@@ -1,0 +1,907 @@
+<html>
+<head>
+<title>Objects/memoryobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/memoryobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L24'>[^]</a><a href='#L785'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L24' title='Defined at 24.'>get_shape0</a>
+<li><a href='#L37' title='Defined at 37.'>dup_buffer</a>
+<li><a href='#L51' title='Defined at 51.'>memory_getbuf</a>
+<li><a href='#L63' title='Defined at 63.'>memory_releasebuf</a>
+<li><a href='#L74' title='Defined at 74.'>PyMemoryView_FromBuffer</a>
+<li><a href='#L90' title='Defined at 90.'>PyMemoryView_FromObject</a>
+<li><a href='#L115' title='Defined at 115.'>memory_new</a>
+<li><a href='#L130' title='Defined at 130.'>_strided_copy_nd</a>
+<li><a href='#L188' title='Defined at 188.'>_indirect_copy_nd</a>
+<li><a href='#L255' title='Defined at 255.'>PyMemoryView_GetContiguous</a>
+<li><a href='#L327' title='Defined at 327.'>memory_format_get</a>
+<li><a href='#L334' title='Defined at 334.'>memory_itemsize_get</a>
+<li><a href='#L341' title='Defined at 341.'>_IntTupleFromSsizet</a>
+<li><a href='#L366' title='Defined at 366.'>memory_shape_get</a>
+<li><a href='#L373' title='Defined at 373.'>memory_strides_get</a>
+<li><a href='#L380' title='Defined at 380.'>memory_suboffsets_get</a>
+<li><a href='#L387' title='Defined at 387.'>memory_readonly_get</a>
+<li><a href='#L394' title='Defined at 394.'>memory_ndim_get</a>
+<li><a href='#L413' title='Defined at 413.'>memory_tobytes</a>
+<li><a href='#L424' title='Defined at 424.'>memory_tolist</a>
+<li><a href='#L459' title='Defined at 459.'>do_release</a>
+<li><a href='#L469' title='Defined at 469.'>memory_enter</a>
+<li><a href='#L477' title='Defined at 477.'>memory_exit</a>
+<li><a href='#L494' title='Defined at 494.'>memory_dealloc</a>
+<li><a href='#L502' title='Defined at 502.'>memory_repr</a>
+<li><a href='#L512' title='Defined at 512.'>memory_length</a>
+<li><a href='#L522' title='Defined at 522.'>memory_item</a>
+<li><a href='#L571' title='Defined at 571.'>memory_subscript</a>
+<li><a href='#L639' title='Defined at 639.'>memory_ass_sub</a>
+<li><a href='#L729' title='Defined at 729.'>memory_richcompare</a>
+<li><a href='#L777' title='Defined at 777.'>memory_traverse</a>
+<li><a href='#L785' title='Defined at 785.'>memory_clear</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Memoryview object implementation */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'>
+<a name='L6'><font color='darkred'>#define</font> <a href='../R/1603.html' title='Multiple refered from 5 places.'>IS_RELEASED</a>(memobj) \
+<a name='L7'>    (((PyMemoryViewObject *) memobj)-&gt;view.buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L8'>
+<a name='L9'><font color='darkred'>#define</font> <a href='../R/500.html' title='Multiple refered from 12 places.'>CHECK_RELEASED</a>(memobj) \
+<a name='L10'>    <b>if</b> (<a href='../S/2800.html#L6' title='Defined at 6 in Objects/memoryobject.c.'>IS_RELEASED</a>(memobj)) <font color='red'>{</font> \
+<a name='L11'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, \
+<a name='L12'>                        "operation forbidden on released memoryview object"); \
+<a name='L13'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; \
+<a name='L14'>    <font color='red'>}</font>
+<a name='L15'>
+<a name='L16'><font color='darkred'>#define</font> <a href='../R/501.html' title='Multiple refered from 3 places.'>CHECK_RELEASED_INT</a>(memobj) \
+<a name='L17'>    <b>if</b> (<a href='../S/2800.html#L6' title='Defined at 6 in Objects/memoryobject.c.'>IS_RELEASED</a>(memobj)) <font color='red'>{</font> \
+<a name='L18'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, \
+<a name='L19'>                        "operation forbidden on released memoryview object"); \
+<a name='L20'>        <b>return</b> -1; \
+<a name='L21'>    <font color='red'>}</font>
+<a name='L22'>
+<a name='L23'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L24'><a href='../R/8093.html' title='Multiple refered from 8 places.'>get_shape0</a>(Py_buffer *buf)
+<a name='L25'><font color='red'>{</font>
+<a name='L26'>    <b>if</b> (buf-&gt;shape != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L27'>        <b>return</b> buf-&gt;shape[0];
+<a name='L28'>    <b>if</b> (buf-&gt;ndim == 0)
+<a name='L29'>        <b>return</b> 1;
+<a name='L30'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L31'>        "exported buffer does not have any shape information associated "
+<a name='L32'>        "to it");
+<a name='L33'>    <b>return</b> -1;
+<a name='L34'><font color='red'>}</font>
+<a name='L35'>
+<a name='L36'><b>static</b> <b>void</b>
+<a name='L37'><a href='../R/7494.html' title='Multiple refered from 2 places.'>dup_buffer</a>(Py_buffer *dest, Py_buffer *src)
+<a name='L38'><font color='red'>{</font>
+<a name='L39'>    *dest = *src;
+<a name='L40'>    <b>if</b> (src-&gt;ndim == 1 &amp;&amp; src-&gt;shape != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L41'>        dest-&gt;shape = &amp;(dest-&gt;smalltable[0]);
+<a name='L42'>        dest-&gt;shape[0] = <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(src);
+<a name='L43'>    <font color='red'>}</font>
+<a name='L44'>    <b>if</b> (src-&gt;ndim == 1 &amp;&amp; src-&gt;strides != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L45'>        dest-&gt;strides = &amp;(dest-&gt;smalltable[1]);
+<a name='L46'>        dest-&gt;strides[0] = src-&gt;strides[0];
+<a name='L47'>    <font color='red'>}</font>
+<a name='L48'><font color='red'>}</font>
+<a name='L49'>
+<a name='L50'><b>static</b> <b>int</b>
+<a name='L51'><a href='../S/2800.html#L809' title='Refered from 809 in Objects/memoryobject.c.'>memory_getbuf</a>(PyMemoryViewObject *self, Py_buffer *view, <b>int</b> flags)
+<a name='L52'><font color='red'>{</font>
+<a name='L53'>    <b>int</b> res = 0;
+<a name='L54'>    <a href='../S/2800.html#L16' title='Defined at 16 in Objects/memoryobject.c.'>CHECK_RELEASED_INT</a>(self);
+<a name='L55'>    <b>if</b> (self-&gt;view.obj != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L56'>        res = <a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(self-&gt;view.obj, view, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L57'>    <b>if</b> (view)
+<a name='L58'>        <a href='../S/2800.html#L37' title='Defined at 37 in Objects/memoryobject.c.'>dup_buffer</a>(view, &amp;self-&gt;view);
+<a name='L59'>    <b>return</b> res;
+<a name='L60'><font color='red'>}</font>
+<a name='L61'>
+<a name='L62'><b>static</b> <b>void</b>
+<a name='L63'><a href='../S/2800.html#L810' title='Refered from 810 in Objects/memoryobject.c.'>memory_releasebuf</a>(PyMemoryViewObject *self, Py_buffer *view)
+<a name='L64'><font color='red'>{</font>
+<a name='L65'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(view);
+<a name='L66'><font color='red'>}</font>
+<a name='L67'>
+<a name='L68'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(memory_doc,
+<a name='L69'>"memoryview(object)\n\
+<a name='L70'>\n\
+<a name='L71'>Create a new memoryview object which references the given object.");
+<a name='L72'>
+<a name='L73'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L74'><a href='../R/3177.html' title='Multiple refered from 6 places.'>PyMemoryView_FromBuffer</a>(Py_buffer *info)
+<a name='L75'><font color='red'>{</font>
+<a name='L76'>    PyMemoryViewObject *mview;
+<a name='L77'>
+<a name='L78'>    mview = (PyMemoryViewObject *)
+<a name='L79'>        PyObject_GC_New(PyMemoryViewObject, &amp;PyMemoryView_Type);
+<a name='L80'>    <b>if</b> (mview == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L81'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L82'>    <a href='../S/2800.html#L37' title='Defined at 37 in Objects/memoryobject.c.'>dup_buffer</a>(&amp;mview-&gt;view, info);
+<a name='L83'>    <i><font color='green'>/* NOTE: mview-&gt;view.obj should already have been incref'ed as</font></i>
+<a name='L84'><i><font color='green'>       part of PyBuffer_FillInfo(). */</font></i>
+<a name='L85'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(mview);
+<a name='L86'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)mview;
+<a name='L87'><font color='red'>}</font>
+<a name='L88'>
+<a name='L89'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L90'><a href='../R/3178.html' title='Multiple refered from 3 places.'>PyMemoryView_FromObject</a>(PyObject *base)
+<a name='L91'><font color='red'>{</font>
+<a name='L92'>    PyMemoryViewObject *mview;
+<a name='L93'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> view;
+<a name='L94'>
+<a name='L95'>    <b>if</b> (!PyObject_CheckBuffer(base)) <font color='red'>{</font>
+<a name='L96'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L97'>            "cannot make memory view because object does "
+<a name='L98'>            "not have the buffer interface");
+<a name='L99'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L100'>    <font color='red'>}</font>
+<a name='L101'>
+<a name='L102'>    <b>if</b> (<a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(base, &amp;view, <a href='../S/544.html#L191' title='Defined at 191 in Include/object.h.'>PyBUF_FULL_RO</a>) &lt; 0)
+<a name='L103'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L104'>
+<a name='L105'>    mview = (PyMemoryViewObject *)<a href='../S/2800.html#L74' title='Defined at 74 in Objects/memoryobject.c.'>PyMemoryView_FromBuffer</a>(&amp;view);
+<a name='L106'>    <b>if</b> (mview == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L107'>        <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;view);
+<a name='L108'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L109'>    <font color='red'>}</font>
+<a name='L110'>
+<a name='L111'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)mview;
+<a name='L112'><font color='red'>}</font>
+<a name='L113'>
+<a name='L114'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L115'><a href='../S/2800.html#L852' title='Refered from 852 in Objects/memoryobject.c.'>memory_new</a>(PyTypeObject *subtype, PyObject *args, PyObject *kwds)
+<a name='L116'><font color='red'>{</font>
+<a name='L117'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L118'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"object", 0<font color='red'>}</font>;
+<a name='L119'>
+<a name='L120'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "O:memoryview", kwlist,
+<a name='L121'>                                     &amp;obj)) <font color='red'>{</font>
+<a name='L122'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L123'>    <font color='red'>}</font>
+<a name='L124'>
+<a name='L125'>    <b>return</b> <a href='../S/2800.html#L90' title='Defined at 90 in Objects/memoryobject.c.'>PyMemoryView_FromObject</a>(obj);
+<a name='L126'><font color='red'>}</font>
+<a name='L127'>
+<a name='L128'>
+<a name='L129'><b>static</b> <b>void</b>
+<a name='L130'><a href='../R/5859.html' title='Multiple refered from 3 places.'>_strided_copy_nd</a>(<b>char</b> *dest, <b>char</b> *src, <b>int</b> nd, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *shape,
+<a name='L131'>                 <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *strides, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> itemsize, <b>char</b> fort)
+<a name='L132'><font color='red'>{</font>
+<a name='L133'>    <b>int</b> k;
+<a name='L134'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> outstride;
+<a name='L135'>
+<a name='L136'>    <b>if</b> (nd==0) <font color='red'>{</font>
+<a name='L137'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(dest, src, itemsize);
+<a name='L138'>    <font color='red'>}</font>
+<a name='L139'>    <b>else</b> <b>if</b> (nd == 1) <font color='red'>{</font>
+<a name='L140'>        <b>for</b> (k = 0; k&lt;shape[0]; k++) <font color='red'>{</font>
+<a name='L141'>            <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(dest, src, itemsize);
+<a name='L142'>            dest += itemsize;
+<a name='L143'>            src += strides[0];
+<a name='L144'>        <font color='red'>}</font>
+<a name='L145'>    <font color='red'>}</font>
+<a name='L146'>    <b>else</b> <font color='red'>{</font>
+<a name='L147'>        <b>if</b> (fort == 'F') <font color='red'>{</font>
+<a name='L148'>            <i><font color='green'>/* Copy first dimension first,</font></i>
+<a name='L149'><i><font color='green'>               second dimension second, etc...</font></i>
+<a name='L150'><i><font color='green'>               Set up the recursive loop backwards so that final</font></i>
+<a name='L151'><i><font color='green'>               dimension is actually copied last.</font></i>
+<a name='L152'><i><font color='green'>            */</font></i>
+<a name='L153'>            outstride = itemsize;
+<a name='L154'>            <b>for</b> (k=1; k&lt;nd-1;k++) <font color='red'>{</font>
+<a name='L155'>                outstride *= shape[k];
+<a name='L156'>            <font color='red'>}</font>
+<a name='L157'>            <b>for</b> (k=0; k&lt;shape[nd-1]; k++) <font color='red'>{</font>
+<a name='L158'>                <a href='../S/2800.html#L130' title='Defined at 130 in Objects/memoryobject.c.'>_strided_copy_nd</a>(dest, src, nd-1, shape,
+<a name='L159'>                                 strides, itemsize, fort);
+<a name='L160'>                dest += outstride;
+<a name='L161'>                src += strides[nd-1];
+<a name='L162'>            <font color='red'>}</font>
+<a name='L163'>        <font color='red'>}</font>
+<a name='L164'>
+<a name='L165'>        <b>else</b> <font color='red'>{</font>
+<a name='L166'>            <i><font color='green'>/* Copy last dimension first,</font></i>
+<a name='L167'><i><font color='green'>               second-to-last dimension second, etc.</font></i>
+<a name='L168'><i><font color='green'>               Set up the recursion so that the</font></i>
+<a name='L169'><i><font color='green'>               first dimension is copied last</font></i>
+<a name='L170'><i><font color='green'>            */</font></i>
+<a name='L171'>            outstride = itemsize;
+<a name='L172'>            <b>for</b> (k=1; k &lt; nd; k++) <font color='red'>{</font>
+<a name='L173'>                outstride *= shape[k];
+<a name='L174'>            <font color='red'>}</font>
+<a name='L175'>            <b>for</b> (k=0; k&lt;shape[0]; k++) <font color='red'>{</font>
+<a name='L176'>                <a href='../S/2800.html#L130' title='Defined at 130 in Objects/memoryobject.c.'>_strided_copy_nd</a>(dest, src, nd-1, shape+1,
+<a name='L177'>                                 strides+1, itemsize,
+<a name='L178'>                                 fort);
+<a name='L179'>                dest += outstride;
+<a name='L180'>                src += strides[0];
+<a name='L181'>            <font color='red'>}</font>
+<a name='L182'>        <font color='red'>}</font>
+<a name='L183'>    <font color='red'>}</font>
+<a name='L184'>    <b>return</b>;
+<a name='L185'><font color='red'>}</font>
+<a name='L186'>
+<a name='L187'><b>static</b> <b>int</b>
+<a name='L188'><a href='../S/2800.html#L314' title='Refered from 314 in Objects/memoryobject.c.'>_indirect_copy_nd</a>(<b>char</b> *dest, Py_buffer *view, <b>char</b> fort)
+<a name='L189'><font color='red'>{</font>
+<a name='L190'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *indices;
+<a name='L191'>    <b>int</b> k;
+<a name='L192'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> elements;
+<a name='L193'>    <b>char</b> *ptr;
+<a name='L194'>    <b>void</b> (*func)(<b>int</b>, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *, <b>const</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *);
+<a name='L195'>
+<a name='L196'>    <b>if</b> (view-&gt;ndim &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a> / <b>sizeof</b>(<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)) <font color='red'>{</font>
+<a name='L197'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L198'>        <b>return</b> -1;
+<a name='L199'>    <font color='red'>}</font>
+<a name='L200'>
+<a name='L201'>    indices = (<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(<b>sizeof</b>(<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)*view-&gt;ndim);
+<a name='L202'>    <b>if</b> (indices == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L203'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L204'>        <b>return</b> -1;
+<a name='L205'>    <font color='red'>}</font>
+<a name='L206'>    <b>for</b> (k=0; k&lt;view-&gt;ndim;k++) <font color='red'>{</font>
+<a name='L207'>        indices[k] = 0;
+<a name='L208'>    <font color='red'>}</font>
+<a name='L209'>
+<a name='L210'>    elements = 1;
+<a name='L211'>    <b>for</b> (k=0; k&lt;view-&gt;ndim; k++) <font color='red'>{</font>
+<a name='L212'>        elements *= view-&gt;shape[k];
+<a name='L213'>    <font color='red'>}</font>
+<a name='L214'>    <b>if</b> (fort == 'F') <font color='red'>{</font>
+<a name='L215'>        func = <a href='../S/2775.html#L416' title='Defined at 416 in Objects/abstract.c.'>_Py_add_one_to_index_F</a>;
+<a name='L216'>    <font color='red'>}</font>
+<a name='L217'>    <b>else</b> <font color='red'>{</font>
+<a name='L218'>        func = <a href='../S/2775.html#L432' title='Defined at 432 in Objects/abstract.c.'>_Py_add_one_to_index_C</a>;
+<a name='L219'>    <font color='red'>}</font>
+<a name='L220'>    <b>while</b> (elements--) <font color='red'>{</font>
+<a name='L221'>        func(view-&gt;ndim, indices, view-&gt;shape);
+<a name='L222'>        ptr = <a href='../S/2775.html#L400' title='Defined at 400 in Objects/abstract.c.'>PyBuffer_GetPointer</a>(view, indices);
+<a name='L223'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(dest, ptr, view-&gt;itemsize);
+<a name='L224'>        dest += view-&gt;itemsize;
+<a name='L225'>    <font color='red'>}</font>
+<a name='L226'>
+<a name='L227'>    <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(indices);
+<a name='L228'>    <b>return</b> 0;
+<a name='L229'><font color='red'>}</font>
+<a name='L230'>
+<a name='L231'><i><font color='green'>/*</font></i>
+<a name='L232'><i><font color='green'>   Get a the data from an object as a contiguous chunk of memory (in</font></i>
+<a name='L233'><i><font color='green'>   either 'C' or 'F'ortran order) even if it means copying it into a</font></i>
+<a name='L234'><i><font color='green'>   separate memory area.</font></i>
+<a name='L235'><i><font color='green'></font></i>
+<a name='L236'><i><font color='green'>   Returns a new reference to a Memory view object.  If no copy is needed,</font></i>
+<a name='L237'><i><font color='green'>   the memory view object points to the original memory and holds a</font></i>
+<a name='L238'><i><font color='green'>   lock on the original.  If a copy is needed, then the memory view object</font></i>
+<a name='L239'><i><font color='green'>   points to a brand-new Bytes object (and holds a memory lock on it).</font></i>
+<a name='L240'><i><font color='green'></font></i>
+<a name='L241'><i><font color='green'>   buffertype</font></i>
+<a name='L242'><i><font color='green'></font></i>
+<a name='L243'><i><font color='green'>   PyBUF_READ  buffer only needs to be read-only</font></i>
+<a name='L244'><i><font color='green'>   PyBUF_WRITE buffer needs to be writable (give error if not contiguous)</font></i>
+<a name='L245'><i><font color='green'>   PyBUF_SHADOW buffer needs to be writable so shadow it with</font></i>
+<a name='L246'><i><font color='green'>                a contiguous buffer if it is not. The view will point to</font></i>
+<a name='L247'><i><font color='green'>                the shadow buffer which can be written to and then</font></i>
+<a name='L248'><i><font color='green'>                will be copied back into the other buffer when the memory</font></i>
+<a name='L249'><i><font color='green'>                view is de-allocated.  While the shadow buffer is</font></i>
+<a name='L250'><i><font color='green'>                being used, it will have an exclusive write lock on</font></i>
+<a name='L251'><i><font color='green'>                the original buffer.</font></i>
+<a name='L252'><i><font color='green'> */</font></i>
+<a name='L253'>
+<a name='L254'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L255'>PyMemoryView_GetContiguous(PyObject *obj, <b>int</b> buffertype, <b>char</b> fort)
+<a name='L256'><font color='red'>{</font>
+<a name='L257'>    PyMemoryViewObject *mem;
+<a name='L258'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>;
+<a name='L259'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> *view;
+<a name='L260'>    <b>int</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L261'>    <b>char</b> *dest;
+<a name='L262'>
+<a name='L263'>    <b>if</b> (!PyObject_CheckBuffer(obj)) <font color='red'>{</font>
+<a name='L264'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L265'>                        "object does not support the buffer interface");
+<a name='L266'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L267'>    <font color='red'>}</font>
+<a name='L268'>
+<a name='L269'>    mem = PyObject_GC_New(PyMemoryViewObject, &amp;PyMemoryView_Type);
+<a name='L270'>    <b>if</b> (mem == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L271'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L272'>
+<a name='L273'>    view = &amp;mem-&gt;view;
+<a name='L274'>    <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/544.html#L191' title='Defined at 191 in Include/object.h.'>PyBUF_FULL_RO</a>;
+<a name='L275'>    <b>switch</b>(buffertype) <font color='red'>{</font>
+<a name='L276'>    <b>case</b> <a href='../S/544.html#L195' title='Defined at 195 in Include/object.h.'>PyBUF_WRITE</a>:
+<a name='L277'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/544.html#L190' title='Defined at 190 in Include/object.h.'>PyBUF_FULL</a>;
+<a name='L278'>        <b>break</b>;
+<a name='L279'>    <font color='red'>}</font>
+<a name='L280'>
+<a name='L281'>    <b>if</b> (<a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(obj, view, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>) != 0) <font color='red'>{</font>
+<a name='L282'>        Py_DECREF(mem);
+<a name='L283'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L284'>    <font color='red'>}</font>
+<a name='L285'>
+<a name='L286'>    <b>if</b> (<a href='../S/2775.html#L384' title='Defined at 384 in Objects/abstract.c.'>PyBuffer_IsContiguous</a>(view, fort)) <font color='red'>{</font>
+<a name='L287'>        <i><font color='green'>/* no copy needed */</font></i>
+<a name='L288'>        <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(mem);
+<a name='L289'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)mem;
+<a name='L290'>    <font color='red'>}</font>
+<a name='L291'>    <i><font color='green'>/* otherwise a copy is needed */</font></i>
+<a name='L292'>    <b>if</b> (buffertype == <a href='../S/544.html#L195' title='Defined at 195 in Include/object.h.'>PyBUF_WRITE</a>) <font color='red'>{</font>
+<a name='L293'>        Py_DECREF(mem);
+<a name='L294'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_BufferError,
+<a name='L295'>                        "writable contiguous buffer requested "
+<a name='L296'>                        "for a non-contiguousobject.");
+<a name='L297'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L298'>    <font color='red'>}</font>
+<a name='L299'>    <a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a> = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, view-&gt;len);
+<a name='L300'>    <b>if</b> (<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L301'>        Py_DECREF(mem);
+<a name='L302'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L303'>    <font color='red'>}</font>
+<a name='L304'>    dest = PyBytes_AS_STRING(<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>);
+<a name='L305'>    <i><font color='green'>/* different copying strategy depending on whether</font></i>
+<a name='L306'><i><font color='green'>       or not any pointer de-referencing is needed</font></i>
+<a name='L307'><i><font color='green'>    */</font></i>
+<a name='L308'>    <i><font color='green'>/* strided or in-direct copy */</font></i>
+<a name='L309'>    <b>if</b> (view-&gt;suboffsets==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L310'>        <a href='../S/2800.html#L130' title='Defined at 130 in Objects/memoryobject.c.'>_strided_copy_nd</a>(dest, view-&gt;buf, view-&gt;ndim, view-&gt;shape,
+<a name='L311'>                         view-&gt;strides, view-&gt;itemsize, fort);
+<a name='L312'>    <font color='red'>}</font>
+<a name='L313'>    <b>else</b> <font color='red'>{</font>
+<a name='L314'>        <b>if</b> (<a href='../S/2800.html#L188' title='Defined at 188 in Objects/memoryobject.c.'>_indirect_copy_nd</a>(dest, view, fort) &lt; 0) <font color='red'>{</font>
+<a name='L315'>            Py_DECREF(<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>);
+<a name='L316'>            Py_DECREF(mem);
+<a name='L317'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L318'>        <font color='red'>}</font>
+<a name='L319'>        <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(view);  <i><font color='green'>/* XXX ? */</font></i>
+<a name='L320'>    <font color='red'>}</font>
+<a name='L321'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(mem);
+<a name='L322'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)mem;
+<a name='L323'><font color='red'>}</font>
+<a name='L324'>
+<a name='L325'>
+<a name='L326'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L327'><a href='../S/2800.html#L401' title='Refered from 401 in Objects/memoryobject.c.'>memory_format_get</a>(PyMemoryViewObject *self)
+<a name='L328'><font color='red'>{</font>
+<a name='L329'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L330'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(self-&gt;view.format);
+<a name='L331'><font color='red'>}</font>
+<a name='L332'>
+<a name='L333'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L334'><a href='../S/2800.html#L402' title='Refered from 402 in Objects/memoryobject.c.'>memory_itemsize_get</a>(PyMemoryViewObject *self)
+<a name='L335'><font color='red'>{</font>
+<a name='L336'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L337'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(self-&gt;view.itemsize);
+<a name='L338'><font color='red'>}</font>
+<a name='L339'>
+<a name='L340'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L341'><a href='../R/5331.html' title='Multiple refered from 3 places.'>_IntTupleFromSsizet</a>(<b>int</b> len, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *vals)
+<a name='L342'><font color='red'>{</font>
+<a name='L343'>    <b>int</b> i;
+<a name='L344'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o;
+<a name='L345'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *intTuple;
+<a name='L346'>
+<a name='L347'>    <b>if</b> (vals == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L348'>        Py_INCREF(Py_None);
+<a name='L349'>        <b>return</b> Py_None;
+<a name='L350'>    <font color='red'>}</font>
+<a name='L351'>    intTuple = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(len);
+<a name='L352'>    <b>if</b> (!intTuple)
+<a name='L353'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L354'>    <b>for</b> (i=0; i&lt;len; i++) <font color='red'>{</font>
+<a name='L355'>        o = <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(vals[i]);
+<a name='L356'>        <b>if</b> (!o) <font color='red'>{</font>
+<a name='L357'>            Py_DECREF(intTuple);
+<a name='L358'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L359'>        <font color='red'>}</font>
+<a name='L360'>        PyTuple_SET_ITEM(intTuple, i, o);
+<a name='L361'>    <font color='red'>}</font>
+<a name='L362'>    <b>return</b> intTuple;
+<a name='L363'><font color='red'>}</font>
+<a name='L364'>
+<a name='L365'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L366'><a href='../S/2800.html#L403' title='Refered from 403 in Objects/memoryobject.c.'>memory_shape_get</a>(PyMemoryViewObject *self)
+<a name='L367'><font color='red'>{</font>
+<a name='L368'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L369'>    <b>return</b> <a href='../S/2800.html#L341' title='Defined at 341 in Objects/memoryobject.c.'>_IntTupleFromSsizet</a>(self-&gt;view.ndim, self-&gt;view.shape);
+<a name='L370'><font color='red'>}</font>
+<a name='L371'>
+<a name='L372'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L373'><a href='../S/2800.html#L404' title='Refered from 404 in Objects/memoryobject.c.'>memory_strides_get</a>(PyMemoryViewObject *self)
+<a name='L374'><font color='red'>{</font>
+<a name='L375'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L376'>    <b>return</b> <a href='../S/2800.html#L341' title='Defined at 341 in Objects/memoryobject.c.'>_IntTupleFromSsizet</a>(self-&gt;view.ndim, self-&gt;view.strides);
+<a name='L377'><font color='red'>}</font>
+<a name='L378'>
+<a name='L379'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L380'><a href='../S/2800.html#L405' title='Refered from 405 in Objects/memoryobject.c.'>memory_suboffsets_get</a>(PyMemoryViewObject *self)
+<a name='L381'><font color='red'>{</font>
+<a name='L382'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L383'>    <b>return</b> <a href='../S/2800.html#L341' title='Defined at 341 in Objects/memoryobject.c.'>_IntTupleFromSsizet</a>(self-&gt;view.ndim, self-&gt;view.suboffsets);
+<a name='L384'><font color='red'>}</font>
+<a name='L385'>
+<a name='L386'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L387'><a href='../S/2800.html#L406' title='Refered from 406 in Objects/memoryobject.c.'>memory_readonly_get</a>(PyMemoryViewObject *self)
+<a name='L388'><font color='red'>{</font>
+<a name='L389'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L390'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(self-&gt;view.readonly);
+<a name='L391'><font color='red'>}</font>
+<a name='L392'>
+<a name='L393'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L394'><a href='../S/2800.html#L407' title='Refered from 407 in Objects/memoryobject.c.'>memory_ndim_get</a>(PyMemoryViewObject *self)
+<a name='L395'><font color='red'>{</font>
+<a name='L396'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L397'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(self-&gt;view.ndim);
+<a name='L398'><font color='red'>}</font>
+<a name='L399'>
+<a name='L400'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> memory_getsetlist[] =<font color='red'>{</font>
+<a name='L401'>    <font color='red'>{</font>"format",                (getter)<a href='../S/2800.html#L327' title='Defined at 327 in Objects/memoryobject.c.'>memory_format_get</a>,      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L402'>    <font color='red'>{</font>"itemsize",        (getter)<a href='../S/2800.html#L334' title='Defined at 334 in Objects/memoryobject.c.'>memory_itemsize_get</a>,    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L403'>    <font color='red'>{</font>"shape",           (getter)<a href='../S/2800.html#L366' title='Defined at 366 in Objects/memoryobject.c.'>memory_shape_get</a>,       <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L404'>    <font color='red'>{</font>"strides",         (getter)<a href='../S/2800.html#L373' title='Defined at 373 in Objects/memoryobject.c.'>memory_strides_get</a>,     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L405'>    <font color='red'>{</font>"suboffsets",      (getter)<a href='../S/2800.html#L380' title='Defined at 380 in Objects/memoryobject.c.'>memory_suboffsets_get</a>,  <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L406'>    <font color='red'>{</font>"readonly",        (getter)<a href='../S/2800.html#L387' title='Defined at 387 in Objects/memoryobject.c.'>memory_readonly_get</a>,    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L407'>    <font color='red'>{</font>"ndim",            (getter)<a href='../S/2800.html#L394' title='Defined at 394 in Objects/memoryobject.c.'>memory_ndim_get</a>,        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L408'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L409'><font color='red'>}</font>;
+<a name='L410'>
+<a name='L411'>
+<a name='L412'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L413'><a href='../S/2800.html#L485' title='Refered from 485 in Objects/memoryobject.c.'>memory_tobytes</a>(PyMemoryViewObject *mem, PyObject *noargs)
+<a name='L414'><font color='red'>{</font>
+<a name='L415'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(mem);
+<a name='L416'>    <b>return</b> <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>(
+<a name='L417'>            (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) &amp;PyBytes_Type, mem, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L418'><font color='red'>}</font>
+<a name='L419'>
+<a name='L420'><i><font color='green'>/* TODO: rewrite this function using the struct module to unpack</font></i>
+<a name='L421'><i><font color='green'>   each buffer item */</font></i>
+<a name='L422'>
+<a name='L423'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L424'><a href='../S/2800.html#L486' title='Refered from 486 in Objects/memoryobject.c.'>memory_tolist</a>(PyMemoryViewObject *mem, PyObject *noargs)
+<a name='L425'><font color='red'>{</font>
+<a name='L426'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> *view = &amp;(mem-&gt;view);
+<a name='L427'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L428'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res, *item;
+<a name='L429'>    <b>char</b> *buf;
+<a name='L430'>
+<a name='L431'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(mem);
+<a name='L432'>    <b>if</b> (strcmp(view-&gt;format, "B") || view-&gt;itemsize != 1) <font color='red'>{</font>
+<a name='L433'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_NotImplementedError, 
+<a name='L434'>                "tolist() only supports byte views");
+<a name='L435'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L436'>    <font color='red'>}</font>
+<a name='L437'>    <b>if</b> (view-&gt;ndim != 1) <font color='red'>{</font>
+<a name='L438'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_NotImplementedError, 
+<a name='L439'>                "tolist() only supports one-dimensional objects");
+<a name='L440'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L441'>    <font color='red'>}</font>
+<a name='L442'>    res = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(view-&gt;len);
+<a name='L443'>    <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L444'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L445'>    buf = view-&gt;buf;
+<a name='L446'>    <b>for</b> (i = 0; i &lt; view-&gt;len; i++) <font color='red'>{</font>
+<a name='L447'>        item = <a href='../S/2799.html#L245' title='Defined at 245 in Objects/longobject.c.'>PyLong_FromUnsignedLong</a>((<b>unsigned</b> <b>char</b>) *buf);
+<a name='L448'>        <b>if</b> (item == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L449'>            Py_DECREF(res);
+<a name='L450'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L451'>        <font color='red'>}</font>
+<a name='L452'>        PyList_SET_ITEM(res, i, item);
+<a name='L453'>        buf++;
+<a name='L454'>    <font color='red'>}</font>
+<a name='L455'>    <b>return</b> res;
+<a name='L456'><font color='red'>}</font>
+<a name='L457'>
+<a name='L458'><b>static</b> <b>void</b>
+<a name='L459'><a href='../R/7445.html' title='Multiple refered from 2 places.'>do_release</a>(PyMemoryViewObject *self)
+<a name='L460'><font color='red'>{</font>
+<a name='L461'>    <b>if</b> (self-&gt;view.obj != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L462'>        <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;(self-&gt;view));
+<a name='L463'>    <font color='red'>}</font>
+<a name='L464'>    self-&gt;view.obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L465'>    self-&gt;view.buf = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L466'><font color='red'>}</font>
+<a name='L467'>
+<a name='L468'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L469'><a href='../S/2800.html#L487' title='Refered from 487 in Objects/memoryobject.c.'>memory_enter</a>(PyObject *self, PyObject *args)
+<a name='L470'><font color='red'>{</font>
+<a name='L471'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L472'>    Py_INCREF(self);
+<a name='L473'>    <b>return</b> self;
+<a name='L474'><font color='red'>}</font>
+<a name='L475'>
+<a name='L476'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L477'><a href='../R/8982.html' title='Multiple refered from 2 places.'>memory_exit</a>(PyObject *self, PyObject *args)
+<a name='L478'><font color='red'>{</font>
+<a name='L479'>    <a href='../S/2800.html#L459' title='Defined at 459 in Objects/memoryobject.c.'>do_release</a>((PyMemoryViewObject *) self);
+<a name='L480'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L481'><font color='red'>}</font>
+<a name='L482'>
+<a name='L483'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> memory_methods[] = <font color='red'>{</font>
+<a name='L484'>    <font color='red'>{</font>"release", <a href='../S/2800.html#L477' title='Defined at 477 in Objects/memoryobject.c.'>memory_exit</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L485'>    <font color='red'>{</font>"tobytes", (PyCFunction)<a href='../S/2800.html#L413' title='Defined at 413 in Objects/memoryobject.c.'>memory_tobytes</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L486'>    <font color='red'>{</font>"tolist", (PyCFunction)<a href='../S/2800.html#L424' title='Defined at 424 in Objects/memoryobject.c.'>memory_tolist</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L487'>    <font color='red'>{</font>"__enter__", <a href='../S/2800.html#L469' title='Defined at 469 in Objects/memoryobject.c.'>memory_enter</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L488'>    <font color='red'>{</font>"__exit__", <a href='../S/2800.html#L477' title='Defined at 477 in Objects/memoryobject.c.'>memory_exit</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L489'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,          <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L490'><font color='red'>}</font>;
+<a name='L491'>
+<a name='L492'>
+<a name='L493'><b>static</b> <b>void</b>
+<a name='L494'><a href='../S/2800.html#L819' title='Refered from 819 in Objects/memoryobject.c.'>memory_dealloc</a>(PyMemoryViewObject *self)
+<a name='L495'><font color='red'>{</font>
+<a name='L496'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(self);
+<a name='L497'>    <a href='../S/2800.html#L459' title='Defined at 459 in Objects/memoryobject.c.'>do_release</a>(self);
+<a name='L498'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(self);
+<a name='L499'><font color='red'>}</font>
+<a name='L500'>
+<a name='L501'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L502'><a href='../S/2800.html#L824' title='Refered from 824 in Objects/memoryobject.c.'>memory_repr</a>(PyMemoryViewObject *self)
+<a name='L503'><font color='red'>{</font>
+<a name='L504'>    <b>if</b> (<a href='../S/2800.html#L6' title='Defined at 6 in Objects/memoryobject.c.'>IS_RELEASED</a>(self))
+<a name='L505'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;released memory at %p&gt;", self);
+<a name='L506'>    <b>else</b>
+<a name='L507'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;memory at %p&gt;", self);
+<a name='L508'><font color='red'>}</font>
+<a name='L509'>
+<a name='L510'><i><font color='green'>/* Sequence methods */</font></i>
+<a name='L511'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L512'><a href='../S/2800.html#L794' title='Refered from 794 in Objects/memoryobject.c.'>memory_length</a>(PyMemoryViewObject *self)
+<a name='L513'><font color='red'>{</font>
+<a name='L514'>    <a href='../S/2800.html#L16' title='Defined at 16 in Objects/memoryobject.c.'>CHECK_RELEASED_INT</a>(self);
+<a name='L515'>    <b>return</b> <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(&amp;self-&gt;view);
+<a name='L516'><font color='red'>}</font>
+<a name='L517'>
+<a name='L518'><i><font color='green'>/* Alternate version of memory_subcript that only accepts indices.</font></i>
+<a name='L519'><i><font color='green'>   Used by PySeqIter_New().</font></i>
+<a name='L520'><i><font color='green'>*/</font></i>
+<a name='L521'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L522'><a href='../R/8985.html' title='Multiple refered from 2 places.'>memory_item</a>(PyMemoryViewObject *self, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> result)
+<a name='L523'><font color='red'>{</font>
+<a name='L524'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> *view = &amp;(self-&gt;view);
+<a name='L525'>
+<a name='L526'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L527'>    <b>if</b> (view-&gt;ndim == 0) <font color='red'>{</font>
+<a name='L528'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L529'>                        "invalid indexing of 0-dim memory");
+<a name='L530'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L531'>    <font color='red'>}</font>
+<a name='L532'>    <b>if</b> (view-&gt;ndim == 1) <font color='red'>{</font>
+<a name='L533'>        <i><font color='green'>/* Return a bytes object */</font></i>
+<a name='L534'>        <b>char</b> *ptr;
+<a name='L535'>        ptr = (<b>char</b> *)view-&gt;buf;
+<a name='L536'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> &lt; 0) <font color='red'>{</font>
+<a name='L537'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> += <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(view);
+<a name='L538'>        <font color='red'>}</font>
+<a name='L539'>        <b>if</b> ((<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> &lt; 0) || (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> &gt;= <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(view))) <font color='red'>{</font>
+<a name='L540'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L541'>                                "index out of bounds");
+<a name='L542'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L543'>        <font color='red'>}</font>
+<a name='L544'>        <b>if</b> (view-&gt;strides == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L545'>            ptr += view-&gt;itemsize * <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L546'>        <b>else</b>
+<a name='L547'>            ptr += view-&gt;strides[0] * <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L548'>        <b>if</b> (view-&gt;suboffsets != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp;
+<a name='L549'>            view-&gt;suboffsets[0] &gt;= 0) <font color='red'>{</font>
+<a name='L550'>            ptr = *((<b>char</b> **)ptr) + view-&gt;suboffsets[0];
+<a name='L551'>        <font color='red'>}</font>
+<a name='L552'>        <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(ptr, view-&gt;itemsize);
+<a name='L553'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L554'>        <i><font color='green'>/* Return a new memory-view object */</font></i>
+<a name='L555'>        <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> newview;
+<a name='L556'>        memset(&amp;newview, 0, <b>sizeof</b>(newview));
+<a name='L557'>        <i><font color='green'>/* XXX:  This needs to be fixed so it actually returns a sub-view */</font></i>
+<a name='L558'>        <b>return</b> <a href='../S/2800.html#L74' title='Defined at 74 in Objects/memoryobject.c.'>PyMemoryView_FromBuffer</a>(&amp;newview);
+<a name='L559'>    <font color='red'>}</font>
+<a name='L560'><font color='red'>}</font>
+<a name='L561'>
+<a name='L562'><i><font color='green'>/*</font></i>
+<a name='L563'><i><font color='green'>  mem[obj] returns a bytes object holding the data for one element if</font></i>
+<a name='L564'><i><font color='green'>           obj fully indexes the memory view or another memory-view object</font></i>
+<a name='L565'><i><font color='green'>           if it does not.</font></i>
+<a name='L566'><i><font color='green'></font></i>
+<a name='L567'><i><font color='green'>           0-d memory-view objects can be referenced using ... or () but</font></i>
+<a name='L568'><i><font color='green'>           not with anything else.</font></i>
+<a name='L569'><i><font color='green'> */</font></i>
+<a name='L570'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L571'><a href='../S/2800.html#L795' title='Refered from 795 in Objects/memoryobject.c.'>memory_subscript</a>(PyMemoryViewObject *self, PyObject *key)
+<a name='L572'><font color='red'>{</font>
+<a name='L573'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> *view;
+<a name='L574'>    view = &amp;(self-&gt;view);
+<a name='L575'>    
+<a name='L576'>    <a href='../S/2800.html#L9' title='Defined at 9 in Objects/memoryobject.c.'>CHECK_RELEASED</a>(self);
+<a name='L577'>    <b>if</b> (view-&gt;ndim == 0) <font color='red'>{</font>
+<a name='L578'>        <b>if</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == Py_Ellipsis ||
+<a name='L579'>            (PyTuple_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>) &amp;&amp; PyTuple_GET_SIZE(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)==0)) <font color='red'>{</font>
+<a name='L580'>            Py_INCREF(self);
+<a name='L581'>            <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L582'>        <font color='red'>}</font>
+<a name='L583'>        <b>else</b> <font color='red'>{</font>
+<a name='L584'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L585'>                                "invalid indexing of 0-dim memory");
+<a name='L586'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L587'>        <font color='red'>}</font>
+<a name='L588'>    <font color='red'>}</font>
+<a name='L589'>    <b>if</b> (PyIndex_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)) <font color='red'>{</font>
+<a name='L590'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L591'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L592'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L593'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L594'>        <b>return</b> <a href='../S/2800.html#L522' title='Defined at 522 in Objects/memoryobject.c.'>memory_item</a>(self, <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L595'>    <font color='red'>}</font>
+<a name='L596'>    <b>else</b> <b>if</b> (PySlice_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)) <font color='red'>{</font>
+<a name='L597'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> start, stop, step, slicelength;
+<a name='L598'>
+<a name='L599'>        <b>if</b> (<a href='../S/2807.html#L134' title='Defined at 134 in Objects/sliceobject.c.'>PySlice_GetIndicesEx</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(view),
+<a name='L600'>                                 &amp;start, &amp;stop, &amp;step, &amp;slicelength) &lt; 0) <font color='red'>{</font>
+<a name='L601'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L602'>        <font color='red'>}</font>
+<a name='L603'>    
+<a name='L604'>        <b>if</b> (step == 1 &amp;&amp; view-&gt;ndim == 1) <font color='red'>{</font>
+<a name='L605'>            <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> newview;
+<a name='L606'>            <b>void</b> *newbuf = (<b>char</b> *) view-&gt;buf
+<a name='L607'>                                    + start * view-&gt;itemsize;
+<a name='L608'>            <b>int</b> newflags = view-&gt;readonly
+<a name='L609'>                    ? <a href='../S/544.html#L182' title='Defined at 182 in Include/object.h.'>PyBUF_CONTIG_RO</a> : <a href='../S/544.html#L181' title='Defined at 181 in Include/object.h.'>PyBUF_CONTIG</a>;
+<a name='L610'>    
+<a name='L611'>            <i><font color='green'>/* XXX There should be an API to create a subbuffer */</font></i>
+<a name='L612'>            <b>if</b> (view-&gt;obj != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L613'>                <b>if</b> (<a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(view-&gt;obj, &amp;newview, newflags) == -1)
+<a name='L614'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L615'>            <font color='red'>}</font>
+<a name='L616'>            <b>else</b> <font color='red'>{</font>
+<a name='L617'>                newview = *view;
+<a name='L618'>            <font color='red'>}</font>
+<a name='L619'>            newview.buf = newbuf;
+<a name='L620'>            newview.len = slicelength * newview.itemsize;
+<a name='L621'>            newview.format = view-&gt;format;
+<a name='L622'>            newview.shape = &amp;(newview.smalltable[0]);
+<a name='L623'>            newview.shape[0] = slicelength;
+<a name='L624'>            newview.strides = &amp;(newview.itemsize);
+<a name='L625'>            <b>return</b> <a href='../S/2800.html#L74' title='Defined at 74 in Objects/memoryobject.c.'>PyMemoryView_FromBuffer</a>(&amp;newview);
+<a name='L626'>        <font color='red'>}</font>
+<a name='L627'>        <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_NotImplementedError);
+<a name='L628'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L629'>    <font color='red'>}</font>
+<a name='L630'>    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L631'>        "cannot index memory using \"%.200s\"", 
+<a name='L632'>        <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>-&gt;ob_type-&gt;tp_name);
+<a name='L633'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L634'><font color='red'>}</font>
+<a name='L635'>
+<a name='L636'>
+<a name='L637'><i><font color='green'>/* Need to support assigning memory if we can */</font></i>
+<a name='L638'><b>static</b> <b>int</b>
+<a name='L639'><a href='../S/2800.html#L796' title='Refered from 796 in Objects/memoryobject.c.'>memory_ass_sub</a>(PyMemoryViewObject *self, PyObject *key, PyObject *value)
+<a name='L640'><font color='red'>{</font>
+<a name='L641'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> start, len, bytelen;
+<a name='L642'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> srcview;
+<a name='L643'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> *view = &amp;(self-&gt;view);
+<a name='L644'>    <b>char</b> *srcbuf, *destbuf;
+<a name='L645'>
+<a name='L646'>    <a href='../S/2800.html#L16' title='Defined at 16 in Objects/memoryobject.c.'>CHECK_RELEASED_INT</a>(self);
+<a name='L647'>    <b>if</b> (view-&gt;readonly) <font color='red'>{</font>
+<a name='L648'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L649'>            "cannot modify read-only memory");
+<a name='L650'>        <b>return</b> -1;
+<a name='L651'>    <font color='red'>}</font>
+<a name='L652'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L653'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L654'>                        "cannot delete memory");
+<a name='L655'>        <b>return</b> -1;
+<a name='L656'>    <font color='red'>}</font>
+<a name='L657'>    <b>if</b> (view-&gt;ndim != 1) <font color='red'>{</font>
+<a name='L658'>        <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_NotImplementedError);
+<a name='L659'>        <b>return</b> -1;
+<a name='L660'>    <font color='red'>}</font>
+<a name='L661'>    <b>if</b> (PyIndex_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)) <font color='red'>{</font>
+<a name='L662'>        start = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L663'>        <b>if</b> (start == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L664'>            <b>return</b> -1;
+<a name='L665'>        <b>if</b> (start &lt; 0) <font color='red'>{</font>
+<a name='L666'>            start += <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(view);
+<a name='L667'>        <font color='red'>}</font>
+<a name='L668'>        <b>if</b> ((start &lt; 0) || (start &gt;= <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(view))) <font color='red'>{</font>
+<a name='L669'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L670'>                            "index out of bounds");
+<a name='L671'>            <b>return</b> -1;
+<a name='L672'>        <font color='red'>}</font>
+<a name='L673'>        len = 1;
+<a name='L674'>    <font color='red'>}</font>
+<a name='L675'>    <b>else</b> <b>if</b> (PySlice_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)) <font color='red'>{</font>
+<a name='L676'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> stop, step;
+<a name='L677'>
+<a name='L678'>        <b>if</b> (<a href='../S/2807.html#L134' title='Defined at 134 in Objects/sliceobject.c.'>PySlice_GetIndicesEx</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2800.html#L24' title='Defined at 24 in Objects/memoryobject.c.'>get_shape0</a>(view),
+<a name='L679'>                         &amp;start, &amp;stop, &amp;step, &amp;len) &lt; 0) <font color='red'>{</font>
+<a name='L680'>            <b>return</b> -1;
+<a name='L681'>        <font color='red'>}</font>
+<a name='L682'>        <b>if</b> (step != 1) <font color='red'>{</font>
+<a name='L683'>            <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_NotImplementedError);
+<a name='L684'>            <b>return</b> -1;
+<a name='L685'>        <font color='red'>}</font>
+<a name='L686'>    <font color='red'>}</font>
+<a name='L687'>    <b>else</b> <font color='red'>{</font>
+<a name='L688'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L689'>            "cannot index memory using \"%.200s\"", 
+<a name='L690'>            <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>-&gt;ob_type-&gt;tp_name);
+<a name='L691'>        <b>return</b> -1;
+<a name='L692'>    <font color='red'>}</font>
+<a name='L693'>    <b>if</b> (<a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, &amp;srcview, <a href='../S/544.html#L182' title='Defined at 182 in Include/object.h.'>PyBUF_CONTIG_RO</a>) == -1) <font color='red'>{</font>
+<a name='L694'>        <b>return</b> -1;
+<a name='L695'>    <font color='red'>}</font>
+<a name='L696'>    <i><font color='green'>/* XXX should we allow assignment of different item sizes</font></i>
+<a name='L697'><i><font color='green'>       as long as the byte length is the same?</font></i>
+<a name='L698'><i><font color='green'>       (e.g. assign 2 shorts to a 4-byte slice) */</font></i>
+<a name='L699'>    <b>if</b> (srcview.itemsize != view-&gt;itemsize) <font color='red'>{</font>
+<a name='L700'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L701'>            "mismatching item sizes for \"%.200s\" and \"%.200s\"", 
+<a name='L702'>            view-&gt;obj-&gt;ob_type-&gt;tp_name, srcview.obj-&gt;ob_type-&gt;tp_name);
+<a name='L703'>        <b>goto</b> _error;
+<a name='L704'>    <font color='red'>}</font>
+<a name='L705'>    bytelen = len * view-&gt;itemsize;
+<a name='L706'>    <b>if</b> (bytelen != srcview.len) <font color='red'>{</font>
+<a name='L707'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L708'>            "cannot modify size of memoryview object");
+<a name='L709'>        <b>goto</b> _error;
+<a name='L710'>    <font color='red'>}</font>
+<a name='L711'>    <i><font color='green'>/* Do the actual copy */</font></i>
+<a name='L712'>    destbuf = (<b>char</b> *) view-&gt;buf + start * view-&gt;itemsize;
+<a name='L713'>    srcbuf = (<b>char</b> *) srcview.buf;
+<a name='L714'>    <b>if</b> (destbuf + bytelen &lt; srcbuf || srcbuf + bytelen &lt; destbuf)
+<a name='L715'>        <i><font color='green'>/* No overlapping */</font></i>
+<a name='L716'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(destbuf, srcbuf, bytelen);
+<a name='L717'>    <b>else</b>
+<a name='L718'>        <a href='../S/2664.html#L75' title='Defined at 75 in Modules/expat/xmlparse.c.'>memmove</a>(destbuf, srcbuf, bytelen);
+<a name='L719'>
+<a name='L720'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;srcview);
+<a name='L721'>    <b>return</b> 0;
+<a name='L722'>
+<a name='L723'>_error:
+<a name='L724'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;srcview);
+<a name='L725'>    <b>return</b> -1;
+<a name='L726'><font color='red'>}</font>
+<a name='L727'>
+<a name='L728'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L729'><a href='../S/2800.html#L838' title='Refered from 838 in Objects/memoryobject.c.'>memory_richcompare</a>(PyObject *v, PyObject *w, <b>int</b> op)
+<a name='L730'><font color='red'>{</font>
+<a name='L731'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> vv, ww;
+<a name='L732'>    <b>int</b> equal = 0;
+<a name='L733'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L734'>
+<a name='L735'>    vv.obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L736'>    ww.obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L737'>    <b>if</b> (op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a> &amp;&amp; op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>)
+<a name='L738'>        <b>goto</b> _notimpl;
+<a name='L739'>    <b>if</b> ((PyMemoryView_Check(v) &amp;&amp; <a href='../S/2800.html#L6' title='Defined at 6 in Objects/memoryobject.c.'>IS_RELEASED</a>(v)) ||
+<a name='L740'>        (PyMemoryView_Check(w) &amp;&amp; <a href='../S/2800.html#L6' title='Defined at 6 in Objects/memoryobject.c.'>IS_RELEASED</a>(w))) <font color='red'>{</font>
+<a name='L741'>        equal = (v == w);
+<a name='L742'>        <b>goto</b> _end;
+<a name='L743'>    <font color='red'>}</font>
+<a name='L744'>    <b>if</b> (<a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(v, &amp;vv, <a href='../S/544.html#L182' title='Defined at 182 in Include/object.h.'>PyBUF_CONTIG_RO</a>) == -1) <font color='red'>{</font>
+<a name='L745'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L746'>        <b>goto</b> _notimpl;
+<a name='L747'>    <font color='red'>}</font>
+<a name='L748'>    <b>if</b> (<a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(w, &amp;ww, <a href='../S/544.html#L182' title='Defined at 182 in Include/object.h.'>PyBUF_CONTIG_RO</a>) == -1) <font color='red'>{</font>
+<a name='L749'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L750'>        <b>goto</b> _notimpl;
+<a name='L751'>    <font color='red'>}</font>
+<a name='L752'>
+<a name='L753'>    <b>if</b> (vv.itemsize != ww.itemsize || vv.len != ww.len)
+<a name='L754'>        <b>goto</b> _end;
+<a name='L755'>
+<a name='L756'>    equal = !memcmp(vv.buf, ww.buf, vv.len);
+<a name='L757'>
+<a name='L758'>_end:
+<a name='L759'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;vv);
+<a name='L760'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;ww);
+<a name='L761'>    <b>if</b> ((equal &amp;&amp; op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>) || (!equal &amp;&amp; op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>))
+<a name='L762'>        res = Py_True;
+<a name='L763'>    <b>else</b>
+<a name='L764'>        res = Py_False;
+<a name='L765'>    Py_INCREF(res);
+<a name='L766'>    <b>return</b> res;
+<a name='L767'>
+<a name='L768'>_notimpl:
+<a name='L769'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;vv);
+<a name='L770'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;ww);
+<a name='L771'>    Py_INCREF(Py_NotImplemented);
+<a name='L772'>    <b>return</b> Py_NotImplemented;
+<a name='L773'><font color='red'>}</font>
+<a name='L774'>
+<a name='L775'>
+<a name='L776'><b>static</b> <b>int</b>
+<a name='L777'><a href='../S/2800.html#L836' title='Refered from 836 in Objects/memoryobject.c.'>memory_traverse</a>(PyMemoryViewObject *self, visitproc visit, <b>void</b> *arg)
+<a name='L778'><font color='red'>{</font>
+<a name='L779'>    <b>if</b> (self-&gt;view.obj != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L780'>        Py_VISIT(self-&gt;view.obj);
+<a name='L781'>    <b>return</b> 0;
+<a name='L782'><font color='red'>}</font>
+<a name='L783'>
+<a name='L784'><b>static</b> <b>int</b>
+<a name='L785'><a href='../S/2800.html#L837' title='Refered from 837 in Objects/memoryobject.c.'>memory_clear</a>(PyMemoryViewObject *self)
+<a name='L786'><font color='red'>{</font>
+<a name='L787'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;self-&gt;view);
+<a name='L788'>    <b>return</b> 0;
+<a name='L789'><font color='red'>}</font>
+<a name='L790'>
+<a name='L791'>
+<a name='L792'><i><font color='green'>/* As mapping */</font></i>
+<a name='L793'><b>static</b> <a href='../S/544.html#L267' title='Defined at 267 in Include/object.h.'>PyMappingMethods</a> memory_as_mapping = <font color='red'>{</font>
+<a name='L794'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2800.html#L512' title='Defined at 512 in Objects/memoryobject.c.'>memory_length</a>,               <i><font color='green'>/* mp_length */</font></i>
+<a name='L795'>    (binaryfunc)<a href='../S/2800.html#L571' title='Defined at 571 in Objects/memoryobject.c.'>memory_subscript</a>,         <i><font color='green'>/* mp_subscript */</font></i>
+<a name='L796'>    (objobjargproc)<a href='../S/2800.html#L639' title='Defined at 639 in Objects/memoryobject.c.'>memory_ass_sub</a>,        <i><font color='green'>/* mp_ass_subscript */</font></i>
+<a name='L797'><font color='red'>}</font>;
+<a name='L798'>
+<a name='L799'><b>static</b> <a href='../S/544.html#L261' title='Defined at 261 in Include/object.h.'>PySequenceMethods</a> memory_as_sequence = <font color='red'>{</font>
+<a name='L800'>        0,                                  <i><font color='green'>/* sq_length */</font></i>
+<a name='L801'>        0,                                  <i><font color='green'>/* sq_concat */</font></i>
+<a name='L802'>        0,                                  <i><font color='green'>/* sq_repeat */</font></i>
+<a name='L803'>        (ssizeargfunc)<a href='../S/2800.html#L522' title='Defined at 522 in Objects/memoryobject.c.'>memory_item</a>,          <i><font color='green'>/* sq_item */</font></i>
+<a name='L804'><font color='red'>}</font>;
+<a name='L805'>
+<a name='L806'><i><font color='green'>/* Buffer methods */</font></i>
+<a name='L807'>
+<a name='L808'><b>static</b> <a href='../S/544.html#L273' title='Defined at 273 in Include/object.h.'>PyBufferProcs</a> memory_as_buffer = <font color='red'>{</font>
+<a name='L809'>    (getbufferproc)<a href='../S/2800.html#L51' title='Defined at 51 in Objects/memoryobject.c.'>memory_getbuf</a>,         <i><font color='green'>/* bf_getbuffer */</font></i>
+<a name='L810'>    (releasebufferproc)<a href='../S/2800.html#L63' title='Defined at 63 in Objects/memoryobject.c.'>memory_releasebuf</a>, <i><font color='green'>/* bf_releasebuffer */</font></i>
+<a name='L811'><font color='red'>}</font>;
+<a name='L812'>
+<a name='L813'>
+<a name='L814'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyMemoryView_Type = <font color='red'>{</font>
+<a name='L815'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L816'>    "memoryview",
+<a name='L817'>    <b>sizeof</b>(PyMemoryViewObject),
+<a name='L818'>    0,
+<a name='L819'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2800.html#L494' title='Defined at 494 in Objects/memoryobject.c.'>memory_dealloc</a>,               <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L820'>    0,                                        <i><font color='green'>/* tp_print */</font></i>
+<a name='L821'>    0,                                        <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L822'>    0,                                        <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L823'>    0,                                        <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L824'>    (reprfunc)<a href='../S/2800.html#L502' title='Defined at 502 in Objects/memoryobject.c.'>memory_repr</a>,                    <i><font color='green'>/* tp_repr */</font></i>
+<a name='L825'>    0,                                        <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L826'>    &amp;memory_as_sequence,                      <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L827'>    &amp;memory_as_mapping,                       <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L828'>    0,                                        <i><font color='green'>/* tp_hash */</font></i>
+<a name='L829'>    0,                                        <i><font color='green'>/* tp_call */</font></i>
+<a name='L830'>    0,                                        <i><font color='green'>/* tp_str */</font></i>
+<a name='L831'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                  <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L832'>    0,                                        <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L833'>    &amp;memory_as_buffer,                        <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L834'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,  <i><font color='green'>/* tp_flags */</font></i>
+<a name='L835'>    memory_doc,                               <i><font color='green'>/* tp_doc */</font></i>
+<a name='L836'>    (traverseproc)<a href='../S/2800.html#L777' title='Defined at 777 in Objects/memoryobject.c.'>memory_traverse</a>,            <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L837'>    (inquiry)<a href='../S/2800.html#L785' title='Defined at 785 in Objects/memoryobject.c.'>memory_clear</a>,                    <i><font color='green'>/* tp_clear */</font></i>
+<a name='L838'>    <a href='../S/2800.html#L729' title='Defined at 729 in Objects/memoryobject.c.'>memory_richcompare</a>,                       <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L839'>    0,                                        <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L840'>    0,                                        <i><font color='green'>/* tp_iter */</font></i>
+<a name='L841'>    0,                                        <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L842'>    memory_methods,                           <i><font color='green'>/* tp_methods */</font></i>
+<a name='L843'>    0,                                        <i><font color='green'>/* tp_members */</font></i>
+<a name='L844'>    memory_getsetlist,                        <i><font color='green'>/* tp_getset */</font></i>
+<a name='L845'>    0,                                        <i><font color='green'>/* tp_base */</font></i>
+<a name='L846'>    0,                                        <i><font color='green'>/* tp_dict */</font></i>
+<a name='L847'>    0,                                        <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L848'>    0,                                        <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L849'>    0,                                        <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L850'>    0,                                        <i><font color='green'>/* tp_init */</font></i>
+<a name='L851'>    0,                                        <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L852'>    <a href='../S/2800.html#L115' title='Defined at 115 in Objects/memoryobject.c.'>memory_new</a>,                               <i><font color='green'>/* tp_new */</font></i>
+<a name='L853'><font color='red'>}</font>;
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L24'>[^]</a><a href='#L785'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

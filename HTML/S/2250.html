@@ -1,0 +1,1914 @@
+<html>
+<head>
+<title>Modules/_ctypes/callproc.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3354.html'>_ctypes</a>/callproc.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L83'>[^]</a><a href='#L1781'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L83' title='Defined at 83.'>pymem_destructor</a>
+<li><a href='#L126' title='Defined at 126.'>_ctypes_get_errobj</a>
+<li><a href='#L169' title='Defined at 169.'>get_error_internal</a>
+<li><a href='#L183' title='Defined at 183.'>set_error_internal</a>
+<li><a href='#L201' title='Defined at 201.'>get_errno</a>
+<li><a href='#L207' title='Defined at 207.'>set_errno</a>
+<li><a href='#L215' title='Defined at 215.'>get_last_error</a>
+<li><a href='#L221' title='Defined at 221.'>set_last_error</a>
+<li><a href='#L228' title='Defined at 228.'>FormatError</a>
+<li><a href='#L248' title='Defined at 248.'>SetException</a>
+<li><a href='#L395' title='Defined at 395.'>HandleException</a>
+<li><a href='#L405' title='Defined at 405.'>check_hresult</a>
+<li><a href='#L420' title='Defined at 420.'>PyCArgObject_new</a>
+<li><a href='#L434' title='Defined at 434.'>PyCArg_dealloc</a>
+<li><a href='#L441' title='Defined at 441.'>PyCArg_repr</a>
+<li><a href='#L603' title='Defined at 603.'>ConvParam</a>
+<li><a href='#L704' title='Defined at 704.'>_ctypes_get_ffi_type</a>
+<li><a href='#L739' title='Defined at 739.'>_call_function_pointer</a>
+<li><a href='#L885' title='Defined at 885.'>GetResult</a>
+<li><a href='#L928' title='Defined at 928.'>_ctypes_extend_error</a>
+<li><a href='#L970' title='Defined at 970.'>GetComError</a>
+<li><a href='#L1049' title='Defined at 1049.'>_ctypes_callproc</a>
+<li><a href='#L1196' title='Defined at 1196.'>_parse_voidp</a>
+<li><a href='#L1211' title='Defined at 1211.'>format_error</a>
+<li><a href='#L1236' title='Defined at 1236.'>load_library</a>
+<li><a href='#L1263' title='Defined at 1263.'>free_library</a>
+<li><a href='#L1277' title='Defined at 1277.'>call_commethod</a>
+<li><a href='#L1334' title='Defined at 1334.'>copy_com_pointer</a>
+<li><a href='#L1363' title='Defined at 1363.'>py_dl_open</a>
+<li><a href='#L1401' title='Defined at 1401.'>py_dl_close</a>
+<li><a href='#L1416' title='Defined at 1416.'>py_dl_sym</a>
+<li><a href='#L1441' title='Defined at 1441.'>call_function</a>
+<li><a href='#L1472' title='Defined at 1472.'>call_cdeclfunction</a>
+<li><a href='#L1506' title='Defined at 1506.'>sizeof_func</a>
+<li><a href='#L1527' title='Defined at 1527.'>align_func</a>
+<li><a href='#L1554' title='Defined at 1554.'>byref</a>
+<li><a href='#L1593' title='Defined at 1593.'>addressof</a>
+<li><a href='#L1603' title='Defined at 1603.'>converter</a>
+<li><a href='#L1610' title='Defined at 1610.'>My_PyObj_FromPtr</a>
+<li><a href='#L1620' title='Defined at 1620.'>My_Py_INCREF</a>
+<li><a href='#L1628' title='Defined at 1628.'>My_Py_DECREF</a>
+<li><a href='#L1636' title='Defined at 1636.'>resize</a>
+<li><a href='#L1692' title='Defined at 1692.'>unpickle</a>
+<li><a href='#L1714' title='Defined at 1714.'>POINTER</a>
+<li><a href='#L1764' title='Defined at 1764.'>pointer</a>
+<li><a href='#L1781' title='Defined at 1781.'>buffer_info</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'> * History: First version dated from 3/97, derived from my SCMLIB version</font></i>
+<a name='L3'><i><font color='green'> * for win16.</font></i>
+<a name='L4'><i><font color='green'> */</font></i>
+<a name='L5'><i><font color='green'>/*</font></i>
+<a name='L6'><i><font color='green'> * Related Work:</font></i>
+<a name='L7'><i><font color='green'> *      - calldll       http://www.nightmare.com/software.html</font></i>
+<a name='L8'><i><font color='green'> *      - libffi        http://sourceware.cygnus.com/libffi/</font></i>
+<a name='L9'><i><font color='green'> *      - ffcall        http://clisp.cons.org/~haible/packages-ffcall.html</font></i>
+<a name='L10'><i><font color='green'> *   and, of course, Don Beaudry's MESS package, but this is more ctypes</font></i>
+<a name='L11'><i><font color='green'> *   related.</font></i>
+<a name='L12'><i><font color='green'> */</font></i>
+<a name='L13'>
+<a name='L14'>
+<a name='L15'><i><font color='green'>/*</font></i>
+<a name='L16'><i><font color='green'>  How are functions called, and how are parameters converted to C ?</font></i>
+<a name='L17'><i><font color='green'></font></i>
+<a name='L18'><i><font color='green'>  1. _ctypes.c::PyCFuncPtr_call receives an argument tuple 'inargs' and a</font></i>
+<a name='L19'><i><font color='green'>  keyword dictionary 'kwds'.</font></i>
+<a name='L20'><i><font color='green'></font></i>
+<a name='L21'><i><font color='green'>  2. After several checks, _build_callargs() is called which returns another</font></i>
+<a name='L22'><i><font color='green'>  tuple 'callargs'.  This may be the same tuple as 'inargs', a slice of</font></i>
+<a name='L23'><i><font color='green'>  'inargs', or a completely fresh tuple, depending on several things (is is a</font></i>
+<a name='L24'><i><font color='green'>  COM method, are 'paramflags' available).</font></i>
+<a name='L25'><i><font color='green'></font></i>
+<a name='L26'><i><font color='green'>  3. _build_callargs also calculates bitarrays containing indexes into</font></i>
+<a name='L27'><i><font color='green'>  the callargs tuple, specifying how to build the return value(s) of</font></i>
+<a name='L28'><i><font color='green'>  the function.</font></i>
+<a name='L29'><i><font color='green'></font></i>
+<a name='L30'><i><font color='green'>  4. _ctypes_callproc is then called with the 'callargs' tuple.  _ctypes_callproc first</font></i>
+<a name='L31'><i><font color='green'>  allocates two arrays.  The first is an array of 'struct argument' items, the</font></i>
+<a name='L32'><i><font color='green'>  second array has 'void *' entried.</font></i>
+<a name='L33'><i><font color='green'></font></i>
+<a name='L34'><i><font color='green'>  5. If 'converters' are present (converters is a sequence of argtypes'</font></i>
+<a name='L35'><i><font color='green'>  from_param methods), for each item in 'callargs' converter is called and the</font></i>
+<a name='L36'><i><font color='green'>  result passed to ConvParam.  If 'converters' are not present, each argument</font></i>
+<a name='L37'><i><font color='green'>  is directly passed to ConvParm.</font></i>
+<a name='L38'><i><font color='green'></font></i>
+<a name='L39'><i><font color='green'>  6. For each arg, ConvParam stores the contained C data (or a pointer to it,</font></i>
+<a name='L40'><i><font color='green'>  for structures) into the 'struct argument' array.</font></i>
+<a name='L41'><i><font color='green'></font></i>
+<a name='L42'><i><font color='green'>  7. Finally, a loop fills the 'void *' array so that each item points to the</font></i>
+<a name='L43'><i><font color='green'>  data contained in or pointed to by the 'struct argument' array.</font></i>
+<a name='L44'><i><font color='green'></font></i>
+<a name='L45'><i><font color='green'>  8. The 'void *' argument array is what _call_function_pointer</font></i>
+<a name='L46'><i><font color='green'>  expects. _call_function_pointer then has very little to do - only some</font></i>
+<a name='L47'><i><font color='green'>  libffi specific stuff, then it calls ffi_call.</font></i>
+<a name='L48'><i><font color='green'></font></i>
+<a name='L49'><i><font color='green'>  So, there are 4 data structures holding processed arguments:</font></i>
+<a name='L50'><i><font color='green'>  - the inargs tuple (in PyCFuncPtr_call)</font></i>
+<a name='L51'><i><font color='green'>  - the callargs tuple (in PyCFuncPtr_call)</font></i>
+<a name='L52'><i><font color='green'>  - the 'struct argguments' array</font></i>
+<a name='L53'><i><font color='green'>  - the 'void *' array</font></i>
+<a name='L54'><i><font color='green'></font></i>
+<a name='L55'><i><font color='green'> */</font></i>
+<a name='L56'>
+<a name='L57'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L58'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L59'>
+<a name='L60'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L61'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L62'><font color='darkred'>#include</font> &lt;tchar.h&gt;
+<a name='L63'><font color='darkred'>#else</font>
+<a name='L64'><font color='darkred'>#include</font> "<a href='2253.html'>ctypes_dlfcn.h</a>"
+<a name='L65'><font color='darkred'>#endif</font>
+<a name='L66'>
+<a name='L67'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L68'><font color='darkred'>#include</font> &lt;malloc.h&gt;
+<a name='L69'><font color='darkred'>#endif</font>
+<a name='L70'>
+<a name='L71'><font color='darkred'>#include</font> &lt;<a href='../I/325.html'>ffi.h</a>&gt;
+<a name='L72'><font color='darkred'>#include</font> "<a href='2252.html'>ctypes.h</a>"
+<a name='L73'>
+<a name='L74'><font color='darkred'>#if</font> <b>defined</b>(_DEBUG) || <b>defined</b>(__MINGW32__)
+<a name='L75'><i><font color='green'>/* Don't use structured exception handling on Windows if this is defined.</font></i>
+<a name='L76'><i><font color='green'>   MingW, AFAIK, doesn't support it.</font></i>
+<a name='L77'><i><font color='green'>*/</font></i>
+<a name='L78'><font color='darkred'>#define</font> <a href='../R/756.html' title='Multiple refered from 5 places.'>DONT_USE_SEH</a>
+<a name='L79'><font color='darkred'>#endif</font>
+<a name='L80'>
+<a name='L81'><font color='darkred'>#define</font> <a href='../R/610.html' title='Multiple refered from 5 places.'>CTYPES_CAPSULE_NAME_PYMEM</a> "_ctypes pymem"
+<a name='L82'>
+<a name='L83'><b>static</b> <b>void</b> <a href='../R/9826.html' title='Multiple refered from 3 places.'>pymem_destructor</a>(PyObject *ptr)
+<a name='L84'><font color='red'>{</font>
+<a name='L85'>    <b>void</b> *p = <a href='../S/2780.html#L80' title='Defined at 80 in Objects/capsule.c.'>PyCapsule_GetPointer</a>(ptr, <a href='../S/2250.html#L81' title='Defined at 81 in Modules/_ctypes/callproc.c.'>CTYPES_CAPSULE_NAME_PYMEM</a>);
+<a name='L86'>    <b>if</b> (p) <font color='red'>{</font>
+<a name='L87'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(p);
+<a name='L88'>    <font color='red'>}</font>
+<a name='L89'><font color='red'>}</font>
+<a name='L90'>
+<a name='L91'><i><font color='green'>/*</font></i>
+<a name='L92'><i><font color='green'>  ctypes maintains thread-local storage that has space for two error numbers:</font></i>
+<a name='L93'><i><font color='green'>  private copies of the system 'errno' value and, on Windows, the system error code</font></i>
+<a name='L94'><i><font color='green'>  accessed by the GetLastError() and SetLastError() api functions.</font></i>
+<a name='L95'><i><font color='green'></font></i>
+<a name='L96'><i><font color='green'>  Foreign functions created with CDLL(..., use_errno=True), when called, swap</font></i>
+<a name='L97'><i><font color='green'>  the system 'errno' value with the private copy just before the actual</font></i>
+<a name='L98'><i><font color='green'>  function call, and swapped again immediately afterwards.  The 'use_errno'</font></i>
+<a name='L99'><i><font color='green'>  parameter defaults to False, in this case 'ctypes_errno' is not touched.</font></i>
+<a name='L100'><i><font color='green'></font></i>
+<a name='L101'><i><font color='green'>  On Windows, foreign functions created with CDLL(..., use_last_error=True) or</font></i>
+<a name='L102'><i><font color='green'>  WinDLL(..., use_last_error=True) swap the system LastError value with the</font></i>
+<a name='L103'><i><font color='green'>  ctypes private copy.</font></i>
+<a name='L104'><i><font color='green'></font></i>
+<a name='L105'><i><font color='green'>  The values are also swapped immeditately before and after ctypes callback</font></i>
+<a name='L106'><i><font color='green'>  functions are called, if the callbacks are constructed using the new</font></i>
+<a name='L107'><i><font color='green'>  optional use_errno parameter set to True: CFUNCTYPE(..., use_errno=TRUE) or</font></i>
+<a name='L108'><i><font color='green'>  WINFUNCTYPE(..., use_errno=True).</font></i>
+<a name='L109'><i><font color='green'></font></i>
+<a name='L110'><i><font color='green'>  New ctypes functions are provided to access the ctypes private copies from</font></i>
+<a name='L111'><i><font color='green'>  Python:</font></i>
+<a name='L112'><i><font color='green'></font></i>
+<a name='L113'><i><font color='green'>  - ctypes.set_errno(value) and ctypes.set_last_error(value) store 'value' in</font></i>
+<a name='L114'><i><font color='green'>    the private copy and returns the previous value.</font></i>
+<a name='L115'><i><font color='green'></font></i>
+<a name='L116'><i><font color='green'>  - ctypes.get_errno() and ctypes.get_last_error() returns the current ctypes</font></i>
+<a name='L117'><i><font color='green'>    private copies value.</font></i>
+<a name='L118'><i><font color='green'>*/</font></i>
+<a name='L119'>
+<a name='L120'><i><font color='green'>/*</font></i>
+<a name='L121'><i><font color='green'>  This function creates and returns a thread-local Python object that has</font></i>
+<a name='L122'><i><font color='green'>  space to store two integer error numbers; once created the Python object is</font></i>
+<a name='L123'><i><font color='green'>  kept alive in the thread state dictionary as long as the thread itself.</font></i>
+<a name='L124'><i><font color='green'>*/</font></i>
+<a name='L125'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L126'><a href='../R/5739.html' title='Multiple refered from 5 places.'>_ctypes_get_errobj</a>(<b>int</b> **pspace)
+<a name='L127'><font color='red'>{</font>
+<a name='L128'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict = <a href='../S/3134.html#L412' title='Defined at 412 in Python/pystate.c.'>PyThreadState_GetDict</a>();
+<a name='L129'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *errobj;
+<a name='L130'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *error_object_name;
+<a name='L131'>    <b>if</b> (dict == 0) <font color='red'>{</font>
+<a name='L132'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L133'>                        "cannot get thread state");
+<a name='L134'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L135'>    <font color='red'>}</font>
+<a name='L136'>    <b>if</b> (error_object_name == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L137'>        error_object_name = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("ctypes.error_object");
+<a name='L138'>        <b>if</b> (error_object_name == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L139'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L140'>    <font color='red'>}</font>
+<a name='L141'>    errobj = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(dict, error_object_name);
+<a name='L142'>    <b>if</b> (errobj) <font color='red'>{</font>
+<a name='L143'>        <b>if</b> (!<a href='../S/2780.html#L68' title='Defined at 68 in Objects/capsule.c.'>PyCapsule_IsValid</a>(errobj, <a href='../S/2250.html#L81' title='Defined at 81 in Modules/_ctypes/callproc.c.'>CTYPES_CAPSULE_NAME_PYMEM</a>)) <font color='red'>{</font>
+<a name='L144'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L145'>                "ctypes.error_object is an invalid capsule");
+<a name='L146'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L147'>        <font color='red'>}</font>
+<a name='L148'>        Py_INCREF(errobj);
+<a name='L149'>    <font color='red'>}</font>
+<a name='L150'>    <b>else</b> <font color='red'>{</font>
+<a name='L151'>        <b>void</b> *space = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(<b>sizeof</b>(<b>int</b>) * 2);
+<a name='L152'>        <b>if</b> (space == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L153'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L154'>        memset(space, 0, <b>sizeof</b>(<b>int</b>) * 2);
+<a name='L155'>        errobj = <a href='../S/2780.html#L44' title='Defined at 44 in Objects/capsule.c.'>PyCapsule_New</a>(space, <a href='../S/2250.html#L81' title='Defined at 81 in Modules/_ctypes/callproc.c.'>CTYPES_CAPSULE_NAME_PYMEM</a>, <a href='../D/10670.html' title='Multiple defined in 2 places.'>pymem_destructor</a>);
+<a name='L156'>        <b>if</b> (errobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L157'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L158'>        <b>if</b> (-1 == <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(dict, error_object_name,
+<a name='L159'>                                 errobj)) <font color='red'>{</font>
+<a name='L160'>            Py_DECREF(errobj);
+<a name='L161'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L162'>        <font color='red'>}</font>
+<a name='L163'>    <font color='red'>}</font>
+<a name='L164'>    *pspace = (<b>int</b> *)<a href='../S/2780.html#L80' title='Defined at 80 in Objects/capsule.c.'>PyCapsule_GetPointer</a>(errobj, <a href='../S/2250.html#L81' title='Defined at 81 in Modules/_ctypes/callproc.c.'>CTYPES_CAPSULE_NAME_PYMEM</a>);
+<a name='L165'>    <b>return</b> errobj;
+<a name='L166'><font color='red'>}</font>
+<a name='L167'>
+<a name='L168'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L169'><a href='../R/8053.html' title='Multiple refered from 2 places.'>get_error_internal</a>(PyObject *self, PyObject *args, <b>int</b> index)
+<a name='L170'><font color='red'>{</font>
+<a name='L171'>    <b>int</b> *space;
+<a name='L172'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *errobj = <a href='../S/2250.html#L126' title='Defined at 126 in Modules/_ctypes/callproc.c.'>_ctypes_get_errobj</a>(&amp;space);
+<a name='L173'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L174'>
+<a name='L175'>    <b>if</b> (errobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L176'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L177'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(space[index]);
+<a name='L178'>    Py_DECREF(errobj);
+<a name='L179'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L180'><font color='red'>}</font>
+<a name='L181'>
+<a name='L182'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L183'><a href='../R/10202.html' title='Multiple refered from 2 places.'>set_error_internal</a>(PyObject *self, PyObject *args, <b>int</b> index)
+<a name='L184'><font color='red'>{</font>
+<a name='L185'>    <b>int</b> new_errno, old_errno;
+<a name='L186'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *errobj;
+<a name='L187'>    <b>int</b> *space;
+<a name='L188'>
+<a name='L189'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i", &amp;new_errno))
+<a name='L190'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L191'>    errobj = <a href='../S/2250.html#L126' title='Defined at 126 in Modules/_ctypes/callproc.c.'>_ctypes_get_errobj</a>(&amp;space);
+<a name='L192'>    <b>if</b> (errobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L193'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L194'>    old_errno = space[index];
+<a name='L195'>    space[index] = new_errno;
+<a name='L196'>    Py_DECREF(errobj);
+<a name='L197'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(old_errno);
+<a name='L198'><font color='red'>}</font>
+<a name='L199'>
+<a name='L200'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L201'><a href='../S/2250.html#L1808' title='Refered from 1808 in Modules/_ctypes/callproc.c.'>get_errno</a>(PyObject *self, PyObject *args)
+<a name='L202'><font color='red'>{</font>
+<a name='L203'>    <b>return</b> <a href='../S/2250.html#L169' title='Defined at 169 in Modules/_ctypes/callproc.c.'>get_error_internal</a>(self, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 0);
+<a name='L204'><font color='red'>}</font>
+<a name='L205'>
+<a name='L206'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L207'><a href='../S/2250.html#L1809' title='Refered from 1809 in Modules/_ctypes/callproc.c.'>set_errno</a>(PyObject *self, PyObject *args)
+<a name='L208'><font color='red'>{</font>
+<a name='L209'>    <b>return</b> <a href='../S/2250.html#L183' title='Defined at 183 in Modules/_ctypes/callproc.c.'>set_error_internal</a>(self, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 0);
+<a name='L210'><font color='red'>}</font>
+<a name='L211'>
+<a name='L212'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L213'>
+<a name='L214'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L215'><a href='../S/2250.html#L1816' title='Refered from 1816 in Modules/_ctypes/callproc.c.'>get_last_error</a>(PyObject *self, PyObject *args)
+<a name='L216'><font color='red'>{</font>
+<a name='L217'>    <b>return</b> <a href='../S/2250.html#L169' title='Defined at 169 in Modules/_ctypes/callproc.c.'>get_error_internal</a>(self, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 1);
+<a name='L218'><font color='red'>}</font>
+<a name='L219'>
+<a name='L220'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L221'><a href='../S/2250.html#L1817' title='Refered from 1817 in Modules/_ctypes/callproc.c.'>set_last_error</a>(PyObject *self, PyObject *args)
+<a name='L222'><font color='red'>{</font>
+<a name='L223'>    <b>return</b> <a href='../S/2250.html#L183' title='Defined at 183 in Modules/_ctypes/callproc.c.'>set_error_internal</a>(self, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 1);
+<a name='L224'><font color='red'>}</font>
+<a name='L225'>
+<a name='L226'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ComError;
+<a name='L227'>
+<a name='L228'><b>static</b> WCHAR *<a href='../R/1213.html' title='Multiple refered from 2 places.'>FormatError</a>(DWORD code)
+<a name='L229'><font color='red'>{</font>
+<a name='L230'>    WCHAR *lpMsgBuf;
+<a name='L231'>    DWORD n;
+<a name='L232'>    n = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+<a name='L233'>                       <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L234'>                       <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>,
+<a name='L235'>                       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), <i><font color='green'>/* Default language */</font></i>
+<a name='L236'>               (LPWSTR) &amp;lpMsgBuf,
+<a name='L237'>               0,
+<a name='L238'>               <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L239'>    <b>if</b> (n) <font color='red'>{</font>
+<a name='L240'>        <b>while</b> (iswspace(lpMsgBuf[n-1]))
+<a name='L241'>            --n;
+<a name='L242'>        lpMsgBuf[n] = L'\0'; <i><font color='green'>/* rstrip() */</font></i>
+<a name='L243'>    <font color='red'>}</font>
+<a name='L244'>    <b>return</b> lpMsgBuf;
+<a name='L245'><font color='red'>}</font>
+<a name='L246'>
+<a name='L247'><font color='darkred'>#ifndef</font> <a href='../S/2250.html#L78' title='Defined at 78 in Modules/_ctypes/callproc.c.'>DONT_USE_SEH</a>
+<a name='L248'><b>static</b> <b>void</b> <a href='../S/2250.html#L836' title='Refered from 836 in Modules/_ctypes/callproc.c.'>SetException</a>(DWORD code, EXCEPTION_RECORD *pr)
+<a name='L249'><font color='red'>{</font>
+<a name='L250'>    <i><font color='green'>/* The 'code' is a normal win32 error code so it could be handled by</font></i>
+<a name='L251'><i><font color='green'>    PyErr_SetFromWindowsErr(). However, for some errors, we have additional</font></i>
+<a name='L252'><i><font color='green'>    information not included in the error code. We handle those here and</font></i>
+<a name='L253'><i><font color='green'>    delegate all others to the generic function. */</font></i>
+<a name='L254'>    <b>switch</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>) <font color='red'>{</font>
+<a name='L255'>    <b>case</b> EXCEPTION_ACCESS_VIOLATION:
+<a name='L256'>        <i><font color='green'>/* The thread attempted to read from or write</font></i>
+<a name='L257'><i><font color='green'>           to a virtual address for which it does not</font></i>
+<a name='L258'><i><font color='green'>           have the appropriate access. */</font></i>
+<a name='L259'>        <b>if</b> (pr-&gt;ExceptionInformation[0] == 0)
+<a name='L260'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_WindowsError,
+<a name='L261'>                         "exception: access violation reading %p",
+<a name='L262'>                         pr-&gt;ExceptionInformation[1]);
+<a name='L263'>        <b>else</b>
+<a name='L264'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_WindowsError,
+<a name='L265'>                         "exception: access violation writing %p",
+<a name='L266'>                         pr-&gt;ExceptionInformation[1]);
+<a name='L267'>        <b>break</b>;
+<a name='L268'>
+<a name='L269'>    <b>case</b> EXCEPTION_BREAKPOINT:
+<a name='L270'>        <i><font color='green'>/* A breakpoint was encountered. */</font></i>
+<a name='L271'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L272'>                        "exception: breakpoint encountered");
+<a name='L273'>        <b>break</b>;
+<a name='L274'>
+<a name='L275'>    <b>case</b> EXCEPTION_DATATYPE_MISALIGNMENT:
+<a name='L276'>        <i><font color='green'>/* The thread attempted to read or write data that is</font></i>
+<a name='L277'><i><font color='green'>           misaligned on hardware that does not provide</font></i>
+<a name='L278'><i><font color='green'>           alignment. For example, 16-bit values must be</font></i>
+<a name='L279'><i><font color='green'>           aligned on 2-byte boundaries, 32-bit values on</font></i>
+<a name='L280'><i><font color='green'>           4-byte boundaries, and so on. */</font></i>
+<a name='L281'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L282'>                        "exception: datatype misalignment");
+<a name='L283'>        <b>break</b>;
+<a name='L284'>
+<a name='L285'>    <b>case</b> EXCEPTION_SINGLE_STEP:
+<a name='L286'>        <i><font color='green'>/* A trace trap or other single-instruction mechanism</font></i>
+<a name='L287'><i><font color='green'>           signaled that one instruction has been executed. */</font></i>
+<a name='L288'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L289'>                        "exception: single step");
+<a name='L290'>        <b>break</b>;
+<a name='L291'>
+<a name='L292'>    <b>case</b> EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+<a name='L293'>        <i><font color='green'>/* The thread attempted to access an array element</font></i>
+<a name='L294'><i><font color='green'>           that is out of bounds, and the underlying hardware</font></i>
+<a name='L295'><i><font color='green'>           supports bounds checking. */</font></i>
+<a name='L296'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L297'>                        "exception: array bounds exceeded");
+<a name='L298'>        <b>break</b>;
+<a name='L299'>
+<a name='L300'>    <b>case</b> EXCEPTION_FLT_DENORMAL_OPERAND:
+<a name='L301'>        <i><font color='green'>/* One of the operands in a floating-point operation</font></i>
+<a name='L302'><i><font color='green'>           is denormal. A denormal value is one that is too</font></i>
+<a name='L303'><i><font color='green'>           small to represent as a standard floating-point</font></i>
+<a name='L304'><i><font color='green'>           value. */</font></i>
+<a name='L305'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L306'>                        "exception: floating-point operand denormal");
+<a name='L307'>        <b>break</b>;
+<a name='L308'>
+<a name='L309'>    <b>case</b> EXCEPTION_FLT_DIVIDE_BY_ZERO:
+<a name='L310'>        <i><font color='green'>/* The thread attempted to divide a floating-point</font></i>
+<a name='L311'><i><font color='green'>           value by a floating-point divisor of zero. */</font></i>
+<a name='L312'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L313'>                        "exception: float divide by zero");
+<a name='L314'>        <b>break</b>;
+<a name='L315'>
+<a name='L316'>    <b>case</b> EXCEPTION_FLT_INEXACT_RESULT:
+<a name='L317'>        <i><font color='green'>/* The result of a floating-point operation cannot be</font></i>
+<a name='L318'><i><font color='green'>           represented exactly as a decimal fraction. */</font></i>
+<a name='L319'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L320'>                        "exception: float inexact");
+<a name='L321'>        <b>break</b>;
+<a name='L322'>
+<a name='L323'>    <b>case</b> EXCEPTION_FLT_INVALID_OPERATION:
+<a name='L324'>        <i><font color='green'>/* This exception represents any floating-point</font></i>
+<a name='L325'><i><font color='green'>           exception not included in this list. */</font></i>
+<a name='L326'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L327'>                        "exception: float invalid operation");
+<a name='L328'>        <b>break</b>;
+<a name='L329'>
+<a name='L330'>    <b>case</b> EXCEPTION_FLT_OVERFLOW:
+<a name='L331'>        <i><font color='green'>/* The exponent of a floating-point operation is</font></i>
+<a name='L332'><i><font color='green'>           greater than the magnitude allowed by the</font></i>
+<a name='L333'><i><font color='green'>           corresponding type. */</font></i>
+<a name='L334'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L335'>                        "exception: float overflow");
+<a name='L336'>        <b>break</b>;
+<a name='L337'>
+<a name='L338'>    <b>case</b> EXCEPTION_FLT_STACK_CHECK:
+<a name='L339'>        <i><font color='green'>/* The stack overflowed or underflowed as the result</font></i>
+<a name='L340'><i><font color='green'>           of a floating-point operation. */</font></i>
+<a name='L341'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L342'>                        "exception: stack over/underflow");
+<a name='L343'>        <b>break</b>;
+<a name='L344'>
+<a name='L345'>    <b>case</b> EXCEPTION_STACK_OVERFLOW:
+<a name='L346'>        <i><font color='green'>/* The stack overflowed or underflowed as the result</font></i>
+<a name='L347'><i><font color='green'>           of a floating-point operation. */</font></i>
+<a name='L348'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L349'>                        "exception: stack overflow");
+<a name='L350'>        <b>break</b>;
+<a name='L351'>
+<a name='L352'>    <b>case</b> EXCEPTION_FLT_UNDERFLOW:
+<a name='L353'>        <i><font color='green'>/* The exponent of a floating-point operation is less</font></i>
+<a name='L354'><i><font color='green'>           than the magnitude allowed by the corresponding</font></i>
+<a name='L355'><i><font color='green'>           type. */</font></i>
+<a name='L356'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L357'>                        "exception: float underflow");
+<a name='L358'>        <b>break</b>;
+<a name='L359'>
+<a name='L360'>    <b>case</b> EXCEPTION_INT_DIVIDE_BY_ZERO:
+<a name='L361'>        <i><font color='green'>/* The thread attempted to divide an integer value by</font></i>
+<a name='L362'><i><font color='green'>           an integer divisor of zero. */</font></i>
+<a name='L363'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L364'>                        "exception: integer divide by zero");
+<a name='L365'>        <b>break</b>;
+<a name='L366'>
+<a name='L367'>    <b>case</b> EXCEPTION_INT_OVERFLOW:
+<a name='L368'>        <i><font color='green'>/* The result of an integer operation caused a carry</font></i>
+<a name='L369'><i><font color='green'>           out of the most significant bit of the result. */</font></i>
+<a name='L370'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L371'>                        "exception: integer overflow");
+<a name='L372'>        <b>break</b>;
+<a name='L373'>
+<a name='L374'>    <b>case</b> EXCEPTION_PRIV_INSTRUCTION:
+<a name='L375'>        <i><font color='green'>/* The thread attempted to execute an instruction</font></i>
+<a name='L376'><i><font color='green'>           whose operation is not allowed in the current</font></i>
+<a name='L377'><i><font color='green'>           machine mode. */</font></i>
+<a name='L378'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L379'>                        "exception: priviledged instruction");
+<a name='L380'>        <b>break</b>;
+<a name='L381'>
+<a name='L382'>    <b>case</b> EXCEPTION_NONCONTINUABLE_EXCEPTION:
+<a name='L383'>        <i><font color='green'>/* The thread attempted to continue execution after a</font></i>
+<a name='L384'><i><font color='green'>           noncontinuable exception occurred. */</font></i>
+<a name='L385'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_WindowsError,
+<a name='L386'>                        "exception: nocontinuable");
+<a name='L387'>        <b>break</b>;
+<a name='L388'>
+<a name='L389'>    <b>default</b>:
+<a name='L390'>        <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L391'>        <b>break</b>;
+<a name='L392'>    <font color='red'>}</font>
+<a name='L393'><font color='red'>}</font>
+<a name='L394'>
+<a name='L395'><b>static</b> DWORD <a href='../S/2250.html#L812' title='Refered from 812 in Modules/_ctypes/callproc.c.'>HandleException</a>(EXCEPTION_POINTERS *ptrs,
+<a name='L396'>                             DWORD *pdw, EXCEPTION_RECORD *record)
+<a name='L397'><font color='red'>{</font>
+<a name='L398'>    *pdw = ptrs-&gt;ExceptionRecord-&gt;ExceptionCode;
+<a name='L399'>    *record = *ptrs-&gt;ExceptionRecord;
+<a name='L400'>    <b>return</b> EXCEPTION_EXECUTE_HANDLER;
+<a name='L401'><font color='red'>}</font>
+<a name='L402'><font color='darkred'>#endif</font>
+<a name='L403'>
+<a name='L404'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L405'><a href='../S/2250.html#L1823' title='Refered from 1823 in Modules/_ctypes/callproc.c.'>check_hresult</a>(PyObject *self, PyObject *args)
+<a name='L406'><font color='red'>{</font>
+<a name='L407'>    HRESULT hr;
+<a name='L408'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i", &amp;hr))
+<a name='L409'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L410'>    <b>if</b> (FAILED(hr))
+<a name='L411'>        <b>return</b> <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(hr);
+<a name='L412'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(hr);
+<a name='L413'><font color='red'>}</font>
+<a name='L414'>
+<a name='L415'><font color='darkred'>#endif</font>
+<a name='L416'>
+<a name='L417'><i><font color='green'>/**************************************************************/</font></i>
+<a name='L418'>
+<a name='L419'><a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a> *
+<a name='L420'><a href='../R/2542.html' title='Multiple refered from 17 places.'>PyCArgObject_new</a>(<b>void</b>)
+<a name='L421'><font color='red'>{</font>
+<a name='L422'>    <a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a> *p;
+<a name='L423'>    p = PyObject_New(<a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a>, &amp;PyCArg_Type);
+<a name='L424'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L425'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L426'>    p-&gt;pffi_type = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L427'>    p-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a> = '\0';
+<a name='L428'>    p-&gt;obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L429'>    memset(&amp;p-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, 0, <b>sizeof</b>(p-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>));
+<a name='L430'>    <b>return</b> p;
+<a name='L431'><font color='red'>}</font>
+<a name='L432'>
+<a name='L433'><b>static</b> <b>void</b>
+<a name='L434'><a href='../S/2250.html#L523' title='Refered from 523 in Modules/_ctypes/callproc.c.'>PyCArg_dealloc</a>(PyCArgObject *self)
+<a name='L435'><font color='red'>{</font>
+<a name='L436'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;obj);
+<a name='L437'>    PyObject_Del(self);
+<a name='L438'><font color='red'>}</font>
+<a name='L439'>
+<a name='L440'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L441'><a href='../S/2250.html#L528' title='Refered from 528 in Modules/_ctypes/callproc.c.'>PyCArg_repr</a>(PyCArgObject *self)
+<a name='L442'><font color='red'>{</font>
+<a name='L443'>    <b>char</b> <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>[256];
+<a name='L444'>    <b>switch</b>(self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>) <font color='red'>{</font>
+<a name='L445'>    <b>case</b> 'b':
+<a name='L446'>    <b>case</b> 'B':
+<a name='L447'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%d)&gt;",
+<a name='L448'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L449'>        <b>break</b>;
+<a name='L450'>    <b>case</b> 'h':
+<a name='L451'>    <b>case</b> 'H':
+<a name='L452'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%d)&gt;",
+<a name='L453'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.h);
+<a name='L454'>        <b>break</b>;
+<a name='L455'>    <b>case</b> 'i':
+<a name='L456'>    <b>case</b> 'I':
+<a name='L457'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%d)&gt;",
+<a name='L458'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.i);
+<a name='L459'>        <b>break</b>;
+<a name='L460'>    <b>case</b> 'l':
+<a name='L461'>    <b>case</b> 'L':
+<a name='L462'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%ld)&gt;",
+<a name='L463'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.l);
+<a name='L464'>        <b>break</b>;
+<a name='L465'>
+<a name='L466'><font color='darkred'>#ifdef</font> <a href='../D/1527.html' title='Multiple defined in 2 places.'>HAVE_LONG_LONG</a>
+<a name='L467'>    <b>case</b> 'q':
+<a name='L468'>    <b>case</b> 'Q':
+<a name='L469'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>,
+<a name='L470'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L471'>            "&lt;cparam '%c' (%I64d)&gt;",
+<a name='L472'><font color='darkred'>#else</font>
+<a name='L473'>            "&lt;cparam '%c' (%qd)&gt;",
+<a name='L474'><font color='darkred'>#endif</font>
+<a name='L475'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.q);
+<a name='L476'>        <b>break</b>;
+<a name='L477'><font color='darkred'>#endif</font>
+<a name='L478'>    <b>case</b> 'd':
+<a name='L479'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%f)&gt;",
+<a name='L480'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.d);
+<a name='L481'>        <b>break</b>;
+<a name='L482'>    <b>case</b> 'f':
+<a name='L483'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%f)&gt;",
+<a name='L484'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.f);
+<a name='L485'>        <b>break</b>;
+<a name='L486'>
+<a name='L487'>    <b>case</b> 'c':
+<a name='L488'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%c)&gt;",
+<a name='L489'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.c);
+<a name='L490'>        <b>break</b>;
+<a name='L491'>
+<a name='L492'><i><font color='green'>/* Hm, are these 'z' and 'Z' codes useful at all?</font></i>
+<a name='L493'><i><font color='green'>   Shouldn't they be replaced by the functionality of c_string</font></i>
+<a name='L494'><i><font color='green'>   and c_wstring ?</font></i>
+<a name='L495'><i><font color='green'>*/</font></i>
+<a name='L496'>    <b>case</b> 'z':
+<a name='L497'>    <b>case</b> 'Z':
+<a name='L498'>    <b>case</b> 'P':
+<a name='L499'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' (%p)&gt;",
+<a name='L500'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p);
+<a name='L501'>        <b>break</b>;
+<a name='L502'>
+<a name='L503'>    <b>default</b>:
+<a name='L504'>        sprintf(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, "&lt;cparam '%c' at %p&gt;",
+<a name='L505'>            self-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a>, self);
+<a name='L506'>        <b>break</b>;
+<a name='L507'>    <font color='red'>}</font>
+<a name='L508'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L509'><font color='red'>}</font>
+<a name='L510'>
+<a name='L511'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> PyCArgType_members[] = <font color='red'>{</font>
+<a name='L512'>    <font color='red'>{</font> "_obj", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,
+<a name='L513'>      <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a>, obj), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>,
+<a name='L514'>      "the wrapped object" <font color='red'>}</font>,
+<a name='L515'>    <font color='red'>{</font> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>,
+<a name='L516'><font color='red'>}</font>;
+<a name='L517'>
+<a name='L518'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyCArg_Type = <font color='red'>{</font>
+<a name='L519'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L520'>    "CArgObject",
+<a name='L521'>    <b>sizeof</b>(<a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a>),
+<a name='L522'>    0,
+<a name='L523'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2250.html#L434' title='Defined at 434 in Modules/_ctypes/callproc.c.'>PyCArg_dealloc</a>,                 <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L524'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L525'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L526'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L527'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L528'>    (reprfunc)<a href='../S/2250.html#L441' title='Defined at 441 in Modules/_ctypes/callproc.c.'>PyCArg_repr</a>,                      <i><font color='green'>/* tp_repr */</font></i>
+<a name='L529'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L530'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L531'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L532'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L533'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L534'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L535'>    0,                                          <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L536'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L537'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L538'>    Py_TPFLAGS_DEFAULT,                         <i><font color='green'>/* tp_flags */</font></i>
+<a name='L539'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L540'>    0,                                          <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L541'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L542'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L543'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L544'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L545'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L546'>    0,                                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L547'>    PyCArgType_members,                         <i><font color='green'>/* tp_members */</font></i>
+<a name='L548'><font color='red'>}</font>;
+<a name='L549'>
+<a name='L550'><i><font color='green'>/****************************************************************/</font></i>
+<a name='L551'><i><font color='green'>/*</font></i>
+<a name='L552'><i><font color='green'> * Convert a PyObject * into a parameter suitable to pass to an</font></i>
+<a name='L553'><i><font color='green'> * C function call.</font></i>
+<a name='L554'><i><font color='green'> *</font></i>
+<a name='L555'><i><font color='green'> * 1. Python integers are converted to C int and passed by value.</font></i>
+<a name='L556'><i><font color='green'> *    Py_None is converted to a C NULL pointer.</font></i>
+<a name='L557'><i><font color='green'> *</font></i>
+<a name='L558'><i><font color='green'> * 2. 3-tuples are expected to have a format character in the first</font></i>
+<a name='L559'><i><font color='green'> *    item, which must be 'i', 'f', 'd', 'q', or 'P'.</font></i>
+<a name='L560'><i><font color='green'> *    The second item will have to be an integer, float, double, long long</font></i>
+<a name='L561'><i><font color='green'> *    or integer (denoting an address void *), will be converted to the</font></i>
+<a name='L562'><i><font color='green'> *    corresponding C data type and passed by value.</font></i>
+<a name='L563'><i><font color='green'> *</font></i>
+<a name='L564'><i><font color='green'> * 3. Other Python objects are tested for an '_as_parameter_' attribute.</font></i>
+<a name='L565'><i><font color='green'> *    The value of this attribute must be an integer which will be passed</font></i>
+<a name='L566'><i><font color='green'> *    by value, or a 2-tuple or 3-tuple which will be used according</font></i>
+<a name='L567'><i><font color='green'> *    to point 2 above. The third item (if any), is ignored. It is normally</font></i>
+<a name='L568'><i><font color='green'> *    used to keep the object alive where this parameter refers to.</font></i>
+<a name='L569'><i><font color='green'> *    XXX This convention is dangerous - you can construct arbitrary tuples</font></i>
+<a name='L570'><i><font color='green'> *    in Python and pass them. Would it be safer to use a custom container</font></i>
+<a name='L571'><i><font color='green'> *    datatype instead of a tuple?</font></i>
+<a name='L572'><i><font color='green'> *</font></i>
+<a name='L573'><i><font color='green'> * 4. Other Python objects cannot be passed as parameters - an exception is raised.</font></i>
+<a name='L574'><i><font color='green'> *</font></i>
+<a name='L575'><i><font color='green'> * 5. ConvParam will store the converted result in a struct containing format</font></i>
+<a name='L576'><i><font color='green'> *    and value.</font></i>
+<a name='L577'><i><font color='green'> */</font></i>
+<a name='L578'>
+<a name='L579'><b>union</b> <a href='../R/10030.html' title='Multiple refered from 4042 places.'>result</a> <font color='red'>{</font>
+<a name='L580'>    <b>char</b> c;
+<a name='L581'>    <b>char</b> <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L582'>    <b>short</b> h;
+<a name='L583'>    <b>int</b> i;
+<a name='L584'>    <b>long</b> l;
+<a name='L585'><font color='darkred'>#ifdef</font> <a href='../D/1527.html' title='Multiple defined in 2 places.'>HAVE_LONG_LONG</a>
+<a name='L586'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> q;
+<a name='L587'><font color='darkred'>#endif</font>
+<a name='L588'>    <b>long</b> <b>double</b> <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>;
+<a name='L589'>    <b>double</b> d;
+<a name='L590'>    <b>float</b> f;
+<a name='L591'>    <b>void</b> *p;
+<a name='L592'><font color='red'>}</font>;
+<a name='L593'>
+<a name='L594'><b>struct</b> <a href='../R/5983.html' title='Multiple refered from 10 places.'>argument</a> <font color='red'>{</font>
+<a name='L595'>    <a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> *<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a>;
+<a name='L596'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *keep;
+<a name='L597'>    <b>union</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L598'><font color='red'>}</font>;
+<a name='L599'>
+<a name='L600'><i><font color='green'>/*</font></i>
+<a name='L601'><i><font color='green'> * Convert a single Python object into a PyCArgObject and return it.</font></i>
+<a name='L602'><i><font color='green'> */</font></i>
+<a name='L603'><b>static</b> <b>int</b> <a href='../R/653.html' title='Multiple refered from 4 places.'>ConvParam</a>(PyObject *obj, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> index, <b>struct</b> argument *pa)
+<a name='L604'><font color='red'>{</font>
+<a name='L605'>    <a href='../S/2252.html#L219' title='Defined at 219 in Modules/_ctypes/ctypes.h.'>StgDictObject</a> *dict;
+<a name='L606'>    pa-&gt;keep = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <i><font color='green'>/* so we cannot forget it later */</font></i>
+<a name='L607'>
+<a name='L608'>    dict = <a href='../S/2557.html#L167' title='Defined at 167 in Modules/_ctypes/stgdict.c.'>PyObject_stgdict</a>(obj);
+<a name='L609'>    <b>if</b> (dict) <font color='red'>{</font>
+<a name='L610'>        <a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a> *carg;
+<a name='L611'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(dict-&gt;paramfunc);
+<a name='L612'>        <i><font color='green'>/* If it has an stgdict, it is a CDataObject */</font></i>
+<a name='L613'>        carg = dict-&gt;paramfunc((<a href='../S/2252.html#L15' title='Defined at 15 in Modules/_ctypes/ctypes.h.'>CDataObject</a> *)obj);
+<a name='L614'>        pa-&gt;<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = carg-&gt;pffi_type;
+<a name='L615'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(&amp;pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, &amp;carg-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, <b>sizeof</b>(pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>));
+<a name='L616'>        pa-&gt;keep = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)carg;
+<a name='L617'>        <b>return</b> 0;
+<a name='L618'>    <font color='red'>}</font>
+<a name='L619'>
+<a name='L620'>    <b>if</b> (<a href='../S/2252.html#L318' title='Defined at 318 in Modules/_ctypes/ctypes.h.'>PyCArg_CheckExact</a>(obj)) <font color='red'>{</font>
+<a name='L621'>        <a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a> *carg = (<a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a> *)obj;
+<a name='L622'>        pa-&gt;<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = carg-&gt;pffi_type;
+<a name='L623'>        Py_INCREF(obj);
+<a name='L624'>        pa-&gt;keep = obj;
+<a name='L625'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(&amp;pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, &amp;carg-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, <b>sizeof</b>(pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>));
+<a name='L626'>        <b>return</b> 0;
+<a name='L627'>    <font color='red'>}</font>
+<a name='L628'>
+<a name='L629'>    <i><font color='green'>/* check for None, integer, string or unicode and use directly if successful */</font></i>
+<a name='L630'>    <b>if</b> (obj == Py_None) <font color='red'>{</font>
+<a name='L631'>        pa-&gt;<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = &amp;ffi_type_pointer;
+<a name='L632'>        pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L633'>        <b>return</b> 0;
+<a name='L634'>    <font color='red'>}</font>
+<a name='L635'>
+<a name='L636'>    <b>if</b> (PyLong_Check(obj)) <font color='red'>{</font>
+<a name='L637'>        pa-&gt;<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = &amp;<a href='../D/8537.html' title='Multiple defined in 9 places.'>ffi_type_sint</a>;
+<a name='L638'>        pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.i = (<b>long</b>)<a href='../S/2799.html#L488' title='Defined at 488 in Objects/longobject.c.'>PyLong_AsUnsignedLong</a>(obj);
+<a name='L639'>        <b>if</b> (pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.i == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L640'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L641'>            pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.i = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(obj);
+<a name='L642'>            <b>if</b> (pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.i == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L643'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L644'>                                "long int too long to convert");
+<a name='L645'>                <b>return</b> -1;
+<a name='L646'>            <font color='red'>}</font>
+<a name='L647'>        <font color='red'>}</font>
+<a name='L648'>        <b>return</b> 0;
+<a name='L649'>    <font color='red'>}</font>
+<a name='L650'>
+<a name='L651'>    <b>if</b> (PyBytes_Check(obj)) <font color='red'>{</font>
+<a name='L652'>        pa-&gt;<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = &amp;ffi_type_pointer;
+<a name='L653'>        pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(obj);
+<a name='L654'>        Py_INCREF(obj);
+<a name='L655'>        pa-&gt;keep = obj;
+<a name='L656'>        <b>return</b> 0;
+<a name='L657'>    <font color='red'>}</font>
+<a name='L658'>
+<a name='L659'><font color='darkred'>#ifdef</font> <a href='../S/2252.html#L348' title='Defined at 348 in Modules/_ctypes/ctypes.h.'>CTYPES_UNICODE</a>
+<a name='L660'>    <b>if</b> (PyUnicode_Check(obj)) <font color='red'>{</font>
+<a name='L661'><font color='darkred'>#if</font> <a href='../D/4282.html' title='Multiple defined in 3 places.'>Py_UNICODE_SIZE</a> == <a href='../S/2906.html#L727' title='Defined at 727 in PC/pyconfig.h.'>SIZEOF_WCHAR_T</a>
+<a name='L662'>        pa-&gt;<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = &amp;ffi_type_pointer;
+<a name='L663'>        pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(obj);
+<a name='L664'>        Py_INCREF(obj);
+<a name='L665'>        pa-&gt;keep = obj;
+<a name='L666'>        <b>return</b> 0;
+<a name='L667'><font color='darkred'>#else</font>
+<a name='L668'>        pa-&gt;<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = &amp;ffi_type_pointer;
+<a name='L669'>        pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p = <a href='../D/3964.html' title='Multiple defined in 3 places.'>PyUnicode_AsWideCharString</a>(obj, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L670'>        <b>if</b> (pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L671'>            <b>return</b> -1;
+<a name='L672'>        pa-&gt;keep = <a href='../S/2780.html#L44' title='Defined at 44 in Objects/capsule.c.'>PyCapsule_New</a>(pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p, <a href='../S/2250.html#L81' title='Defined at 81 in Modules/_ctypes/callproc.c.'>CTYPES_CAPSULE_NAME_PYMEM</a>, <a href='../D/10670.html' title='Multiple defined in 2 places.'>pymem_destructor</a>);
+<a name='L673'>        <b>if</b> (!pa-&gt;keep) <font color='red'>{</font>
+<a name='L674'>            <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(pa-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p);
+<a name='L675'>            <b>return</b> -1;
+<a name='L676'>        <font color='red'>}</font>
+<a name='L677'>        <b>return</b> 0;
+<a name='L678'><font color='darkred'>#endif</font>
+<a name='L679'>    <font color='red'>}</font>
+<a name='L680'><font color='darkred'>#endif</font>
+<a name='L681'>
+<a name='L682'>    <font color='red'>{</font>
+<a name='L683'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L684'>        <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(obj, "_as_parameter_");
+<a name='L685'>        <i><font color='green'>/* Which types should we exactly allow here?</font></i>
+<a name='L686'><i><font color='green'>           integers are required for using Python classes</font></i>
+<a name='L687'><i><font color='green'>           as parameters (they have to expose the '_as_parameter_'</font></i>
+<a name='L688'><i><font color='green'>           attribute)</font></i>
+<a name='L689'><i><font color='green'>        */</font></i>
+<a name='L690'>        <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>) <font color='red'>{</font>
+<a name='L691'>            <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L692'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2250.html#L603' title='Defined at 603 in Modules/_ctypes/callproc.c.'>ConvParam</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, index, pa);
+<a name='L693'>            Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L694'>            <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L695'>        <font color='red'>}</font>
+<a name='L696'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L697'>                     "Don't know how to convert parameter %d",
+<a name='L698'>                     <a href='../D/4230.html' title='Multiple defined in 2 places.'>Py_SAFE_DOWNCAST</a>(index, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>, <b>int</b>));
+<a name='L699'>        <b>return</b> -1;
+<a name='L700'>    <font color='red'>}</font>
+<a name='L701'><font color='red'>}</font>
+<a name='L702'>
+<a name='L703'>
+<a name='L704'><a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> *<a href='../R/5740.html' title='Multiple refered from 4 places.'>_ctypes_get_ffi_type</a>(PyObject *obj)
+<a name='L705'><font color='red'>{</font>
+<a name='L706'>    <a href='../S/2252.html#L219' title='Defined at 219 in Modules/_ctypes/ctypes.h.'>StgDictObject</a> *dict;
+<a name='L707'>    <b>if</b> (obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L708'>        <b>return</b> &amp;<a href='../D/8537.html' title='Multiple defined in 9 places.'>ffi_type_sint</a>;
+<a name='L709'>    dict = <a href='../S/2557.html#L149' title='Defined at 149 in Modules/_ctypes/stgdict.c.'>PyType_stgdict</a>(obj);
+<a name='L710'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L711'>        <b>return</b> &amp;<a href='../D/8537.html' title='Multiple defined in 9 places.'>ffi_type_sint</a>;
+<a name='L712'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>) &amp;&amp; !<b>defined</b>(_WIN32_WCE)
+<a name='L713'>    <i><font color='green'>/* This little trick works correctly with MSVC.</font></i>
+<a name='L714'><i><font color='green'>       It returns small structures in registers</font></i>
+<a name='L715'><i><font color='green'>    */</font></i>
+<a name='L716'>    <b>if</b> (dict-&gt;ffi_type_pointer.type == <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>) <font color='red'>{</font>
+<a name='L717'>        <b>if</b> (dict-&gt;ffi_type_pointer.size &lt;= 4)
+<a name='L718'>            <b>return</b> &amp;ffi_type_sint32;
+<a name='L719'>        <b>else</b> <b>if</b> (dict-&gt;ffi_type_pointer.size &lt;= 8)
+<a name='L720'>            <b>return</b> &amp;ffi_type_sint64;
+<a name='L721'>    <font color='red'>}</font>
+<a name='L722'><font color='darkred'>#endif</font>
+<a name='L723'>    <b>return</b> &amp;dict-&gt;ffi_type_pointer;
+<a name='L724'><font color='red'>}</font>
+<a name='L725'>
+<a name='L726'>
+<a name='L727'><i><font color='green'>/*</font></i>
+<a name='L728'><i><font color='green'> * libffi uses:</font></i>
+<a name='L729'><i><font color='green'> *</font></i>
+<a name='L730'><i><font color='green'> * ffi_status ffi_prep_cif(ffi_cif *cif, ffi_abi abi,</font></i>
+<a name='L731'><i><font color='green'> *                         unsigned int nargs,</font></i>
+<a name='L732'><i><font color='green'> *                         ffi_type *rtype,</font></i>
+<a name='L733'><i><font color='green'> *                         ffi_type **atypes);</font></i>
+<a name='L734'><i><font color='green'> *</font></i>
+<a name='L735'><i><font color='green'> * and then</font></i>
+<a name='L736'><i><font color='green'> *</font></i>
+<a name='L737'><i><font color='green'> * void ffi_call(ffi_cif *cif, void *fn, void *rvalue, void **avalues);</font></i>
+<a name='L738'><i><font color='green'> */</font></i>
+<a name='L739'><b>static</b> <b>int</b> <a href='../S/2250.html#L1151' title='Refered from 1151 in Modules/_ctypes/callproc.c.'>_call_function_pointer</a>(<b>int</b> flags,
+<a name='L740'>                                  PPROC pProc,
+<a name='L741'>                                  <b>void</b> **avalues,
+<a name='L742'>                                  ffi_type **atypes,
+<a name='L743'>                                  ffi_type *restype,
+<a name='L744'>                                  <b>void</b> *resmem,
+<a name='L745'>                                  <b>int</b> argcount)
+<a name='L746'><font color='red'>{</font>
+<a name='L747'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L748'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *_save = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <i><font color='green'>/* For Py_BLOCK_THREADS and Py_UNBLOCK_THREADS */</font></i>
+<a name='L749'><font color='darkred'>#endif</font>
+<a name='L750'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *error_object = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L751'>    <b>int</b> *space;
+<a name='L752'>    <a href='../D/8477.html' title='Multiple defined in 4 places.'>ffi_cif</a> cif;
+<a name='L753'>    <b>int</b> cc;
+<a name='L754'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L755'>    <b>int</b> delta;
+<a name='L756'><font color='darkred'>#ifndef</font> <a href='../S/2250.html#L78' title='Defined at 78 in Modules/_ctypes/callproc.c.'>DONT_USE_SEH</a>
+<a name='L757'>    DWORD dwExceptionCode = 0;
+<a name='L758'>    EXCEPTION_RECORD record;
+<a name='L759'><font color='darkred'>#endif</font>
+<a name='L760'><font color='darkred'>#endif</font>
+<a name='L761'>    <i><font color='green'>/* XXX check before here */</font></i>
+<a name='L762'>    <b>if</b> (restype == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L763'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L764'>                        "No ffi_type for result");
+<a name='L765'>        <b>return</b> -1;
+<a name='L766'>    <font color='red'>}</font>
+<a name='L767'>
+<a name='L768'>    cc = <a href='../D/1131.html' title='Multiple defined in 63 places.'>FFI_DEFAULT_ABI</a>;
+<a name='L769'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>) &amp;&amp; !<b>defined</b>(<a href='../S/2906.html#L142' title='Defined at 142 in PC/pyconfig.h.'>MS_WIN64</a>) &amp;&amp; !<b>defined</b>(_WIN32_WCE)
+<a name='L770'>    <b>if</b> ((<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L284' title='Defined at 284 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_CDECL</a>) == 0)
+<a name='L771'>        cc = <a href='../D/1171.html' title='Multiple defined in 3 places.'>FFI_STDCALL</a>;
+<a name='L772'><font color='darkred'>#endif</font>
+<a name='L773'>    <b>if</b> (<a href='../D/1165.html' title='Multiple defined in 3 places.'>FFI_OK</a> != <a href='../D/8512.html' title='Multiple defined in 5 places.'>ffi_prep_cif</a>(&amp;cif,
+<a name='L774'>                               cc,
+<a name='L775'>                               argcount,
+<a name='L776'>                               restype,
+<a name='L777'>                               atypes)) <font color='red'>{</font>
+<a name='L778'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L779'>                        "ffi_prep_cif failed");
+<a name='L780'>        <b>return</b> -1;
+<a name='L781'>    <font color='red'>}</font>
+<a name='L782'>
+<a name='L783'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; (<a href='../S/2252.html#L287' title='Defined at 287 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_USE_ERRNO</a> | <a href='../S/2252.html#L288' title='Defined at 288 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_USE_LASTERROR</a>)) <font color='red'>{</font>
+<a name='L784'>        error_object = <a href='../S/2250.html#L126' title='Defined at 126 in Modules/_ctypes/callproc.c.'>_ctypes_get_errobj</a>(&amp;space);
+<a name='L785'>        <b>if</b> (error_object == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L786'>            <b>return</b> -1;
+<a name='L787'>    <font color='red'>}</font>
+<a name='L788'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L789'>    <b>if</b> ((<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L286' title='Defined at 286 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_PYTHONAPI</a>) == 0)
+<a name='L790'>        <a href='../D/4264.html' title='Multiple defined in 2 places.'>Py_UNBLOCK_THREADS</a>
+<a name='L791'><font color='darkred'>#endif</font>
+<a name='L792'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L287' title='Defined at 287 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_USE_ERRNO</a>) <font color='red'>{</font>
+<a name='L793'>        <b>int</b> temp = space[0];
+<a name='L794'>        space[0] = errno;
+<a name='L795'>        errno = temp;
+<a name='L796'>    <font color='red'>}</font>
+<a name='L797'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L798'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L288' title='Defined at 288 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_USE_LASTERROR</a>) <font color='red'>{</font>
+<a name='L799'>        <b>int</b> temp = space[1];
+<a name='L800'>        space[1] = GetLastError();
+<a name='L801'>        SetLastError(temp);
+<a name='L802'>    <font color='red'>}</font>
+<a name='L803'><font color='darkred'>#ifndef</font> <a href='../S/2250.html#L78' title='Defined at 78 in Modules/_ctypes/callproc.c.'>DONT_USE_SEH</a>
+<a name='L804'>    __try <font color='red'>{</font>
+<a name='L805'><font color='darkred'>#endif</font>
+<a name='L806'>        delta =
+<a name='L807'><font color='darkred'>#endif</font>
+<a name='L808'>                <a href='../D/8473.html' title='Multiple defined in 24 places.'>ffi_call</a>(&amp;cif, (<b>void</b> *)pProc, resmem, avalues);
+<a name='L809'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L810'><font color='darkred'>#ifndef</font> <a href='../S/2250.html#L78' title='Defined at 78 in Modules/_ctypes/callproc.c.'>DONT_USE_SEH</a>
+<a name='L811'>    <font color='red'>}</font>
+<a name='L812'>    __except (<a href='../S/2250.html#L395' title='Defined at 395 in Modules/_ctypes/callproc.c.'>HandleException</a>(GetExceptionInformation(),
+<a name='L813'>                              &amp;dwExceptionCode, &amp;record)) <font color='red'>{</font>
+<a name='L814'>        ;
+<a name='L815'>    <font color='red'>}</font>
+<a name='L816'><font color='darkred'>#endif</font>
+<a name='L817'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L288' title='Defined at 288 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_USE_LASTERROR</a>) <font color='red'>{</font>
+<a name='L818'>        <b>int</b> temp = space[1];
+<a name='L819'>        space[1] = GetLastError();
+<a name='L820'>        SetLastError(temp);
+<a name='L821'>    <font color='red'>}</font>
+<a name='L822'><font color='darkred'>#endif</font>
+<a name='L823'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L287' title='Defined at 287 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_USE_ERRNO</a>) <font color='red'>{</font>
+<a name='L824'>        <b>int</b> temp = space[0];
+<a name='L825'>        space[0] = errno;
+<a name='L826'>        errno = temp;
+<a name='L827'>    <font color='red'>}</font>
+<a name='L828'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(error_object);
+<a name='L829'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L830'>    <b>if</b> ((<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L286' title='Defined at 286 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_PYTHONAPI</a>) == 0)
+<a name='L831'>        <a href='../D/4082.html' title='Multiple defined in 2 places.'>Py_BLOCK_THREADS</a>
+<a name='L832'><font color='darkred'>#endif</font>
+<a name='L833'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L834'><font color='darkred'>#ifndef</font> <a href='../S/2250.html#L78' title='Defined at 78 in Modules/_ctypes/callproc.c.'>DONT_USE_SEH</a>
+<a name='L835'>    <b>if</b> (dwExceptionCode) <font color='red'>{</font>
+<a name='L836'>        <a href='../S/2250.html#L248' title='Defined at 248 in Modules/_ctypes/callproc.c.'>SetException</a>(dwExceptionCode, &amp;record);
+<a name='L837'>        <b>return</b> -1;
+<a name='L838'>    <font color='red'>}</font>
+<a name='L839'><font color='darkred'>#endif</font>
+<a name='L840'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L142' title='Defined at 142 in PC/pyconfig.h.'>MS_WIN64</a>
+<a name='L841'>    <b>if</b> (delta != 0) <font color='red'>{</font>
+<a name='L842'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_RuntimeError,
+<a name='L843'>                 "ffi_call failed with code %d",
+<a name='L844'>                 delta);
+<a name='L845'>        <b>return</b> -1;
+<a name='L846'>    <font color='red'>}</font>
+<a name='L847'><font color='darkred'>#else</font>
+<a name='L848'>    <b>if</b> (delta &lt; 0) <font color='red'>{</font>
+<a name='L849'>        <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L284' title='Defined at 284 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_CDECL</a>)
+<a name='L850'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L851'>                     "Procedure called with not enough "
+<a name='L852'>                     "arguments (%d bytes missing) "
+<a name='L853'>                     "or wrong calling convention",
+<a name='L854'>                     -delta);
+<a name='L855'>        <b>else</b>
+<a name='L856'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L857'>                     "Procedure probably called with not enough "
+<a name='L858'>                     "arguments (%d bytes missing)",
+<a name='L859'>                     -delta);
+<a name='L860'>        <b>return</b> -1;
+<a name='L861'>    <font color='red'>}</font> <b>else</b> <b>if</b> (delta &gt; 0) <font color='red'>{</font>
+<a name='L862'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L863'>                 "Procedure probably called with too many "
+<a name='L864'>                 "arguments (%d bytes in excess)",
+<a name='L865'>                 delta);
+<a name='L866'>        <b>return</b> -1;
+<a name='L867'>    <font color='red'>}</font>
+<a name='L868'><font color='darkred'>#endif</font>
+<a name='L869'><font color='darkred'>#endif</font>
+<a name='L870'>    <b>if</b> ((<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L286' title='Defined at 286 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_PYTHONAPI</a>) &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L871'>        <b>return</b> -1;
+<a name='L872'>    <b>return</b> 0;
+<a name='L873'><font color='red'>}</font>
+<a name='L874'>
+<a name='L875'><i><font color='green'>/*</font></i>
+<a name='L876'><i><font color='green'> * Convert the C value in result into a Python object, depending on restype.</font></i>
+<a name='L877'><i><font color='green'> *</font></i>
+<a name='L878'><i><font color='green'> * - If restype is NULL, return a Python integer.</font></i>
+<a name='L879'><i><font color='green'> * - If restype is None, return None.</font></i>
+<a name='L880'><i><font color='green'> * - If restype is a simple ctypes type (c_int, c_void_p), call the type's getfunc,</font></i>
+<a name='L881'><i><font color='green'> *   pass the result to checker and return the result.</font></i>
+<a name='L882'><i><font color='green'> * - If restype is another ctypes type, return an instance of that.</font></i>
+<a name='L883'><i><font color='green'> * - Otherwise, call restype and return the result.</font></i>
+<a name='L884'><i><font color='green'> */</font></i>
+<a name='L885'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1188' title='Refered from 1188 in Modules/_ctypes/callproc.c.'>GetResult</a>(PyObject *restype, <b>void</b> *result, PyObject *checker)
+<a name='L886'><font color='red'>{</font>
+<a name='L887'>    <a href='../S/2252.html#L219' title='Defined at 219 in Modules/_ctypes/ctypes.h.'>StgDictObject</a> *dict;
+<a name='L888'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *retval, *v;
+<a name='L889'>
+<a name='L890'>    <b>if</b> (restype == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L891'>        <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(*(<b>int</b> *)<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L892'>
+<a name='L893'>    <b>if</b> (restype == Py_None) <font color='red'>{</font>
+<a name='L894'>        Py_INCREF(Py_None);
+<a name='L895'>        <b>return</b> Py_None;
+<a name='L896'>    <font color='red'>}</font>
+<a name='L897'>
+<a name='L898'>    dict = <a href='../S/2557.html#L149' title='Defined at 149 in Modules/_ctypes/stgdict.c.'>PyType_stgdict</a>(restype);
+<a name='L899'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L900'>        <b>return</b> <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(restype, "i", *(<b>int</b> *)<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L901'>
+<a name='L902'>    <b>if</b> (dict-&gt;getfunc &amp;&amp; !<a href='../S/2246.html#L2686' title='Defined at 2686 in Modules/_ctypes/_ctypes.c.'>_ctypes_simple_instance</a>(restype)) <font color='red'>{</font>
+<a name='L903'>        retval = dict-&gt;getfunc(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, dict-&gt;size);
+<a name='L904'>        <i><font color='green'>/* If restype is py_object (detected by comparing getfunc with</font></i>
+<a name='L905'><i><font color='green'>           O_get), we have to call Py_DECREF because O_get has already</font></i>
+<a name='L906'><i><font color='green'>           called Py_INCREF.</font></i>
+<a name='L907'><i><font color='green'>        */</font></i>
+<a name='L908'>        <b>if</b> (dict-&gt;getfunc == <a href='../S/2251.html#L1645' title='Defined at 1645 in Modules/_ctypes/cfield.c.'>_ctypes_get_fielddesc</a>("O")-&gt;getfunc) <font color='red'>{</font>
+<a name='L909'>            Py_DECREF(retval);
+<a name='L910'>        <font color='red'>}</font>
+<a name='L911'>    <font color='red'>}</font> <b>else</b>
+<a name='L912'>        retval = <a href='../S/2246.html#L2615' title='Defined at 2615 in Modules/_ctypes/_ctypes.c.'>PyCData_FromBaseObj</a>(restype, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0, <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L913'>
+<a name='L914'>    <b>if</b> (!checker || !retval)
+<a name='L915'>        <b>return</b> retval;
+<a name='L916'>
+<a name='L917'>    v = <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>(checker, retval, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L918'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L919'>        <a href='../S/2249.html#L95' title='Defined at 95 in Modules/_ctypes/callbacks.c.'>_ctypes_add_traceback</a>("GetResult", "_ctypes/callproc.c", __LINE__-2);
+<a name='L920'>    Py_DECREF(retval);
+<a name='L921'>    <b>return</b> v;
+<a name='L922'><font color='red'>}</font>
+<a name='L923'>
+<a name='L924'><i><font color='green'>/*</font></i>
+<a name='L925'><i><font color='green'> * Raise a new exception 'exc_class', adding additional text to the original</font></i>
+<a name='L926'><i><font color='green'> * exception string.</font></i>
+<a name='L927'><i><font color='green'> */</font></i>
+<a name='L928'><b>void</b> <a href='../R/5738.html' title='Multiple refered from 5 places.'>_ctypes_extend_error</a>(PyObject *exc_class, <b>char</b> *fmt, ...)
+<a name='L929'><font color='red'>{</font>
+<a name='L930'>    va_list vargs;
+<a name='L931'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tp, *v, *tb, *s, *cls_str, *msg_str;
+<a name='L932'>
+<a name='L933'>    va_start(vargs, fmt);
+<a name='L934'>    s = <a href='../D/4009.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormatV</a>(fmt, vargs);
+<a name='L935'>    va_end(vargs);
+<a name='L936'>    <b>if</b> (!s)
+<a name='L937'>        <b>return</b>;
+<a name='L938'>
+<a name='L939'>    <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;tp, &amp;v, &amp;tb);
+<a name='L940'>    <a href='../S/3106.html#L202' title='Defined at 202 in Python/errors.c.'>PyErr_NormalizeException</a>(&amp;tp, &amp;v, &amp;tb);
+<a name='L941'>    cls_str = <a href='../S/2803.html#L396' title='Defined at 396 in Objects/object.c.'>PyObject_Str</a>(tp);
+<a name='L942'>    <b>if</b> (cls_str) <font color='red'>{</font>
+<a name='L943'>        <a href='../D/3946.html' title='Multiple defined in 3 places.'>PyUnicode_AppendAndDel</a>(&amp;s, cls_str);
+<a name='L944'>        <a href='../D/3946.html' title='Multiple defined in 3 places.'>PyUnicode_AppendAndDel</a>(&amp;s, <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(": "));
+<a name='L945'>        <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L946'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L947'>    <font color='red'>}</font> <b>else</b>
+<a name='L948'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L949'>    msg_str = <a href='../S/2803.html#L396' title='Defined at 396 in Objects/object.c.'>PyObject_Str</a>(v);
+<a name='L950'>    <b>if</b> (msg_str)
+<a name='L951'>        <a href='../D/3946.html' title='Multiple defined in 3 places.'>PyUnicode_AppendAndDel</a>(&amp;s, msg_str);
+<a name='L952'>    <b>else</b> <font color='red'>{</font>
+<a name='L953'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L954'>        <a href='../D/3946.html' title='Multiple defined in 3 places.'>PyUnicode_AppendAndDel</a>(&amp;s, <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("???"));
+<a name='L955'>        <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L956'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L957'>    <font color='red'>}</font>
+<a name='L958'>    <a href='../S/3106.html#L53' title='Defined at 53 in Python/errors.c.'>PyErr_SetObject</a>(exc_class, s);
+<a name='L959'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L960'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tp);
+<a name='L961'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(v);
+<a name='L962'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tb);
+<a name='L963'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(s);
+<a name='L964'><font color='red'>}</font>
+<a name='L965'>
+<a name='L966'>
+<a name='L967'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L968'>
+<a name='L969'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L970'><a href='../S/2250.html#L1178' title='Refered from 1178 in Modules/_ctypes/callproc.c.'>GetComError</a>(HRESULT errcode, GUID *riid, IUnknown *pIunk)
+<a name='L971'><font color='red'>{</font>
+<a name='L972'>    HRESULT hr;
+<a name='L973'>    ISupportErrorInfo *psei = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L974'>    IErrorInfo *pei = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L975'>    BSTR descr=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, helpfile=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, source=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L976'>    GUID guid;
+<a name='L977'>    DWORD helpcontext=0;
+<a name='L978'>    LPOLESTR progid;
+<a name='L979'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L980'>    LPOLESTR text;
+<a name='L981'>
+<a name='L982'>    <i><font color='green'>/* We absolutely have to release the GIL during COM method calls,</font></i>
+<a name='L983'><i><font color='green'>       otherwise we may get a deadlock!</font></i>
+<a name='L984'><i><font color='green'>    */</font></i>
+<a name='L985'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L986'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L987'><font color='darkred'>#endif</font>
+<a name='L988'>
+<a name='L989'>    hr = pIunk-&gt;lpVtbl-&gt;QueryInterface(pIunk, &amp;IID_ISupportErrorInfo, (<b>void</b> **)&amp;psei);
+<a name='L990'>    <b>if</b> (FAILED(hr))
+<a name='L991'>        <b>goto</b> failed;
+<a name='L992'>
+<a name='L993'>    hr = psei-&gt;lpVtbl-&gt;InterfaceSupportsErrorInfo(psei, riid);
+<a name='L994'>    psei-&gt;lpVtbl-&gt;Release(psei);
+<a name='L995'>    <b>if</b> (FAILED(hr))
+<a name='L996'>        <b>goto</b> failed;
+<a name='L997'>
+<a name='L998'>    hr = GetErrorInfo(0, &amp;pei);
+<a name='L999'>    <b>if</b> (hr != S_OK)
+<a name='L1000'>        <b>goto</b> failed;
+<a name='L1001'>
+<a name='L1002'>    pei-&gt;lpVtbl-&gt;GetDescription(pei, &amp;descr);
+<a name='L1003'>    pei-&gt;lpVtbl-&gt;GetGUID(pei, &amp;guid);
+<a name='L1004'>    pei-&gt;lpVtbl-&gt;GetHelpContext(pei, &amp;helpcontext);
+<a name='L1005'>    pei-&gt;lpVtbl-&gt;GetHelpFile(pei, &amp;helpfile);
+<a name='L1006'>    pei-&gt;lpVtbl-&gt;GetSource(pei, &amp;source);
+<a name='L1007'>
+<a name='L1008'>    pei-&gt;lpVtbl-&gt;Release(pei);
+<a name='L1009'>
+<a name='L1010'>  failed:
+<a name='L1011'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L1012'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L1013'><font color='darkred'>#endif</font>
+<a name='L1014'>
+<a name='L1015'>    progid = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1016'>    ProgIDFromCLSID(&amp;guid, &amp;progid);
+<a name='L1017'>
+<a name='L1018'>    text = <a href='../S/2250.html#L228' title='Defined at 228 in Modules/_ctypes/callproc.c.'>FormatError</a>(errcode);
+<a name='L1019'>    obj = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>(
+<a name='L1020'>        "iu(uuuiu)",
+<a name='L1021'>        errcode,
+<a name='L1022'>        text,
+<a name='L1023'>        descr, source, helpfile, helpcontext,
+<a name='L1024'>        progid);
+<a name='L1025'>    <b>if</b> (obj) <font color='red'>{</font>
+<a name='L1026'>        <a href='../S/3106.html#L53' title='Defined at 53 in Python/errors.c.'>PyErr_SetObject</a>(ComError, obj);
+<a name='L1027'>        Py_DECREF(obj);
+<a name='L1028'>    <font color='red'>}</font>
+<a name='L1029'>    LocalFree(text);
+<a name='L1030'>
+<a name='L1031'>    <b>if</b> (descr)
+<a name='L1032'>        SysFreeString(descr);
+<a name='L1033'>    <b>if</b> (helpfile)
+<a name='L1034'>        SysFreeString(helpfile);
+<a name='L1035'>    <b>if</b> (source)
+<a name='L1036'>        SysFreeString(source);
+<a name='L1037'>
+<a name='L1038'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1039'><font color='red'>}</font>
+<a name='L1040'><font color='darkred'>#endif</font>
+<a name='L1041'>
+<a name='L1042'><i><font color='green'>/*</font></i>
+<a name='L1043'><i><font color='green'> * Requirements, must be ensured by the caller:</font></i>
+<a name='L1044'><i><font color='green'> * - argtuple is tuple of arguments</font></i>
+<a name='L1045'><i><font color='green'> * - argtypes is either NULL, or a tuple of the same size as argtuple</font></i>
+<a name='L1046'><i><font color='green'> *</font></i>
+<a name='L1047'><i><font color='green'> * - XXX various requirements for restype, not yet collected</font></i>
+<a name='L1048'><i><font color='green'> */</font></i>
+<a name='L1049'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../R/5737.html' title='Multiple refered from 5 places.'>_ctypes_callproc</a>(PPROC pProc,
+<a name='L1050'>                    PyObject *argtuple,
+<a name='L1051'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1052'>                    IUnknown *pIunk,
+<a name='L1053'>                    GUID *iid,
+<a name='L1054'><font color='darkred'>#endif</font>
+<a name='L1055'>                    <b>int</b> flags,
+<a name='L1056'>                    PyObject *argtypes, <i><font color='green'>/* misleading name: This is a tuple of</font></i>
+<a name='L1057'><i><font color='green'>                                           methods, not types: the .from_param</font></i>
+<a name='L1058'><i><font color='green'>                                           class methods of the types */</font></i>
+<a name='L1059'>            PyObject *restype,
+<a name='L1060'>            PyObject *checker)
+<a name='L1061'><font color='red'>{</font>
+<a name='L1062'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, n, argcount, argtype_count;
+<a name='L1063'>    <b>void</b> *resbuf;
+<a name='L1064'>    <b>struct</b> <a href='../D/6736.html' title='Multiple defined in 2 places.'>argument</a> *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, *pa;
+<a name='L1065'>    <a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> **atypes;
+<a name='L1066'>    <a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> *rtype;
+<a name='L1067'>    <b>void</b> **avalues;
+<a name='L1068'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1069'>
+<a name='L1070'>    n = argcount = PyTuple_GET_SIZE(argtuple);
+<a name='L1071'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1072'>    <i><font color='green'>/* an optional COM object this pointer */</font></i>
+<a name='L1073'>    <b>if</b> (pIunk)
+<a name='L1074'>        ++argcount;
+<a name='L1075'><font color='darkred'>#endif</font>
+<a name='L1076'>
+<a name='L1077'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = (<b>struct</b> <a href='../D/6736.html' title='Multiple defined in 2 places.'>argument</a> *)<a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a>(<b>sizeof</b>(<b>struct</b> <a href='../D/6736.html' title='Multiple defined in 2 places.'>argument</a>) * argcount);
+<a name='L1078'>    <b>if</b> (!<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>) <font color='red'>{</font>
+<a name='L1079'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1080'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1081'>    <font color='red'>}</font>
+<a name='L1082'>    memset(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 0, <b>sizeof</b>(<b>struct</b> <a href='../D/6736.html' title='Multiple defined in 2 places.'>argument</a>) * argcount);
+<a name='L1083'>    argtype_count = argtypes ? PyTuple_GET_SIZE(argtypes) : 0;
+<a name='L1084'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1085'>    <b>if</b> (pIunk) <font color='red'>{</font>
+<a name='L1086'>        <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[0].<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> = &amp;ffi_type_pointer;
+<a name='L1087'>        <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[0].<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p = pIunk;
+<a name='L1088'>        pa = &amp;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[1];
+<a name='L1089'>    <font color='red'>}</font> <b>else</b>
+<a name='L1090'><font color='darkred'>#endif</font>
+<a name='L1091'>        pa = &amp;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[0];
+<a name='L1092'>
+<a name='L1093'>    <i><font color='green'>/* Convert the arguments */</font></i>
+<a name='L1094'>    <b>for</b> (i = 0; i &lt; n; ++i, ++pa) <font color='red'>{</font>
+<a name='L1095'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>;
+<a name='L1096'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L1097'>        <b>int</b> err;
+<a name='L1098'>
+<a name='L1099'>        <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = PyTuple_GET_ITEM(argtuple, i);            <i><font color='green'>/* borrowed ref */</font></i>
+<a name='L1100'>        <i><font color='green'>/* For cdecl functions, we allow more actual arguments</font></i>
+<a name='L1101'><i><font color='green'>           than the length of the argtypes tuple.</font></i>
+<a name='L1102'><i><font color='green'>           This is checked in _ctypes::PyCFuncPtr_Call</font></i>
+<a name='L1103'><i><font color='green'>        */</font></i>
+<a name='L1104'>        <b>if</b> (argtypes &amp;&amp; argtype_count &gt; i) <font color='red'>{</font>
+<a name='L1105'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L1106'>            <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = PyTuple_GET_ITEM(argtypes, i);
+<a name='L1107'>            v = <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>(<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>,
+<a name='L1108'>                                               <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>,
+<a name='L1109'>                                               <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1110'>            <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1111'>                <a href='../S/2250.html#L928' title='Defined at 928 in Modules/_ctypes/callproc.c.'>_ctypes_extend_error</a>(PyExc_ArgError, "argument %d: ", i+1);
+<a name='L1112'>                <b>goto</b> cleanup;
+<a name='L1113'>            <font color='red'>}</font>
+<a name='L1114'>
+<a name='L1115'>            err = <a href='../S/2250.html#L603' title='Defined at 603 in Modules/_ctypes/callproc.c.'>ConvParam</a>(v, i+1, pa);
+<a name='L1116'>            Py_DECREF(v);
+<a name='L1117'>            <b>if</b> (-1 == err) <font color='red'>{</font>
+<a name='L1118'>                <a href='../S/2250.html#L928' title='Defined at 928 in Modules/_ctypes/callproc.c.'>_ctypes_extend_error</a>(PyExc_ArgError, "argument %d: ", i+1);
+<a name='L1119'>                <b>goto</b> cleanup;
+<a name='L1120'>            <font color='red'>}</font>
+<a name='L1121'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1122'>            err = <a href='../S/2250.html#L603' title='Defined at 603 in Modules/_ctypes/callproc.c.'>ConvParam</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, i+1, pa);
+<a name='L1123'>            <b>if</b> (-1 == err) <font color='red'>{</font>
+<a name='L1124'>                <a href='../S/2250.html#L928' title='Defined at 928 in Modules/_ctypes/callproc.c.'>_ctypes_extend_error</a>(PyExc_ArgError, "argument %d: ", i+1);
+<a name='L1125'>                <b>goto</b> cleanup; <i><font color='green'>/* leaking ? */</font></i>
+<a name='L1126'>            <font color='red'>}</font>
+<a name='L1127'>        <font color='red'>}</font>
+<a name='L1128'>    <font color='red'>}</font>
+<a name='L1129'>
+<a name='L1130'>    rtype = <a href='../S/2250.html#L704' title='Defined at 704 in Modules/_ctypes/callproc.c.'>_ctypes_get_ffi_type</a>(restype);
+<a name='L1131'>    resbuf = <a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a>(<a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>(rtype-&gt;size, <b>sizeof</b>(<a href='../D/8471.html' title='Multiple defined in 27 places.'>ffi_arg</a>)));
+<a name='L1132'>
+<a name='L1133'>    avalues = (<b>void</b> **)<a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a>(<b>sizeof</b>(<b>void</b> *) * argcount);
+<a name='L1134'>    atypes = (<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> **)<a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a>(<b>sizeof</b>(<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> *) * argcount);
+<a name='L1135'>    <b>if</b> (!resbuf || !avalues || !atypes) <font color='red'>{</font>
+<a name='L1136'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1137'>        <b>goto</b> cleanup;
+<a name='L1138'>    <font color='red'>}</font>
+<a name='L1139'>    <b>for</b> (i = 0; i &lt; argcount; ++i) <font color='red'>{</font>
+<a name='L1140'>        atypes[i] = <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[i].<a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a>;
+<a name='L1141'>        <b>if</b> (atypes[i]-&gt;type == <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>
+<a name='L1142'><font color='darkred'>#ifdef</font> _WIN64
+<a name='L1143'>            &amp;&amp; atypes[i]-&gt;size &lt;= <b>sizeof</b>(<b>void</b> *)
+<a name='L1144'><font color='darkred'>#endif</font>
+<a name='L1145'>            )
+<a name='L1146'>            avalues[i] = (<b>void</b> *)<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[i].<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p;
+<a name='L1147'>        <b>else</b>
+<a name='L1148'>            avalues[i] = (<b>void</b> *)&amp;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[i].<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L1149'>    <font color='red'>}</font>
+<a name='L1150'>
+<a name='L1151'>    <b>if</b> (-1 == <a href='../S/2250.html#L739' title='Defined at 739 in Modules/_ctypes/callproc.c.'>_call_function_pointer</a>(<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, pProc, avalues, atypes,
+<a name='L1152'>                                     rtype, resbuf,
+<a name='L1153'>                                     <a href='../D/4230.html' title='Multiple defined in 2 places.'>Py_SAFE_DOWNCAST</a>(argcount,
+<a name='L1154'>                                                      <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>,
+<a name='L1155'>                                                      <b>int</b>)))
+<a name='L1156'>        <b>goto</b> cleanup;
+<a name='L1157'>
+<a name='L1158'><font color='darkred'>#ifdef</font> <a href='../D/5540.html' title='Multiple defined in 8 places.'>WORDS_BIGENDIAN</a>
+<a name='L1159'>    <i><font color='green'>/* libffi returns the result in a buffer with sizeof(ffi_arg). This</font></i>
+<a name='L1160'><i><font color='green'>       causes problems on big endian machines, since the result buffer</font></i>
+<a name='L1161'><i><font color='green'>       address cannot simply be used as result pointer, instead we must</font></i>
+<a name='L1162'><i><font color='green'>       adjust the pointer value:</font></i>
+<a name='L1163'><i><font color='green'>     */</font></i>
+<a name='L1164'>    <i><font color='green'>/*</font></i>
+<a name='L1165'><i><font color='green'>      XXX I should find out and clarify why this is needed at all,</font></i>
+<a name='L1166'><i><font color='green'>      especially why adjusting for ffi_type_float must be avoided on</font></i>
+<a name='L1167'><i><font color='green'>      64-bit platforms.</font></i>
+<a name='L1168'><i><font color='green'>     */</font></i>
+<a name='L1169'>    <b>if</b> (rtype-&gt;type != <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>
+<a name='L1170'>        &amp;&amp; rtype-&gt;type != <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>
+<a name='L1171'>        &amp;&amp; rtype-&gt;size &lt; <b>sizeof</b>(<a href='../D/8471.html' title='Multiple defined in 27 places.'>ffi_arg</a>))
+<a name='L1172'>        resbuf = (<b>char</b> *)resbuf + <b>sizeof</b>(<a href='../D/8471.html' title='Multiple defined in 27 places.'>ffi_arg</a>) - rtype-&gt;size;
+<a name='L1173'><font color='darkred'>#endif</font>
+<a name='L1174'>
+<a name='L1175'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1176'>    <b>if</b> (iid &amp;&amp; pIunk) <font color='red'>{</font>
+<a name='L1177'>        <b>if</b> (*(<b>int</b> *)resbuf &amp; 0x80000000)
+<a name='L1178'>            retval = <a href='../S/2250.html#L970' title='Defined at 970 in Modules/_ctypes/callproc.c.'>GetComError</a>(*(HRESULT *)resbuf, iid, pIunk);
+<a name='L1179'>        <b>else</b>
+<a name='L1180'>            retval = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(*(<b>int</b> *)resbuf);
+<a name='L1181'>    <font color='red'>}</font> <b>else</b> <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2252.html#L285' title='Defined at 285 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_HRESULT</a>) <font color='red'>{</font>
+<a name='L1182'>        <b>if</b> (*(<b>int</b> *)resbuf &amp; 0x80000000)
+<a name='L1183'>            retval = <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(*(<b>int</b> *)resbuf);
+<a name='L1184'>        <b>else</b>
+<a name='L1185'>            retval = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(*(<b>int</b> *)resbuf);
+<a name='L1186'>    <font color='red'>}</font> <b>else</b>
+<a name='L1187'><font color='darkred'>#endif</font>
+<a name='L1188'>        retval = <a href='../S/2250.html#L885' title='Defined at 885 in Modules/_ctypes/callproc.c.'>GetResult</a>(restype, resbuf, checker);
+<a name='L1189'>  cleanup:
+<a name='L1190'>    <b>for</b> (i = 0; i &lt; argcount; ++i)
+<a name='L1191'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>[i].keep);
+<a name='L1192'>    <b>return</b> retval;
+<a name='L1193'><font color='red'>}</font>
+<a name='L1194'>
+<a name='L1195'><b>static</b> <b>int</b>
+<a name='L1196'><a href='../R/5810.html' title='Multiple refered from 5 places.'>_parse_voidp</a>(PyObject *obj, <b>void</b> **address)
+<a name='L1197'><font color='red'>{</font>
+<a name='L1198'>    *address = <a href='../S/2799.html#L947' title='Defined at 947 in Objects/longobject.c.'>PyLong_AsVoidPtr</a>(obj);
+<a name='L1199'>    <b>if</b> (*address == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1200'>        <b>return</b> 0;
+<a name='L1201'>    <b>return</b> 1;
+<a name='L1202'><font color='red'>}</font>
+<a name='L1203'>
+<a name='L1204'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1205'>
+<a name='L1206'><b>static</b> <b>char</b> format_error_doc[] =
+<a name='L1207'>"FormatError([integer]) -&gt; string\n\
+<a name='L1208'>\n\
+<a name='L1209'>Convert a win32 error code into a string. If the error code is not\n\
+<a name='L1210'>given, the return value of a call to GetLastError() is used.\n";
+<a name='L1211'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1819' title='Refered from 1819 in Modules/_ctypes/callproc.c.'>format_error</a>(PyObject *self, PyObject *args)
+<a name='L1212'><font color='red'>{</font>
+<a name='L1213'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1214'>    wchar_t *lpMsgBuf;
+<a name='L1215'>    DWORD <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = 0;
+<a name='L1216'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|i:FormatError", &amp;<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>))
+<a name='L1217'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1218'>    <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> == 0)
+<a name='L1219'>        <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = GetLastError();
+<a name='L1220'>    lpMsgBuf = <a href='../S/2250.html#L228' title='Defined at 228 in Modules/_ctypes/callproc.c.'>FormatError</a>(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L1221'>    <b>if</b> (lpMsgBuf) <font color='red'>{</font>
+<a name='L1222'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4015.html' title='Multiple defined in 4 places.'>PyUnicode_FromWideChar</a>(lpMsgBuf, wcslen(lpMsgBuf));
+<a name='L1223'>        LocalFree(lpMsgBuf);
+<a name='L1224'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1225'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("&lt;no description&gt;");
+<a name='L1226'>    <font color='red'>}</font>
+<a name='L1227'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1228'><font color='red'>}</font>
+<a name='L1229'>
+<a name='L1230'><b>static</b> <b>char</b> load_library_doc[] =
+<a name='L1231'>"LoadLibrary(name) -&gt; handle\n\
+<a name='L1232'>\n\
+<a name='L1233'>Load an executable (usually a DLL), and return a handle to it.\n\
+<a name='L1234'>The handle may be used to locate exported functions in this\n\
+<a name='L1235'>module.\n";
+<a name='L1236'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1820' title='Refered from 1820 in Modules/_ctypes/callproc.c.'>load_library</a>(PyObject *self, PyObject *args)
+<a name='L1237'><font color='red'>{</font>
+<a name='L1238'>    WCHAR *name;
+<a name='L1239'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *nameobj;
+<a name='L1240'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ignored;
+<a name='L1241'>    HMODULE hMod;
+<a name='L1242'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O|O:LoadLibrary", &amp;nameobj, &amp;ignored))
+<a name='L1243'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1244'>
+<a name='L1245'>    name = <a href='../D/3960.html' title='Multiple defined in 3 places.'>PyUnicode_AsUnicode</a>(nameobj);
+<a name='L1246'>    <b>if</b> (!name)
+<a name='L1247'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1248'>
+<a name='L1249'>    hMod = LoadLibraryW(name);
+<a name='L1250'>    <b>if</b> (!hMod)
+<a name='L1251'>        <b>return</b> <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(GetLastError());
+<a name='L1252'><font color='darkred'>#ifdef</font> _WIN64
+<a name='L1253'>    <b>return</b> <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>(hMod);
+<a name='L1254'><font color='darkred'>#else</font>
+<a name='L1255'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("i", hMod);
+<a name='L1256'><font color='darkred'>#endif</font>
+<a name='L1257'><font color='red'>}</font>
+<a name='L1258'>
+<a name='L1259'><b>static</b> <b>char</b> free_library_doc[] =
+<a name='L1260'>"FreeLibrary(handle) -&gt; void\n\
+<a name='L1261'>\n\
+<a name='L1262'>Free the handle of an executable previously loaded by LoadLibrary.\n";
+<a name='L1263'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1821' title='Refered from 1821 in Modules/_ctypes/callproc.c.'>free_library</a>(PyObject *self, PyObject *args)
+<a name='L1264'><font color='red'>{</font>
+<a name='L1265'>    <b>void</b> *hMod;
+<a name='L1266'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;:FreeLibrary", &amp;<a href='../S/2250.html#L1196' title='Defined at 1196 in Modules/_ctypes/callproc.c.'>_parse_voidp</a>, &amp;hMod))
+<a name='L1267'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1268'>    <b>if</b> (!FreeLibrary((HMODULE)hMod))
+<a name='L1269'>        <b>return</b> <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(GetLastError());
+<a name='L1270'>    Py_INCREF(Py_None);
+<a name='L1271'>    <b>return</b> Py_None;
+<a name='L1272'><font color='red'>}</font>
+<a name='L1273'>
+<a name='L1274'><i><font color='green'>/* obsolete, should be removed */</font></i>
+<a name='L1275'><i><font color='green'>/* Only used by sample code (in samples\Windows\COM.py) */</font></i>
+<a name='L1276'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1277'><a href='../S/2250.html#L1822' title='Refered from 1822 in Modules/_ctypes/callproc.c.'>call_commethod</a>(PyObject *self, PyObject *args)
+<a name='L1278'><font color='red'>{</font>
+<a name='L1279'>    IUnknown *pIunk;
+<a name='L1280'>    <b>int</b> index;
+<a name='L1281'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>;
+<a name='L1282'>    PPROC *lpVtbl;
+<a name='L1283'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1284'>    <a href='../S/2252.html#L15' title='Defined at 15 in Modules/_ctypes/ctypes.h.'>CDataObject</a> *pcom;
+<a name='L1285'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *argtypes = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1286'>
+<a name='L1287'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>,
+<a name='L1288'>                          "OiO!|O!",
+<a name='L1289'>                          &amp;pcom, &amp;index,
+<a name='L1290'>                          &amp;PyTuple_Type, &amp;<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>,
+<a name='L1291'>                          &amp;PyTuple_Type, &amp;argtypes))
+<a name='L1292'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1293'>
+<a name='L1294'>    <b>if</b> (argtypes &amp;&amp; (PyTuple_GET_SIZE(<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>) != PyTuple_GET_SIZE(argtypes))) <font color='red'>{</font>
+<a name='L1295'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L1296'>                     "Method takes %d arguments (%d given)",
+<a name='L1297'>                     PyTuple_GET_SIZE(argtypes), PyTuple_GET_SIZE(<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>));
+<a name='L1298'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1299'>    <font color='red'>}</font>
+<a name='L1300'>
+<a name='L1301'>    <b>if</b> (!<a href='../S/2252.html#L118' title='Defined at 118 in Modules/_ctypes/ctypes.h.'>CDataObject_Check</a>(pcom) || (pcom-&gt;b_size != <b>sizeof</b>(<b>void</b> *))) <font color='red'>{</font>
+<a name='L1302'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L1303'>                     "COM Pointer expected instead of %s instance",
+<a name='L1304'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(pcom)-&gt;tp_name);
+<a name='L1305'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1306'>    <font color='red'>}</font>
+<a name='L1307'>
+<a name='L1308'>    <b>if</b> ((*(<b>void</b> **)(pcom-&gt;b_ptr)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1309'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L1310'>                        "The COM 'this' pointer is NULL");
+<a name='L1311'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1312'>    <font color='red'>}</font>
+<a name='L1313'>
+<a name='L1314'>    pIunk = (IUnknown *)(*(<b>void</b> **)(pcom-&gt;b_ptr));
+<a name='L1315'>    lpVtbl = (PPROC *)(pIunk-&gt;lpVtbl);
+<a name='L1316'>
+<a name='L1317'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> =  <a href='../S/2250.html#L1049' title='Defined at 1049 in Modules/_ctypes/callproc.c.'>_ctypes_callproc</a>(lpVtbl[index],
+<a name='L1318'>                        <a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>,
+<a name='L1319'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1320'>                        pIunk,
+<a name='L1321'>                        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1322'><font color='darkred'>#endif</font>
+<a name='L1323'>                        <a href='../S/2252.html#L285' title='Defined at 285 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_HRESULT</a>, <i><font color='green'>/* flags */</font></i>
+<a name='L1324'>                argtypes, <i><font color='green'>/* self-&gt;argtypes */</font></i>
+<a name='L1325'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* self-&gt;restype */</font></i>
+<a name='L1326'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>); <i><font color='green'>/* checker */</font></i>
+<a name='L1327'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1328'><font color='red'>}</font>
+<a name='L1329'>
+<a name='L1330'><b>static</b> <b>char</b> copy_com_pointer_doc[] =
+<a name='L1331'>"CopyComPointer(src, dst) -&gt; HRESULT value\n";
+<a name='L1332'>
+<a name='L1333'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1334'><a href='../S/2250.html#L1818' title='Refered from 1818 in Modules/_ctypes/callproc.c.'>copy_com_pointer</a>(PyObject *self, PyObject *args)
+<a name='L1335'><font color='red'>{</font>
+<a name='L1336'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *p1, *p2, *r = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1337'>    <b>struct</b> <a href='../D/6736.html' title='Multiple defined in 2 places.'>argument</a> a, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L1338'>    IUnknown *src, **pdst;
+<a name='L1339'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "OO:CopyComPointer", &amp;p1, &amp;p2))
+<a name='L1340'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1341'>    a.keep = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>.keep = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1342'>
+<a name='L1343'>    <b>if</b> (-1 == <a href='../S/2250.html#L603' title='Defined at 603 in Modules/_ctypes/callproc.c.'>ConvParam</a>(p1, 0, &amp;a) || -1 == <a href='../S/2250.html#L603' title='Defined at 603 in Modules/_ctypes/callproc.c.'>ConvParam</a>(p2, 1, &amp;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>))
+<a name='L1344'>        <b>goto</b> done;
+<a name='L1345'>    src = (IUnknown *)a.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p;
+<a name='L1346'>    pdst = (IUnknown **)<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p;
+<a name='L1347'>
+<a name='L1348'>    <b>if</b> (pdst == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1349'>        r = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(E_POINTER);
+<a name='L1350'>    <b>else</b> <font color='red'>{</font>
+<a name='L1351'>        <b>if</b> (src)
+<a name='L1352'>            src-&gt;lpVtbl-&gt;AddRef(src);
+<a name='L1353'>        *pdst = src;
+<a name='L1354'>        r = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(S_OK);
+<a name='L1355'>    <font color='red'>}</font>
+<a name='L1356'>  done:
+<a name='L1357'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(a.keep);
+<a name='L1358'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>.keep);
+<a name='L1359'>    <b>return</b> r;
+<a name='L1360'><font color='red'>}</font>
+<a name='L1361'><font color='darkred'>#else</font>
+<a name='L1362'>
+<a name='L1363'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1825' title='Refered from 1825 in Modules/_ctypes/callproc.c.'>py_dl_open</a>(PyObject *self, PyObject *args)
+<a name='L1364'><font color='red'>{</font>
+<a name='L1365'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name, *name2;
+<a name='L1366'>    <b>char</b> *name_str;
+<a name='L1367'>    <b>void</b> * handle;
+<a name='L1368'><font color='darkred'>#ifdef</font> <a href='../D/4523.html' title='Multiple defined in 2 places.'>RTLD_LOCAL</a>
+<a name='L1369'>    <b>int</b> mode = <a href='../S/2254.html#L70' title='Defined at 70 in Modules/_ctypes/darwin/dlfcn.h.'>RTLD_NOW</a> | <a href='../D/4523.html' title='Multiple defined in 2 places.'>RTLD_LOCAL</a>;
+<a name='L1370'><font color='darkred'>#else</font>
+<a name='L1371'>    <i><font color='green'>/* cygwin doesn't define RTLD_LOCAL */</font></i>
+<a name='L1372'>    <b>int</b> mode = <a href='../S/2254.html#L70' title='Defined at 70 in Modules/_ctypes/darwin/dlfcn.h.'>RTLD_NOW</a>;
+<a name='L1373'><font color='darkred'>#endif</font>
+<a name='L1374'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O|i:dlopen", &amp;name, &amp;mode))
+<a name='L1375'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1376'>    mode |= <a href='../S/2254.html#L70' title='Defined at 70 in Modules/_ctypes/darwin/dlfcn.h.'>RTLD_NOW</a>;
+<a name='L1377'>    <b>if</b> (name != Py_None) <font color='red'>{</font>
+<a name='L1378'>        <b>if</b> (<a href='../D/4003.html' title='Multiple defined in 3 places.'>PyUnicode_FSConverter</a>(name, &amp;name2) == 0)
+<a name='L1379'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1380'>        <b>if</b> (PyBytes_Check(name2))
+<a name='L1381'>            name_str = PyBytes_AS_STRING(name2);
+<a name='L1382'>        <b>else</b>
+<a name='L1383'>            name_str = PyByteArray_AS_STRING(name2);
+<a name='L1384'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1385'>        name_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1386'>        name2 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1387'>    <font color='red'>}</font>
+<a name='L1388'>    handle = <a href='../S/2253.html#L20' title='Defined at 20 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlopen</a>(name_str, mode);
+<a name='L1389'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(name2);
+<a name='L1390'>    <b>if</b> (!handle) <font color='red'>{</font>
+<a name='L1391'>        <b>char</b> *errmsg = <a href='../S/2253.html#L19' title='Defined at 19 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlerror</a>();
+<a name='L1392'>        <b>if</b> (!errmsg)
+<a name='L1393'>            errmsg = "dlopen() error";
+<a name='L1394'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OSError,
+<a name='L1395'>                               errmsg);
+<a name='L1396'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1397'>    <font color='red'>}</font>
+<a name='L1398'>    <b>return</b> <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>(handle);
+<a name='L1399'><font color='red'>}</font>
+<a name='L1400'>
+<a name='L1401'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1827' title='Refered from 1827 in Modules/_ctypes/callproc.c.'>py_dl_close</a>(PyObject *self, PyObject *args)
+<a name='L1402'><font color='red'>{</font>
+<a name='L1403'>    <b>void</b> *handle;
+<a name='L1404'>
+<a name='L1405'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;:dlclose", &amp;<a href='../S/2250.html#L1196' title='Defined at 1196 in Modules/_ctypes/callproc.c.'>_parse_voidp</a>, &amp;handle))
+<a name='L1406'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1407'>    <b>if</b> (<a href='../D/8179.html' title='Multiple defined in 2 places.'>dlclose</a>(handle)) <font color='red'>{</font>
+<a name='L1408'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OSError,
+<a name='L1409'>                               <a href='../S/2253.html#L19' title='Defined at 19 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlerror</a>());
+<a name='L1410'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1411'>    <font color='red'>}</font>
+<a name='L1412'>    Py_INCREF(Py_None);
+<a name='L1413'>    <b>return</b> Py_None;
+<a name='L1414'><font color='red'>}</font>
+<a name='L1415'>
+<a name='L1416'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L1828' title='Refered from 1828 in Modules/_ctypes/callproc.c.'>py_dl_sym</a>(PyObject *self, PyObject *args)
+<a name='L1417'><font color='red'>{</font>
+<a name='L1418'>    <b>char</b> *name;
+<a name='L1419'>    <b>void</b> *handle;
+<a name='L1420'>    <b>void</b> *ptr;
+<a name='L1421'>
+<a name='L1422'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;s:dlsym",
+<a name='L1423'>                          &amp;<a href='../S/2250.html#L1196' title='Defined at 1196 in Modules/_ctypes/callproc.c.'>_parse_voidp</a>, &amp;handle, &amp;name))
+<a name='L1424'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1425'>    ptr = <a href='../S/2253.html#L18' title='Defined at 18 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlsym</a>((<b>void</b>*)handle, name);
+<a name='L1426'>    <b>if</b> (!ptr) <font color='red'>{</font>
+<a name='L1427'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OSError,
+<a name='L1428'>                               <a href='../S/2253.html#L19' title='Defined at 19 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlerror</a>());
+<a name='L1429'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1430'>    <font color='red'>}</font>
+<a name='L1431'>    <b>return</b> <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>(ptr);
+<a name='L1432'><font color='red'>}</font>
+<a name='L1433'><font color='darkred'>#endif</font>
+<a name='L1434'>
+<a name='L1435'><i><font color='green'>/*</font></i>
+<a name='L1436'><i><font color='green'> * Only for debugging so far: So that we can call CFunction instances</font></i>
+<a name='L1437'><i><font color='green'> *</font></i>
+<a name='L1438'><i><font color='green'> * XXX Needs to accept more arguments: flags, argtypes, restype</font></i>
+<a name='L1439'><i><font color='green'> */</font></i>
+<a name='L1440'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1441'><a href='../R/6555.html' title='Multiple refered from 5 places.'>call_function</a>(PyObject *self, PyObject *args)
+<a name='L1442'><font color='red'>{</font>
+<a name='L1443'>    <b>void</b> *func;
+<a name='L1444'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>;
+<a name='L1445'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1446'>
+<a name='L1447'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>,
+<a name='L1448'>                          "O&amp;O!",
+<a name='L1449'>                          &amp;<a href='../S/2250.html#L1196' title='Defined at 1196 in Modules/_ctypes/callproc.c.'>_parse_voidp</a>, &amp;func,
+<a name='L1450'>                          &amp;PyTuple_Type, &amp;<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>))
+<a name='L1451'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1452'>
+<a name='L1453'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> =  <a href='../S/2250.html#L1049' title='Defined at 1049 in Modules/_ctypes/callproc.c.'>_ctypes_callproc</a>((PPROC)func,
+<a name='L1454'>                        <a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>,
+<a name='L1455'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1456'>                        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1457'>                        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1458'><font color='darkred'>#endif</font>
+<a name='L1459'>                        0, <i><font color='green'>/* flags */</font></i>
+<a name='L1460'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* self-&gt;argtypes */</font></i>
+<a name='L1461'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* self-&gt;restype */</font></i>
+<a name='L1462'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>); <i><font color='green'>/* checker */</font></i>
+<a name='L1463'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1464'><font color='red'>}</font>
+<a name='L1465'>
+<a name='L1466'><i><font color='green'>/*</font></i>
+<a name='L1467'><i><font color='green'> * Only for debugging so far: So that we can call CFunction instances</font></i>
+<a name='L1468'><i><font color='green'> *</font></i>
+<a name='L1469'><i><font color='green'> * XXX Needs to accept more arguments: flags, argtypes, restype</font></i>
+<a name='L1470'><i><font color='green'> */</font></i>
+<a name='L1471'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1472'><a href='../S/2250.html#L1835' title='Refered from 1835 in Modules/_ctypes/callproc.c.'>call_cdeclfunction</a>(PyObject *self, PyObject *args)
+<a name='L1473'><font color='red'>{</font>
+<a name='L1474'>    <b>void</b> *func;
+<a name='L1475'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>;
+<a name='L1476'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1477'>
+<a name='L1478'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>,
+<a name='L1479'>                          "O&amp;O!",
+<a name='L1480'>                          &amp;<a href='../S/2250.html#L1196' title='Defined at 1196 in Modules/_ctypes/callproc.c.'>_parse_voidp</a>, &amp;func,
+<a name='L1481'>                          &amp;PyTuple_Type, &amp;<a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>))
+<a name='L1482'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1483'>
+<a name='L1484'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> =  <a href='../S/2250.html#L1049' title='Defined at 1049 in Modules/_ctypes/callproc.c.'>_ctypes_callproc</a>((PPROC)func,
+<a name='L1485'>                        <a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>,
+<a name='L1486'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1487'>                        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1488'>                        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1489'><font color='darkred'>#endif</font>
+<a name='L1490'>                        <a href='../S/2252.html#L284' title='Defined at 284 in Modules/_ctypes/ctypes.h.'>FUNCFLAG_CDECL</a>, <i><font color='green'>/* flags */</font></i>
+<a name='L1491'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* self-&gt;argtypes */</font></i>
+<a name='L1492'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* self-&gt;restype */</font></i>
+<a name='L1493'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>); <i><font color='green'>/* checker */</font></i>
+<a name='L1494'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1495'><font color='red'>}</font>
+<a name='L1496'>
+<a name='L1497'><i><font color='green'>/*****************************************************************</font></i>
+<a name='L1498'><i><font color='green'> * functions</font></i>
+<a name='L1499'><i><font color='green'> */</font></i>
+<a name='L1500'><b>static</b> <b>char</b> sizeof_doc[] =
+<a name='L1501'>"sizeof(C type) -&gt; integer\n"
+<a name='L1502'>"sizeof(C instance) -&gt; integer\n"
+<a name='L1503'>"Return the size in bytes of a C instance";
+<a name='L1504'>
+<a name='L1505'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1506'><a href='../S/2250.html#L1831' title='Refered from 1831 in Modules/_ctypes/callproc.c.'>sizeof_func</a>(PyObject *self, PyObject *obj)
+<a name='L1507'><font color='red'>{</font>
+<a name='L1508'>    <a href='../S/2252.html#L219' title='Defined at 219 in Modules/_ctypes/ctypes.h.'>StgDictObject</a> *dict;
+<a name='L1509'>
+<a name='L1510'>    dict = <a href='../S/2557.html#L149' title='Defined at 149 in Modules/_ctypes/stgdict.c.'>PyType_stgdict</a>(obj);
+<a name='L1511'>    <b>if</b> (dict)
+<a name='L1512'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(dict-&gt;size);
+<a name='L1513'>
+<a name='L1514'>    <b>if</b> (<a href='../S/2252.html#L118' title='Defined at 118 in Modules/_ctypes/ctypes.h.'>CDataObject_Check</a>(obj))
+<a name='L1515'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(((<a href='../S/2252.html#L15' title='Defined at 15 in Modules/_ctypes/ctypes.h.'>CDataObject</a> *)obj)-&gt;b_size);
+<a name='L1516'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1517'>                    "this type has no size");
+<a name='L1518'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1519'><font color='red'>}</font>
+<a name='L1520'>
+<a name='L1521'><b>static</b> <b>char</b> alignment_doc[] =
+<a name='L1522'>"alignment(C type) -&gt; integer\n"
+<a name='L1523'>"alignment(C instance) -&gt; integer\n"
+<a name='L1524'>"Return the alignment requirements of a C instance";
+<a name='L1525'>
+<a name='L1526'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1527'><a href='../S/2250.html#L1830' title='Refered from 1830 in Modules/_ctypes/callproc.c.'>align_func</a>(PyObject *self, PyObject *obj)
+<a name='L1528'><font color='red'>{</font>
+<a name='L1529'>    <a href='../S/2252.html#L219' title='Defined at 219 in Modules/_ctypes/ctypes.h.'>StgDictObject</a> *dict;
+<a name='L1530'>
+<a name='L1531'>    dict = <a href='../S/2557.html#L149' title='Defined at 149 in Modules/_ctypes/stgdict.c.'>PyType_stgdict</a>(obj);
+<a name='L1532'>    <b>if</b> (dict)
+<a name='L1533'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(dict-&gt;<a href='../S/2613.html#L1149' title='Defined at 1149 in Modules/_struct.c.'>align</a>);
+<a name='L1534'>
+<a name='L1535'>    dict = <a href='../S/2557.html#L167' title='Defined at 167 in Modules/_ctypes/stgdict.c.'>PyObject_stgdict</a>(obj);
+<a name='L1536'>    <b>if</b> (dict)
+<a name='L1537'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(dict-&gt;<a href='../S/2613.html#L1149' title='Defined at 1149 in Modules/_struct.c.'>align</a>);
+<a name='L1538'>
+<a name='L1539'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1540'>                    "no alignment info");
+<a name='L1541'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1542'><font color='red'>}</font>
+<a name='L1543'>
+<a name='L1544'><b>static</b> <b>char</b> byref_doc[] =
+<a name='L1545'>"byref(C instance[, offset=0]) -&gt; byref-object\n"
+<a name='L1546'>"Return a pointer lookalike to a C instance, only usable\n"
+<a name='L1547'>"as function argument";
+<a name='L1548'>
+<a name='L1549'><i><font color='green'>/*</font></i>
+<a name='L1550'><i><font color='green'> * We must return something which can be converted to a parameter,</font></i>
+<a name='L1551'><i><font color='green'> * but still has a reference to self.</font></i>
+<a name='L1552'><i><font color='green'> */</font></i>
+<a name='L1553'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1554'><a href='../R/6391.html' title='Multiple refered from 3 places.'>byref</a>(PyObject *self, PyObject *args)
+<a name='L1555'><font color='red'>{</font>
+<a name='L1556'>    <a href='../S/2252.html#L14' title='Defined at 14 in Modules/_ctypes/ctypes.h.'>PyCArgObject</a> *parg;
+<a name='L1557'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L1558'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *pyoffset = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1559'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> offset = 0;
+<a name='L1560'>
+<a name='L1561'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "byref", 1, 2,
+<a name='L1562'>                           &amp;obj, &amp;pyoffset))
+<a name='L1563'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1564'>    <b>if</b> (pyoffset) <font color='red'>{</font>
+<a name='L1565'>        offset = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(pyoffset, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1566'>        <b>if</b> (offset == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L1567'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1568'>    <font color='red'>}</font>
+<a name='L1569'>    <b>if</b> (!<a href='../S/2252.html#L118' title='Defined at 118 in Modules/_ctypes/ctypes.h.'>CDataObject_Check</a>(obj)) <font color='red'>{</font>
+<a name='L1570'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L1571'>                     "byref() argument must be a ctypes instance, not '%s'",
+<a name='L1572'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(obj)-&gt;tp_name);
+<a name='L1573'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1574'>    <font color='red'>}</font>
+<a name='L1575'>
+<a name='L1576'>    parg = <a href='../S/2250.html#L420' title='Defined at 420 in Modules/_ctypes/callproc.c.'>PyCArgObject_new</a>();
+<a name='L1577'>    <b>if</b> (parg == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1578'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1579'>
+<a name='L1580'>    parg-&gt;<a href='../S/2664.html#L175' title='Defined at 175 in Modules/expat/xmlparse.c.'>tag</a> = 'P';
+<a name='L1581'>    parg-&gt;pffi_type = &amp;ffi_type_pointer;
+<a name='L1582'>    Py_INCREF(obj);
+<a name='L1583'>    parg-&gt;obj = obj;
+<a name='L1584'>    parg-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>.p = (<b>char</b> *)((<a href='../S/2252.html#L15' title='Defined at 15 in Modules/_ctypes/ctypes.h.'>CDataObject</a> *)obj)-&gt;b_ptr + offset;
+<a name='L1585'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)parg;
+<a name='L1586'><font color='red'>}</font>
+<a name='L1587'>
+<a name='L1588'><b>static</b> <b>char</b> addressof_doc[] =
+<a name='L1589'>"addressof(C instance) -&gt; integer\n"
+<a name='L1590'>"Return the address of the C instance internal buffer";
+<a name='L1591'>
+<a name='L1592'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1593'><a href='../S/2250.html#L1833' title='Refered from 1833 in Modules/_ctypes/callproc.c.'>addressof</a>(PyObject *self, PyObject *obj)
+<a name='L1594'><font color='red'>{</font>
+<a name='L1595'>    <b>if</b> (<a href='../S/2252.html#L118' title='Defined at 118 in Modules/_ctypes/ctypes.h.'>CDataObject_Check</a>(obj))
+<a name='L1596'>        <b>return</b> <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>(((<a href='../S/2252.html#L15' title='Defined at 15 in Modules/_ctypes/ctypes.h.'>CDataObject</a> *)obj)-&gt;b_ptr);
+<a name='L1597'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1598'>                    "invalid type");
+<a name='L1599'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1600'><font color='red'>}</font>
+<a name='L1601'>
+<a name='L1602'><b>static</b> <b>int</b>
+<a name='L1603'><a href='../R/7004.html' title='Multiple refered from 24 places.'>converter</a>(PyObject *obj, <b>void</b> **address)
+<a name='L1604'><font color='red'>{</font>
+<a name='L1605'>    *address = <a href='../S/2799.html#L947' title='Defined at 947 in Objects/longobject.c.'>PyLong_AsVoidPtr</a>(obj);
+<a name='L1606'>    <b>return</b> *address != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1607'><font color='red'>}</font>
+<a name='L1608'>
+<a name='L1609'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1610'><a href='../S/2250.html#L1836' title='Refered from 1836 in Modules/_ctypes/callproc.c.'>My_PyObj_FromPtr</a>(PyObject *self, PyObject *args)
+<a name='L1611'><font color='red'>{</font>
+<a name='L1612'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ob;
+<a name='L1613'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;:PyObj_FromPtr", <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>, &amp;ob))
+<a name='L1614'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1615'>    Py_INCREF(ob);
+<a name='L1616'>    <b>return</b> ob;
+<a name='L1617'><font color='red'>}</font>
+<a name='L1618'>
+<a name='L1619'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1620'><a href='../S/2250.html#L1837' title='Refered from 1837 in Modules/_ctypes/callproc.c.'>My_Py_INCREF</a>(PyObject *self, PyObject *arg)
+<a name='L1621'><font color='red'>{</font>
+<a name='L1622'>    Py_INCREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>); <i><font color='green'>/* that's what this function is for */</font></i>
+<a name='L1623'>    Py_INCREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>); <i><font color='green'>/* that for returning it */</font></i>
+<a name='L1624'>    <b>return</b> <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L1625'><font color='red'>}</font>
+<a name='L1626'>
+<a name='L1627'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1628'><a href='../S/2250.html#L1838' title='Refered from 1838 in Modules/_ctypes/callproc.c.'>My_Py_DECREF</a>(PyObject *self, PyObject *arg)
+<a name='L1629'><font color='red'>{</font>
+<a name='L1630'>    Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>); <i><font color='green'>/* that's what this function is for */</font></i>
+<a name='L1631'>    Py_INCREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>); <i><font color='green'>/* that's for returning it */</font></i>
+<a name='L1632'>    <b>return</b> <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L1633'><font color='red'>}</font>
+<a name='L1634'>
+<a name='L1635'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1636'><a href='../S/2250.html#L1814' title='Refered from 1814 in Modules/_ctypes/callproc.c.'>resize</a>(PyObject *self, PyObject *args)
+<a name='L1637'><font color='red'>{</font>
+<a name='L1638'>    <a href='../S/2252.html#L15' title='Defined at 15 in Modules/_ctypes/ctypes.h.'>CDataObject</a> *obj;
+<a name='L1639'>    <a href='../S/2252.html#L219' title='Defined at 219 in Modules/_ctypes/ctypes.h.'>StgDictObject</a> *dict;
+<a name='L1640'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size;
+<a name='L1641'>
+<a name='L1642'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>,
+<a name='L1643'>                          "On:resize",
+<a name='L1644'>                          &amp;obj, &amp;size))
+<a name='L1645'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1646'>
+<a name='L1647'>    dict = <a href='../S/2557.html#L167' title='Defined at 167 in Modules/_ctypes/stgdict.c.'>PyObject_stgdict</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)obj);
+<a name='L1648'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1649'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1650'>                        "excepted ctypes instance");
+<a name='L1651'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1652'>    <font color='red'>}</font>
+<a name='L1653'>    <b>if</b> (size &lt; dict-&gt;size) <font color='red'>{</font>
+<a name='L1654'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L1655'>                     "minimum size is %zd",
+<a name='L1656'>                     dict-&gt;size);
+<a name='L1657'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1658'>    <font color='red'>}</font>
+<a name='L1659'>    <b>if</b> (obj-&gt;b_needsfree == 0) <font color='red'>{</font>
+<a name='L1660'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L1661'>                     "Memory cannot be resized because this object doesn't own it");
+<a name='L1662'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1663'>    <font color='red'>}</font>
+<a name='L1664'>    <b>if</b> (size &lt;= <b>sizeof</b>(obj-&gt;b_value)) <font color='red'>{</font>
+<a name='L1665'>        <i><font color='green'>/* internal default buffer is large enough */</font></i>
+<a name='L1666'>        obj-&gt;b_size = size;
+<a name='L1667'>        <b>goto</b> done;
+<a name='L1668'>    <font color='red'>}</font>
+<a name='L1669'>    <b>if</b> (obj-&gt;b_size &lt;= <b>sizeof</b>(obj-&gt;b_value)) <font color='red'>{</font>
+<a name='L1670'>        <i><font color='green'>/* We are currently using the objects default buffer, but it</font></i>
+<a name='L1671'><i><font color='green'>           isn't large enough any more. */</font></i>
+<a name='L1672'>        <b>void</b> *ptr = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(size);
+<a name='L1673'>        <b>if</b> (ptr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1674'>            <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1675'>        memset(ptr, 0, size);
+<a name='L1676'>        <a href='../S/2664.html#L75' title='Defined at 75 in Modules/expat/xmlparse.c.'>memmove</a>(ptr, obj-&gt;b_ptr, obj-&gt;b_size);
+<a name='L1677'>        obj-&gt;b_ptr = ptr;
+<a name='L1678'>        obj-&gt;b_size = size;
+<a name='L1679'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1680'>        <b>void</b> * ptr = <a href='../S/2803.html#L1775' title='Defined at 1775 in Objects/object.c.'>PyMem_Realloc</a>(obj-&gt;b_ptr, size);
+<a name='L1681'>        <b>if</b> (ptr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1682'>            <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1683'>        obj-&gt;b_ptr = ptr;
+<a name='L1684'>        obj-&gt;b_size = size;
+<a name='L1685'>    <font color='red'>}</font>
+<a name='L1686'>  done:
+<a name='L1687'>    Py_INCREF(Py_None);
+<a name='L1688'>    <b>return</b> Py_None;
+<a name='L1689'><font color='red'>}</font>
+<a name='L1690'>
+<a name='L1691'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1692'><a href='../S/2250.html#L1812' title='Refered from 1812 in Modules/_ctypes/callproc.c.'>unpickle</a>(PyObject *self, PyObject *args)
+<a name='L1693'><font color='red'>{</font>
+<a name='L1694'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *typ;
+<a name='L1695'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1696'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1697'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp;
+<a name='L1698'>
+<a name='L1699'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "OO", &amp;typ, &amp;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>))
+<a name='L1700'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1701'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(typ, "__new__", "O", typ);
+<a name='L1702'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1703'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1704'>    tmp = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, "__setstate__", "O", <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L1705'>    <b>if</b> (tmp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1706'>        Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L1707'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1708'>    <font color='red'>}</font>
+<a name='L1709'>    Py_DECREF(tmp);
+<a name='L1710'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1711'><font color='red'>}</font>
+<a name='L1712'>
+<a name='L1713'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1714'><a href='../R/2267.html' title='Multiple refered from 6 places.'>POINTER</a>(PyObject *self, PyObject *cls)
+<a name='L1715'><font color='red'>{</font>
+<a name='L1716'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1717'>    <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *typ;
+<a name='L1718'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L1719'>    <b>char</b> *buf;
+<a name='L1720'>
+<a name='L1721'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(_ctypes_ptrtype_cache, cls);
+<a name='L1722'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L1723'>        Py_INCREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L1724'>        <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1725'>    <font color='red'>}</font>
+<a name='L1726'>    <b>if</b> (PyUnicode_CheckExact(cls)) <font color='red'>{</font>
+<a name='L1727'>        <b>char</b> *name = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(cls);
+<a name='L1728'>        buf = <a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a>(strlen(name) + 3 + 1);
+<a name='L1729'>        sprintf(buf, "LP_%s", name);
+<a name='L1730'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(&amp;PyCPointer_Type),
+<a name='L1731'>                                       "s(O){}",
+<a name='L1732'>                                       buf,
+<a name='L1733'>                                       &amp;PyCPointer_Type);
+<a name='L1734'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1735'>            <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1736'>        <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L1737'>    <font color='red'>}</font> <b>else</b> <b>if</b> (PyType_Check(cls)) <font color='red'>{</font>
+<a name='L1738'>        typ = (<a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *)cls;
+<a name='L1739'>        buf = <a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a>(strlen(typ-&gt;tp_name) + 3 + 1);
+<a name='L1740'>        sprintf(buf, "LP_%s", typ-&gt;tp_name);
+<a name='L1741'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(&amp;PyCPointer_Type),
+<a name='L1742'>                                       "s(O){sO}",
+<a name='L1743'>                                       buf,
+<a name='L1744'>                                       &amp;PyCPointer_Type,
+<a name='L1745'>                                       "_type_", cls);
+<a name='L1746'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1747'>            <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1748'>        Py_INCREF(cls);
+<a name='L1749'>        <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = cls;
+<a name='L1750'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1751'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError, "must be a ctypes type");
+<a name='L1752'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1753'>    <font color='red'>}</font>
+<a name='L1754'>    <b>if</b> (-1 == <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(_ctypes_ptrtype_cache, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)) <font color='red'>{</font>
+<a name='L1755'>        Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L1756'>        Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1757'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1758'>    <font color='red'>}</font>
+<a name='L1759'>    Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1760'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1761'><font color='red'>}</font>
+<a name='L1762'>
+<a name='L1763'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1764'><a href='../R/9537.html' title='Multiple refered from 22 places.'>pointer</a>(PyObject *self, PyObject *arg)
+<a name='L1765'><font color='red'>{</font>
+<a name='L1766'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1767'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *typ;
+<a name='L1768'>
+<a name='L1769'>    typ = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(_ctypes_ptrtype_cache, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>));
+<a name='L1770'>    <b>if</b> (typ)
+<a name='L1771'>        <b>return</b> <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>(typ, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1772'>    typ = <a href='../D/2501.html' title='Multiple defined in 2 places.'>POINTER</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>));
+<a name='L1773'>    <b>if</b> (typ == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1774'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1775'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>(typ, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1776'>    Py_DECREF(typ);
+<a name='L1777'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1778'><font color='red'>}</font>
+<a name='L1779'>
+<a name='L1780'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1781'><a href='../S/2250.html#L1813' title='Refered from 1813 in Modules/_ctypes/callproc.c.'>buffer_info</a>(PyObject *self, PyObject *arg)
+<a name='L1782'><font color='red'>{</font>
+<a name='L1783'>    <a href='../S/2252.html#L219' title='Defined at 219 in Modules/_ctypes/ctypes.h.'>StgDictObject</a> *dict = <a href='../S/2557.html#L149' title='Defined at 149 in Modules/_ctypes/stgdict.c.'>PyType_stgdict</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L1784'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *shape;
+<a name='L1785'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L1786'>
+<a name='L1787'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1788'>        dict = <a href='../S/2557.html#L167' title='Defined at 167 in Modules/_ctypes/stgdict.c.'>PyObject_stgdict</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L1789'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1790'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1791'>                        "not a ctypes type or object");
+<a name='L1792'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1793'>    <font color='red'>}</font>
+<a name='L1794'>    shape = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(dict-&gt;ndim);
+<a name='L1795'>    <b>if</b> (shape == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1796'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1797'>    <b>for</b> (i = 0; i &lt; (<b>int</b>)dict-&gt;ndim; ++i)
+<a name='L1798'>        PyTuple_SET_ITEM(shape, i, <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(dict-&gt;shape[i]));
+<a name='L1799'>
+<a name='L1800'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1801'>        Py_DECREF(shape);
+<a name='L1802'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1803'>    <font color='red'>}</font>
+<a name='L1804'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("siN", dict-&gt;format, dict-&gt;ndim, shape);
+<a name='L1805'><font color='red'>}</font>
+<a name='L1806'>
+<a name='L1807'><a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> _ctypes_module_methods[] = <font color='red'>{</font>
+<a name='L1808'>    <font color='red'>{</font>"get_errno", <a href='../S/2250.html#L201' title='Defined at 201 in Modules/_ctypes/callproc.c.'>get_errno</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L1809'>    <font color='red'>{</font>"set_errno", <a href='../S/2250.html#L207' title='Defined at 207 in Modules/_ctypes/callproc.c.'>set_errno</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L1810'>    <font color='red'>{</font>"POINTER", <a href='../D/2501.html' title='Multiple defined in 2 places.'>POINTER</a>, METH_O <font color='red'>}</font>,
+<a name='L1811'>    <font color='red'>{</font>"pointer", <a href='../S/2250.html#L1764' title='Defined at 1764 in Modules/_ctypes/callproc.c.'>pointer</a>, METH_O <font color='red'>}</font>,
+<a name='L1812'>    <font color='red'>{</font>"_unpickle", <a href='../S/2250.html#L1692' title='Defined at 1692 in Modules/_ctypes/callproc.c.'>unpickle</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> <font color='red'>}</font>,
+<a name='L1813'>    <font color='red'>{</font>"buffer_info", <a href='../S/2250.html#L1781' title='Defined at 1781 in Modules/_ctypes/callproc.c.'>buffer_info</a>, METH_O, "Return buffer interface information"<font color='red'>}</font>,
+<a name='L1814'>    <font color='red'>{</font>"resize", <a href='../S/2250.html#L1636' title='Defined at 1636 in Modules/_ctypes/callproc.c.'>resize</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, "Resize the memory buffer of a ctypes instance"<font color='red'>}</font>,
+<a name='L1815'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L1816'>    <font color='red'>{</font>"get_last_error", <a href='../S/2250.html#L215' title='Defined at 215 in Modules/_ctypes/callproc.c.'>get_last_error</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L1817'>    <font color='red'>{</font>"set_last_error", <a href='../S/2250.html#L221' title='Defined at 221 in Modules/_ctypes/callproc.c.'>set_last_error</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L1818'>    <font color='red'>{</font>"CopyComPointer", <a href='../S/2250.html#L1334' title='Defined at 1334 in Modules/_ctypes/callproc.c.'>copy_com_pointer</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, copy_com_pointer_doc<font color='red'>}</font>,
+<a name='L1819'>    <font color='red'>{</font>"FormatError", <a href='../S/2250.html#L1211' title='Defined at 1211 in Modules/_ctypes/callproc.c.'>format_error</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, format_error_doc<font color='red'>}</font>,
+<a name='L1820'>    <font color='red'>{</font>"LoadLibrary", <a href='../S/2250.html#L1236' title='Defined at 1236 in Modules/_ctypes/callproc.c.'>load_library</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, load_library_doc<font color='red'>}</font>,
+<a name='L1821'>    <font color='red'>{</font>"FreeLibrary", <a href='../S/2250.html#L1263' title='Defined at 1263 in Modules/_ctypes/callproc.c.'>free_library</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, free_library_doc<font color='red'>}</font>,
+<a name='L1822'>    <font color='red'>{</font>"call_commethod", <a href='../S/2250.html#L1277' title='Defined at 1277 in Modules/_ctypes/callproc.c.'>call_commethod</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> <font color='red'>}</font>,
+<a name='L1823'>    <font color='red'>{</font>"_check_HRESULT", <a href='../S/2250.html#L405' title='Defined at 405 in Modules/_ctypes/callproc.c.'>check_hresult</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L1824'><font color='darkred'>#else</font>
+<a name='L1825'>    <font color='red'>{</font>"dlopen", <a href='../S/2250.html#L1363' title='Defined at 1363 in Modules/_ctypes/callproc.c.'>py_dl_open</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1826'>     "dlopen(name, flag={RTLD_GLOBAL|RTLD_LOCAL}) open a shared library"<font color='red'>}</font>,
+<a name='L1827'>    <font color='red'>{</font>"dlclose", <a href='../S/2250.html#L1401' title='Defined at 1401 in Modules/_ctypes/callproc.c.'>py_dl_close</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, "dlclose a library"<font color='red'>}</font>,
+<a name='L1828'>    <font color='red'>{</font>"dlsym", <a href='../S/2250.html#L1416' title='Defined at 1416 in Modules/_ctypes/callproc.c.'>py_dl_sym</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, "find symbol in shared library"<font color='red'>}</font>,
+<a name='L1829'><font color='darkred'>#endif</font>
+<a name='L1830'>    <font color='red'>{</font>"alignment", <a href='../S/2250.html#L1527' title='Defined at 1527 in Modules/_ctypes/callproc.c.'>align_func</a>, METH_O, alignment_doc<font color='red'>}</font>,
+<a name='L1831'>    <font color='red'>{</font>"sizeof", <a href='../S/2250.html#L1506' title='Defined at 1506 in Modules/_ctypes/callproc.c.'>sizeof_func</a>, METH_O, sizeof_doc<font color='red'>}</font>,
+<a name='L1832'>    <font color='red'>{</font>"byref", <a href='../S/2250.html#L1554' title='Defined at 1554 in Modules/_ctypes/callproc.c.'>byref</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, byref_doc<font color='red'>}</font>,
+<a name='L1833'>    <font color='red'>{</font>"addressof", <a href='../S/2250.html#L1593' title='Defined at 1593 in Modules/_ctypes/callproc.c.'>addressof</a>, METH_O, addressof_doc<font color='red'>}</font>,
+<a name='L1834'>    <font color='red'>{</font>"call_function", <a href='../D/7326.html' title='Multiple defined in 2 places.'>call_function</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> <font color='red'>}</font>,
+<a name='L1835'>    <font color='red'>{</font>"call_cdeclfunction", <a href='../S/2250.html#L1472' title='Defined at 1472 in Modules/_ctypes/callproc.c.'>call_cdeclfunction</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> <font color='red'>}</font>,
+<a name='L1836'>    <font color='red'>{</font>"PyObj_FromPtr", <a href='../S/2250.html#L1610' title='Defined at 1610 in Modules/_ctypes/callproc.c.'>My_PyObj_FromPtr</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> <font color='red'>}</font>,
+<a name='L1837'>    <font color='red'>{</font>"Py_INCREF", <a href='../S/2250.html#L1620' title='Defined at 1620 in Modules/_ctypes/callproc.c.'>My_Py_INCREF</a>, METH_O <font color='red'>}</font>,
+<a name='L1838'>    <font color='red'>{</font>"Py_DECREF", <a href='../S/2250.html#L1628' title='Defined at 1628 in Modules/_ctypes/callproc.c.'>My_Py_DECREF</a>, METH_O <font color='red'>}</font>,
+<a name='L1839'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>        <i><font color='green'>/* Sentinel */</font></i>
+<a name='L1840'><font color='red'>}</font>;
+<a name='L1841'>
+<a name='L1842'><i><font color='green'>/*</font></i>
+<a name='L1843'><i><font color='green'> Local Variables:</font></i>
+<a name='L1844'><i><font color='green'> compile-command: "cd .. &amp;&amp; python setup.py -q build -g &amp;&amp; python setup.py -q build install --home ~"</font></i>
+<a name='L1845'><i><font color='green'> End:</font></i>
+<a name='L1846'><i><font color='green'>*/</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L83'>[^]</a><a href='#L1781'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

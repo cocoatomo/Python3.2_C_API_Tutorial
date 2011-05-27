@@ -1,0 +1,137 @@
+<html>
+<head>
+<title>Python/dynload_next.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/dynload_next.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L34'>[^]</a>[v][top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L34' title='Defined at 34.'>_PyImport_GetDynLoadFunc</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Support for dynamic loading of extension modules on Mac OS X</font></i>
+<a name='L3'><i><font color='green'>** All references to "NeXT" are for historical reasons.</font></i>
+<a name='L4'><i><font color='green'>*/</font></i>
+<a name='L5'>
+<a name='L6'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L7'><font color='darkred'>#include</font> "<a href='3122.html'>importdl.h</a>"
+<a name='L8'>
+<a name='L9'><font color='darkred'>#include</font> &lt;mach-o/dyld.h&gt;
+<a name='L10'>
+<a name='L11'><b>const</b> <b>struct</b> <a href='../S/3122.html#L23' title='Defined at 23 in Python/importdl.h.'>filedescr</a> _PyImport_DynLoadFiletab[] = <font color='red'>{</font>
+<a name='L12'>    <font color='red'>{</font>".so", "rb", <a href='../S/3122.html#L14' title='Defined at 14 in Python/importdl.h.'>C_EXTENSION</a><font color='red'>}</font>,
+<a name='L13'>    <font color='red'>{</font>"module.so", "rb", <a href='../S/3122.html#L14' title='Defined at 14 in Python/importdl.h.'>C_EXTENSION</a><font color='red'>}</font>,
+<a name='L14'>    <font color='red'>{</font>0, 0<font color='red'>}</font>
+<a name='L15'><font color='red'>}</font>;
+<a name='L16'>
+<a name='L17'><i><font color='green'>/*</font></i>
+<a name='L18'><i><font color='green'>** Python modules are Mach-O MH_BUNDLE files. The best way to load these</font></i>
+<a name='L19'><i><font color='green'>** is each in a private namespace, so you can load, say, a module bar and a</font></i>
+<a name='L20'><i><font color='green'>** module foo.bar. If we load everything in the global namespace the two</font></i>
+<a name='L21'><i><font color='green'>** initbar() symbols will conflict.</font></i>
+<a name='L22'><i><font color='green'>** However, it seems some extension packages depend upon being able to access</font></i>
+<a name='L23'><i><font color='green'>** each others' global symbols. There seems to be no way to eat our cake and</font></i>
+<a name='L24'><i><font color='green'>** have it, so the USE_DYLD_GLOBAL_NAMESPACE define determines which behaviour</font></i>
+<a name='L25'><i><font color='green'>** you get.</font></i>
+<a name='L26'><i><font color='green'>*/</font></i>
+<a name='L27'>
+<a name='L28'><font color='darkred'>#ifdef</font> USE_DYLD_GLOBAL_NAMESPACE
+<a name='L29'><font color='darkred'>#define</font> <a href='../S/3101.html#L77' title='Refered from 77 in Python/dynload_next.c.'>LINKOPTIONS</a> NSLINKMODULE_OPTION_BINDNOW|NSLINKMODULE_OPTION_RETURN_ON_ERROR
+<a name='L30'><font color='darkred'>#else</font>
+<a name='L31'><font color='darkred'>#define</font> <a href='../S/3101.html#L77' title='Refered from 77 in Python/dynload_next.c.'>LINKOPTIONS</a> NSLINKMODULE_OPTION_BINDNOW| \
+<a name='L32'>    NSLINKMODULE_OPTION_RETURN_ON_ERROR|NSLINKMODULE_OPTION_PRIVATE
+<a name='L33'><font color='darkred'>#endif</font>
+<a name='L34'><a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a> <a href='../R/5428.html' title='Multiple refered from 2 places.'>_PyImport_GetDynLoadFunc</a>(<b>const</b> <b>char</b> *fqname, <b>const</b> <b>char</b> *shortname,
+<a name='L35'>                                        <b>const</b> <b>char</b> *pathname, FILE *fp)
+<a name='L36'><font color='red'>{</font>
+<a name='L37'>    <a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a> p = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L38'>    <b>char</b> funcname[258];
+<a name='L39'>    NSObjectFileImageReturnCode rc;
+<a name='L40'>    NSObjectFileImage image;
+<a name='L41'>    NSModule newModule;
+<a name='L42'>    NSSymbol theSym;
+<a name='L43'>    <b>const</b> <b>char</b> *errString;
+<a name='L44'>    <b>char</b> errBuf[512];
+<a name='L45'>
+<a name='L46'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(funcname, <b>sizeof</b>(funcname), "_PyInit_%.200s", shortname);
+<a name='L47'>
+<a name='L48'><font color='darkred'>#ifdef</font> USE_DYLD_GLOBAL_NAMESPACE
+<a name='L49'>    <b>if</b> (NSIsSymbolNameDefined(funcname)) <font color='red'>{</font>
+<a name='L50'>        theSym = NSLookupAndBindSymbol(funcname);
+<a name='L51'>        p = (<a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a>)NSAddressOfSymbol(theSym);
+<a name='L52'>        <b>return</b> p;
+<a name='L53'>    <font color='red'>}</font>
+<a name='L54'><font color='darkred'>#endif</font>
+<a name='L55'>    rc = NSCreateObjectFileImageFromFile(pathname, &amp;image);
+<a name='L56'>    <b>switch</b>(rc) <font color='red'>{</font>
+<a name='L57'>        <b>default</b>:
+<a name='L58'>        <b>case</b> NSObjectFileImageFailure:
+<a name='L59'>        <b>case</b> NSObjectFileImageFormat:
+<a name='L60'>            <i><font color='green'>/* for these a message is printed on stderr by dyld */</font></i>
+<a name='L61'>            errString = "Can't create object file image";
+<a name='L62'>        <b>break</b>;
+<a name='L63'>        <b>case</b> NSObjectFileImageSuccess:
+<a name='L64'>            errString = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L65'>            <b>break</b>;
+<a name='L66'>        <b>case</b> NSObjectFileImageInappropriateFile:
+<a name='L67'>            errString = "Inappropriate file type for dynamic loading";
+<a name='L68'>            <b>break</b>;
+<a name='L69'>        <b>case</b> NSObjectFileImageArch:
+<a name='L70'>            errString = "Wrong CPU type in object file";
+<a name='L71'>            <b>break</b>;
+<a name='L72'>        <b>case</b> NSObjectFileImageAccess:
+<a name='L73'>            errString = "Can't read object file (no access)";
+<a name='L74'>            <b>break</b>;
+<a name='L75'>    <font color='red'>}</font>
+<a name='L76'>    <b>if</b> (errString == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L77'>        newModule = NSLinkModule(image, pathname, <a href='../D/1922.html' title='Multiple defined in 2 places.'>LINKOPTIONS</a>);
+<a name='L78'>        <b>if</b> (newModule == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L79'>            <b>int</b> errNo;
+<a name='L80'>            <b>const</b> <b>char</b> *fileName, *moreErrorStr;
+<a name='L81'>            NSLinkEditErrors c;
+<a name='L82'>            NSLinkEditError( &amp;c, &amp;errNo, &amp;fileName, &amp;moreErrorStr );
+<a name='L83'>            <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(errBuf, 512, "Failure linking new module: %s: %s",
+<a name='L84'>                            fileName, moreErrorStr);
+<a name='L85'>            errString = errBuf;
+<a name='L86'>        <font color='red'>}</font>
+<a name='L87'>    <font color='red'>}</font>
+<a name='L88'>    <b>if</b> (errString != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L89'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError, errString);
+<a name='L90'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L91'>    <font color='red'>}</font>
+<a name='L92'><font color='darkred'>#ifdef</font> USE_DYLD_GLOBAL_NAMESPACE
+<a name='L93'>    <b>if</b> (!NSIsSymbolNameDefined(funcname)) <font color='red'>{</font>
+<a name='L94'>        <i><font color='green'>/* UnlinkModule() isn't implemented in current versions, but calling it does no harm */</font></i>
+<a name='L95'>        <i><font color='green'>/* NSUnLinkModule(newModule, FALSE); removed: causes problems for ObjC code */</font></i>
+<a name='L96'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ImportError,
+<a name='L97'>                         "Loaded module does not contain symbol %.200s",
+<a name='L98'>                         funcname);
+<a name='L99'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L100'>    <font color='red'>}</font>
+<a name='L101'>    theSym = NSLookupAndBindSymbol(funcname);
+<a name='L102'><font color='darkred'>#else</font>
+<a name='L103'>    theSym = NSLookupSymbolInModule(newModule, funcname);
+<a name='L104'>    <b>if</b> ( theSym == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ) <font color='red'>{</font>
+<a name='L105'>        <i><font color='green'>/* NSUnLinkModule(newModule, FALSE); removed: causes problems for ObjC code */</font></i>
+<a name='L106'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ImportError,
+<a name='L107'>                         "Loaded module does not contain symbol %.200s",
+<a name='L108'>                         funcname);
+<a name='L109'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L110'>    <font color='red'>}</font>
+<a name='L111'><font color='darkred'>#endif</font>
+<a name='L112'>    p = (<a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a>)NSAddressOfSymbol(theSym);
+<a name='L113'>    <b>return</b> p;
+<a name='L114'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;][^]<a href='#L34'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

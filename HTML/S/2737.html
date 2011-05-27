@@ -1,0 +1,1881 @@
+<html>
+<head>
+<title>Modules/zlib/deflate.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3390.html'>zlib</a>/deflate.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L198'>[^]</a><a href='#L1807'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L198' title='Defined at 198.'>deflateInit_</a>
+<li><a href='#L210' title='Defined at 210.'>deflateInit2_</a>
+<li><a href='#L311' title='Defined at 311.'>deflateSetDictionary</a>
+<li><a href='#L353' title='Defined at 353.'>deflateReset</a>
+<li><a href='#L389' title='Defined at 389.'>deflateSetHeader</a>
+<li><a href='#L400' title='Defined at 400.'>deflatePrime</a>
+<li><a href='#L412' title='Defined at 412.'>deflateParams</a>
+<li><a href='#L451' title='Defined at 451.'>deflateTune</a>
+<li><a href='#L486' title='Defined at 486.'>deflateBound</a>
+<li><a href='#L548' title='Defined at 548.'>putShortMSB</a>
+<li><a href='#L562' title='Defined at 562.'>flush_pending</a>
+<li><a href='#L582' title='Defined at 582.'>deflate</a>
+<li><a href='#L895' title='Defined at 895.'>deflateEnd</a>
+<li><a href='#L930' title='Defined at 930.'>deflateCopy</a>
+<li><a href='#L992' title='Defined at 992.'>read_buf</a>
+<li><a href='#L1022' title='Defined at 1022.'>lm_init</a>
+<li><a href='#L1063' title='Defined at 1063.'>longest_match</a>
+<li><a href='#L1212' title='Defined at 1212.'>longest_match</a>
+<li><a href='#L1271' title='Defined at 1271.'>check_match</a>
+<li><a href='#L1305' title='Defined at 1305.'>fill_window</a>
+<li><a href='#L1462' title='Defined at 1462.'>deflate_stored</a>
+<li><a href='#L1520' title='Defined at 1520.'>deflate_fast</a>
+<li><a href='#L1616' title='Defined at 1616.'>deflate_slow</a>
+<li><a href='#L1741' title='Defined at 1741.'>deflate_rle</a>
+<li><a href='#L1807' title='Defined at 1807.'>deflate_huff</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* deflate.c -- compress data using the deflation algorithm</font></i>
+<a name='L2'><i><font color='green'> * Copyright (C) 1995-2010 Jean-loup Gailly and Mark Adler</font></i>
+<a name='L3'><i><font color='green'> * For conditions of distribution and use, see copyright notice in zlib.h</font></i>
+<a name='L4'><i><font color='green'> */</font></i>
+<a name='L5'>
+<a name='L6'><i><font color='green'>/*</font></i>
+<a name='L7'><i><font color='green'> *  ALGORITHM</font></i>
+<a name='L8'><i><font color='green'> *</font></i>
+<a name='L9'><i><font color='green'> *      The "deflation" process depends on being able to identify portions</font></i>
+<a name='L10'><i><font color='green'> *      of the input text which are identical to earlier input (within a</font></i>
+<a name='L11'><i><font color='green'> *      sliding window trailing behind the input currently being processed).</font></i>
+<a name='L12'><i><font color='green'> *</font></i>
+<a name='L13'><i><font color='green'> *      The most straightforward technique turns out to be the fastest for</font></i>
+<a name='L14'><i><font color='green'> *      most input files: try all possible matches and select the longest.</font></i>
+<a name='L15'><i><font color='green'> *      The key feature of this algorithm is that insertions into the string</font></i>
+<a name='L16'><i><font color='green'> *      dictionary are very simple and thus fast, and deletions are avoided</font></i>
+<a name='L17'><i><font color='green'> *      completely. Insertions are performed at each input character, whereas</font></i>
+<a name='L18'><i><font color='green'> *      string matches are performed only when the previous match ends. So it</font></i>
+<a name='L19'><i><font color='green'> *      is preferable to spend more time in matches to allow very fast string</font></i>
+<a name='L20'><i><font color='green'> *      insertions and avoid deletions. The matching algorithm for small</font></i>
+<a name='L21'><i><font color='green'> *      strings is inspired from that of Rabin &amp; Karp. A brute force approach</font></i>
+<a name='L22'><i><font color='green'> *      is used to find longer strings when a small match has been found.</font></i>
+<a name='L23'><i><font color='green'> *      A similar algorithm is used in comic (by Jan-Mark Wams) and freeze</font></i>
+<a name='L24'><i><font color='green'> *      (by Leonid Broukhis).</font></i>
+<a name='L25'><i><font color='green'> *         A previous version of this file used a more sophisticated algorithm</font></i>
+<a name='L26'><i><font color='green'> *      (by Fiala and Greene) which is guaranteed to run in linear amortized</font></i>
+<a name='L27'><i><font color='green'> *      time, but has a larger average cost, uses more memory and is patented.</font></i>
+<a name='L28'><i><font color='green'> *      However the F&amp;G algorithm may be faster for some highly redundant</font></i>
+<a name='L29'><i><font color='green'> *      files if the parameter max_chain_length (described below) is too large.</font></i>
+<a name='L30'><i><font color='green'> *</font></i>
+<a name='L31'><i><font color='green'> *  ACKNOWLEDGEMENTS</font></i>
+<a name='L32'><i><font color='green'> *</font></i>
+<a name='L33'><i><font color='green'> *      The idea of lazy evaluation of matches is due to Jan-Mark Wams, and</font></i>
+<a name='L34'><i><font color='green'> *      I found it in 'freeze' written by Leonid Broukhis.</font></i>
+<a name='L35'><i><font color='green'> *      Thanks to many people for bug reports and testing.</font></i>
+<a name='L36'><i><font color='green'> *</font></i>
+<a name='L37'><i><font color='green'> *  REFERENCES</font></i>
+<a name='L38'><i><font color='green'> *</font></i>
+<a name='L39'><i><font color='green'> *      Deutsch, L.P.,"DEFLATE Compressed Data Format Specification".</font></i>
+<a name='L40'><i><font color='green'> *      Available in http://www.ietf.org/rfc/rfc1951.txt</font></i>
+<a name='L41'><i><font color='green'> *</font></i>
+<a name='L42'><i><font color='green'> *      A description of the Rabin and Karp algorithm is given in the book</font></i>
+<a name='L43'><i><font color='green'> *         "Algorithms" by R. Sedgewick, Addison-Wesley, p252.</font></i>
+<a name='L44'><i><font color='green'> *</font></i>
+<a name='L45'><i><font color='green'> *      Fiala,E.R., and Greene,D.H.</font></i>
+<a name='L46'><i><font color='green'> *         Data Compression with Finite Windows, Comm.ACM, 32,4 (1989) 490-595</font></i>
+<a name='L47'><i><font color='green'> *</font></i>
+<a name='L48'><i><font color='green'> */</font></i>
+<a name='L49'>
+<a name='L50'><i><font color='green'>/* @(#) $Id$ */</font></i>
+<a name='L51'>
+<a name='L52'><font color='darkred'>#include</font> "<a href='2738.html'>deflate.h</a>"
+<a name='L53'>
+<a name='L54'><b>const</b> <b>char</b> <a href='../S/2764.html#L48' title='Defined at 48 in Modules/zlib/zconf.h.'>deflate_copyright</a>[] =
+<a name='L55'>   " deflate 1.2.5 Copyright 1995-2010 Jean-loup Gailly and Mark Adler ";
+<a name='L56'><i><font color='green'>/*</font></i>
+<a name='L57'><i><font color='green'>  If you use the zlib library in a product, an acknowledgment is welcome</font></i>
+<a name='L58'><i><font color='green'>  in the documentation of your product. If for some reason you cannot</font></i>
+<a name='L59'><i><font color='green'>  include such an acknowledgment, I would appreciate that you keep this</font></i>
+<a name='L60'><i><font color='green'>  copyright string in the executable of your product.</font></i>
+<a name='L61'><i><font color='green'> */</font></i>
+<a name='L62'>
+<a name='L63'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L64'><i><font color='green'> *  Function prototypes.</font></i>
+<a name='L65'><i><font color='green'> */</font></i>
+<a name='L66'><b>typedef</b> <b>enum</b> <font color='red'>{</font>
+<a name='L67'>    <a href='../R/9177.html' title='Multiple refered from 8 places.'>need_more</a>,      <i><font color='green'>/* block not completed, need more input or more output */</font></i>
+<a name='L68'>    <a href='../R/6247.html' title='Multiple refered from 6 places.'>block_done</a>,     <i><font color='green'>/* block flush performed */</font></i>
+<a name='L69'>    <a href='../R/7811.html' title='Multiple refered from 3 places.'>finish_started</a>, <i><font color='green'>/* finish started, need only more output at next deflate */</font></i>
+<a name='L70'>    <a href='../R/7810.html' title='Multiple refered from 6 places.'>finish_done</a>     <i><font color='green'>/* finish done, accept no more input or output */</font></i>
+<a name='L71'><font color='red'>}</font> <a href='../R/6250.html' title='Multiple refered from 12 places.'>block_state</a>;
+<a name='L72'>
+<a name='L73'><b>typedef</b> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> (*compress_func) <a href='../R/2174.html' title='Multiple refered from 189 places.'>OF</a>((deflate_state *s, <b>int</b> flush));
+<a name='L74'><i><font color='green'>/* Compression function. Returns the block state after the call. */</font></i>
+<a name='L75'>
+<a name='L76'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2737.html#L1305' title='Defined at 1305 in Modules/zlib/deflate.c.'>fill_window</a>    <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s));
+<a name='L77'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../S/2737.html#L1462' title='Defined at 1462 in Modules/zlib/deflate.c.'>deflate_stored</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, <b>int</b> flush));
+<a name='L78'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../S/2737.html#L1520' title='Defined at 1520 in Modules/zlib/deflate.c.'>deflate_fast</a>   <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, <b>int</b> flush));
+<a name='L79'><font color='darkred'>#ifndef</font> FASTEST
+<a name='L80'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../S/2737.html#L1616' title='Defined at 1616 in Modules/zlib/deflate.c.'>deflate_slow</a>   <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, <b>int</b> flush));
+<a name='L81'><font color='darkred'>#endif</font>
+<a name='L82'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../S/2737.html#L1741' title='Defined at 1741 in Modules/zlib/deflate.c.'>deflate_rle</a>    <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, <b>int</b> flush));
+<a name='L83'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../S/2737.html#L1807' title='Defined at 1807 in Modules/zlib/deflate.c.'>deflate_huff</a>   <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, <b>int</b> flush));
+<a name='L84'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2737.html#L1022' title='Defined at 1022 in Modules/zlib/deflate.c.'>lm_init</a>        <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s));
+<a name='L85'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2737.html#L548' title='Defined at 548 in Modules/zlib/deflate.c.'>putShortMSB</a>    <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, uInt b));
+<a name='L86'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>  <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((z_streamp strm));
+<a name='L87'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> <a href='../S/2737.html#L992' title='Defined at 992 in Modules/zlib/deflate.c.'>read_buf</a>        <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((z_streamp strm, Bytef *buf, <b>unsigned</b> size));
+<a name='L88'><font color='darkred'>#ifdef</font> ASMV
+<a name='L89'>      <b>void</b> match_init <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>void</b>)); <i><font color='green'>/* asm code initialization */</font></i>
+<a name='L90'>      <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> <a href='../D/9619.html' title='Multiple defined in 2 places.'>longest_match</a>  <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, IPos cur_match));
+<a name='L91'><font color='darkred'>#else</font>
+<a name='L92'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> <a href='../D/9619.html' title='Multiple defined in 2 places.'>longest_match</a>  <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, IPos cur_match));
+<a name='L93'><font color='darkred'>#endif</font>
+<a name='L94'>
+<a name='L95'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L96'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>  <b>void</b> <a href='../D/7409.html' title='Multiple defined in 2 places.'>check_match</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, IPos start, IPos match,
+<a name='L97'>                            <b>int</b> length));
+<a name='L98'><font color='darkred'>#endif</font>
+<a name='L99'>
+<a name='L100'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L101'><i><font color='green'> * Local data</font></i>
+<a name='L102'><i><font color='green'> */</font></i>
+<a name='L103'>
+<a name='L104'><font color='darkred'>#define</font> <a href='../R/2086.html' title='Multiple refered from 8 places.'>NIL</a> 0
+<a name='L105'><i><font color='green'>/* Tail of hash chains */</font></i>
+<a name='L106'>
+<a name='L107'><font color='darkred'>#ifndef</font> <a href='../S/2737.html#L108' title='Defined at 108 in Modules/zlib/deflate.c.'>TOO_FAR</a>
+<a name='L108'><font color='darkred'>#  define</font> <a href='../R/4556.html' title='Multiple refered from 3 places.'>TOO_FAR</a> 4096
+<a name='L109'><font color='darkred'>#endif</font>
+<a name='L110'><i><font color='green'>/* Matches of length 3 are discarded if their distance exceeds TOO_FAR */</font></i>
+<a name='L111'>
+<a name='L112'><i><font color='green'>/* Values for max_lazy_match, good_match and max_chain_length, depending on</font></i>
+<a name='L113'><i><font color='green'> * the desired pack level (0..9). The values given below have been tuned to</font></i>
+<a name='L114'><i><font color='green'> * exclude worst case performance for pathological files. Better values may be</font></i>
+<a name='L115'><i><font color='green'> * found for specific files.</font></i>
+<a name='L116'><i><font color='green'> */</font></i>
+<a name='L117'><b>typedef</b> <b>struct</b> config_s <font color='red'>{</font>
+<a name='L118'>   <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> good_length; <i><font color='green'>/* reduce lazy search above this match length */</font></i>
+<a name='L119'>   <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> max_lazy;    <i><font color='green'>/* do not perform lazy search above this match length */</font></i>
+<a name='L120'>   <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> nice_length; <i><font color='green'>/* quit search above this match length */</font></i>
+<a name='L121'>   <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> max_chain;
+<a name='L122'>   compress_func func;
+<a name='L123'><font color='red'>}</font> <a href='../R/6964.html' title='Multiple refered from 33 places.'>config</a>;
+<a name='L124'>
+<a name='L125'><font color='darkred'>#ifdef</font> FASTEST
+<a name='L126'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>const</b> <a href='../D/7740.html' title='Multiple defined in 3 places.'>config</a> configuration_table[2] = <font color='red'>{</font>
+<a name='L127'><i><font color='green'>/*      good lazy nice chain */</font></i>
+<a name='L128'><i><font color='green'>/* 0 */</font></i> <font color='red'>{</font>0,    0,  0,    0, <a href='../S/2737.html#L1462' title='Defined at 1462 in Modules/zlib/deflate.c.'>deflate_stored</a><font color='red'>}</font>,  <i><font color='green'>/* store only */</font></i>
+<a name='L129'><i><font color='green'>/* 1 */</font></i> <font color='red'>{</font>4,    4,  8,    4, <a href='../S/2737.html#L1520' title='Defined at 1520 in Modules/zlib/deflate.c.'>deflate_fast</a><font color='red'>}</font><font color='red'>}</font>; <i><font color='green'>/* max speed, no lazy matches */</font></i>
+<a name='L130'><font color='darkred'>#else</font>
+<a name='L131'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>const</b> <a href='../D/7740.html' title='Multiple defined in 3 places.'>config</a> configuration_table[10] = <font color='red'>{</font>
+<a name='L132'><i><font color='green'>/*      good lazy nice chain */</font></i>
+<a name='L133'><i><font color='green'>/* 0 */</font></i> <font color='red'>{</font>0,    0,  0,    0, <a href='../S/2737.html#L1462' title='Defined at 1462 in Modules/zlib/deflate.c.'>deflate_stored</a><font color='red'>}</font>,  <i><font color='green'>/* store only */</font></i>
+<a name='L134'><i><font color='green'>/* 1 */</font></i> <font color='red'>{</font>4,    4,  8,    4, <a href='../S/2737.html#L1520' title='Defined at 1520 in Modules/zlib/deflate.c.'>deflate_fast</a><font color='red'>}</font>, <i><font color='green'>/* max speed, no lazy matches */</font></i>
+<a name='L135'><i><font color='green'>/* 2 */</font></i> <font color='red'>{</font>4,    5, 16,    8, <a href='../S/2737.html#L1520' title='Defined at 1520 in Modules/zlib/deflate.c.'>deflate_fast</a><font color='red'>}</font>,
+<a name='L136'><i><font color='green'>/* 3 */</font></i> <font color='red'>{</font>4,    6, 32,   32, <a href='../S/2737.html#L1520' title='Defined at 1520 in Modules/zlib/deflate.c.'>deflate_fast</a><font color='red'>}</font>,
+<a name='L137'>
+<a name='L138'><i><font color='green'>/* 4 */</font></i> <font color='red'>{</font>4,    4, 16,   16, <a href='../S/2737.html#L1616' title='Defined at 1616 in Modules/zlib/deflate.c.'>deflate_slow</a><font color='red'>}</font>,  <i><font color='green'>/* lazy matches */</font></i>
+<a name='L139'><i><font color='green'>/* 5 */</font></i> <font color='red'>{</font>8,   16, 32,   32, <a href='../S/2737.html#L1616' title='Defined at 1616 in Modules/zlib/deflate.c.'>deflate_slow</a><font color='red'>}</font>,
+<a name='L140'><i><font color='green'>/* 6 */</font></i> <font color='red'>{</font>8,   16, 128, 128, <a href='../S/2737.html#L1616' title='Defined at 1616 in Modules/zlib/deflate.c.'>deflate_slow</a><font color='red'>}</font>,
+<a name='L141'><i><font color='green'>/* 7 */</font></i> <font color='red'>{</font>8,   32, 128, 256, <a href='../S/2737.html#L1616' title='Defined at 1616 in Modules/zlib/deflate.c.'>deflate_slow</a><font color='red'>}</font>,
+<a name='L142'><i><font color='green'>/* 8 */</font></i> <font color='red'>{</font>32, 128, 258, 1024, <a href='../S/2737.html#L1616' title='Defined at 1616 in Modules/zlib/deflate.c.'>deflate_slow</a><font color='red'>}</font>,
+<a name='L143'><i><font color='green'>/* 9 */</font></i> <font color='red'>{</font>32, 258, 258, 4096, <a href='../S/2737.html#L1616' title='Defined at 1616 in Modules/zlib/deflate.c.'>deflate_slow</a><font color='red'>}</font><font color='red'>}</font>; <i><font color='green'>/* max compression */</font></i>
+<a name='L144'><font color='darkred'>#endif</font>
+<a name='L145'>
+<a name='L146'><i><font color='green'>/* Note: the deflate() code requires max_lazy &gt;= MIN_MATCH and max_chain &gt;= 4</font></i>
+<a name='L147'><i><font color='green'> * For deflate_fast() (levels &lt;= 3) good is ignored and lazy has a different</font></i>
+<a name='L148'><i><font color='green'> * meaning.</font></i>
+<a name='L149'><i><font color='green'> */</font></i>
+<a name='L150'>
+<a name='L151'><font color='darkred'>#define</font> <a href='../R/877.html' title='Multiple refered from 10 places.'>EQUAL</a> 0
+<a name='L152'><i><font color='green'>/* result of memcmp for equal strings */</font></i>
+<a name='L153'>
+<a name='L154'><font color='darkred'>#ifndef</font> <a href='../D/2327.html' title='Multiple defined in 2 places.'>NO_DUMMY_DECL</a>
+<a name='L155'><b>struct</b> <a href='../S/2738.html#L78' title='Refered from 78 in Modules/zlib/deflate.h.'>static_tree_desc_s</a> <font color='red'>{</font><b>int</b> dummy;<font color='red'>}</font>; <i><font color='green'>/* for buggy compilers */</font></i>
+<a name='L156'><font color='darkred'>#endif</font>
+<a name='L157'>
+<a name='L158'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L159'><i><font color='green'> * Update a hash value with the given input byte</font></i>
+<a name='L160'><i><font color='green'> * IN  assertion: all calls to to UPDATE_HASH are made with consecutive</font></i>
+<a name='L161'><i><font color='green'> *    input characters, so that a running hash key can be computed from the</font></i>
+<a name='L162'><i><font color='green'> *    previous key instead of complete recalculation each time.</font></i>
+<a name='L163'><i><font color='green'> */</font></i>
+<a name='L164'><font color='darkred'>#define</font> <a href='../R/4756.html' title='Multiple refered from 7 places.'>UPDATE_HASH</a>(s,h,c) (h = (((h)&lt;&lt;s-&gt;hash_shift) ^ (c)) &amp; s-&gt;hash_mask)
+<a name='L165'>
+<a name='L166'>
+<a name='L167'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L168'><i><font color='green'> * Insert string str in the dictionary and set match_head to the previous head</font></i>
+<a name='L169'><i><font color='green'> * of the hash chain (the most recent string with same hash key). Return</font></i>
+<a name='L170'><i><font color='green'> * the previous length of the hash chain.</font></i>
+<a name='L171'><i><font color='green'> * If this file is compiled with -DFASTEST, the compression level is forced</font></i>
+<a name='L172'><i><font color='green'> * to 1, and no hash chains are maintained.</font></i>
+<a name='L173'><i><font color='green'> * IN  assertion: all calls to to INSERT_STRING are made with consecutive</font></i>
+<a name='L174'><i><font color='green'> *    input characters and the first MIN_MATCH bytes of str are valid</font></i>
+<a name='L175'><i><font color='green'> *    (except for the last MIN_MATCH-1 bytes of the input file).</font></i>
+<a name='L176'><i><font color='green'> */</font></i>
+<a name='L177'><font color='darkred'>#ifdef</font> FASTEST
+<a name='L178'><font color='darkred'>#define</font> <a href='../R/1549.html' title='Multiple refered from 5 places.'>INSERT_STRING</a>(s, str, match_head) \
+<a name='L179'>   (<a href='../S/2737.html#L164' title='Defined at 164 in Modules/zlib/deflate.c.'>UPDATE_HASH</a>(s, s-&gt;ins_h, s-&gt;window[(str) + (<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1)]), \
+<a name='L180'>    match_head = s-&gt;head[s-&gt;ins_h], \
+<a name='L181'>    s-&gt;head[s-&gt;ins_h] = (<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>)(str))
+<a name='L182'><font color='darkred'>#else</font>
+<a name='L183'><font color='darkred'>#define</font> <a href='../R/1549.html' title='Multiple refered from 5 places.'>INSERT_STRING</a>(s, str, match_head) \
+<a name='L184'>   (<a href='../S/2737.html#L164' title='Defined at 164 in Modules/zlib/deflate.c.'>UPDATE_HASH</a>(s, s-&gt;ins_h, s-&gt;window[(str) + (<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1)]), \
+<a name='L185'>    match_head = s-&gt;prev[(str) &amp; s-&gt;w_mask] = s-&gt;head[s-&gt;ins_h], \
+<a name='L186'>    s-&gt;head[s-&gt;ins_h] = (<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>)(str))
+<a name='L187'><font color='darkred'>#endif</font>
+<a name='L188'>
+<a name='L189'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L190'><i><font color='green'> * Initialize the hash table (avoiding 64K overflow for 16 bit systems).</font></i>
+<a name='L191'><i><font color='green'> * prev[] will be initialized on the fly.</font></i>
+<a name='L192'><i><font color='green'> */</font></i>
+<a name='L193'><font color='darkred'>#define</font> <a href='../R/525.html' title='Multiple refered from 2 places.'>CLEAR_HASH</a>(s) \
+<a name='L194'>    s-&gt;head[s-&gt;hash_size-1] = <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a>; \
+<a name='L195'>    <a href='../D/12473.html' title='Multiple defined in 3 places.'>zmemzero</a>((<a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *)s-&gt;head, (<b>unsigned</b>)(s-&gt;hash_size-1)*<b>sizeof</b>(*s-&gt;head));
+<a name='L196'>
+<a name='L197'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L198'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7231.html' title='Multiple refered from 2 places.'>deflateInit_</a>(strm, level, version, stream_size)
+<a name='L199'>    z_streamp strm;
+<a name='L200'>    <b>int</b> level;
+<a name='L201'>    <b>const</b> <b>char</b> *version;
+<a name='L202'>    <b>int</b> stream_size;
+<a name='L203'><font color='red'>{</font>
+<a name='L204'>    <b>return</b> <a href='../D/8010.html' title='Multiple defined in 3 places.'>deflateInit2_</a>(strm, level, <a href='../S/2769.html#L205' title='Defined at 205 in Modules/zlib/zlib.h.'>Z_DEFLATED</a>, <a href='../D/2084.html' title='Multiple defined in 2 places.'>MAX_WBITS</a>, <a href='../D/768.html' title='Multiple defined in 4 places.'>DEF_MEM_LEVEL</a>,
+<a name='L205'>                         <a href='../S/2769.html#L196' title='Defined at 196 in Modules/zlib/zlib.h.'>Z_DEFAULT_STRATEGY</a>, version, stream_size);
+<a name='L206'>    <i><font color='green'>/* To do: ignore strm-&gt;next_in if we use it as window */</font></i>
+<a name='L207'><font color='red'>}</font>
+<a name='L208'>
+<a name='L209'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L210'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7230.html' title='Multiple refered from 3 places.'>deflateInit2_</a>(strm, level, method, windowBits, memLevel, strategy,
+<a name='L211'>                  version, stream_size)
+<a name='L212'>    z_streamp strm;
+<a name='L213'>    <b>int</b>  level;
+<a name='L214'>    <b>int</b>  method;
+<a name='L215'>    <b>int</b>  windowBits;
+<a name='L216'>    <b>int</b>  memLevel;
+<a name='L217'>    <b>int</b>  strategy;
+<a name='L218'>    <b>const</b> <b>char</b> *version;
+<a name='L219'>    <b>int</b> stream_size;
+<a name='L220'><font color='red'>{</font>
+<a name='L221'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *s;
+<a name='L222'>    <b>int</b> wrap = 1;
+<a name='L223'>    <b>static</b> <b>const</b> <b>char</b> my_version[] = <a href='../S/2769.html#L40' title='Defined at 40 in Modules/zlib/zlib.h.'>ZLIB_VERSION</a>;
+<a name='L224'>
+<a name='L225'>    <a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a> *overlay;
+<a name='L226'>    <i><font color='green'>/* We overlay pending_buf and d_buf+l_buf. This works since the average</font></i>
+<a name='L227'><i><font color='green'>     * output size for (length,distance) codes is &lt;= 24 bits.</font></i>
+<a name='L228'><i><font color='green'>     */</font></i>
+<a name='L229'>
+<a name='L230'>    <b>if</b> (version == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || version[0] != my_version[0] ||
+<a name='L231'>        stream_size != <b>sizeof</b>(<a href='../S/2769.html#L104' title='Defined at 104 in Modules/zlib/zlib.h.'>z_stream</a>)) <font color='red'>{</font>
+<a name='L232'>        <b>return</b> <a href='../S/2769.html#L181' title='Defined at 181 in Modules/zlib/zlib.h.'>Z_VERSION_ERROR</a>;
+<a name='L233'>    <font color='red'>}</font>
+<a name='L234'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L235'>
+<a name='L236'>    strm-&gt;msg = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L237'>    <b>if</b> (strm-&gt;zalloc == (<a href='../D/6713.html' title='Multiple defined in 2 places.'>alloc_func</a>)0) <font color='red'>{</font>
+<a name='L238'>        strm-&gt;zalloc = <a href='../D/12443.html' title='Multiple defined in 4 places.'>zcalloc</a>;
+<a name='L239'>        strm-&gt;opaque = (<a href='../D/12267.html' title='Multiple defined in 6 places.'>voidpf</a>)0;
+<a name='L240'>    <font color='red'>}</font>
+<a name='L241'>    <b>if</b> (strm-&gt;zfree == (<a href='../D/8725.html' title='Multiple defined in 2 places.'>free_func</a>)0) strm-&gt;zfree = <a href='../D/12444.html' title='Multiple defined in 4 places.'>zcfree</a>;
+<a name='L242'>
+<a name='L243'><font color='darkred'>#ifdef</font> FASTEST
+<a name='L244'>    <b>if</b> (level != 0) level = 1;
+<a name='L245'><font color='darkred'>#else</font>
+<a name='L246'>    <b>if</b> (level == <a href='../S/2769.html#L189' title='Defined at 189 in Modules/zlib/zlib.h.'>Z_DEFAULT_COMPRESSION</a>) level = 6;
+<a name='L247'><font color='darkred'>#endif</font>
+<a name='L248'>
+<a name='L249'>    <b>if</b> (windowBits &lt; 0) <font color='red'>{</font> <i><font color='green'>/* suppress zlib wrapper */</font></i>
+<a name='L250'>        wrap = 0;
+<a name='L251'>        windowBits = -windowBits;
+<a name='L252'>    <font color='red'>}</font>
+<a name='L253'><font color='darkred'>#ifdef</font> <a href='../D/1420.html' title='Multiple defined in 2 places.'>GZIP</a>
+<a name='L254'>    <b>else</b> <b>if</b> (windowBits &gt; 15) <font color='red'>{</font>
+<a name='L255'>        wrap = 2;       <i><font color='green'>/* write gzip wrapper instead */</font></i>
+<a name='L256'>        windowBits -= 16;
+<a name='L257'>    <font color='red'>}</font>
+<a name='L258'><font color='darkred'>#endif</font>
+<a name='L259'>    <b>if</b> (memLevel &lt; 1 || memLevel &gt; <a href='../D/2069.html' title='Multiple defined in 4 places.'>MAX_MEM_LEVEL</a> || method != <a href='../S/2769.html#L205' title='Defined at 205 in Modules/zlib/zlib.h.'>Z_DEFLATED</a> ||
+<a name='L260'>        windowBits &lt; 8 || windowBits &gt; 15 || level &lt; 0 || level &gt; 9 ||
+<a name='L261'>        strategy &lt; 0 || strategy &gt; <a href='../S/2769.html#L195' title='Defined at 195 in Modules/zlib/zlib.h.'>Z_FIXED</a>) <font color='red'>{</font>
+<a name='L262'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L263'>    <font color='red'>}</font>
+<a name='L264'>    <b>if</b> (windowBits == 8) windowBits = 9;  <i><font color='green'>/* until 256-byte window bug fixed */</font></i>
+<a name='L265'>    s = (<a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *) <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(strm, 1, <b>sizeof</b>(<a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a>));
+<a name='L266'>    <b>if</b> (s == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L267'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../D/9267.html' title='Multiple defined in 5 places.'>internal_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)s;
+<a name='L268'>    s-&gt;strm = strm;
+<a name='L269'>
+<a name='L270'>    s-&gt;wrap = wrap;
+<a name='L271'>    s-&gt;gzhead = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L272'>    s-&gt;w_bits = windowBits;
+<a name='L273'>    s-&gt;w_size = 1 &lt;&lt; s-&gt;w_bits;
+<a name='L274'>    s-&gt;w_mask = s-&gt;w_size - 1;
+<a name='L275'>
+<a name='L276'>    s-&gt;hash_bits = memLevel + 7;
+<a name='L277'>    s-&gt;hash_size = 1 &lt;&lt; s-&gt;hash_bits;
+<a name='L278'>    s-&gt;hash_mask = s-&gt;hash_size - 1;
+<a name='L279'>    s-&gt;hash_shift =  ((s-&gt;hash_bits+<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1)/<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>);
+<a name='L280'>
+<a name='L281'>    s-&gt;window = (<a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *) <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(strm, s-&gt;w_size, 2*<b>sizeof</b>(<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>));
+<a name='L282'>    s-&gt;prev   = (<a href='../S/2738.html#L87' title='Defined at 87 in Modules/zlib/deflate.h.'>Posf</a> *)  <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(strm, s-&gt;w_size, <b>sizeof</b>(<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>));
+<a name='L283'>    s-&gt;head   = (<a href='../S/2738.html#L87' title='Defined at 87 in Modules/zlib/deflate.h.'>Posf</a> *)  <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(strm, s-&gt;hash_size, <b>sizeof</b>(<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>));
+<a name='L284'>
+<a name='L285'>    s-&gt;high_water = 0;      <i><font color='green'>/* nothing written to s-&gt;window yet */</font></i>
+<a name='L286'>
+<a name='L287'>    s-&gt;lit_bufsize = 1 &lt;&lt; (memLevel + 6); <i><font color='green'>/* 16K elements by default */</font></i>
+<a name='L288'>
+<a name='L289'>    overlay = (<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a> *) <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(strm, s-&gt;lit_bufsize, <b>sizeof</b>(<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)+2);
+<a name='L290'>    s-&gt;pending_buf = (<a href='../S/2773.html#L38' title='Defined at 38 in Modules/zlib/zutil.h.'>uchf</a> *) overlay;
+<a name='L291'>    s-&gt;pending_buf_size = (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;lit_bufsize * (<b>sizeof</b>(<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)+2L);
+<a name='L292'>
+<a name='L293'>    <b>if</b> (s-&gt;window == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || s-&gt;prev == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || s-&gt;head == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L294'>        s-&gt;pending_buf == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L295'>        s-&gt;status = <a href='../S/2738.html#L57' title='Defined at 57 in Modules/zlib/deflate.h.'>FINISH_STATE</a>;
+<a name='L296'>        strm-&gt;msg = (<b>char</b>*)<a href='../S/2773.html#L46' title='Defined at 46 in Modules/zlib/zutil.h.'>ERR_MSG</a>(<a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>);
+<a name='L297'>        <a href='../D/8007.html' title='Multiple defined in 3 places.'>deflateEnd</a> (strm);
+<a name='L298'>        <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L299'>    <font color='red'>}</font>
+<a name='L300'>    s-&gt;d_buf = overlay + s-&gt;lit_bufsize/<b>sizeof</b>(<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>);
+<a name='L301'>    s-&gt;l_buf = s-&gt;pending_buf + (1+<b>sizeof</b>(<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>))*s-&gt;lit_bufsize;
+<a name='L302'>
+<a name='L303'>    s-&gt;level = level;
+<a name='L304'>    s-&gt;strategy = strategy;
+<a name='L305'>    s-&gt;method = (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)method;
+<a name='L306'>
+<a name='L307'>    <b>return</b> <a href='../D/8014.html' title='Multiple defined in 3 places.'>deflateReset</a>(strm);
+<a name='L308'><font color='red'>}</font>
+<a name='L309'>
+<a name='L310'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L311'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7235.html' title='Multiple refered from 2 places.'>deflateSetDictionary</a> (strm, dictionary, dictLength)
+<a name='L312'>    z_streamp strm;
+<a name='L313'>    <b>const</b> Bytef *dictionary;
+<a name='L314'>    uInt  dictLength;
+<a name='L315'><font color='red'>{</font>
+<a name='L316'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *s;
+<a name='L317'>    <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> length = dictLength;
+<a name='L318'>    <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> n;
+<a name='L319'>    <a href='../S/2738.html#L88' title='Defined at 88 in Modules/zlib/deflate.h.'>IPos</a> hash_head = 0;
+<a name='L320'>
+<a name='L321'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || dictionary == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L322'>        strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap == 2 ||
+<a name='L323'>        (strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap == 1 &amp;&amp; strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;status != <a href='../S/2738.html#L51' title='Defined at 51 in Modules/zlib/deflate.h.'>INIT_STATE</a>))
+<a name='L324'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L325'>
+<a name='L326'>    s = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L327'>    <b>if</b> (s-&gt;wrap)
+<a name='L328'>        strm-&gt;adler = <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(strm-&gt;adler, dictionary, dictLength);
+<a name='L329'>
+<a name='L330'>    <b>if</b> (length &lt; <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L331'>    <b>if</b> (length &gt; s-&gt;w_size) <font color='red'>{</font>
+<a name='L332'>        length = s-&gt;w_size;
+<a name='L333'>        dictionary += dictLength - length; <i><font color='green'>/* use the tail of the dictionary */</font></i>
+<a name='L334'>    <font color='red'>}</font>
+<a name='L335'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(s-&gt;window, dictionary, length);
+<a name='L336'>    s-&gt;strstart = length;
+<a name='L337'>    s-&gt;block_start = (<b>long</b>)length;
+<a name='L338'>
+<a name='L339'>    <i><font color='green'>/* Insert all strings in the hash table (except for the last two bytes).</font></i>
+<a name='L340'><i><font color='green'>     * s-&gt;lookahead stays null, so s-&gt;ins_h will be recomputed at the next</font></i>
+<a name='L341'><i><font color='green'>     * call of fill_window.</font></i>
+<a name='L342'><i><font color='green'>     */</font></i>
+<a name='L343'>    s-&gt;ins_h = s-&gt;window[0];
+<a name='L344'>    <a href='../S/2737.html#L164' title='Defined at 164 in Modules/zlib/deflate.c.'>UPDATE_HASH</a>(s, s-&gt;ins_h, s-&gt;window[1]);
+<a name='L345'>    <b>for</b> (n = 0; n &lt;= length - <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>; n++) <font color='red'>{</font>
+<a name='L346'>        <a href='../D/1738.html' title='Multiple defined in 2 places.'>INSERT_STRING</a>(s, n, hash_head);
+<a name='L347'>    <font color='red'>}</font>
+<a name='L348'>    <b>if</b> (hash_head) hash_head = 0;  <i><font color='green'>/* to make compiler happy */</font></i>
+<a name='L349'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L350'><font color='red'>}</font>
+<a name='L351'>
+<a name='L352'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L353'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7234.html' title='Multiple refered from 3 places.'>deflateReset</a> (strm)
+<a name='L354'>    z_streamp strm;
+<a name='L355'><font color='red'>{</font>
+<a name='L356'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *s;
+<a name='L357'>
+<a name='L358'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L359'>        strm-&gt;zalloc == (<a href='../D/6713.html' title='Multiple defined in 2 places.'>alloc_func</a>)0 || strm-&gt;zfree == (<a href='../D/8725.html' title='Multiple defined in 2 places.'>free_func</a>)0) <font color='red'>{</font>
+<a name='L360'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L361'>    <font color='red'>}</font>
+<a name='L362'>
+<a name='L363'>    strm-&gt;total_in = strm-&gt;total_out = 0;
+<a name='L364'>    strm-&gt;msg = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>; <i><font color='green'>/* use zfree if we ever allocate msg dynamically */</font></i>
+<a name='L365'>    strm-&gt;data_type = <a href='../S/2769.html#L202' title='Defined at 202 in Modules/zlib/zlib.h.'>Z_UNKNOWN</a>;
+<a name='L366'>
+<a name='L367'>    s = (<a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L368'>    s-&gt;pending = 0;
+<a name='L369'>    s-&gt;pending_out = s-&gt;pending_buf;
+<a name='L370'>
+<a name='L371'>    <b>if</b> (s-&gt;wrap &lt; 0) <font color='red'>{</font>
+<a name='L372'>        s-&gt;wrap = -s-&gt;wrap; <i><font color='green'>/* was made negative by deflate(..., Z_FINISH); */</font></i>
+<a name='L373'>    <font color='red'>}</font>
+<a name='L374'>    s-&gt;status = s-&gt;wrap ? <a href='../S/2738.html#L51' title='Defined at 51 in Modules/zlib/deflate.h.'>INIT_STATE</a> : <a href='../S/2738.html#L56' title='Defined at 56 in Modules/zlib/deflate.h.'>BUSY_STATE</a>;
+<a name='L375'>    strm-&gt;adler =
+<a name='L376'><font color='darkred'>#ifdef</font> <a href='../D/1420.html' title='Multiple defined in 2 places.'>GZIP</a>
+<a name='L377'>        s-&gt;wrap == 2 ? <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0) :
+<a name='L378'><font color='darkred'>#endif</font>
+<a name='L379'>        <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L380'>    s-&gt;last_flush = <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a>;
+<a name='L381'>
+<a name='L382'>    <a href='../D/6621.html' title='Multiple defined in 2 places.'>_tr_init</a>(s);
+<a name='L383'>    <a href='../S/2737.html#L1022' title='Defined at 1022 in Modules/zlib/deflate.c.'>lm_init</a>(s);
+<a name='L384'>
+<a name='L385'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L386'><font color='red'>}</font>
+<a name='L387'>
+<a name='L388'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L389'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L710' title='Refered from 710 in Modules/zlib/zlib.h.'>deflateSetHeader</a> (strm, head)
+<a name='L390'>    z_streamp strm;
+<a name='L391'>    gz_headerp head;
+<a name='L392'><font color='red'>{</font>
+<a name='L393'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L394'>    <b>if</b> (strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap != 2) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L395'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;gzhead = head;
+<a name='L396'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L397'><font color='red'>}</font>
+<a name='L398'>
+<a name='L399'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L400'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L694' title='Refered from 694 in Modules/zlib/zlib.h.'>deflatePrime</a> (strm, bits, value)
+<a name='L401'>    z_streamp strm;
+<a name='L402'>    <b>int</b> bits;
+<a name='L403'>    <b>int</b> value;
+<a name='L404'><font color='red'>{</font>
+<a name='L405'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L406'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bi_valid = bits;
+<a name='L407'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bi_buf = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &amp; ((1 &lt;&lt; bits) - 1));
+<a name='L408'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L409'><font color='red'>}</font>
+<a name='L410'>
+<a name='L411'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L412'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7232.html' title='Multiple refered from 5 places.'>deflateParams</a>(strm, level, strategy)
+<a name='L413'>    z_streamp strm;
+<a name='L414'>    <b>int</b> level;
+<a name='L415'>    <b>int</b> strategy;
+<a name='L416'><font color='red'>{</font>
+<a name='L417'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *s;
+<a name='L418'>    compress_func func;
+<a name='L419'>    <b>int</b> err = <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L420'>
+<a name='L421'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L422'>    s = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L423'>
+<a name='L424'><font color='darkred'>#ifdef</font> FASTEST
+<a name='L425'>    <b>if</b> (level != 0) level = 1;
+<a name='L426'><font color='darkred'>#else</font>
+<a name='L427'>    <b>if</b> (level == <a href='../S/2769.html#L189' title='Defined at 189 in Modules/zlib/zlib.h.'>Z_DEFAULT_COMPRESSION</a>) level = 6;
+<a name='L428'><font color='darkred'>#endif</font>
+<a name='L429'>    <b>if</b> (level &lt; 0 || level &gt; 9 || strategy &lt; 0 || strategy &gt; <a href='../S/2769.html#L195' title='Defined at 195 in Modules/zlib/zlib.h.'>Z_FIXED</a>) <font color='red'>{</font>
+<a name='L430'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L431'>    <font color='red'>}</font>
+<a name='L432'>    func = configuration_table[s-&gt;level].func;
+<a name='L433'>
+<a name='L434'>    <b>if</b> ((strategy != s-&gt;strategy || func != configuration_table[level].func) &amp;&amp;
+<a name='L435'>        strm-&gt;total_in != 0) <font color='red'>{</font>
+<a name='L436'>        <i><font color='green'>/* Flush the last buffer: */</font></i>
+<a name='L437'>        err = <a href='../D/8004.html' title='Multiple defined in 3 places.'>deflate</a>(strm, <a href='../S/2769.html#L169' title='Defined at 169 in Modules/zlib/zlib.h.'>Z_BLOCK</a>);
+<a name='L438'>    <font color='red'>}</font>
+<a name='L439'>    <b>if</b> (s-&gt;level != level) <font color='red'>{</font>
+<a name='L440'>        s-&gt;level = level;
+<a name='L441'>        s-&gt;max_lazy_match   = configuration_table[level].max_lazy;
+<a name='L442'>        s-&gt;good_match       = configuration_table[level].good_length;
+<a name='L443'>        s-&gt;nice_match       = configuration_table[level].nice_length;
+<a name='L444'>        s-&gt;max_chain_length = configuration_table[level].max_chain;
+<a name='L445'>    <font color='red'>}</font>
+<a name='L446'>    s-&gt;strategy = strategy;
+<a name='L447'>    <b>return</b> err;
+<a name='L448'><font color='red'>}</font>
+<a name='L449'>
+<a name='L450'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L451'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L667' title='Refered from 667 in Modules/zlib/zlib.h.'>deflateTune</a>(strm, good_length, max_lazy, nice_length, max_chain)
+<a name='L452'>    z_streamp strm;
+<a name='L453'>    <b>int</b> good_length;
+<a name='L454'>    <b>int</b> max_lazy;
+<a name='L455'>    <b>int</b> nice_length;
+<a name='L456'>    <b>int</b> max_chain;
+<a name='L457'><font color='red'>{</font>
+<a name='L458'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *s;
+<a name='L459'>
+<a name='L460'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L461'>    s = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L462'>    s-&gt;good_match = good_length;
+<a name='L463'>    s-&gt;max_lazy_match = max_lazy;
+<a name='L464'>    s-&gt;nice_match = nice_length;
+<a name='L465'>    s-&gt;max_chain_length = max_chain;
+<a name='L466'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L467'><font color='red'>}</font>
+<a name='L468'>
+<a name='L469'><i><font color='green'>/* =========================================================================</font></i>
+<a name='L470'><i><font color='green'> * For the default windowBits of 15 and memLevel of 8, this function returns</font></i>
+<a name='L471'><i><font color='green'> * a close to exact, as well as small, upper bound on the compressed size.</font></i>
+<a name='L472'><i><font color='green'> * They are coded as constants here for a reason--if the #define's are</font></i>
+<a name='L473'><i><font color='green'> * changed, then this function needs to be changed as well.  The return</font></i>
+<a name='L474'><i><font color='green'> * value for 15 and 8 only works for those exact settings.</font></i>
+<a name='L475'><i><font color='green'> *</font></i>
+<a name='L476'><i><font color='green'> * For any setting other than those defaults for windowBits and memLevel,</font></i>
+<a name='L477'><i><font color='green'> * the value returned is a conservative worst case for the maximum expansion</font></i>
+<a name='L478'><i><font color='green'> * resulting from using fixed blocks instead of stored blocks, which deflate</font></i>
+<a name='L479'><i><font color='green'> * can emit on compressed data for some combinations of the parameters.</font></i>
+<a name='L480'><i><font color='green'> *</font></i>
+<a name='L481'><i><font color='green'> * This function could be more sophisticated to provide closer upper bounds for</font></i>
+<a name='L482'><i><font color='green'> * every combination of windowBits and memLevel.  But even the conservative</font></i>
+<a name='L483'><i><font color='green'> * upper bound of about 14% expansion does not seem onerous for output buffer</font></i>
+<a name='L484'><i><font color='green'> * allocation.</font></i>
+<a name='L485'><i><font color='green'> */</font></i>
+<a name='L486'><a href='../D/11920.html' title='Multiple defined in 4 places.'>uLong</a> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L684' title='Refered from 684 in Modules/zlib/zlib.h.'>deflateBound</a>(strm, sourceLen)
+<a name='L487'>    z_streamp strm;
+<a name='L488'>    uLong sourceLen;
+<a name='L489'><font color='red'>{</font>
+<a name='L490'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *s;
+<a name='L491'>    <a href='../D/11920.html' title='Multiple defined in 4 places.'>uLong</a> complen, wraplen;
+<a name='L492'>    <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *str;
+<a name='L493'>
+<a name='L494'>    <i><font color='green'>/* conservative upper bound for compressed data */</font></i>
+<a name='L495'>    complen = sourceLen +
+<a name='L496'>              ((sourceLen + 7) &gt;&gt; 3) + ((sourceLen + 63) &gt;&gt; 6) + 5;
+<a name='L497'>
+<a name='L498'>    <i><font color='green'>/* if can't get parameters, return conservative bound plus zlib wrapper */</font></i>
+<a name='L499'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L500'>        <b>return</b> complen + 6;
+<a name='L501'>
+<a name='L502'>    <i><font color='green'>/* compute wrapper length */</font></i>
+<a name='L503'>    s = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L504'>    <b>switch</b> (s-&gt;wrap) <font color='red'>{</font>
+<a name='L505'>    <b>case</b> 0:                                 <i><font color='green'>/* raw deflate */</font></i>
+<a name='L506'>        wraplen = 0;
+<a name='L507'>        <b>break</b>;
+<a name='L508'>    <b>case</b> 1:                                 <i><font color='green'>/* zlib wrapper */</font></i>
+<a name='L509'>        wraplen = 6 + (s-&gt;strstart ? 4 : 0);
+<a name='L510'>        <b>break</b>;
+<a name='L511'>    <b>case</b> 2:                                 <i><font color='green'>/* gzip wrapper */</font></i>
+<a name='L512'>        wraplen = 18;
+<a name='L513'>        <b>if</b> (s-&gt;gzhead != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>          <i><font color='green'>/* user-supplied gzip header */</font></i>
+<a name='L514'>            <b>if</b> (s-&gt;gzhead-&gt;extra != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L515'>                wraplen += 2 + s-&gt;gzhead-&gt;extra_len;
+<a name='L516'>            str = s-&gt;gzhead-&gt;name;
+<a name='L517'>            <b>if</b> (str != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L518'>                <b>do</b> <font color='red'>{</font>
+<a name='L519'>                    wraplen++;
+<a name='L520'>                <font color='red'>}</font> <b>while</b> (*str++);
+<a name='L521'>            str = s-&gt;gzhead-&gt;comment;
+<a name='L522'>            <b>if</b> (str != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L523'>                <b>do</b> <font color='red'>{</font>
+<a name='L524'>                    wraplen++;
+<a name='L525'>                <font color='red'>}</font> <b>while</b> (*str++);
+<a name='L526'>            <b>if</b> (s-&gt;gzhead-&gt;hcrc)
+<a name='L527'>                wraplen += 2;
+<a name='L528'>        <font color='red'>}</font>
+<a name='L529'>        <b>break</b>;
+<a name='L530'>    <b>default</b>:                                <i><font color='green'>/* for compiler happiness */</font></i>
+<a name='L531'>        wraplen = 6;
+<a name='L532'>    <font color='red'>}</font>
+<a name='L533'>
+<a name='L534'>    <i><font color='green'>/* if not default parameters, return conservative bound */</font></i>
+<a name='L535'>    <b>if</b> (s-&gt;w_bits != 15 || s-&gt;hash_bits != 8 + 7)
+<a name='L536'>        <b>return</b> complen + wraplen;
+<a name='L537'>
+<a name='L538'>    <i><font color='green'>/* default settings: return tight bound for that case */</font></i>
+<a name='L539'>    <b>return</b> sourceLen + (sourceLen &gt;&gt; 12) + (sourceLen &gt;&gt; 14) +
+<a name='L540'>           (sourceLen &gt;&gt; 25) + 13 - 6 + wraplen;
+<a name='L541'><font color='red'>}</font>
+<a name='L542'>
+<a name='L543'><i><font color='green'>/* =========================================================================</font></i>
+<a name='L544'><i><font color='green'> * Put a short in the pending buffer. The 16-bit value is put in MSB order.</font></i>
+<a name='L545'><i><font color='green'> * IN assertion: the stream state is correct and there is enough room in</font></i>
+<a name='L546'><i><font color='green'> * pending_buf.</font></i>
+<a name='L547'><i><font color='green'> */</font></i>
+<a name='L548'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/9788.html' title='Multiple refered from 6 places.'>putShortMSB</a> (s, b)
+<a name='L549'>    deflate_state *s;
+<a name='L550'>    uInt b;
+<a name='L551'><font color='red'>{</font>
+<a name='L552'>    <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> &gt;&gt; 8));
+<a name='L553'>    <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> &amp; 0xff));
+<a name='L554'><font color='red'>}</font>
+<a name='L555'>
+<a name='L556'><i><font color='green'>/* =========================================================================</font></i>
+<a name='L557'><i><font color='green'> * Flush as much pending output as possible. All deflate() output goes</font></i>
+<a name='L558'><i><font color='green'> * through this function so some applications may wish to modify it</font></i>
+<a name='L559'><i><font color='green'> * to avoid allocating a large strm-&gt;next_out buffer and copying into it.</font></i>
+<a name='L560'><i><font color='green'> * (See also read_buf()).</font></i>
+<a name='L561'><i><font color='green'> */</font></i>
+<a name='L562'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/7874.html' title='Multiple refered from 9 places.'>flush_pending</a>(strm)
+<a name='L563'>    z_streamp strm;
+<a name='L564'><font color='red'>{</font>
+<a name='L565'>    <b>unsigned</b> len = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending;
+<a name='L566'>
+<a name='L567'>    <b>if</b> (len &gt; strm-&gt;avail_out) len = strm-&gt;avail_out;
+<a name='L568'>    <b>if</b> (len == 0) <b>return</b>;
+<a name='L569'>
+<a name='L570'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(strm-&gt;next_out, strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending_out, len);
+<a name='L571'>    strm-&gt;next_out  += len;
+<a name='L572'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending_out  += len;
+<a name='L573'>    strm-&gt;total_out += len;
+<a name='L574'>    strm-&gt;avail_out  -= len;
+<a name='L575'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending -= len;
+<a name='L576'>    <b>if</b> (strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending == 0) <font color='red'>{</font>
+<a name='L577'>        strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending_out = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending_buf;
+<a name='L578'>    <font color='red'>}</font>
+<a name='L579'><font color='red'>}</font>
+<a name='L580'>
+<a name='L581'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L582'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7224.html' title='Multiple refered from 20 places.'>deflate</a> (strm, flush)
+<a name='L583'>    z_streamp strm;
+<a name='L584'>    <b>int</b> flush;
+<a name='L585'><font color='red'>{</font>
+<a name='L586'>    <b>int</b> old_flush; <i><font color='green'>/* value of flush param for previous deflate call */</font></i>
+<a name='L587'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *s;
+<a name='L588'>
+<a name='L589'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L590'>        flush &gt; <a href='../S/2769.html#L169' title='Defined at 169 in Modules/zlib/zlib.h.'>Z_BLOCK</a> || flush &lt; 0) <font color='red'>{</font>
+<a name='L591'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L592'>    <font color='red'>}</font>
+<a name='L593'>    s = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L594'>
+<a name='L595'>    <b>if</b> (strm-&gt;next_out == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L596'>        (strm-&gt;next_in == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp; strm-&gt;avail_in != 0) ||
+<a name='L597'>        (s-&gt;status == <a href='../S/2738.html#L57' title='Defined at 57 in Modules/zlib/deflate.h.'>FINISH_STATE</a> &amp;&amp; flush != <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>)) <font color='red'>{</font>
+<a name='L598'>        <a href='../S/2773.html#L48' title='Defined at 48 in Modules/zlib/zutil.h.'>ERR_RETURN</a>(strm, <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>);
+<a name='L599'>    <font color='red'>}</font>
+<a name='L600'>    <b>if</b> (strm-&gt;avail_out == 0) <a href='../S/2773.html#L48' title='Defined at 48 in Modules/zlib/zutil.h.'>ERR_RETURN</a>(strm, <a href='../S/2769.html#L180' title='Defined at 180 in Modules/zlib/zlib.h.'>Z_BUF_ERROR</a>);
+<a name='L601'>
+<a name='L602'>    s-&gt;strm = strm; <i><font color='green'>/* just in case */</font></i>
+<a name='L603'>    old_flush = s-&gt;last_flush;
+<a name='L604'>    s-&gt;last_flush = flush;
+<a name='L605'>
+<a name='L606'>    <i><font color='green'>/* Write the header */</font></i>
+<a name='L607'>    <b>if</b> (s-&gt;status == <a href='../S/2738.html#L51' title='Defined at 51 in Modules/zlib/deflate.h.'>INIT_STATE</a>) <font color='red'>{</font>
+<a name='L608'><font color='darkred'>#ifdef</font> <a href='../D/1420.html' title='Multiple defined in 2 places.'>GZIP</a>
+<a name='L609'>        <b>if</b> (s-&gt;wrap == 2) <font color='red'>{</font>
+<a name='L610'>            strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L611'>            <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 31);
+<a name='L612'>            <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 139);
+<a name='L613'>            <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 8);
+<a name='L614'>            <b>if</b> (s-&gt;gzhead == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L615'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 0);
+<a name='L616'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 0);
+<a name='L617'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 0);
+<a name='L618'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 0);
+<a name='L619'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, 0);
+<a name='L620'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, s-&gt;level == 9 ? 2 :
+<a name='L621'>                            (s-&gt;strategy &gt;= <a href='../S/2769.html#L193' title='Defined at 193 in Modules/zlib/zlib.h.'>Z_HUFFMAN_ONLY</a> || s-&gt;level &lt; 2 ?
+<a name='L622'>                             4 : 0));
+<a name='L623'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, <a href='../D/2429.html' title='Multiple defined in 10 places.'>OS_CODE</a>);
+<a name='L624'>                s-&gt;status = <a href='../S/2738.html#L56' title='Defined at 56 in Modules/zlib/deflate.h.'>BUSY_STATE</a>;
+<a name='L625'>            <font color='red'>}</font>
+<a name='L626'>            <b>else</b> <font color='red'>{</font>
+<a name='L627'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (s-&gt;gzhead-&gt;text ? 1 : 0) +
+<a name='L628'>                            (s-&gt;gzhead-&gt;hcrc ? 2 : 0) +
+<a name='L629'>                            (s-&gt;gzhead-&gt;extra == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ? 0 : 4) +
+<a name='L630'>                            (s-&gt;gzhead-&gt;name == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ? 0 : 8) +
+<a name='L631'>                            (s-&gt;gzhead-&gt;comment == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ? 0 : 16)
+<a name='L632'>                        );
+<a name='L633'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)(s-&gt;gzhead-&gt;time &amp; 0xff));
+<a name='L634'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((s-&gt;gzhead-&gt;time &gt;&gt; 8) &amp; 0xff));
+<a name='L635'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((s-&gt;gzhead-&gt;time &gt;&gt; 16) &amp; 0xff));
+<a name='L636'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((s-&gt;gzhead-&gt;time &gt;&gt; 24) &amp; 0xff));
+<a name='L637'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, s-&gt;level == 9 ? 2 :
+<a name='L638'>                            (s-&gt;strategy &gt;= <a href='../S/2769.html#L193' title='Defined at 193 in Modules/zlib/zlib.h.'>Z_HUFFMAN_ONLY</a> || s-&gt;level &lt; 2 ?
+<a name='L639'>                             4 : 0));
+<a name='L640'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, s-&gt;gzhead-&gt;os &amp; 0xff);
+<a name='L641'>                <b>if</b> (s-&gt;gzhead-&gt;extra != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L642'>                    <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, s-&gt;gzhead-&gt;extra_len &amp; 0xff);
+<a name='L643'>                    <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (s-&gt;gzhead-&gt;extra_len &gt;&gt; 8) &amp; 0xff);
+<a name='L644'>                <font color='red'>}</font>
+<a name='L645'>                <b>if</b> (s-&gt;gzhead-&gt;hcrc)
+<a name='L646'>                    strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, s-&gt;pending_buf,
+<a name='L647'>                                        s-&gt;pending);
+<a name='L648'>                s-&gt;gzindex = 0;
+<a name='L649'>                s-&gt;status = <a href='../S/2738.html#L52' title='Defined at 52 in Modules/zlib/deflate.h.'>EXTRA_STATE</a>;
+<a name='L650'>            <font color='red'>}</font>
+<a name='L651'>        <font color='red'>}</font>
+<a name='L652'>        <b>else</b>
+<a name='L653'><font color='darkred'>#endif</font>
+<a name='L654'>        <font color='red'>{</font>
+<a name='L655'>            <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> header = (<a href='../S/2769.html#L205' title='Defined at 205 in Modules/zlib/zlib.h.'>Z_DEFLATED</a> + ((s-&gt;w_bits-8)&lt;&lt;4)) &lt;&lt; 8;
+<a name='L656'>            <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> level_flags;
+<a name='L657'>
+<a name='L658'>            <b>if</b> (s-&gt;strategy &gt;= <a href='../S/2769.html#L193' title='Defined at 193 in Modules/zlib/zlib.h.'>Z_HUFFMAN_ONLY</a> || s-&gt;level &lt; 2)
+<a name='L659'>                level_flags = 0;
+<a name='L660'>            <b>else</b> <b>if</b> (s-&gt;level &lt; 6)
+<a name='L661'>                level_flags = 1;
+<a name='L662'>            <b>else</b> <b>if</b> (s-&gt;level == 6)
+<a name='L663'>                level_flags = 2;
+<a name='L664'>            <b>else</b>
+<a name='L665'>                level_flags = 3;
+<a name='L666'>            header |= (level_flags &lt;&lt; 6);
+<a name='L667'>            <b>if</b> (s-&gt;strstart != 0) header |= <a href='../S/2773.html#L75' title='Defined at 75 in Modules/zlib/zutil.h.'>PRESET_DICT</a>;
+<a name='L668'>            header += 31 - (header % 31);
+<a name='L669'>
+<a name='L670'>            s-&gt;status = <a href='../S/2738.html#L56' title='Defined at 56 in Modules/zlib/deflate.h.'>BUSY_STATE</a>;
+<a name='L671'>            <a href='../S/2737.html#L548' title='Defined at 548 in Modules/zlib/deflate.c.'>putShortMSB</a>(s, header);
+<a name='L672'>
+<a name='L673'>            <i><font color='green'>/* Save the adler32 of the preset dictionary: */</font></i>
+<a name='L674'>            <b>if</b> (s-&gt;strstart != 0) <font color='red'>{</font>
+<a name='L675'>                <a href='../S/2737.html#L548' title='Defined at 548 in Modules/zlib/deflate.c.'>putShortMSB</a>(s, (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)(strm-&gt;adler &gt;&gt; 16));
+<a name='L676'>                <a href='../S/2737.html#L548' title='Defined at 548 in Modules/zlib/deflate.c.'>putShortMSB</a>(s, (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)(strm-&gt;adler &amp; 0xffff));
+<a name='L677'>            <font color='red'>}</font>
+<a name='L678'>            strm-&gt;adler = <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L679'>        <font color='red'>}</font>
+<a name='L680'>    <font color='red'>}</font>
+<a name='L681'><font color='darkred'>#ifdef</font> <a href='../D/1420.html' title='Multiple defined in 2 places.'>GZIP</a>
+<a name='L682'>    <b>if</b> (s-&gt;status == <a href='../S/2738.html#L52' title='Defined at 52 in Modules/zlib/deflate.h.'>EXTRA_STATE</a>) <font color='red'>{</font>
+<a name='L683'>        <b>if</b> (s-&gt;gzhead-&gt;extra != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L684'>            <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> beg = s-&gt;pending;  <i><font color='green'>/* start of bytes to update crc */</font></i>
+<a name='L685'>
+<a name='L686'>            <b>while</b> (s-&gt;gzindex &lt; (s-&gt;gzhead-&gt;extra_len &amp; 0xffff)) <font color='red'>{</font>
+<a name='L687'>                <b>if</b> (s-&gt;pending == s-&gt;pending_buf_size) <font color='red'>{</font>
+<a name='L688'>                    <b>if</b> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+<a name='L689'>                        strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, s-&gt;pending_buf + beg,
+<a name='L690'>                                            s-&gt;pending - beg);
+<a name='L691'>                    <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(strm);
+<a name='L692'>                    beg = s-&gt;pending;
+<a name='L693'>                    <b>if</b> (s-&gt;pending == s-&gt;pending_buf_size)
+<a name='L694'>                        <b>break</b>;
+<a name='L695'>                <font color='red'>}</font>
+<a name='L696'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, s-&gt;gzhead-&gt;extra[s-&gt;gzindex]);
+<a name='L697'>                s-&gt;gzindex++;
+<a name='L698'>            <font color='red'>}</font>
+<a name='L699'>            <b>if</b> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+<a name='L700'>                strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, s-&gt;pending_buf + beg,
+<a name='L701'>                                    s-&gt;pending - beg);
+<a name='L702'>            <b>if</b> (s-&gt;gzindex == s-&gt;gzhead-&gt;extra_len) <font color='red'>{</font>
+<a name='L703'>                s-&gt;gzindex = 0;
+<a name='L704'>                s-&gt;status = <a href='../S/2738.html#L53' title='Defined at 53 in Modules/zlib/deflate.h.'>NAME_STATE</a>;
+<a name='L705'>            <font color='red'>}</font>
+<a name='L706'>        <font color='red'>}</font>
+<a name='L707'>        <b>else</b>
+<a name='L708'>            s-&gt;status = <a href='../S/2738.html#L53' title='Defined at 53 in Modules/zlib/deflate.h.'>NAME_STATE</a>;
+<a name='L709'>    <font color='red'>}</font>
+<a name='L710'>    <b>if</b> (s-&gt;status == <a href='../S/2738.html#L53' title='Defined at 53 in Modules/zlib/deflate.h.'>NAME_STATE</a>) <font color='red'>{</font>
+<a name='L711'>        <b>if</b> (s-&gt;gzhead-&gt;name != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L712'>            <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> beg = s-&gt;pending;  <i><font color='green'>/* start of bytes to update crc */</font></i>
+<a name='L713'>            <b>int</b> val;
+<a name='L714'>
+<a name='L715'>            <b>do</b> <font color='red'>{</font>
+<a name='L716'>                <b>if</b> (s-&gt;pending == s-&gt;pending_buf_size) <font color='red'>{</font>
+<a name='L717'>                    <b>if</b> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+<a name='L718'>                        strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, s-&gt;pending_buf + beg,
+<a name='L719'>                                            s-&gt;pending - beg);
+<a name='L720'>                    <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(strm);
+<a name='L721'>                    beg = s-&gt;pending;
+<a name='L722'>                    <b>if</b> (s-&gt;pending == s-&gt;pending_buf_size) <font color='red'>{</font>
+<a name='L723'>                        val = 1;
+<a name='L724'>                        <b>break</b>;
+<a name='L725'>                    <font color='red'>}</font>
+<a name='L726'>                <font color='red'>}</font>
+<a name='L727'>                val = s-&gt;gzhead-&gt;name[s-&gt;gzindex++];
+<a name='L728'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, val);
+<a name='L729'>            <font color='red'>}</font> <b>while</b> (val != 0);
+<a name='L730'>            <b>if</b> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+<a name='L731'>                strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, s-&gt;pending_buf + beg,
+<a name='L732'>                                    s-&gt;pending - beg);
+<a name='L733'>            <b>if</b> (val == 0) <font color='red'>{</font>
+<a name='L734'>                s-&gt;gzindex = 0;
+<a name='L735'>                s-&gt;status = <a href='../S/2738.html#L54' title='Defined at 54 in Modules/zlib/deflate.h.'>COMMENT_STATE</a>;
+<a name='L736'>            <font color='red'>}</font>
+<a name='L737'>        <font color='red'>}</font>
+<a name='L738'>        <b>else</b>
+<a name='L739'>            s-&gt;status = <a href='../S/2738.html#L54' title='Defined at 54 in Modules/zlib/deflate.h.'>COMMENT_STATE</a>;
+<a name='L740'>    <font color='red'>}</font>
+<a name='L741'>    <b>if</b> (s-&gt;status == <a href='../S/2738.html#L54' title='Defined at 54 in Modules/zlib/deflate.h.'>COMMENT_STATE</a>) <font color='red'>{</font>
+<a name='L742'>        <b>if</b> (s-&gt;gzhead-&gt;comment != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L743'>            <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> beg = s-&gt;pending;  <i><font color='green'>/* start of bytes to update crc */</font></i>
+<a name='L744'>            <b>int</b> val;
+<a name='L745'>
+<a name='L746'>            <b>do</b> <font color='red'>{</font>
+<a name='L747'>                <b>if</b> (s-&gt;pending == s-&gt;pending_buf_size) <font color='red'>{</font>
+<a name='L748'>                    <b>if</b> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+<a name='L749'>                        strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, s-&gt;pending_buf + beg,
+<a name='L750'>                                            s-&gt;pending - beg);
+<a name='L751'>                    <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(strm);
+<a name='L752'>                    beg = s-&gt;pending;
+<a name='L753'>                    <b>if</b> (s-&gt;pending == s-&gt;pending_buf_size) <font color='red'>{</font>
+<a name='L754'>                        val = 1;
+<a name='L755'>                        <b>break</b>;
+<a name='L756'>                    <font color='red'>}</font>
+<a name='L757'>                <font color='red'>}</font>
+<a name='L758'>                val = s-&gt;gzhead-&gt;comment[s-&gt;gzindex++];
+<a name='L759'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, val);
+<a name='L760'>            <font color='red'>}</font> <b>while</b> (val != 0);
+<a name='L761'>            <b>if</b> (s-&gt;gzhead-&gt;hcrc &amp;&amp; s-&gt;pending &gt; beg)
+<a name='L762'>                strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, s-&gt;pending_buf + beg,
+<a name='L763'>                                    s-&gt;pending - beg);
+<a name='L764'>            <b>if</b> (val == 0)
+<a name='L765'>                s-&gt;status = <a href='../S/2738.html#L55' title='Defined at 55 in Modules/zlib/deflate.h.'>HCRC_STATE</a>;
+<a name='L766'>        <font color='red'>}</font>
+<a name='L767'>        <b>else</b>
+<a name='L768'>            s-&gt;status = <a href='../S/2738.html#L55' title='Defined at 55 in Modules/zlib/deflate.h.'>HCRC_STATE</a>;
+<a name='L769'>    <font color='red'>}</font>
+<a name='L770'>    <b>if</b> (s-&gt;status == <a href='../S/2738.html#L55' title='Defined at 55 in Modules/zlib/deflate.h.'>HCRC_STATE</a>) <font color='red'>{</font>
+<a name='L771'>        <b>if</b> (s-&gt;gzhead-&gt;hcrc) <font color='red'>{</font>
+<a name='L772'>            <b>if</b> (s-&gt;pending + 2 &gt; s-&gt;pending_buf_size)
+<a name='L773'>                <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(strm);
+<a name='L774'>            <b>if</b> (s-&gt;pending + 2 &lt;= s-&gt;pending_buf_size) <font color='red'>{</font>
+<a name='L775'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)(strm-&gt;adler &amp; 0xff));
+<a name='L776'>                <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((strm-&gt;adler &gt;&gt; 8) &amp; 0xff));
+<a name='L777'>                strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L778'>                s-&gt;status = <a href='../S/2738.html#L56' title='Defined at 56 in Modules/zlib/deflate.h.'>BUSY_STATE</a>;
+<a name='L779'>            <font color='red'>}</font>
+<a name='L780'>        <font color='red'>}</font>
+<a name='L781'>        <b>else</b>
+<a name='L782'>            s-&gt;status = <a href='../S/2738.html#L56' title='Defined at 56 in Modules/zlib/deflate.h.'>BUSY_STATE</a>;
+<a name='L783'>    <font color='red'>}</font>
+<a name='L784'><font color='darkred'>#endif</font>
+<a name='L785'>
+<a name='L786'>    <i><font color='green'>/* Flush as much pending output as possible */</font></i>
+<a name='L787'>    <b>if</b> (s-&gt;pending != 0) <font color='red'>{</font>
+<a name='L788'>        <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(strm);
+<a name='L789'>        <b>if</b> (strm-&gt;avail_out == 0) <font color='red'>{</font>
+<a name='L790'>            <i><font color='green'>/* Since avail_out is 0, deflate will be called again with</font></i>
+<a name='L791'><i><font color='green'>             * more output space, but possibly with both pending and</font></i>
+<a name='L792'><i><font color='green'>             * avail_in equal to zero. There won't be anything to do,</font></i>
+<a name='L793'><i><font color='green'>             * but this is not an error situation so make sure we</font></i>
+<a name='L794'><i><font color='green'>             * return OK instead of BUF_ERROR at next call of deflate:</font></i>
+<a name='L795'><i><font color='green'>             */</font></i>
+<a name='L796'>            s-&gt;last_flush = -1;
+<a name='L797'>            <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L798'>        <font color='red'>}</font>
+<a name='L799'>
+<a name='L800'>    <i><font color='green'>/* Make sure there is something to do and avoid duplicate consecutive</font></i>
+<a name='L801'><i><font color='green'>     * flushes. For repeated and useless calls with Z_FINISH, we keep</font></i>
+<a name='L802'><i><font color='green'>     * returning Z_STREAM_END instead of Z_BUF_ERROR.</font></i>
+<a name='L803'><i><font color='green'>     */</font></i>
+<a name='L804'>    <font color='red'>}</font> <b>else</b> <b>if</b> (strm-&gt;avail_in == 0 &amp;&amp; flush &lt;= old_flush &amp;&amp;
+<a name='L805'>               flush != <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>) <font color='red'>{</font>
+<a name='L806'>        <a href='../S/2773.html#L48' title='Defined at 48 in Modules/zlib/zutil.h.'>ERR_RETURN</a>(strm, <a href='../S/2769.html#L180' title='Defined at 180 in Modules/zlib/zlib.h.'>Z_BUF_ERROR</a>);
+<a name='L807'>    <font color='red'>}</font>
+<a name='L808'>
+<a name='L809'>    <i><font color='green'>/* User must not provide more input after the first FINISH: */</font></i>
+<a name='L810'>    <b>if</b> (s-&gt;status == <a href='../S/2738.html#L57' title='Defined at 57 in Modules/zlib/deflate.h.'>FINISH_STATE</a> &amp;&amp; strm-&gt;avail_in != 0) <font color='red'>{</font>
+<a name='L811'>        <a href='../S/2773.html#L48' title='Defined at 48 in Modules/zlib/zutil.h.'>ERR_RETURN</a>(strm, <a href='../S/2769.html#L180' title='Defined at 180 in Modules/zlib/zlib.h.'>Z_BUF_ERROR</a>);
+<a name='L812'>    <font color='red'>}</font>
+<a name='L813'>
+<a name='L814'>    <i><font color='green'>/* Start a new block or continue the current one.</font></i>
+<a name='L815'><i><font color='green'>     */</font></i>
+<a name='L816'>    <b>if</b> (strm-&gt;avail_in != 0 || s-&gt;lookahead != 0 ||
+<a name='L817'>        (flush != <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a> &amp;&amp; s-&gt;status != <a href='../S/2738.html#L57' title='Defined at 57 in Modules/zlib/deflate.h.'>FINISH_STATE</a>)) <font color='red'>{</font>
+<a name='L818'>        <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> bstate;
+<a name='L819'>
+<a name='L820'>        bstate = s-&gt;strategy == <a href='../S/2769.html#L193' title='Defined at 193 in Modules/zlib/zlib.h.'>Z_HUFFMAN_ONLY</a> ? <a href='../S/2737.html#L1807' title='Defined at 1807 in Modules/zlib/deflate.c.'>deflate_huff</a>(s, flush) :
+<a name='L821'>                    (s-&gt;strategy == <a href='../S/2769.html#L194' title='Defined at 194 in Modules/zlib/zlib.h.'>Z_RLE</a> ? <a href='../S/2737.html#L1741' title='Defined at 1741 in Modules/zlib/deflate.c.'>deflate_rle</a>(s, flush) :
+<a name='L822'>                        (*(configuration_table[s-&gt;level].func))(s, flush));
+<a name='L823'>
+<a name='L824'>        <b>if</b> (bstate == <a href='../S/2737.html#L69' title='Defined at 69 in Modules/zlib/deflate.c.'>finish_started</a> || bstate == <a href='../S/2737.html#L70' title='Defined at 70 in Modules/zlib/deflate.c.'>finish_done</a>) <font color='red'>{</font>
+<a name='L825'>            s-&gt;status = <a href='../S/2738.html#L57' title='Defined at 57 in Modules/zlib/deflate.h.'>FINISH_STATE</a>;
+<a name='L826'>        <font color='red'>}</font>
+<a name='L827'>        <b>if</b> (bstate == <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a> || bstate == <a href='../S/2737.html#L69' title='Defined at 69 in Modules/zlib/deflate.c.'>finish_started</a>) <font color='red'>{</font>
+<a name='L828'>            <b>if</b> (strm-&gt;avail_out == 0) <font color='red'>{</font>
+<a name='L829'>                s-&gt;last_flush = -1; <i><font color='green'>/* avoid BUF_ERROR next call, see above */</font></i>
+<a name='L830'>            <font color='red'>}</font>
+<a name='L831'>            <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L832'>            <i><font color='green'>/* If flush != Z_NO_FLUSH &amp;&amp; avail_out == 0, the next call</font></i>
+<a name='L833'><i><font color='green'>             * of deflate should use the same flush parameter to make sure</font></i>
+<a name='L834'><i><font color='green'>             * that the flush is complete. So we don't have to output an</font></i>
+<a name='L835'><i><font color='green'>             * empty block here, this will be done at next call. This also</font></i>
+<a name='L836'><i><font color='green'>             * ensures that for a very small output buffer, we emit at most</font></i>
+<a name='L837'><i><font color='green'>             * one empty block.</font></i>
+<a name='L838'><i><font color='green'>             */</font></i>
+<a name='L839'>        <font color='red'>}</font>
+<a name='L840'>        <b>if</b> (bstate == <a href='../S/2737.html#L68' title='Defined at 68 in Modules/zlib/deflate.c.'>block_done</a>) <font color='red'>{</font>
+<a name='L841'>            <b>if</b> (flush == <a href='../S/2769.html#L165' title='Defined at 165 in Modules/zlib/zlib.h.'>Z_PARTIAL_FLUSH</a>) <font color='red'>{</font>
+<a name='L842'>                <a href='../D/6619.html' title='Multiple defined in 2 places.'>_tr_align</a>(s);
+<a name='L843'>            <font color='red'>}</font> <b>else</b> <b>if</b> (flush != <a href='../S/2769.html#L169' title='Defined at 169 in Modules/zlib/zlib.h.'>Z_BLOCK</a>) <font color='red'>{</font> <i><font color='green'>/* FULL_FLUSH or SYNC_FLUSH */</font></i>
+<a name='L844'>                <a href='../D/6622.html' title='Multiple defined in 2 places.'>_tr_stored_block</a>(s, (<b>char</b>*)0, 0L, 0);
+<a name='L845'>                <i><font color='green'>/* For a full flush, this empty block will be recognized</font></i>
+<a name='L846'><i><font color='green'>                 * as a special marker by inflate_sync().</font></i>
+<a name='L847'><i><font color='green'>                 */</font></i>
+<a name='L848'>                <b>if</b> (flush == <a href='../S/2769.html#L167' title='Defined at 167 in Modules/zlib/zlib.h.'>Z_FULL_FLUSH</a>) <font color='red'>{</font>
+<a name='L849'>                    <a href='../S/2737.html#L193' title='Defined at 193 in Modules/zlib/deflate.c.'>CLEAR_HASH</a>(s);             <i><font color='green'>/* forget history */</font></i>
+<a name='L850'>                    <b>if</b> (s-&gt;lookahead == 0) <font color='red'>{</font>
+<a name='L851'>                        s-&gt;strstart = 0;
+<a name='L852'>                        s-&gt;block_start = 0L;
+<a name='L853'>                    <font color='red'>}</font>
+<a name='L854'>                <font color='red'>}</font>
+<a name='L855'>            <font color='red'>}</font>
+<a name='L856'>            <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(strm);
+<a name='L857'>            <b>if</b> (strm-&gt;avail_out == 0) <font color='red'>{</font>
+<a name='L858'>              s-&gt;last_flush = -1; <i><font color='green'>/* avoid BUF_ERROR at next call, see above */</font></i>
+<a name='L859'>              <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L860'>            <font color='red'>}</font>
+<a name='L861'>        <font color='red'>}</font>
+<a name='L862'>    <font color='red'>}</font>
+<a name='L863'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(strm-&gt;avail_out &gt; 0, "bug2");
+<a name='L864'>
+<a name='L865'>    <b>if</b> (flush != <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>) <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L866'>    <b>if</b> (s-&gt;wrap &lt;= 0) <b>return</b> <a href='../S/2769.html#L174' title='Defined at 174 in Modules/zlib/zlib.h.'>Z_STREAM_END</a>;
+<a name='L867'>
+<a name='L868'>    <i><font color='green'>/* Write the trailer */</font></i>
+<a name='L869'><font color='darkred'>#ifdef</font> <a href='../D/1420.html' title='Multiple defined in 2 places.'>GZIP</a>
+<a name='L870'>    <b>if</b> (s-&gt;wrap == 2) <font color='red'>{</font>
+<a name='L871'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)(strm-&gt;adler &amp; 0xff));
+<a name='L872'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((strm-&gt;adler &gt;&gt; 8) &amp; 0xff));
+<a name='L873'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((strm-&gt;adler &gt;&gt; 16) &amp; 0xff));
+<a name='L874'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((strm-&gt;adler &gt;&gt; 24) &amp; 0xff));
+<a name='L875'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)(strm-&gt;total_in &amp; 0xff));
+<a name='L876'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((strm-&gt;total_in &gt;&gt; 8) &amp; 0xff));
+<a name='L877'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((strm-&gt;total_in &gt;&gt; 16) &amp; 0xff));
+<a name='L878'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)((strm-&gt;total_in &gt;&gt; 24) &amp; 0xff));
+<a name='L879'>    <font color='red'>}</font>
+<a name='L880'>    <b>else</b>
+<a name='L881'><font color='darkred'>#endif</font>
+<a name='L882'>    <font color='red'>{</font>
+<a name='L883'>        <a href='../S/2737.html#L548' title='Defined at 548 in Modules/zlib/deflate.c.'>putShortMSB</a>(s, (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)(strm-&gt;adler &gt;&gt; 16));
+<a name='L884'>        <a href='../S/2737.html#L548' title='Defined at 548 in Modules/zlib/deflate.c.'>putShortMSB</a>(s, (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)(strm-&gt;adler &amp; 0xffff));
+<a name='L885'>    <font color='red'>}</font>
+<a name='L886'>    <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(strm);
+<a name='L887'>    <i><font color='green'>/* If avail_out is zero, the application will call deflate again</font></i>
+<a name='L888'><i><font color='green'>     * to flush the rest.</font></i>
+<a name='L889'><i><font color='green'>     */</font></i>
+<a name='L890'>    <b>if</b> (s-&gt;wrap &gt; 0) s-&gt;wrap = -s-&gt;wrap; <i><font color='green'>/* write the trailer only once! */</font></i>
+<a name='L891'>    <b>return</b> s-&gt;pending != 0 ? <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a> : <a href='../S/2769.html#L174' title='Defined at 174 in Modules/zlib/zlib.h.'>Z_STREAM_END</a>;
+<a name='L892'><font color='red'>}</font>
+<a name='L893'>
+<a name='L894'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L895'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7227.html' title='Multiple refered from 16 places.'>deflateEnd</a> (strm)
+<a name='L896'>    z_streamp strm;
+<a name='L897'><font color='red'>{</font>
+<a name='L898'>    <b>int</b> status;
+<a name='L899'>
+<a name='L900'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L901'>
+<a name='L902'>    status = strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;status;
+<a name='L903'>    <b>if</b> (status != <a href='../S/2738.html#L51' title='Defined at 51 in Modules/zlib/deflate.h.'>INIT_STATE</a> &amp;&amp;
+<a name='L904'>        status != <a href='../S/2738.html#L52' title='Defined at 52 in Modules/zlib/deflate.h.'>EXTRA_STATE</a> &amp;&amp;
+<a name='L905'>        status != <a href='../S/2738.html#L53' title='Defined at 53 in Modules/zlib/deflate.h.'>NAME_STATE</a> &amp;&amp;
+<a name='L906'>        status != <a href='../S/2738.html#L54' title='Defined at 54 in Modules/zlib/deflate.h.'>COMMENT_STATE</a> &amp;&amp;
+<a name='L907'>        status != <a href='../S/2738.html#L55' title='Defined at 55 in Modules/zlib/deflate.h.'>HCRC_STATE</a> &amp;&amp;
+<a name='L908'>        status != <a href='../S/2738.html#L56' title='Defined at 56 in Modules/zlib/deflate.h.'>BUSY_STATE</a> &amp;&amp;
+<a name='L909'>        status != <a href='../S/2738.html#L57' title='Defined at 57 in Modules/zlib/deflate.h.'>FINISH_STATE</a>) <font color='red'>{</font>
+<a name='L910'>      <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L911'>    <font color='red'>}</font>
+<a name='L912'>
+<a name='L913'>    <i><font color='green'>/* Deallocate in reverse order of allocations: */</font></i>
+<a name='L914'>    <a href='../S/2773.html#L272' title='Defined at 272 in Modules/zlib/zutil.h.'>TRY_FREE</a>(strm, strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;pending_buf);
+<a name='L915'>    <a href='../S/2773.html#L272' title='Defined at 272 in Modules/zlib/zutil.h.'>TRY_FREE</a>(strm, strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head);
+<a name='L916'>    <a href='../S/2773.html#L272' title='Defined at 272 in Modules/zlib/zutil.h.'>TRY_FREE</a>(strm, strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;prev);
+<a name='L917'>    <a href='../S/2773.html#L272' title='Defined at 272 in Modules/zlib/zutil.h.'>TRY_FREE</a>(strm, strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window);
+<a name='L918'>
+<a name='L919'>    <a href='../S/2773.html#L271' title='Defined at 271 in Modules/zlib/zutil.h.'>ZFREE</a>(strm, strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L920'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L921'>
+<a name='L922'>    <b>return</b> status == <a href='../S/2738.html#L56' title='Defined at 56 in Modules/zlib/deflate.h.'>BUSY_STATE</a> ? <a href='../S/2769.html#L178' title='Defined at 178 in Modules/zlib/zlib.h.'>Z_DATA_ERROR</a> : <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L923'><font color='red'>}</font>
+<a name='L924'>
+<a name='L925'><i><font color='green'>/* =========================================================================</font></i>
+<a name='L926'><i><font color='green'> * Copy the source state to the destination state.</font></i>
+<a name='L927'><i><font color='green'> * To simplify the source, this is not supported for 16-bit MSDOS (which</font></i>
+<a name='L928'><i><font color='green'> * doesn't have enough memory anyway to duplicate compression states).</font></i>
+<a name='L929'><i><font color='green'> */</font></i>
+<a name='L930'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7226.html' title='Multiple refered from 2 places.'>deflateCopy</a> (dest, source)
+<a name='L931'>    z_streamp dest;
+<a name='L932'>    z_streamp source;
+<a name='L933'><font color='red'>{</font>
+<a name='L934'><font color='darkred'>#ifdef</font> <a href='../D/2045.html' title='Multiple defined in 2 places.'>MAXSEG_64K</a>
+<a name='L935'>    <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L936'><font color='darkred'>#else</font>
+<a name='L937'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *ds;
+<a name='L938'>    <a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *ss;
+<a name='L939'>    <a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a> *overlay;
+<a name='L940'>
+<a name='L941'>
+<a name='L942'>    <b>if</b> (source == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || dest == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || source-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L943'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L944'>    <font color='red'>}</font>
+<a name='L945'>
+<a name='L946'>    ss = source-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L947'>
+<a name='L948'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(dest, source, <b>sizeof</b>(<a href='../S/2769.html#L104' title='Defined at 104 in Modules/zlib/zlib.h.'>z_stream</a>));
+<a name='L949'>
+<a name='L950'>    ds = (<a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a> *) <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(dest, 1, <b>sizeof</b>(<a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a>));
+<a name='L951'>    <b>if</b> (ds == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L952'>    dest-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../D/9267.html' title='Multiple defined in 5 places.'>internal_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *) ds;
+<a name='L953'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(ds, ss, <b>sizeof</b>(<a href='../S/2738.html#L270' title='Defined at 270 in Modules/zlib/deflate.h.'>deflate_state</a>));
+<a name='L954'>    ds-&gt;strm = dest;
+<a name='L955'>
+<a name='L956'>    ds-&gt;window = (<a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *) <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(dest, ds-&gt;w_size, 2*<b>sizeof</b>(<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>));
+<a name='L957'>    ds-&gt;prev   = (<a href='../S/2738.html#L87' title='Defined at 87 in Modules/zlib/deflate.h.'>Posf</a> *)  <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(dest, ds-&gt;w_size, <b>sizeof</b>(<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>));
+<a name='L958'>    ds-&gt;head   = (<a href='../S/2738.html#L87' title='Defined at 87 in Modules/zlib/deflate.h.'>Posf</a> *)  <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(dest, ds-&gt;hash_size, <b>sizeof</b>(<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>));
+<a name='L959'>    overlay = (<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a> *) <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(dest, ds-&gt;lit_bufsize, <b>sizeof</b>(<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)+2);
+<a name='L960'>    ds-&gt;pending_buf = (<a href='../S/2773.html#L38' title='Defined at 38 in Modules/zlib/zutil.h.'>uchf</a> *) overlay;
+<a name='L961'>
+<a name='L962'>    <b>if</b> (ds-&gt;window == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || ds-&gt;prev == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || ds-&gt;head == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L963'>        ds-&gt;pending_buf == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L964'>        <a href='../D/8007.html' title='Multiple defined in 3 places.'>deflateEnd</a> (dest);
+<a name='L965'>        <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L966'>    <font color='red'>}</font>
+<a name='L967'>    <i><font color='green'>/* following zmemcpy do not work for 16-bit MSDOS */</font></i>
+<a name='L968'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(ds-&gt;window, ss-&gt;window, ds-&gt;w_size * 2 * <b>sizeof</b>(<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>));
+<a name='L969'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(ds-&gt;prev, ss-&gt;prev, ds-&gt;w_size * <b>sizeof</b>(<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>));
+<a name='L970'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(ds-&gt;head, ss-&gt;head, ds-&gt;hash_size * <b>sizeof</b>(<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>));
+<a name='L971'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(ds-&gt;pending_buf, ss-&gt;pending_buf, (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)ds-&gt;pending_buf_size);
+<a name='L972'>
+<a name='L973'>    ds-&gt;pending_out = ds-&gt;pending_buf + (ss-&gt;pending_out - ss-&gt;pending_buf);
+<a name='L974'>    ds-&gt;d_buf = overlay + ds-&gt;lit_bufsize/<b>sizeof</b>(<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>);
+<a name='L975'>    ds-&gt;l_buf = ds-&gt;pending_buf + (1+<b>sizeof</b>(<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>))*ds-&gt;lit_bufsize;
+<a name='L976'>
+<a name='L977'>    ds-&gt;l_desc.dyn_tree = ds-&gt;dyn_ltree;
+<a name='L978'>    ds-&gt;d_desc.dyn_tree = ds-&gt;dyn_dtree;
+<a name='L979'>    ds-&gt;bl_desc.dyn_tree = ds-&gt;bl_tree;
+<a name='L980'>
+<a name='L981'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L982'><font color='darkred'>#endif</font> <i><font color='green'>/* MAXSEG_64K */</font></i>
+<a name='L983'><font color='red'>}</font>
+<a name='L984'>
+<a name='L985'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L986'><i><font color='green'> * Read a new buffer from the current input stream, update the adler32</font></i>
+<a name='L987'><i><font color='green'> * and total number of bytes read.  All deflate() input goes through</font></i>
+<a name='L988'><i><font color='green'> * this function so some applications may wish to modify it to avoid</font></i>
+<a name='L989'><i><font color='green'> * allocating a large strm-&gt;next_in buffer and copying from it.</font></i>
+<a name='L990'><i><font color='green'> * (See also flush_pending()).</font></i>
+<a name='L991'><i><font color='green'> */</font></i>
+<a name='L992'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> <a href='../R/9969.html' title='Multiple refered from 8 places.'>read_buf</a>(strm, buf, size)
+<a name='L993'>    z_streamp strm;
+<a name='L994'>    Bytef *buf;
+<a name='L995'>    <b>unsigned</b> size;
+<a name='L996'><font color='red'>{</font>
+<a name='L997'>    <b>unsigned</b> len = strm-&gt;avail_in;
+<a name='L998'>
+<a name='L999'>    <b>if</b> (len &gt; size) len = size;
+<a name='L1000'>    <b>if</b> (len == 0) <b>return</b> 0;
+<a name='L1001'>
+<a name='L1002'>    strm-&gt;avail_in  -= len;
+<a name='L1003'>
+<a name='L1004'>    <b>if</b> (strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap == 1) <font color='red'>{</font>
+<a name='L1005'>        strm-&gt;adler = <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(strm-&gt;adler, strm-&gt;next_in, len);
+<a name='L1006'>    <font color='red'>}</font>
+<a name='L1007'><font color='darkred'>#ifdef</font> <a href='../D/1420.html' title='Multiple defined in 2 places.'>GZIP</a>
+<a name='L1008'>    <b>else</b> <b>if</b> (strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap == 2) <font color='red'>{</font>
+<a name='L1009'>        strm-&gt;adler = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(strm-&gt;adler, strm-&gt;next_in, len);
+<a name='L1010'>    <font color='red'>}</font>
+<a name='L1011'><font color='darkred'>#endif</font>
+<a name='L1012'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(buf, strm-&gt;next_in, len);
+<a name='L1013'>    strm-&gt;next_in  += len;
+<a name='L1014'>    strm-&gt;total_in += len;
+<a name='L1015'>
+<a name='L1016'>    <b>return</b> (<b>int</b>)len;
+<a name='L1017'><font color='red'>}</font>
+<a name='L1018'>
+<a name='L1019'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1020'><i><font color='green'> * Initialize the "longest match" routines for a new zlib stream</font></i>
+<a name='L1021'><i><font color='green'> */</font></i>
+<a name='L1022'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/8676.html' title='Multiple refered from 2 places.'>lm_init</a> (s)
+<a name='L1023'>    deflate_state *s;
+<a name='L1024'><font color='red'>{</font>
+<a name='L1025'>    s-&gt;window_size = (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)2L*s-&gt;w_size;
+<a name='L1026'>
+<a name='L1027'>    <a href='../S/2737.html#L193' title='Defined at 193 in Modules/zlib/deflate.c.'>CLEAR_HASH</a>(s);
+<a name='L1028'>
+<a name='L1029'>    <i><font color='green'>/* Set the default configuration parameters:</font></i>
+<a name='L1030'><i><font color='green'>     */</font></i>
+<a name='L1031'>    s-&gt;max_lazy_match   = configuration_table[s-&gt;level].max_lazy;
+<a name='L1032'>    s-&gt;good_match       = configuration_table[s-&gt;level].good_length;
+<a name='L1033'>    s-&gt;nice_match       = configuration_table[s-&gt;level].nice_length;
+<a name='L1034'>    s-&gt;max_chain_length = configuration_table[s-&gt;level].max_chain;
+<a name='L1035'>
+<a name='L1036'>    s-&gt;strstart = 0;
+<a name='L1037'>    s-&gt;block_start = 0L;
+<a name='L1038'>    s-&gt;lookahead = 0;
+<a name='L1039'>    s-&gt;match_length = s-&gt;prev_length = <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1;
+<a name='L1040'>    s-&gt;match_available = 0;
+<a name='L1041'>    s-&gt;ins_h = 0;
+<a name='L1042'><font color='darkred'>#ifndef</font> FASTEST
+<a name='L1043'><font color='darkred'>#ifdef</font> ASMV
+<a name='L1044'>    match_init(); <i><font color='green'>/* initialize the asm code */</font></i>
+<a name='L1045'><font color='darkred'>#endif</font>
+<a name='L1046'><font color='darkred'>#endif</font>
+<a name='L1047'><font color='red'>}</font>
+<a name='L1048'>
+<a name='L1049'><font color='darkred'>#ifndef</font> FASTEST
+<a name='L1050'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1051'><i><font color='green'> * Set match_start to the longest match starting at the given string and</font></i>
+<a name='L1052'><i><font color='green'> * return its length. Matches shorter or equal to prev_length are discarded,</font></i>
+<a name='L1053'><i><font color='green'> * in which case the result is equal to prev_length and match_start is</font></i>
+<a name='L1054'><i><font color='green'> * garbage.</font></i>
+<a name='L1055'><i><font color='green'> * IN assertions: cur_match is the head of the hash chain for the current</font></i>
+<a name='L1056'><i><font color='green'> *   string (strstart) and its distance is &lt;= MAX_DIST, and prev_length &gt;= 1</font></i>
+<a name='L1057'><i><font color='green'> * OUT assertion: the match length is not greater than s-&gt;lookahead.</font></i>
+<a name='L1058'><i><font color='green'> */</font></i>
+<a name='L1059'><font color='darkred'>#ifndef</font> ASMV
+<a name='L1060'><i><font color='green'>/* For 80x86 and 680x0, an optimized version will be provided in match.asm or</font></i>
+<a name='L1061'><i><font color='green'> * match.S. The code will be functionally equivalent.</font></i>
+<a name='L1062'><i><font color='green'> */</font></i>
+<a name='L1063'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> <a href='../R/8798.html' title='Multiple refered from 4 places.'>longest_match</a>(s, cur_match)
+<a name='L1064'>    deflate_state *s;
+<a name='L1065'>    IPos cur_match;                             <i><font color='green'>/* current match */</font></i>
+<a name='L1066'><font color='red'>{</font>
+<a name='L1067'>    <b>unsigned</b> chain_length = s-&gt;max_chain_length;<i><font color='green'>/* max hash chain length */</font></i>
+<a name='L1068'>    <b>register</b> <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *scan = s-&gt;window + s-&gt;strstart; <i><font color='green'>/* current string */</font></i>
+<a name='L1069'>    <b>register</b> <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *match;                       <i><font color='green'>/* matched string */</font></i>
+<a name='L1070'>    <b>register</b> <b>int</b> len;                           <i><font color='green'>/* length of current match */</font></i>
+<a name='L1071'>    <b>int</b> best_len = s-&gt;prev_length;              <i><font color='green'>/* best match length so far */</font></i>
+<a name='L1072'>    <b>int</b> nice_match = s-&gt;nice_match;             <i><font color='green'>/* stop if match long enough */</font></i>
+<a name='L1073'>    <a href='../S/2738.html#L88' title='Defined at 88 in Modules/zlib/deflate.h.'>IPos</a> limit = s-&gt;strstart &gt; (<a href='../S/2738.html#L88' title='Defined at 88 in Modules/zlib/deflate.h.'>IPos</a>)<a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s) ?
+<a name='L1074'>        s-&gt;strstart - (<a href='../S/2738.html#L88' title='Defined at 88 in Modules/zlib/deflate.h.'>IPos</a>)<a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s) : <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a>;
+<a name='L1075'>    <i><font color='green'>/* Stop when cur_match becomes &lt;= limit. To simplify the code,</font></i>
+<a name='L1076'><i><font color='green'>     * we prevent matches with the string of window index 0.</font></i>
+<a name='L1077'><i><font color='green'>     */</font></i>
+<a name='L1078'>    <a href='../S/2738.html#L87' title='Defined at 87 in Modules/zlib/deflate.h.'>Posf</a> *prev = s-&gt;prev;
+<a name='L1079'>    <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> wmask = s-&gt;w_mask;
+<a name='L1080'>
+<a name='L1081'><font color='darkred'>#ifdef</font> <a href='../D/5337.html' title='Multiple defined in 2 places.'>UNALIGNED_OK</a>
+<a name='L1082'>    <i><font color='green'>/* Compare two bytes at a time. Note: this is not always beneficial.</font></i>
+<a name='L1083'><i><font color='green'>     * Try with and without -DUNALIGNED_OK to check.</font></i>
+<a name='L1084'><i><font color='green'>     */</font></i>
+<a name='L1085'>    <b>register</b> <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *strend = s-&gt;window + s-&gt;strstart + <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> - 1;
+<a name='L1086'>    <b>register</b> <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> scan_start = *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)scan;
+<a name='L1087'>    <b>register</b> <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> scan_end   = *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(scan+best_len-1);
+<a name='L1088'><font color='darkred'>#else</font>
+<a name='L1089'>    <b>register</b> <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *strend = s-&gt;window + s-&gt;strstart + <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>;
+<a name='L1090'>    <b>register</b> <a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a> scan_end1  = scan[best_len-1];
+<a name='L1091'>    <b>register</b> <a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a> scan_end   = scan[best_len];
+<a name='L1092'><font color='darkred'>#endif</font>
+<a name='L1093'>
+<a name='L1094'>    <i><font color='green'>/* The code is optimized for HASH_BITS &gt;= 8 and MAX_MATCH-2 multiple of 16.</font></i>
+<a name='L1095'><i><font color='green'>     * It is easy to get rid of this optimization if necessary.</font></i>
+<a name='L1096'><i><font color='green'>     */</font></i>
+<a name='L1097'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(s-&gt;hash_bits &gt;= 8 &amp;&amp; <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> == 258, "Code too clever");
+<a name='L1098'>
+<a name='L1099'>    <i><font color='green'>/* Do not waste too much time if we already have a good match: */</font></i>
+<a name='L1100'>    <b>if</b> (s-&gt;prev_length &gt;= s-&gt;good_match) <font color='red'>{</font>
+<a name='L1101'>        chain_length &gt;&gt;= 2;
+<a name='L1102'>    <font color='red'>}</font>
+<a name='L1103'>    <i><font color='green'>/* Do not look for matches beyond the end of the input. This is necessary</font></i>
+<a name='L1104'><i><font color='green'>     * to make deflate deterministic.</font></i>
+<a name='L1105'><i><font color='green'>     */</font></i>
+<a name='L1106'>    <b>if</b> ((<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)nice_match &gt; s-&gt;lookahead) nice_match = s-&gt;lookahead;
+<a name='L1107'>
+<a name='L1108'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>((<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;strstart &lt;= s-&gt;window_size-<a href='../S/2738.html#L278' title='Defined at 278 in Modules/zlib/deflate.h.'>MIN_LOOKAHEAD</a>, "need lookahead");
+<a name='L1109'>
+<a name='L1110'>    <b>do</b> <font color='red'>{</font>
+<a name='L1111'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(cur_match &lt; s-&gt;strstart, "no future");
+<a name='L1112'>        match = s-&gt;window + cur_match;
+<a name='L1113'>
+<a name='L1114'>        <i><font color='green'>/* Skip to next match if the match length cannot increase</font></i>
+<a name='L1115'><i><font color='green'>         * or if the match length is less than 2.  Note that the checks below</font></i>
+<a name='L1116'><i><font color='green'>         * for insufficient lookahead only occur occasionally for performance</font></i>
+<a name='L1117'><i><font color='green'>         * reasons.  Therefore uninitialized memory will be accessed, and</font></i>
+<a name='L1118'><i><font color='green'>         * conditional jumps will be made that depend on those values.</font></i>
+<a name='L1119'><i><font color='green'>         * However the length of the match is limited to the lookahead, so</font></i>
+<a name='L1120'><i><font color='green'>         * the output of deflate is not affected by the uninitialized values.</font></i>
+<a name='L1121'><i><font color='green'>         */</font></i>
+<a name='L1122'><font color='darkred'>#if</font> (<b>defined</b>(<a href='../D/5337.html' title='Multiple defined in 2 places.'>UNALIGNED_OK</a>) &amp;&amp; <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> == 258)
+<a name='L1123'>        <i><font color='green'>/* This code assumes sizeof(unsigned short) == 2. Do not use</font></i>
+<a name='L1124'><i><font color='green'>         * UNALIGNED_OK if your compiler uses a different size.</font></i>
+<a name='L1125'><i><font color='green'>         */</font></i>
+<a name='L1126'>        <b>if</b> (*(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(match+best_len-1) != scan_end ||
+<a name='L1127'>            *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)match != scan_start) <b>continue</b>;
+<a name='L1128'>
+<a name='L1129'>        <i><font color='green'>/* It is not necessary to compare scan[2] and match[2] since they are</font></i>
+<a name='L1130'><i><font color='green'>         * always equal when the other bytes match, given that the hash keys</font></i>
+<a name='L1131'><i><font color='green'>         * are equal and that HASH_BITS &gt;= 8. Compare 2 bytes at a time at</font></i>
+<a name='L1132'><i><font color='green'>         * strstart+3, +5, ... up to strstart+257. We check for insufficient</font></i>
+<a name='L1133'><i><font color='green'>         * lookahead only every 4th comparison; the 128th check will be made</font></i>
+<a name='L1134'><i><font color='green'>         * at strstart+257. If MAX_MATCH-2 is not a multiple of 8, it is</font></i>
+<a name='L1135'><i><font color='green'>         * necessary to put more guard bytes at the end of the window, or</font></i>
+<a name='L1136'><i><font color='green'>         * to check more often for insufficient lookahead.</font></i>
+<a name='L1137'><i><font color='green'>         */</font></i>
+<a name='L1138'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(scan[2] == match[2], "scan[2]?");
+<a name='L1139'>        scan++, match++;
+<a name='L1140'>        <b>do</b> <font color='red'>{</font>
+<a name='L1141'>        <font color='red'>}</font> <b>while</b> (*(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(scan+=2) == *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(match+=2) &amp;&amp;
+<a name='L1142'>                 *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(scan+=2) == *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(match+=2) &amp;&amp;
+<a name='L1143'>                 *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(scan+=2) == *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(match+=2) &amp;&amp;
+<a name='L1144'>                 *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(scan+=2) == *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(match+=2) &amp;&amp;
+<a name='L1145'>                 scan &lt; strend);
+<a name='L1146'>        <i><font color='green'>/* The funny "do {}" generates better code on most compilers */</font></i>
+<a name='L1147'>
+<a name='L1148'>        <i><font color='green'>/* Here, scan &lt;= window+strstart+257 */</font></i>
+<a name='L1149'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(scan &lt;= s-&gt;window+(<b>unsigned</b>)(s-&gt;window_size-1), "wild scan");
+<a name='L1150'>        <b>if</b> (*scan == *match) scan++;
+<a name='L1151'>
+<a name='L1152'>        len = (<a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> - 1) - (<b>int</b>)(strend-scan);
+<a name='L1153'>        scan = strend - (<a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>-1);
+<a name='L1154'>
+<a name='L1155'><font color='darkred'>#else</font> <i><font color='green'>/* UNALIGNED_OK */</font></i>
+<a name='L1156'>
+<a name='L1157'>        <b>if</b> (match[best_len]   != scan_end  ||
+<a name='L1158'>            match[best_len-1] != scan_end1 ||
+<a name='L1159'>            *match            != *scan     ||
+<a name='L1160'>            *++match          != scan[1])      <b>continue</b>;
+<a name='L1161'>
+<a name='L1162'>        <i><font color='green'>/* The check at best_len-1 can be removed because it will be made</font></i>
+<a name='L1163'><i><font color='green'>         * again later. (This heuristic is not always a win.)</font></i>
+<a name='L1164'><i><font color='green'>         * It is not necessary to compare scan[2] and match[2] since they</font></i>
+<a name='L1165'><i><font color='green'>         * are always equal when the other bytes match, given that</font></i>
+<a name='L1166'><i><font color='green'>         * the hash keys are equal and that HASH_BITS &gt;= 8.</font></i>
+<a name='L1167'><i><font color='green'>         */</font></i>
+<a name='L1168'>        scan += 2, match++;
+<a name='L1169'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(*scan == *match, "match[2]?");
+<a name='L1170'>
+<a name='L1171'>        <i><font color='green'>/* We check for insufficient lookahead only every 8th comparison;</font></i>
+<a name='L1172'><i><font color='green'>         * the 256th check will be made at strstart+258.</font></i>
+<a name='L1173'><i><font color='green'>         */</font></i>
+<a name='L1174'>        <b>do</b> <font color='red'>{</font>
+<a name='L1175'>        <font color='red'>}</font> <b>while</b> (*++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1176'>                 *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1177'>                 *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1178'>                 *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1179'>                 scan &lt; strend);
+<a name='L1180'>
+<a name='L1181'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(scan &lt;= s-&gt;window+(<b>unsigned</b>)(s-&gt;window_size-1), "wild scan");
+<a name='L1182'>
+<a name='L1183'>        len = <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> - (<b>int</b>)(strend - scan);
+<a name='L1184'>        scan = strend - <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>;
+<a name='L1185'>
+<a name='L1186'><font color='darkred'>#endif</font> <i><font color='green'>/* UNALIGNED_OK */</font></i>
+<a name='L1187'>
+<a name='L1188'>        <b>if</b> (len &gt; best_len) <font color='red'>{</font>
+<a name='L1189'>            s-&gt;<a href='../S/2611.html#L3390' title='Defined at 3390 in Modules/_sre.c.'>match_start</a> = cur_match;
+<a name='L1190'>            best_len = len;
+<a name='L1191'>            <b>if</b> (len &gt;= nice_match) <b>break</b>;
+<a name='L1192'><font color='darkred'>#ifdef</font> <a href='../D/5337.html' title='Multiple defined in 2 places.'>UNALIGNED_OK</a>
+<a name='L1193'>            scan_end = *(<a href='../S/2773.html#L40' title='Defined at 40 in Modules/zlib/zutil.h.'>ushf</a>*)(scan+best_len-1);
+<a name='L1194'><font color='darkred'>#else</font>
+<a name='L1195'>            scan_end1  = scan[best_len-1];
+<a name='L1196'>            scan_end   = scan[best_len];
+<a name='L1197'><font color='darkred'>#endif</font>
+<a name='L1198'>        <font color='red'>}</font>
+<a name='L1199'>    <font color='red'>}</font> <b>while</b> ((cur_match = prev[cur_match &amp; wmask]) &gt; limit
+<a name='L1200'>             &amp;&amp; --chain_length != 0);
+<a name='L1201'>
+<a name='L1202'>    <b>if</b> ((<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)best_len &lt;= s-&gt;lookahead) <b>return</b> (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)best_len;
+<a name='L1203'>    <b>return</b> s-&gt;lookahead;
+<a name='L1204'><font color='red'>}</font>
+<a name='L1205'><font color='darkred'>#endif</font> <i><font color='green'>/* ASMV */</font></i>
+<a name='L1206'>
+<a name='L1207'><font color='darkred'>#else</font> <i><font color='green'>/* FASTEST */</font></i>
+<a name='L1208'>
+<a name='L1209'><i><font color='green'>/* ---------------------------------------------------------------------------</font></i>
+<a name='L1210'><i><font color='green'> * Optimized version for FASTEST only</font></i>
+<a name='L1211'><i><font color='green'> */</font></i>
+<a name='L1212'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> <a href='../R/8798.html' title='Multiple refered from 4 places.'>longest_match</a>(s, cur_match)
+<a name='L1213'>    deflate_state *s;
+<a name='L1214'>    IPos cur_match;                             <i><font color='green'>/* current match */</font></i>
+<a name='L1215'><font color='red'>{</font>
+<a name='L1216'>    <b>register</b> <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *scan = s-&gt;window + s-&gt;strstart; <i><font color='green'>/* current string */</font></i>
+<a name='L1217'>    <b>register</b> <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *match;                       <i><font color='green'>/* matched string */</font></i>
+<a name='L1218'>    <b>register</b> <b>int</b> len;                           <i><font color='green'>/* length of current match */</font></i>
+<a name='L1219'>    <b>register</b> <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *strend = s-&gt;window + s-&gt;strstart + <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>;
+<a name='L1220'>
+<a name='L1221'>    <i><font color='green'>/* The code is optimized for HASH_BITS &gt;= 8 and MAX_MATCH-2 multiple of 16.</font></i>
+<a name='L1222'><i><font color='green'>     * It is easy to get rid of this optimization if necessary.</font></i>
+<a name='L1223'><i><font color='green'>     */</font></i>
+<a name='L1224'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(s-&gt;hash_bits &gt;= 8 &amp;&amp; <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> == 258, "Code too clever");
+<a name='L1225'>
+<a name='L1226'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>((<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;strstart &lt;= s-&gt;window_size-<a href='../S/2738.html#L278' title='Defined at 278 in Modules/zlib/deflate.h.'>MIN_LOOKAHEAD</a>, "need lookahead");
+<a name='L1227'>
+<a name='L1228'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(cur_match &lt; s-&gt;strstart, "no future");
+<a name='L1229'>
+<a name='L1230'>    match = s-&gt;window + cur_match;
+<a name='L1231'>
+<a name='L1232'>    <i><font color='green'>/* Return failure if the match length is less than 2:</font></i>
+<a name='L1233'><i><font color='green'>     */</font></i>
+<a name='L1234'>    <b>if</b> (match[0] != scan[0] || match[1] != scan[1]) <b>return</b> <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1;
+<a name='L1235'>
+<a name='L1236'>    <i><font color='green'>/* The check at best_len-1 can be removed because it will be made</font></i>
+<a name='L1237'><i><font color='green'>     * again later. (This heuristic is not always a win.)</font></i>
+<a name='L1238'><i><font color='green'>     * It is not necessary to compare scan[2] and match[2] since they</font></i>
+<a name='L1239'><i><font color='green'>     * are always equal when the other bytes match, given that</font></i>
+<a name='L1240'><i><font color='green'>     * the hash keys are equal and that HASH_BITS &gt;= 8.</font></i>
+<a name='L1241'><i><font color='green'>     */</font></i>
+<a name='L1242'>    scan += 2, match += 2;
+<a name='L1243'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(*scan == *match, "match[2]?");
+<a name='L1244'>
+<a name='L1245'>    <i><font color='green'>/* We check for insufficient lookahead only every 8th comparison;</font></i>
+<a name='L1246'><i><font color='green'>     * the 256th check will be made at strstart+258.</font></i>
+<a name='L1247'><i><font color='green'>     */</font></i>
+<a name='L1248'>    <b>do</b> <font color='red'>{</font>
+<a name='L1249'>    <font color='red'>}</font> <b>while</b> (*++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1250'>             *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1251'>             *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1252'>             *++scan == *++match &amp;&amp; *++scan == *++match &amp;&amp;
+<a name='L1253'>             scan &lt; strend);
+<a name='L1254'>
+<a name='L1255'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(scan &lt;= s-&gt;window+(<b>unsigned</b>)(s-&gt;window_size-1), "wild scan");
+<a name='L1256'>
+<a name='L1257'>    len = <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> - (<b>int</b>)(strend - scan);
+<a name='L1258'>
+<a name='L1259'>    <b>if</b> (len &lt; <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <b>return</b> <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a> - 1;
+<a name='L1260'>
+<a name='L1261'>    s-&gt;<a href='../S/2611.html#L3390' title='Defined at 3390 in Modules/_sre.c.'>match_start</a> = cur_match;
+<a name='L1262'>    <b>return</b> (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)len &lt;= s-&gt;lookahead ? (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)len : s-&gt;lookahead;
+<a name='L1263'><font color='red'>}</font>
+<a name='L1264'>
+<a name='L1265'><font color='darkred'>#endif</font> <i><font color='green'>/* FASTEST */</font></i>
+<a name='L1266'>
+<a name='L1267'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L1268'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1269'><i><font color='green'> * Check that the match at match_start is indeed a match.</font></i>
+<a name='L1270'><i><font color='green'> */</font></i>
+<a name='L1271'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/6637.html' title='Multiple refered from 4 places.'>check_match</a>(s, start, match, length)
+<a name='L1272'>    deflate_state *s;
+<a name='L1273'>    IPos start, match;
+<a name='L1274'>    <b>int</b> length;
+<a name='L1275'><font color='red'>{</font>
+<a name='L1276'>    <i><font color='green'>/* check that the match is indeed a match */</font></i>
+<a name='L1277'>    <b>if</b> (<a href='../D/12471.html' title='Multiple defined in 3 places.'>zmemcmp</a>(s-&gt;window + match,
+<a name='L1278'>                s-&gt;window + start, length) != <a href='../D/952.html' title='Multiple defined in 2 places.'>EQUAL</a>) <font color='red'>{</font>
+<a name='L1279'>        fprintf(stderr, " start %u, match %u, length %d\n",
+<a name='L1280'>                start, match, length);
+<a name='L1281'>        <b>do</b> <font color='red'>{</font>
+<a name='L1282'>            fprintf(stderr, "%c%c", s-&gt;window[match++], s-&gt;window[start++]);
+<a name='L1283'>        <font color='red'>}</font> <b>while</b> (--length != 0);
+<a name='L1284'>        <a href='../S/2772.html#L122' title='Defined at 122 in Modules/zlib/zutil.c.'>z_error</a>("invalid match");
+<a name='L1285'>    <font color='red'>}</font>
+<a name='L1286'>    <b>if</b> (z_verbose &gt; 1) <font color='red'>{</font>
+<a name='L1287'>        fprintf(stderr,"\\[%d,%d]", start-match, length);
+<a name='L1288'>        <b>do</b> <font color='red'>{</font> putc(s-&gt;window[start++], stderr); <font color='red'>}</font> <b>while</b> (--length != 0);
+<a name='L1289'>    <font color='red'>}</font>
+<a name='L1290'><font color='red'>}</font>
+<a name='L1291'><font color='darkred'>#else</font>
+<a name='L1292'><font color='darkred'>#  define</font> <a href='../R/6637.html' title='Multiple refered from 4 places.'>check_match</a>(s, start, match, length)
+<a name='L1293'><font color='darkred'>#endif</font> <i><font color='green'>/* DEBUG */</font></i>
+<a name='L1294'>
+<a name='L1295'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1296'><i><font color='green'> * Fill the window when the lookahead becomes insufficient.</font></i>
+<a name='L1297'><i><font color='green'> * Updates strstart and lookahead.</font></i>
+<a name='L1298'><i><font color='green'> *</font></i>
+<a name='L1299'><i><font color='green'> * IN assertion: lookahead &lt; MIN_LOOKAHEAD</font></i>
+<a name='L1300'><i><font color='green'> * OUT assertions: strstart &lt;= window_size-MIN_LOOKAHEAD</font></i>
+<a name='L1301'><i><font color='green'> *    At least one byte has been read, or avail_in == 0; reads are</font></i>
+<a name='L1302'><i><font color='green'> *    performed for at least two bytes (required for the zip translate_eol</font></i>
+<a name='L1303'><i><font color='green'> *    option -- not supported here).</font></i>
+<a name='L1304'><i><font color='green'> */</font></i>
+<a name='L1305'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/7786.html' title='Multiple refered from 6 places.'>fill_window</a>(s)
+<a name='L1306'>    deflate_state *s;
+<a name='L1307'><font color='red'>{</font>
+<a name='L1308'>    <b>register</b> <b>unsigned</b> n, m;
+<a name='L1309'>    <b>register</b> <a href='../S/2738.html#L87' title='Defined at 87 in Modules/zlib/deflate.h.'>Posf</a> *p;
+<a name='L1310'>    <b>unsigned</b> more;    <i><font color='green'>/* Amount of free space at the end of the window. */</font></i>
+<a name='L1311'>    <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> wsize = s-&gt;w_size;
+<a name='L1312'>
+<a name='L1313'>    <b>do</b> <font color='red'>{</font>
+<a name='L1314'>        more = (<b>unsigned</b>)(s-&gt;window_size -(<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;lookahead -(<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;strstart);
+<a name='L1315'>
+<a name='L1316'>        <i><font color='green'>/* Deal with !@#$% 64K limit: */</font></i>
+<a name='L1317'>        <b>if</b> (<b>sizeof</b>(<b>int</b>) &lt;= 2) <font color='red'>{</font>
+<a name='L1318'>            <b>if</b> (more == 0 &amp;&amp; s-&gt;strstart == 0 &amp;&amp; s-&gt;lookahead == 0) <font color='red'>{</font>
+<a name='L1319'>                more = wsize;
+<a name='L1320'>
+<a name='L1321'>            <font color='red'>}</font> <b>else</b> <b>if</b> (more == (<b>unsigned</b>)(-1)) <font color='red'>{</font>
+<a name='L1322'>                <i><font color='green'>/* Very unlikely, but possible on 16 bit machine if</font></i>
+<a name='L1323'><i><font color='green'>                 * strstart == 0 &amp;&amp; lookahead == 1 (input done a byte at time)</font></i>
+<a name='L1324'><i><font color='green'>                 */</font></i>
+<a name='L1325'>                more--;
+<a name='L1326'>            <font color='red'>}</font>
+<a name='L1327'>        <font color='red'>}</font>
+<a name='L1328'>
+<a name='L1329'>        <i><font color='green'>/* If the window is almost full and there is insufficient lookahead,</font></i>
+<a name='L1330'><i><font color='green'>         * move the upper half to the lower one to make room in the upper half.</font></i>
+<a name='L1331'><i><font color='green'>         */</font></i>
+<a name='L1332'>        <b>if</b> (s-&gt;strstart &gt;= wsize+<a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s)) <font color='red'>{</font>
+<a name='L1333'>
+<a name='L1334'>            <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(s-&gt;window, s-&gt;window+wsize, (<b>unsigned</b>)wsize);
+<a name='L1335'>            s-&gt;<a href='../S/2611.html#L3390' title='Defined at 3390 in Modules/_sre.c.'>match_start</a> -= wsize;
+<a name='L1336'>            s-&gt;strstart    -= wsize; <i><font color='green'>/* we now have strstart &gt;= MAX_DIST */</font></i>
+<a name='L1337'>            s-&gt;block_start -= (<b>long</b>) wsize;
+<a name='L1338'>
+<a name='L1339'>            <i><font color='green'>/* Slide the hash table (could be avoided with 32 bit values</font></i>
+<a name='L1340'><i><font color='green'>               at the expense of memory usage). We slide even when level == 0</font></i>
+<a name='L1341'><i><font color='green'>               to keep the hash table consistent if we switch back to level &gt; 0</font></i>
+<a name='L1342'><i><font color='green'>               later. (Using level 0 permanently is not an optimal usage of</font></i>
+<a name='L1343'><i><font color='green'>               zlib, so we don't care about this pathological case.)</font></i>
+<a name='L1344'><i><font color='green'>             */</font></i>
+<a name='L1345'>            n = s-&gt;hash_size;
+<a name='L1346'>            p = &amp;s-&gt;head[n];
+<a name='L1347'>            <b>do</b> <font color='red'>{</font>
+<a name='L1348'>                m = *--p;
+<a name='L1349'>                *p = (<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>)(m &gt;= wsize ? m-wsize : <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a>);
+<a name='L1350'>            <font color='red'>}</font> <b>while</b> (--n);
+<a name='L1351'>
+<a name='L1352'>            n = wsize;
+<a name='L1353'><font color='darkred'>#ifndef</font> FASTEST
+<a name='L1354'>            p = &amp;s-&gt;prev[n];
+<a name='L1355'>            <b>do</b> <font color='red'>{</font>
+<a name='L1356'>                m = *--p;
+<a name='L1357'>                *p = (<a href='../S/2738.html#L86' title='Defined at 86 in Modules/zlib/deflate.h.'>Pos</a>)(m &gt;= wsize ? m-wsize : <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a>);
+<a name='L1358'>                <i><font color='green'>/* If n is not on any hash chain, prev[n] is garbage but</font></i>
+<a name='L1359'><i><font color='green'>                 * its value will never be used.</font></i>
+<a name='L1360'><i><font color='green'>                 */</font></i>
+<a name='L1361'>            <font color='red'>}</font> <b>while</b> (--n);
+<a name='L1362'><font color='darkred'>#endif</font>
+<a name='L1363'>            more += wsize;
+<a name='L1364'>        <font color='red'>}</font>
+<a name='L1365'>        <b>if</b> (s-&gt;strm-&gt;avail_in == 0) <b>return</b>;
+<a name='L1366'>
+<a name='L1367'>        <i><font color='green'>/* If there was no sliding:</font></i>
+<a name='L1368'><i><font color='green'>         *    strstart &lt;= WSIZE+MAX_DIST-1 &amp;&amp; lookahead &lt;= MIN_LOOKAHEAD - 1 &amp;&amp;</font></i>
+<a name='L1369'><i><font color='green'>         *    more == window_size - lookahead - strstart</font></i>
+<a name='L1370'><i><font color='green'>         * =&gt; more &gt;= window_size - (MIN_LOOKAHEAD-1 + WSIZE + MAX_DIST-1)</font></i>
+<a name='L1371'><i><font color='green'>         * =&gt; more &gt;= window_size - 2*WSIZE + 2</font></i>
+<a name='L1372'><i><font color='green'>         * In the BIG_MEM or MMAP case (not yet supported),</font></i>
+<a name='L1373'><i><font color='green'>         *   window_size == input_size + MIN_LOOKAHEAD  &amp;&amp;</font></i>
+<a name='L1374'><i><font color='green'>         *   strstart + s-&gt;lookahead &lt;= input_size =&gt; more &gt;= MIN_LOOKAHEAD.</font></i>
+<a name='L1375'><i><font color='green'>         * Otherwise, window_size == 2*WSIZE so more &gt;= 2.</font></i>
+<a name='L1376'><i><font color='green'>         * If there was sliding, more &gt;= WSIZE. So in all cases, more &gt;= 2.</font></i>
+<a name='L1377'><i><font color='green'>         */</font></i>
+<a name='L1378'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(more &gt;= 2, "more &lt; 2");
+<a name='L1379'>
+<a name='L1380'>        n = <a href='../S/2737.html#L992' title='Defined at 992 in Modules/zlib/deflate.c.'>read_buf</a>(s-&gt;strm, s-&gt;window + s-&gt;strstart + s-&gt;lookahead, more);
+<a name='L1381'>        s-&gt;lookahead += n;
+<a name='L1382'>
+<a name='L1383'>        <i><font color='green'>/* Initialize the hash value now that we have some input: */</font></i>
+<a name='L1384'>        <b>if</b> (s-&gt;lookahead &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <font color='red'>{</font>
+<a name='L1385'>            s-&gt;ins_h = s-&gt;window[s-&gt;strstart];
+<a name='L1386'>            <a href='../S/2737.html#L164' title='Defined at 164 in Modules/zlib/deflate.c.'>UPDATE_HASH</a>(s, s-&gt;ins_h, s-&gt;window[s-&gt;strstart+1]);
+<a name='L1387'><font color='darkred'>#if</font> <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a> != 3
+<a name='L1388'>            <a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a> <a href='../S/2737.html#L164' title='Defined at 164 in Modules/zlib/deflate.c.'>UPDATE_HASH</a>() <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-3 more times
+<a name='L1389'><font color='darkred'>#endif</font>
+<a name='L1390'>        <font color='red'>}</font>
+<a name='L1391'>        <i><font color='green'>/* If the whole input has less than MIN_MATCH bytes, ins_h is garbage,</font></i>
+<a name='L1392'><i><font color='green'>         * but this is not important since only literal bytes will be emitted.</font></i>
+<a name='L1393'><i><font color='green'>         */</font></i>
+<a name='L1394'>
+<a name='L1395'>    <font color='red'>}</font> <b>while</b> (s-&gt;lookahead &lt; <a href='../S/2738.html#L278' title='Defined at 278 in Modules/zlib/deflate.h.'>MIN_LOOKAHEAD</a> &amp;&amp; s-&gt;strm-&gt;avail_in != 0);
+<a name='L1396'>
+<a name='L1397'>    <i><font color='green'>/* If the WIN_INIT bytes after the end of the current data have never been</font></i>
+<a name='L1398'><i><font color='green'>     * written, then zero those bytes in order to avoid memory check reports of</font></i>
+<a name='L1399'><i><font color='green'>     * the use of uninitialized (or uninitialised as Julian writes) bytes by</font></i>
+<a name='L1400'><i><font color='green'>     * the longest match routines.  Update the high water mark for the next</font></i>
+<a name='L1401'><i><font color='green'>     * time through here.  WIN_INIT is set to MAX_MATCH since the longest match</font></i>
+<a name='L1402'><i><font color='green'>     * routines allow scanning to strstart + MAX_MATCH, ignoring lookahead.</font></i>
+<a name='L1403'><i><font color='green'>     */</font></i>
+<a name='L1404'>    <b>if</b> (s-&gt;high_water &lt; s-&gt;window_size) <font color='red'>{</font>
+<a name='L1405'>        <a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a> curr = s-&gt;strstart + (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)(s-&gt;lookahead);
+<a name='L1406'>        <a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a> init;
+<a name='L1407'>
+<a name='L1408'>        <b>if</b> (s-&gt;high_water &lt; curr) <font color='red'>{</font>
+<a name='L1409'>            <i><font color='green'>/* Previous high water mark below current data -- zero WIN_INIT</font></i>
+<a name='L1410'><i><font color='green'>             * bytes or up to end of window, whichever is less.</font></i>
+<a name='L1411'><i><font color='green'>             */</font></i>
+<a name='L1412'>            init = s-&gt;window_size - curr;
+<a name='L1413'>            <b>if</b> (init &gt; <a href='../S/2738.html#L288' title='Defined at 288 in Modules/zlib/deflate.h.'>WIN_INIT</a>)
+<a name='L1414'>                init = <a href='../S/2738.html#L288' title='Defined at 288 in Modules/zlib/deflate.h.'>WIN_INIT</a>;
+<a name='L1415'>            <a href='../D/12473.html' title='Multiple defined in 3 places.'>zmemzero</a>(s-&gt;window + curr, (<b>unsigned</b>)init);
+<a name='L1416'>            s-&gt;high_water = curr + init;
+<a name='L1417'>        <font color='red'>}</font>
+<a name='L1418'>        <b>else</b> <b>if</b> (s-&gt;high_water &lt; (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)curr + <a href='../S/2738.html#L288' title='Defined at 288 in Modules/zlib/deflate.h.'>WIN_INIT</a>) <font color='red'>{</font>
+<a name='L1419'>            <i><font color='green'>/* High water mark at or above current data, but below current data</font></i>
+<a name='L1420'><i><font color='green'>             * plus WIN_INIT -- zero out to current data plus WIN_INIT, or up</font></i>
+<a name='L1421'><i><font color='green'>             * to end of window, whichever is less.</font></i>
+<a name='L1422'><i><font color='green'>             */</font></i>
+<a name='L1423'>            init = (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)curr + <a href='../S/2738.html#L288' title='Defined at 288 in Modules/zlib/deflate.h.'>WIN_INIT</a> - s-&gt;high_water;
+<a name='L1424'>            <b>if</b> (init &gt; s-&gt;window_size - s-&gt;high_water)
+<a name='L1425'>                init = s-&gt;window_size - s-&gt;high_water;
+<a name='L1426'>            <a href='../D/12473.html' title='Multiple defined in 3 places.'>zmemzero</a>(s-&gt;window + s-&gt;high_water, (<b>unsigned</b>)init);
+<a name='L1427'>            s-&gt;high_water += init;
+<a name='L1428'>        <font color='red'>}</font>
+<a name='L1429'>    <font color='red'>}</font>
+<a name='L1430'><font color='red'>}</font>
+<a name='L1431'>
+<a name='L1432'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1433'><i><font color='green'> * Flush the current block, with given end-of-file flag.</font></i>
+<a name='L1434'><i><font color='green'> * IN assertion: strstart is set to the end of the current match.</font></i>
+<a name='L1435'><i><font color='green'> */</font></i>
+<a name='L1436'><font color='darkred'>#define</font> <a href='../R/1146.html' title='Multiple refered from 2 places.'>FLUSH_BLOCK_ONLY</a>(s, last) <font color='red'>{</font> \
+<a name='L1437'>   <a href='../D/6620.html' title='Multiple defined in 2 places.'>_tr_flush_block</a>(s, (s-&gt;block_start &gt;= 0L ? \
+<a name='L1438'>                   (<a href='../D/7377.html' title='Multiple defined in 4 places.'>charf</a> *)&amp;s-&gt;window[(<b>unsigned</b>)s-&gt;block_start] : \
+<a name='L1439'>                   (<a href='../D/7377.html' title='Multiple defined in 4 places.'>charf</a> *)<a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>), \
+<a name='L1440'>                (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)((<b>long</b>)s-&gt;strstart - s-&gt;block_start), \
+<a name='L1441'>                (last)); \
+<a name='L1442'>   s-&gt;block_start = s-&gt;strstart; \
+<a name='L1443'>   <a href='../S/2737.html#L562' title='Defined at 562 in Modules/zlib/deflate.c.'>flush_pending</a>(s-&gt;strm); \
+<a name='L1444'>   <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr,"[FLUSH]")); \
+<a name='L1445'><font color='red'>}</font>
+<a name='L1446'>
+<a name='L1447'><i><font color='green'>/* Same but force premature exit if necessary. */</font></i>
+<a name='L1448'><font color='darkred'>#define</font> <a href='../R/1145.html' title='Multiple refered from 11 places.'>FLUSH_BLOCK</a>(s, last) <font color='red'>{</font> \
+<a name='L1449'>   <a href='../S/2737.html#L1436' title='Defined at 1436 in Modules/zlib/deflate.c.'>FLUSH_BLOCK_ONLY</a>(s, last); \
+<a name='L1450'>   <b>if</b> (s-&gt;strm-&gt;avail_out == 0) <b>return</b> (last) ? <a href='../S/2737.html#L69' title='Defined at 69 in Modules/zlib/deflate.c.'>finish_started</a> : <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a>; \
+<a name='L1451'><font color='red'>}</font>
+<a name='L1452'>
+<a name='L1453'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1454'><i><font color='green'> * Copy without compression as much as possible from the input stream, return</font></i>
+<a name='L1455'><i><font color='green'> * the current block state.</font></i>
+<a name='L1456'><i><font color='green'> * This function does not insert new strings in the dictionary since</font></i>
+<a name='L1457'><i><font color='green'> * uncompressible data is probably not useful. This function is used</font></i>
+<a name='L1458'><i><font color='green'> * only for the level=0 compression option.</font></i>
+<a name='L1459'><i><font color='green'> * NOTE: this function should be optimized to avoid extra copying from</font></i>
+<a name='L1460'><i><font color='green'> * window to pending_buf.</font></i>
+<a name='L1461'><i><font color='green'> */</font></i>
+<a name='L1462'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../R/7244.html' title='Multiple refered from 3 places.'>deflate_stored</a>(s, flush)
+<a name='L1463'>    deflate_state *s;
+<a name='L1464'>    <b>int</b> flush;
+<a name='L1465'><font color='red'>{</font>
+<a name='L1466'>    <i><font color='green'>/* Stored blocks are limited to 0xffff bytes, pending_buf is limited</font></i>
+<a name='L1467'><i><font color='green'>     * to pending_buf_size, and each stored block has a 5 byte header:</font></i>
+<a name='L1468'><i><font color='green'>     */</font></i>
+<a name='L1469'>    <a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a> max_block_size = 0xffff;
+<a name='L1470'>    <a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a> max_start;
+<a name='L1471'>
+<a name='L1472'>    <b>if</b> (max_block_size &gt; s-&gt;pending_buf_size - 5) <font color='red'>{</font>
+<a name='L1473'>        max_block_size = s-&gt;pending_buf_size - 5;
+<a name='L1474'>    <font color='red'>}</font>
+<a name='L1475'>
+<a name='L1476'>    <i><font color='green'>/* Copy as much as possible from input to output: */</font></i>
+<a name='L1477'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1478'>        <i><font color='green'>/* Fill the window as much as possible: */</font></i>
+<a name='L1479'>        <b>if</b> (s-&gt;lookahead &lt;= 1) <font color='red'>{</font>
+<a name='L1480'>
+<a name='L1481'>            <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(s-&gt;strstart &lt; s-&gt;w_size+<a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s) ||
+<a name='L1482'>                   s-&gt;block_start &gt;= (<b>long</b>)s-&gt;w_size, "slide too late");
+<a name='L1483'>
+<a name='L1484'>            <a href='../S/2737.html#L1305' title='Defined at 1305 in Modules/zlib/deflate.c.'>fill_window</a>(s);
+<a name='L1485'>            <b>if</b> (s-&gt;lookahead == 0 &amp;&amp; flush == <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a>) <b>return</b> <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a>;
+<a name='L1486'>
+<a name='L1487'>            <b>if</b> (s-&gt;lookahead == 0) <b>break</b>; <i><font color='green'>/* flush the current block */</font></i>
+<a name='L1488'>        <font color='red'>}</font>
+<a name='L1489'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(s-&gt;block_start &gt;= 0L, "block gone");
+<a name='L1490'>
+<a name='L1491'>        s-&gt;strstart += s-&gt;lookahead;
+<a name='L1492'>        s-&gt;lookahead = 0;
+<a name='L1493'>
+<a name='L1494'>        <i><font color='green'>/* Emit a stored block if pending_buf will be full: */</font></i>
+<a name='L1495'>        max_start = s-&gt;block_start + max_block_size;
+<a name='L1496'>        <b>if</b> (s-&gt;strstart == 0 || (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;strstart &gt;= max_start) <font color='red'>{</font>
+<a name='L1497'>            <i><font color='green'>/* strstart == 0 is possible when wraparound on 16-bit machine */</font></i>
+<a name='L1498'>            s-&gt;lookahead = (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)(s-&gt;strstart - max_start);
+<a name='L1499'>            s-&gt;strstart = (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)max_start;
+<a name='L1500'>            <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, 0);
+<a name='L1501'>        <font color='red'>}</font>
+<a name='L1502'>        <i><font color='green'>/* Flush if we may have to slide, otherwise block_start may become</font></i>
+<a name='L1503'><i><font color='green'>         * negative and the data will be gone:</font></i>
+<a name='L1504'><i><font color='green'>         */</font></i>
+<a name='L1505'>        <b>if</b> (s-&gt;strstart - (<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)s-&gt;block_start &gt;= <a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s)) <font color='red'>{</font>
+<a name='L1506'>            <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, 0);
+<a name='L1507'>        <font color='red'>}</font>
+<a name='L1508'>    <font color='red'>}</font>
+<a name='L1509'>    <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>);
+<a name='L1510'>    <b>return</b> flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a> ? <a href='../S/2737.html#L70' title='Defined at 70 in Modules/zlib/deflate.c.'>finish_done</a> : <a href='../S/2737.html#L68' title='Defined at 68 in Modules/zlib/deflate.c.'>block_done</a>;
+<a name='L1511'><font color='red'>}</font>
+<a name='L1512'>
+<a name='L1513'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1514'><i><font color='green'> * Compress as much as possible from the input stream, return the current</font></i>
+<a name='L1515'><i><font color='green'> * block state.</font></i>
+<a name='L1516'><i><font color='green'> * This function does not perform lazy evaluation of matches and inserts</font></i>
+<a name='L1517'><i><font color='green'> * new strings in the dictionary only for unmatched strings or for short</font></i>
+<a name='L1518'><i><font color='green'> * matches. It is used only for the fast compression options.</font></i>
+<a name='L1519'><i><font color='green'> */</font></i>
+<a name='L1520'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../R/7239.html' title='Multiple refered from 5 places.'>deflate_fast</a>(s, flush)
+<a name='L1521'>    deflate_state *s;
+<a name='L1522'>    <b>int</b> flush;
+<a name='L1523'><font color='red'>{</font>
+<a name='L1524'>    <a href='../S/2738.html#L88' title='Defined at 88 in Modules/zlib/deflate.h.'>IPos</a> hash_head;       <i><font color='green'>/* head of the hash chain */</font></i>
+<a name='L1525'>    <b>int</b> bflush;           <i><font color='green'>/* set if current block must be flushed */</font></i>
+<a name='L1526'>
+<a name='L1527'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1528'>        <i><font color='green'>/* Make sure that we always have enough lookahead, except</font></i>
+<a name='L1529'><i><font color='green'>         * at the end of the input file. We need MAX_MATCH bytes</font></i>
+<a name='L1530'><i><font color='green'>         * for the next match, plus MIN_MATCH bytes to insert the</font></i>
+<a name='L1531'><i><font color='green'>         * string following the next match.</font></i>
+<a name='L1532'><i><font color='green'>         */</font></i>
+<a name='L1533'>        <b>if</b> (s-&gt;lookahead &lt; <a href='../S/2738.html#L278' title='Defined at 278 in Modules/zlib/deflate.h.'>MIN_LOOKAHEAD</a>) <font color='red'>{</font>
+<a name='L1534'>            <a href='../S/2737.html#L1305' title='Defined at 1305 in Modules/zlib/deflate.c.'>fill_window</a>(s);
+<a name='L1535'>            <b>if</b> (s-&gt;lookahead &lt; <a href='../S/2738.html#L278' title='Defined at 278 in Modules/zlib/deflate.h.'>MIN_LOOKAHEAD</a> &amp;&amp; flush == <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a>) <font color='red'>{</font>
+<a name='L1536'>                <b>return</b> <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a>;
+<a name='L1537'>            <font color='red'>}</font>
+<a name='L1538'>            <b>if</b> (s-&gt;lookahead == 0) <b>break</b>; <i><font color='green'>/* flush the current block */</font></i>
+<a name='L1539'>        <font color='red'>}</font>
+<a name='L1540'>
+<a name='L1541'>        <i><font color='green'>/* Insert the string window[strstart .. strstart+2] in the</font></i>
+<a name='L1542'><i><font color='green'>         * dictionary, and set hash_head to the head of the hash chain:</font></i>
+<a name='L1543'><i><font color='green'>         */</font></i>
+<a name='L1544'>        hash_head = <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a>;
+<a name='L1545'>        <b>if</b> (s-&gt;lookahead &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <font color='red'>{</font>
+<a name='L1546'>            <a href='../D/1738.html' title='Multiple defined in 2 places.'>INSERT_STRING</a>(s, s-&gt;strstart, hash_head);
+<a name='L1547'>        <font color='red'>}</font>
+<a name='L1548'>
+<a name='L1549'>        <i><font color='green'>/* Find the longest match, discarding those &lt;= prev_length.</font></i>
+<a name='L1550'><i><font color='green'>         * At this point we have always match_length &lt; MIN_MATCH</font></i>
+<a name='L1551'><i><font color='green'>         */</font></i>
+<a name='L1552'>        <b>if</b> (hash_head != <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a> &amp;&amp; s-&gt;strstart - hash_head &lt;= <a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s)) <font color='red'>{</font>
+<a name='L1553'>            <i><font color='green'>/* To simplify the code, we prevent matches with the string</font></i>
+<a name='L1554'><i><font color='green'>             * of window index 0 (in particular we have to avoid a match</font></i>
+<a name='L1555'><i><font color='green'>             * of the string with itself at the start of the input file).</font></i>
+<a name='L1556'><i><font color='green'>             */</font></i>
+<a name='L1557'>            s-&gt;match_length = <a href='../D/9619.html' title='Multiple defined in 2 places.'>longest_match</a> (s, hash_head);
+<a name='L1558'>            <i><font color='green'>/* longest_match() sets match_start */</font></i>
+<a name='L1559'>        <font color='red'>}</font>
+<a name='L1560'>        <b>if</b> (s-&gt;match_length &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <font color='red'>{</font>
+<a name='L1561'>            <a href='../D/7409.html' title='Multiple defined in 2 places.'>check_match</a>(s, s-&gt;strstart, s-&gt;<a href='../S/2611.html#L3390' title='Defined at 3390 in Modules/_sre.c.'>match_start</a>, s-&gt;match_length);
+<a name='L1562'>
+<a name='L1563'>            <a href='../D/6624.html' title='Multiple defined in 2 places.'>_tr_tally_dist</a>(s, s-&gt;strstart - s-&gt;<a href='../S/2611.html#L3390' title='Defined at 3390 in Modules/_sre.c.'>match_start</a>,
+<a name='L1564'>                           s-&gt;match_length - <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>, bflush);
+<a name='L1565'>
+<a name='L1566'>            s-&gt;lookahead -= s-&gt;match_length;
+<a name='L1567'>
+<a name='L1568'>            <i><font color='green'>/* Insert new strings in the hash table only if the match length</font></i>
+<a name='L1569'><i><font color='green'>             * is not too large. This saves time but degrades compression.</font></i>
+<a name='L1570'><i><font color='green'>             */</font></i>
+<a name='L1571'><font color='darkred'>#ifndef</font> FASTEST
+<a name='L1572'>            <b>if</b> (s-&gt;match_length &lt;= s-&gt;max_insert_length &amp;&amp;
+<a name='L1573'>                s-&gt;lookahead &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <font color='red'>{</font>
+<a name='L1574'>                s-&gt;match_length--; <i><font color='green'>/* string at strstart already in table */</font></i>
+<a name='L1575'>                <b>do</b> <font color='red'>{</font>
+<a name='L1576'>                    s-&gt;strstart++;
+<a name='L1577'>                    <a href='../D/1738.html' title='Multiple defined in 2 places.'>INSERT_STRING</a>(s, s-&gt;strstart, hash_head);
+<a name='L1578'>                    <i><font color='green'>/* strstart never exceeds WSIZE-MAX_MATCH, so there are</font></i>
+<a name='L1579'><i><font color='green'>                     * always MIN_MATCH bytes ahead.</font></i>
+<a name='L1580'><i><font color='green'>                     */</font></i>
+<a name='L1581'>                <font color='red'>}</font> <b>while</b> (--s-&gt;match_length != 0);
+<a name='L1582'>                s-&gt;strstart++;
+<a name='L1583'>            <font color='red'>}</font> <b>else</b>
+<a name='L1584'><font color='darkred'>#endif</font>
+<a name='L1585'>            <font color='red'>{</font>
+<a name='L1586'>                s-&gt;strstart += s-&gt;match_length;
+<a name='L1587'>                s-&gt;match_length = 0;
+<a name='L1588'>                s-&gt;ins_h = s-&gt;window[s-&gt;strstart];
+<a name='L1589'>                <a href='../S/2737.html#L164' title='Defined at 164 in Modules/zlib/deflate.c.'>UPDATE_HASH</a>(s, s-&gt;ins_h, s-&gt;window[s-&gt;strstart+1]);
+<a name='L1590'><font color='darkred'>#if</font> <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a> != 3
+<a name='L1591'>                <a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a> <a href='../S/2737.html#L164' title='Defined at 164 in Modules/zlib/deflate.c.'>UPDATE_HASH</a>() <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-3 more times
+<a name='L1592'><font color='darkred'>#endif</font>
+<a name='L1593'>                <i><font color='green'>/* If lookahead &lt; MIN_MATCH, ins_h is garbage, but it does not</font></i>
+<a name='L1594'><i><font color='green'>                 * matter since it will be recomputed at next deflate call.</font></i>
+<a name='L1595'><i><font color='green'>                 */</font></i>
+<a name='L1596'>            <font color='red'>}</font>
+<a name='L1597'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1598'>            <i><font color='green'>/* No match, output a literal byte */</font></i>
+<a name='L1599'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr,"%c", s-&gt;window[s-&gt;strstart]));
+<a name='L1600'>            <a href='../D/6625.html' title='Multiple defined in 2 places.'>_tr_tally_lit</a> (s, s-&gt;window[s-&gt;strstart], bflush);
+<a name='L1601'>            s-&gt;lookahead--;
+<a name='L1602'>            s-&gt;strstart++;
+<a name='L1603'>        <font color='red'>}</font>
+<a name='L1604'>        <b>if</b> (bflush) <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, 0);
+<a name='L1605'>    <font color='red'>}</font>
+<a name='L1606'>    <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>);
+<a name='L1607'>    <b>return</b> flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a> ? <a href='../S/2737.html#L70' title='Defined at 70 in Modules/zlib/deflate.c.'>finish_done</a> : <a href='../S/2737.html#L68' title='Defined at 68 in Modules/zlib/deflate.c.'>block_done</a>;
+<a name='L1608'><font color='red'>}</font>
+<a name='L1609'>
+<a name='L1610'><font color='darkred'>#ifndef</font> FASTEST
+<a name='L1611'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1612'><i><font color='green'> * Same as above, but achieves better compression. We use a lazy</font></i>
+<a name='L1613'><i><font color='green'> * evaluation for matches: a match is finally adopted only if there is</font></i>
+<a name='L1614'><i><font color='green'> * no better match at the next window position.</font></i>
+<a name='L1615'><i><font color='green'> */</font></i>
+<a name='L1616'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../R/7242.html' title='Multiple refered from 7 places.'>deflate_slow</a>(s, flush)
+<a name='L1617'>    deflate_state *s;
+<a name='L1618'>    <b>int</b> flush;
+<a name='L1619'><font color='red'>{</font>
+<a name='L1620'>    <a href='../S/2738.html#L88' title='Defined at 88 in Modules/zlib/deflate.h.'>IPos</a> hash_head;          <i><font color='green'>/* head of hash chain */</font></i>
+<a name='L1621'>    <b>int</b> bflush;              <i><font color='green'>/* set if current block must be flushed */</font></i>
+<a name='L1622'>
+<a name='L1623'>    <i><font color='green'>/* Process the input block. */</font></i>
+<a name='L1624'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1625'>        <i><font color='green'>/* Make sure that we always have enough lookahead, except</font></i>
+<a name='L1626'><i><font color='green'>         * at the end of the input file. We need MAX_MATCH bytes</font></i>
+<a name='L1627'><i><font color='green'>         * for the next match, plus MIN_MATCH bytes to insert the</font></i>
+<a name='L1628'><i><font color='green'>         * string following the next match.</font></i>
+<a name='L1629'><i><font color='green'>         */</font></i>
+<a name='L1630'>        <b>if</b> (s-&gt;lookahead &lt; <a href='../S/2738.html#L278' title='Defined at 278 in Modules/zlib/deflate.h.'>MIN_LOOKAHEAD</a>) <font color='red'>{</font>
+<a name='L1631'>            <a href='../S/2737.html#L1305' title='Defined at 1305 in Modules/zlib/deflate.c.'>fill_window</a>(s);
+<a name='L1632'>            <b>if</b> (s-&gt;lookahead &lt; <a href='../S/2738.html#L278' title='Defined at 278 in Modules/zlib/deflate.h.'>MIN_LOOKAHEAD</a> &amp;&amp; flush == <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a>) <font color='red'>{</font>
+<a name='L1633'>                <b>return</b> <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a>;
+<a name='L1634'>            <font color='red'>}</font>
+<a name='L1635'>            <b>if</b> (s-&gt;lookahead == 0) <b>break</b>; <i><font color='green'>/* flush the current block */</font></i>
+<a name='L1636'>        <font color='red'>}</font>
+<a name='L1637'>
+<a name='L1638'>        <i><font color='green'>/* Insert the string window[strstart .. strstart+2] in the</font></i>
+<a name='L1639'><i><font color='green'>         * dictionary, and set hash_head to the head of the hash chain:</font></i>
+<a name='L1640'><i><font color='green'>         */</font></i>
+<a name='L1641'>        hash_head = <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a>;
+<a name='L1642'>        <b>if</b> (s-&gt;lookahead &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <font color='red'>{</font>
+<a name='L1643'>            <a href='../D/1738.html' title='Multiple defined in 2 places.'>INSERT_STRING</a>(s, s-&gt;strstart, hash_head);
+<a name='L1644'>        <font color='red'>}</font>
+<a name='L1645'>
+<a name='L1646'>        <i><font color='green'>/* Find the longest match, discarding those &lt;= prev_length.</font></i>
+<a name='L1647'><i><font color='green'>         */</font></i>
+<a name='L1648'>        s-&gt;prev_length = s-&gt;match_length, s-&gt;prev_match = s-&gt;<a href='../S/2611.html#L3390' title='Defined at 3390 in Modules/_sre.c.'>match_start</a>;
+<a name='L1649'>        s-&gt;match_length = <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1;
+<a name='L1650'>
+<a name='L1651'>        <b>if</b> (hash_head != <a href='../S/2737.html#L104' title='Defined at 104 in Modules/zlib/deflate.c.'>NIL</a> &amp;&amp; s-&gt;prev_length &lt; s-&gt;max_lazy_match &amp;&amp;
+<a name='L1652'>            s-&gt;strstart - hash_head &lt;= <a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s)) <font color='red'>{</font>
+<a name='L1653'>            <i><font color='green'>/* To simplify the code, we prevent matches with the string</font></i>
+<a name='L1654'><i><font color='green'>             * of window index 0 (in particular we have to avoid a match</font></i>
+<a name='L1655'><i><font color='green'>             * of the string with itself at the start of the input file).</font></i>
+<a name='L1656'><i><font color='green'>             */</font></i>
+<a name='L1657'>            s-&gt;match_length = <a href='../D/9619.html' title='Multiple defined in 2 places.'>longest_match</a> (s, hash_head);
+<a name='L1658'>            <i><font color='green'>/* longest_match() sets match_start */</font></i>
+<a name='L1659'>
+<a name='L1660'>            <b>if</b> (s-&gt;match_length &lt;= 5 &amp;&amp; (s-&gt;strategy == <a href='../S/2769.html#L192' title='Defined at 192 in Modules/zlib/zlib.h.'>Z_FILTERED</a>
+<a name='L1661'><font color='darkred'>#if</font> <a href='../S/2737.html#L108' title='Defined at 108 in Modules/zlib/deflate.c.'>TOO_FAR</a> &lt;= 32767
+<a name='L1662'>                || (s-&gt;match_length == <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a> &amp;&amp;
+<a name='L1663'>                    s-&gt;strstart - s-&gt;<a href='../S/2611.html#L3390' title='Defined at 3390 in Modules/_sre.c.'>match_start</a> &gt; <a href='../S/2737.html#L108' title='Defined at 108 in Modules/zlib/deflate.c.'>TOO_FAR</a>)
+<a name='L1664'><font color='darkred'>#endif</font>
+<a name='L1665'>                )) <font color='red'>{</font>
+<a name='L1666'>
+<a name='L1667'>                <i><font color='green'>/* If prev_match is also MIN_MATCH, match_start is garbage</font></i>
+<a name='L1668'><i><font color='green'>                 * but we will ignore the current match anyway.</font></i>
+<a name='L1669'><i><font color='green'>                 */</font></i>
+<a name='L1670'>                s-&gt;match_length = <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1;
+<a name='L1671'>            <font color='red'>}</font>
+<a name='L1672'>        <font color='red'>}</font>
+<a name='L1673'>        <i><font color='green'>/* If there was a match at the previous step and the current</font></i>
+<a name='L1674'><i><font color='green'>         * match is not better, output the previous match:</font></i>
+<a name='L1675'><i><font color='green'>         */</font></i>
+<a name='L1676'>        <b>if</b> (s-&gt;prev_length &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a> &amp;&amp; s-&gt;match_length &lt;= s-&gt;prev_length) <font color='red'>{</font>
+<a name='L1677'>            <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> max_insert = s-&gt;strstart + s-&gt;lookahead - <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>;
+<a name='L1678'>            <i><font color='green'>/* Do not insert strings in hash table beyond this. */</font></i>
+<a name='L1679'>
+<a name='L1680'>            <a href='../D/7409.html' title='Multiple defined in 2 places.'>check_match</a>(s, s-&gt;strstart-1, s-&gt;prev_match, s-&gt;prev_length);
+<a name='L1681'>
+<a name='L1682'>            <a href='../D/6624.html' title='Multiple defined in 2 places.'>_tr_tally_dist</a>(s, s-&gt;strstart -1 - s-&gt;prev_match,
+<a name='L1683'>                           s-&gt;prev_length - <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>, bflush);
+<a name='L1684'>
+<a name='L1685'>            <i><font color='green'>/* Insert in hash table all strings up to the end of the match.</font></i>
+<a name='L1686'><i><font color='green'>             * strstart-1 and strstart are already inserted. If there is not</font></i>
+<a name='L1687'><i><font color='green'>             * enough lookahead, the last two strings are not inserted in</font></i>
+<a name='L1688'><i><font color='green'>             * the hash table.</font></i>
+<a name='L1689'><i><font color='green'>             */</font></i>
+<a name='L1690'>            s-&gt;lookahead -= s-&gt;prev_length-1;
+<a name='L1691'>            s-&gt;prev_length -= 2;
+<a name='L1692'>            <b>do</b> <font color='red'>{</font>
+<a name='L1693'>                <b>if</b> (++s-&gt;strstart &lt;= max_insert) <font color='red'>{</font>
+<a name='L1694'>                    <a href='../D/1738.html' title='Multiple defined in 2 places.'>INSERT_STRING</a>(s, s-&gt;strstart, hash_head);
+<a name='L1695'>                <font color='red'>}</font>
+<a name='L1696'>            <font color='red'>}</font> <b>while</b> (--s-&gt;prev_length != 0);
+<a name='L1697'>            s-&gt;match_available = 0;
+<a name='L1698'>            s-&gt;match_length = <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>-1;
+<a name='L1699'>            s-&gt;strstart++;
+<a name='L1700'>
+<a name='L1701'>            <b>if</b> (bflush) <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, 0);
+<a name='L1702'>
+<a name='L1703'>        <font color='red'>}</font> <b>else</b> <b>if</b> (s-&gt;match_available) <font color='red'>{</font>
+<a name='L1704'>            <i><font color='green'>/* If there was no match at the previous position, output a</font></i>
+<a name='L1705'><i><font color='green'>             * single literal. If there was a match but the current match</font></i>
+<a name='L1706'><i><font color='green'>             * is longer, truncate the previous match to a single literal.</font></i>
+<a name='L1707'><i><font color='green'>             */</font></i>
+<a name='L1708'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr,"%c", s-&gt;window[s-&gt;strstart-1]));
+<a name='L1709'>            <a href='../D/6625.html' title='Multiple defined in 2 places.'>_tr_tally_lit</a>(s, s-&gt;window[s-&gt;strstart-1], bflush);
+<a name='L1710'>            <b>if</b> (bflush) <font color='red'>{</font>
+<a name='L1711'>                <a href='../S/2737.html#L1436' title='Defined at 1436 in Modules/zlib/deflate.c.'>FLUSH_BLOCK_ONLY</a>(s, 0);
+<a name='L1712'>            <font color='red'>}</font>
+<a name='L1713'>            s-&gt;strstart++;
+<a name='L1714'>            s-&gt;lookahead--;
+<a name='L1715'>            <b>if</b> (s-&gt;strm-&gt;avail_out == 0) <b>return</b> <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a>;
+<a name='L1716'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1717'>            <i><font color='green'>/* There is no previous match to compare with, wait for</font></i>
+<a name='L1718'><i><font color='green'>             * the next step to decide.</font></i>
+<a name='L1719'><i><font color='green'>             */</font></i>
+<a name='L1720'>            s-&gt;match_available = 1;
+<a name='L1721'>            s-&gt;strstart++;
+<a name='L1722'>            s-&gt;lookahead--;
+<a name='L1723'>        <font color='red'>}</font>
+<a name='L1724'>    <font color='red'>}</font>
+<a name='L1725'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (flush != <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a>, "no flush?");
+<a name='L1726'>    <b>if</b> (s-&gt;match_available) <font color='red'>{</font>
+<a name='L1727'>        <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr,"%c", s-&gt;window[s-&gt;strstart-1]));
+<a name='L1728'>        <a href='../D/6625.html' title='Multiple defined in 2 places.'>_tr_tally_lit</a>(s, s-&gt;window[s-&gt;strstart-1], bflush);
+<a name='L1729'>        s-&gt;match_available = 0;
+<a name='L1730'>    <font color='red'>}</font>
+<a name='L1731'>    <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>);
+<a name='L1732'>    <b>return</b> flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a> ? <a href='../S/2737.html#L70' title='Defined at 70 in Modules/zlib/deflate.c.'>finish_done</a> : <a href='../S/2737.html#L68' title='Defined at 68 in Modules/zlib/deflate.c.'>block_done</a>;
+<a name='L1733'><font color='red'>}</font>
+<a name='L1734'><font color='darkred'>#endif</font> <i><font color='green'>/* FASTEST */</font></i>
+<a name='L1735'>
+<a name='L1736'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1737'><i><font color='green'> * For Z_RLE, simply look for runs of bytes, generate matches only of distance</font></i>
+<a name='L1738'><i><font color='green'> * one.  Do not maintain a hash table.  (It will be regenerated if this run of</font></i>
+<a name='L1739'><i><font color='green'> * deflate switches away from Z_RLE.)</font></i>
+<a name='L1740'><i><font color='green'> */</font></i>
+<a name='L1741'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../R/7241.html' title='Multiple refered from 2 places.'>deflate_rle</a>(s, flush)
+<a name='L1742'>    deflate_state *s;
+<a name='L1743'>    <b>int</b> flush;
+<a name='L1744'><font color='red'>{</font>
+<a name='L1745'>    <b>int</b> bflush;             <i><font color='green'>/* set if current block must be flushed */</font></i>
+<a name='L1746'>    <a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a> prev;              <i><font color='green'>/* byte at distance one to match */</font></i>
+<a name='L1747'>    <a href='../D/459.html' title='Multiple defined in 6 places.'>Bytef</a> *scan, *strend;   <i><font color='green'>/* scan goes up to strend for length of run */</font></i>
+<a name='L1748'>
+<a name='L1749'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1750'>        <i><font color='green'>/* Make sure that we always have enough lookahead, except</font></i>
+<a name='L1751'><i><font color='green'>         * at the end of the input file. We need MAX_MATCH bytes</font></i>
+<a name='L1752'><i><font color='green'>         * for the longest encodable run.</font></i>
+<a name='L1753'><i><font color='green'>         */</font></i>
+<a name='L1754'>        <b>if</b> (s-&gt;lookahead &lt; <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>) <font color='red'>{</font>
+<a name='L1755'>            <a href='../S/2737.html#L1305' title='Defined at 1305 in Modules/zlib/deflate.c.'>fill_window</a>(s);
+<a name='L1756'>            <b>if</b> (s-&gt;lookahead &lt; <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> &amp;&amp; flush == <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a>) <font color='red'>{</font>
+<a name='L1757'>                <b>return</b> <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a>;
+<a name='L1758'>            <font color='red'>}</font>
+<a name='L1759'>            <b>if</b> (s-&gt;lookahead == 0) <b>break</b>; <i><font color='green'>/* flush the current block */</font></i>
+<a name='L1760'>        <font color='red'>}</font>
+<a name='L1761'>
+<a name='L1762'>        <i><font color='green'>/* See how many times the previous byte repeats */</font></i>
+<a name='L1763'>        s-&gt;match_length = 0;
+<a name='L1764'>        <b>if</b> (s-&gt;lookahead &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a> &amp;&amp; s-&gt;strstart &gt; 0) <font color='red'>{</font>
+<a name='L1765'>            scan = s-&gt;window + s-&gt;strstart - 1;
+<a name='L1766'>            prev = *scan;
+<a name='L1767'>            <b>if</b> (prev == *++scan &amp;&amp; prev == *++scan &amp;&amp; prev == *++scan) <font color='red'>{</font>
+<a name='L1768'>                strend = s-&gt;window + s-&gt;strstart + <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>;
+<a name='L1769'>                <b>do</b> <font color='red'>{</font>
+<a name='L1770'>                <font color='red'>}</font> <b>while</b> (prev == *++scan &amp;&amp; prev == *++scan &amp;&amp;
+<a name='L1771'>                         prev == *++scan &amp;&amp; prev == *++scan &amp;&amp;
+<a name='L1772'>                         prev == *++scan &amp;&amp; prev == *++scan &amp;&amp;
+<a name='L1773'>                         prev == *++scan &amp;&amp; prev == *++scan &amp;&amp;
+<a name='L1774'>                         scan &lt; strend);
+<a name='L1775'>                s-&gt;match_length = <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a> - (<b>int</b>)(strend - scan);
+<a name='L1776'>                <b>if</b> (s-&gt;match_length &gt; s-&gt;lookahead)
+<a name='L1777'>                    s-&gt;match_length = s-&gt;lookahead;
+<a name='L1778'>            <font color='red'>}</font>
+<a name='L1779'>        <font color='red'>}</font>
+<a name='L1780'>
+<a name='L1781'>        <i><font color='green'>/* Emit match if have run of MIN_MATCH or longer, else emit literal */</font></i>
+<a name='L1782'>        <b>if</b> (s-&gt;match_length &gt;= <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) <font color='red'>{</font>
+<a name='L1783'>            <a href='../D/7409.html' title='Multiple defined in 2 places.'>check_match</a>(s, s-&gt;strstart, s-&gt;strstart - 1, s-&gt;match_length);
+<a name='L1784'>
+<a name='L1785'>            <a href='../D/6624.html' title='Multiple defined in 2 places.'>_tr_tally_dist</a>(s, 1, s-&gt;match_length - <a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>, bflush);
+<a name='L1786'>
+<a name='L1787'>            s-&gt;lookahead -= s-&gt;match_length;
+<a name='L1788'>            s-&gt;strstart += s-&gt;match_length;
+<a name='L1789'>            s-&gt;match_length = 0;
+<a name='L1790'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1791'>            <i><font color='green'>/* No match, output a literal byte */</font></i>
+<a name='L1792'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr,"%c", s-&gt;window[s-&gt;strstart]));
+<a name='L1793'>            <a href='../D/6625.html' title='Multiple defined in 2 places.'>_tr_tally_lit</a> (s, s-&gt;window[s-&gt;strstart], bflush);
+<a name='L1794'>            s-&gt;lookahead--;
+<a name='L1795'>            s-&gt;strstart++;
+<a name='L1796'>        <font color='red'>}</font>
+<a name='L1797'>        <b>if</b> (bflush) <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, 0);
+<a name='L1798'>    <font color='red'>}</font>
+<a name='L1799'>    <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>);
+<a name='L1800'>    <b>return</b> flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a> ? <a href='../S/2737.html#L70' title='Defined at 70 in Modules/zlib/deflate.c.'>finish_done</a> : <a href='../S/2737.html#L68' title='Defined at 68 in Modules/zlib/deflate.c.'>block_done</a>;
+<a name='L1801'><font color='red'>}</font>
+<a name='L1802'>
+<a name='L1803'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1804'><i><font color='green'> * For Z_HUFFMAN_ONLY, do not look for matches.  Do not maintain a hash table.</font></i>
+<a name='L1805'><i><font color='green'> * (It will be regenerated if this run of deflate switches away from Huffman.)</font></i>
+<a name='L1806'><i><font color='green'> */</font></i>
+<a name='L1807'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2737.html#L71' title='Defined at 71 in Modules/zlib/deflate.c.'>block_state</a> <a href='../R/7240.html' title='Multiple refered from 2 places.'>deflate_huff</a>(s, flush)
+<a name='L1808'>    deflate_state *s;
+<a name='L1809'>    <b>int</b> flush;
+<a name='L1810'><font color='red'>{</font>
+<a name='L1811'>    <b>int</b> bflush;             <i><font color='green'>/* set if current block must be flushed */</font></i>
+<a name='L1812'>
+<a name='L1813'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1814'>        <i><font color='green'>/* Make sure that we have a literal to write. */</font></i>
+<a name='L1815'>        <b>if</b> (s-&gt;lookahead == 0) <font color='red'>{</font>
+<a name='L1816'>            <a href='../S/2737.html#L1305' title='Defined at 1305 in Modules/zlib/deflate.c.'>fill_window</a>(s);
+<a name='L1817'>            <b>if</b> (s-&gt;lookahead == 0) <font color='red'>{</font>
+<a name='L1818'>                <b>if</b> (flush == <a href='../S/2769.html#L164' title='Defined at 164 in Modules/zlib/zlib.h.'>Z_NO_FLUSH</a>)
+<a name='L1819'>                    <b>return</b> <a href='../S/2737.html#L67' title='Defined at 67 in Modules/zlib/deflate.c.'>need_more</a>;
+<a name='L1820'>                <b>break</b>;      <i><font color='green'>/* flush the current block */</font></i>
+<a name='L1821'>            <font color='red'>}</font>
+<a name='L1822'>        <font color='red'>}</font>
+<a name='L1823'>
+<a name='L1824'>        <i><font color='green'>/* Output a literal byte */</font></i>
+<a name='L1825'>        s-&gt;match_length = 0;
+<a name='L1826'>        <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr,"%c", s-&gt;window[s-&gt;strstart]));
+<a name='L1827'>        <a href='../D/6625.html' title='Multiple defined in 2 places.'>_tr_tally_lit</a> (s, s-&gt;window[s-&gt;strstart], bflush);
+<a name='L1828'>        s-&gt;lookahead--;
+<a name='L1829'>        s-&gt;strstart++;
+<a name='L1830'>        <b>if</b> (bflush) <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, 0);
+<a name='L1831'>    <font color='red'>}</font>
+<a name='L1832'>    <a href='../S/2737.html#L1448' title='Defined at 1448 in Modules/zlib/deflate.c.'>FLUSH_BLOCK</a>(s, flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>);
+<a name='L1833'>    <b>return</b> flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a> ? <a href='../S/2737.html#L70' title='Defined at 70 in Modules/zlib/deflate.c.'>finish_done</a> : <a href='../S/2737.html#L68' title='Defined at 68 in Modules/zlib/deflate.c.'>block_done</a>;
+<a name='L1834'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L198'>[^]</a><a href='#L1807'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

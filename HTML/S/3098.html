@@ -1,0 +1,208 @@
+<html>
+<head>
+<title>Python/dynload_aix.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/dynload_aix.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L157'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L36' title='Defined at 36.'>aix_getoldmodules</a>
+<li><a href='#L108' title='Defined at 108.'>aix_loaderror</a>
+<li><a href='#L157' title='Defined at 157.'>_PyImport_GetDynLoadFunc</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Support for dynamic loading of extension modules */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='3122.html'>importdl.h</a>"
+<a name='L6'>
+<a name='L7'><font color='darkred'>#include</font> &lt;<a href='2809.html'>ctype.h</a>&gt;      <i><font color='green'>/*  for isdigit()         */</font></i>
+<a name='L8'><font color='darkred'>#include</font> &lt;errno.h&gt;      <i><font color='green'>/*  for global errno      */</font></i>
+<a name='L9'><font color='darkred'>#include</font> &lt;string.h&gt;     <i><font color='green'>/*  for strerror()        */</font></i>
+<a name='L10'><font color='darkred'>#include</font> &lt;stdlib.h&gt;     <i><font color='green'>/*  for malloc(), free()  */</font></i>
+<a name='L11'><font color='darkred'>#include</font> &lt;sys/ldr.h&gt;
+<a name='L12'>
+<a name='L13'>
+<a name='L14'><font color='darkred'>#ifdef</font> AIX_GENUINE_CPLUSPLUS
+<a name='L15'><font color='darkred'>#include</font> &lt;load.h&gt;
+<a name='L16'><font color='darkred'>#define</font> <a href='../S/3098.html#L176' title='Refered from 176 in Python/dynload_aix.c.'>aix_load</a> loadAndInit
+<a name='L17'><font color='darkred'>#else</font>
+<a name='L18'><font color='darkred'>#define</font> <a href='../S/3098.html#L176' title='Refered from 176 in Python/dynload_aix.c.'>aix_load</a> <a href='../S/2588.html#L5187' title='Defined at 5187 in Modules/_pickle.c.'>load</a>
+<a name='L19'><font color='darkred'>#endif</font>
+<a name='L20'>
+<a name='L21'>
+<a name='L22'><b>extern</b> <b>char</b> *<a href='../S/3138.html#L674' title='Defined at 674 in Python/pythonrun.c.'>Py_GetProgramName</a>(<b>void</b>);
+<a name='L23'>
+<a name='L24'><b>typedef</b> <b>struct</b> <a href='../R/2019.html' title='Multiple refered from 11 places.'>Module</a> <font color='red'>{</font>
+<a name='L25'>    <b>struct</b> <a href='../D/2223.html' title='Multiple defined in 4 places.'>Module</a> *next;
+<a name='L26'>    <b>void</b>          *entry;
+<a name='L27'><font color='red'>}</font> <a href='../R/2019.html' title='Multiple refered from 11 places.'>Module</a>, *<a href='../R/2021.html' title='Multiple refered from 3 places.'>ModulePtr</a>;
+<a name='L28'>
+<a name='L29'><b>const</b> <b>struct</b> <a href='../S/3122.html#L23' title='Defined at 23 in Python/importdl.h.'>filedescr</a> _PyImport_DynLoadFiletab[] = <font color='red'>{</font>
+<a name='L30'>    <font color='red'>{</font>".so", "rb", <a href='../S/3122.html#L14' title='Defined at 14 in Python/importdl.h.'>C_EXTENSION</a><font color='red'>}</font>,
+<a name='L31'>    <font color='red'>{</font>"module.so", "rb", <a href='../S/3122.html#L14' title='Defined at 14 in Python/importdl.h.'>C_EXTENSION</a><font color='red'>}</font>,
+<a name='L32'>    <font color='red'>{</font>0, 0<font color='red'>}</font>
+<a name='L33'><font color='red'>}</font>;
+<a name='L34'>
+<a name='L35'><b>static</b> <b>int</b>
+<a name='L36'><a href='../S/3098.html#L174' title='Refered from 174 in Python/dynload_aix.c.'>aix_getoldmodules</a>(<b>void</b> **modlistptr)
+<a name='L37'><font color='red'>{</font>
+<a name='L38'>    <b>register</b> <a href='../S/3098.html#L27' title='Defined at 27 in Python/dynload_aix.c.'>ModulePtr</a>       modptr, prevmodptr;
+<a name='L39'>    <b>register</b> <b>struct</b> ld_info  *ldiptr;
+<a name='L40'>    <b>register</b> <b>char</b>            *ldibuf;
+<a name='L41'>    <b>register</b> <b>int</b>             errflag, bufsize = 1024;
+<a name='L42'>    <b>register</b> <b>unsigned</b> <b>int</b>    offset;
+<a name='L43'>    <b>char</b> *progname = <a href='../S/3138.html#L674' title='Defined at 674 in Python/pythonrun.c.'>Py_GetProgramName</a>();
+<a name='L44'>
+<a name='L45'>    <i><font color='green'>/*</font></i>
+<a name='L46'><i><font color='green'>    -- Get the list of loaded modules into ld_info structures.</font></i>
+<a name='L47'><i><font color='green'>    */</font></i>
+<a name='L48'>    <b>if</b> ((ldibuf = malloc(bufsize)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L49'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError, strerror(errno));
+<a name='L50'>        <b>return</b> -1;
+<a name='L51'>    <font color='red'>}</font>
+<a name='L52'>    <b>while</b> ((errflag = loadquery(L_GETINFO, ldibuf, bufsize)) == -1
+<a name='L53'>           &amp;&amp; errno == ENOMEM) <font color='red'>{</font>
+<a name='L54'>        free(ldibuf);
+<a name='L55'>        bufsize += 1024;
+<a name='L56'>        <b>if</b> ((ldibuf = malloc(bufsize)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L57'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError, strerror(errno));
+<a name='L58'>            <b>return</b> -1;
+<a name='L59'>        <font color='red'>}</font>
+<a name='L60'>    <font color='red'>}</font>
+<a name='L61'>    <b>if</b> (errflag == -1) <font color='red'>{</font>
+<a name='L62'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError, strerror(errno));
+<a name='L63'>        <b>return</b> -1;
+<a name='L64'>    <font color='red'>}</font>
+<a name='L65'>    <i><font color='green'>/*</font></i>
+<a name='L66'><i><font color='green'>    -- Make the modules list from the ld_info structures.</font></i>
+<a name='L67'><i><font color='green'>    */</font></i>
+<a name='L68'>    ldiptr = (<b>struct</b> ld_info *)ldibuf;
+<a name='L69'>    prevmodptr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L70'>    <b>do</b> <font color='red'>{</font>
+<a name='L71'>        <b>if</b> (strstr(progname, ldiptr-&gt;ldinfo_filename) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp;
+<a name='L72'>            strstr(ldiptr-&gt;ldinfo_filename, "python") == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L73'>            <i><font color='green'>/*</font></i>
+<a name='L74'><i><font color='green'>            -- Extract only the modules belonging to the main</font></i>
+<a name='L75'><i><font color='green'>            -- executable + those containing "python" as a</font></i>
+<a name='L76'><i><font color='green'>            -- substring (like the "python[version]" binary or</font></i>
+<a name='L77'><i><font color='green'>            -- "libpython[version].a" in case it's a shared lib).</font></i>
+<a name='L78'><i><font color='green'>            */</font></i>
+<a name='L79'>            offset = (<b>unsigned</b> <b>int</b>)ldiptr-&gt;ldinfo_next;
+<a name='L80'>            ldiptr = (<b>struct</b> ld_info *)((<b>char</b>*)ldiptr + offset);
+<a name='L81'>            <b>continue</b>;
+<a name='L82'>        <font color='red'>}</font>
+<a name='L83'>        <b>if</b> ((modptr = (<a href='../S/3098.html#L27' title='Defined at 27 in Python/dynload_aix.c.'>ModulePtr</a>)malloc(<b>sizeof</b>(<a href='../D/2223.html' title='Multiple defined in 4 places.'>Module</a>))) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L84'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError, strerror(errno));
+<a name='L85'>            <b>while</b> (*modlistptr) <font color='red'>{</font>
+<a name='L86'>                modptr = (<a href='../S/3098.html#L27' title='Defined at 27 in Python/dynload_aix.c.'>ModulePtr</a>)*modlistptr;
+<a name='L87'>                *modlistptr = (<b>void</b> *)modptr-&gt;next;
+<a name='L88'>                free(modptr);
+<a name='L89'>            <font color='red'>}</font>
+<a name='L90'>            <b>return</b> -1;
+<a name='L91'>        <font color='red'>}</font>
+<a name='L92'>        modptr-&gt;entry = ldiptr-&gt;ldinfo_dataorg;
+<a name='L93'>        modptr-&gt;next  = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L94'>        <b>if</b> (prevmodptr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L95'>            *modlistptr = (<b>void</b> *)modptr;
+<a name='L96'>        <b>else</b>
+<a name='L97'>            prevmodptr-&gt;next = modptr;
+<a name='L98'>        prevmodptr = modptr;
+<a name='L99'>        offset = (<b>unsigned</b> <b>int</b>)ldiptr-&gt;ldinfo_next;
+<a name='L100'>        ldiptr = (<b>struct</b> ld_info *)((<b>char</b>*)ldiptr + offset);
+<a name='L101'>    <font color='red'>}</font> <b>while</b> (offset);
+<a name='L102'>    free(ldibuf);
+<a name='L103'>    <b>return</b> 0;
+<a name='L104'><font color='red'>}</font>
+<a name='L105'>
+<a name='L106'>
+<a name='L107'><b>static</b> <b>void</b>
+<a name='L108'><a href='../S/3098.html#L178' title='Refered from 178 in Python/dynload_aix.c.'>aix_loaderror</a>(<b>const</b> <b>char</b> *pathname)
+<a name='L109'><font color='red'>{</font>
+<a name='L110'>
+<a name='L111'>    <b>char</b> *message[1024], errbuf[1024];
+<a name='L112'>    <b>register</b> <b>int</b> i,j;
+<a name='L113'>
+<a name='L114'>    <b>struct</b> errtab <font color='red'>{</font>
+<a name='L115'>        <b>int</b> errNo;
+<a name='L116'>        <b>char</b> *errstr;
+<a name='L117'>    <font color='red'>}</font> load_errtab[] = <font color='red'>{</font>
+<a name='L118'>        <font color='red'>{</font>L_ERROR_TOOMANY,               "too many errors, rest skipped."<font color='red'>}</font>,
+<a name='L119'>        <font color='red'>{</font>L_ERROR_NOLIB,                 "can't load library:"<font color='red'>}</font>,
+<a name='L120'>        <font color='red'>{</font>L_ERROR_UNDEF,                 "can't find symbol in library:"<font color='red'>}</font>,
+<a name='L121'>        <font color='red'>{</font>L_ERROR_RLDBAD,
+<a name='L122'>         "RLD index out of range or bad relocation type:"<font color='red'>}</font>,
+<a name='L123'>        <font color='red'>{</font>L_ERROR_FORMAT,                "not a valid, executable xcoff file:"<font color='red'>}</font>,
+<a name='L124'>        <font color='red'>{</font>L_ERROR_MEMBER,
+<a name='L125'>         "file not an archive or does not contain requested member:"<font color='red'>}</font>,
+<a name='L126'>        <font color='red'>{</font>L_ERROR_TYPE,                  "symbol table mismatch:"<font color='red'>}</font>,
+<a name='L127'>        <font color='red'>{</font>L_ERROR_ALIGN,                 "text alignment in file is wrong."<font color='red'>}</font>,
+<a name='L128'>        <font color='red'>{</font>L_ERROR_SYSTEM,                "System error:"<font color='red'>}</font>,
+<a name='L129'>        <font color='red'>{</font>L_ERROR_ERRNO,                 <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L130'>    <font color='red'>}</font>;
+<a name='L131'>
+<a name='L132'><font color='darkred'>#define</font> <a href='../S/3098.html#L143' title='Refered from 143 in Python/dynload_aix.c.'>LOAD_ERRTAB_LEN</a> (<b>sizeof</b>(load_errtab)/<b>sizeof</b>(load_errtab[0]))
+<a name='L133'><font color='darkred'>#define</font> <a href='../R/883.html' title='Multiple refered from 5 places.'>ERRBUF_APPEND</a>(s) strncat(errbuf, s, <b>sizeof</b>(errbuf)-strlen(errbuf)-1)
+<a name='L134'>
+<a name='L135'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(errbuf, <b>sizeof</b>(errbuf), "from module %.200s ", pathname);
+<a name='L136'>
+<a name='L137'>    <b>if</b> (!loadquery(L_GETMESSAGES, &amp;message[0], <b>sizeof</b>(message))) <font color='red'>{</font>
+<a name='L138'>        <a href='../S/3098.html#L133' title='Defined at 133 in Python/dynload_aix.c.'>ERRBUF_APPEND</a>(strerror(errno));
+<a name='L139'>        <a href='../S/3098.html#L133' title='Defined at 133 in Python/dynload_aix.c.'>ERRBUF_APPEND</a>("\n");
+<a name='L140'>    <font color='red'>}</font>
+<a name='L141'>    <b>for</b>(i = 0; message[i] &amp;&amp; *message[i]; i++) <font color='red'>{</font>
+<a name='L142'>        <b>int</b> nerr = atoi(message[i]);
+<a name='L143'>        <b>for</b> (j=0; j&lt;<a href='../S/3098.html#L132' title='Defined at 132 in Python/dynload_aix.c.'>LOAD_ERRTAB_LEN</a> ; j++) <font color='red'>{</font>
+<a name='L144'>            <b>if</b> (nerr == load_errtab[j].errNo &amp;&amp; load_errtab[j].errstr)
+<a name='L145'>            <a href='../S/3098.html#L133' title='Defined at 133 in Python/dynload_aix.c.'>ERRBUF_APPEND</a>(load_errtab[j].errstr);
+<a name='L146'>        <font color='red'>}</font>
+<a name='L147'>        <b>while</b> (isdigit(<a href='../S/570.html#L144' title='Defined at 144 in Include/Python.h.'>Py_CHARMASK</a>(*message[i]))) message[i]++ ;
+<a name='L148'>        <a href='../S/3098.html#L133' title='Defined at 133 in Python/dynload_aix.c.'>ERRBUF_APPEND</a>(message[i]);
+<a name='L149'>        <a href='../S/3098.html#L133' title='Defined at 133 in Python/dynload_aix.c.'>ERRBUF_APPEND</a>("\n");
+<a name='L150'>    <font color='red'>}</font>
+<a name='L151'>    errbuf[strlen(errbuf)-1] = '\0';            <i><font color='green'>/* trim off last newline */</font></i>
+<a name='L152'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError, errbuf);
+<a name='L153'>    <b>return</b>;
+<a name='L154'><font color='red'>}</font>
+<a name='L155'>
+<a name='L156'>
+<a name='L157'><a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a> <a href='../R/5428.html' title='Multiple refered from 2 places.'>_PyImport_GetDynLoadFunc</a>(<b>const</b> <b>char</b> *fqname, <b>const</b> <b>char</b> *shortname,
+<a name='L158'>                                    <b>const</b> <b>char</b> *pathname, FILE *fp)
+<a name='L159'><font color='red'>{</font>
+<a name='L160'>    <a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a> p;
+<a name='L161'>
+<a name='L162'>    <i><font color='green'>/*</font></i>
+<a name='L163'><i><font color='green'>    -- Invoke load() with L_NOAUTODEFER leaving the imported symbols</font></i>
+<a name='L164'><i><font color='green'>    -- of the shared module unresolved. Thus we have to resolve them</font></i>
+<a name='L165'><i><font color='green'>    -- explicitly with loadbind. The new module is loaded, then we</font></i>
+<a name='L166'><i><font color='green'>    -- resolve its symbols using the list of already loaded modules</font></i>
+<a name='L167'><i><font color='green'>    -- (only those that belong to the python executable). Get these</font></i>
+<a name='L168'><i><font color='green'>    -- with loadquery(L_GETINFO).</font></i>
+<a name='L169'><i><font color='green'>    */</font></i>
+<a name='L170'>
+<a name='L171'>    <b>static</b> <b>void</b> *staticmodlistptr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L172'>
+<a name='L173'>    <b>if</b> (!staticmodlistptr)
+<a name='L174'>        <b>if</b> (<a href='../S/3098.html#L36' title='Defined at 36 in Python/dynload_aix.c.'>aix_getoldmodules</a>(&amp;staticmodlistptr) == -1)
+<a name='L175'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L176'>    p = (<a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a>) <a href='../D/6700.html' title='Multiple defined in 2 places.'>aix_load</a>((<b>char</b> *)pathname, L_NOAUTODEFER, 0);
+<a name='L177'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L178'>        <a href='../S/3098.html#L108' title='Defined at 108 in Python/dynload_aix.c.'>aix_loaderror</a>(pathname);
+<a name='L179'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L180'>    <font color='red'>}</font>
+<a name='L181'>
+<a name='L182'>    <b>return</b> p;
+<a name='L183'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L157'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

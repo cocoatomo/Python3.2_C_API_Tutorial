@@ -1,0 +1,1804 @@
+<html>
+<head>
+<title>Parser/tokenizer.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3401.html'>Parser</a>/tokenizer.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L113'>[^]</a><a href='#L1737'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L113' title='Defined at 113.'>tok_new</a>
+<li><a href='#L150' title='Defined at 150.'>new_string</a>
+<li><a href='#L163' title='Defined at 163.'>decoding_fgets</a>
+<li><a href='#L169' title='Defined at 169.'>decoding_feof</a>
+<li><a href='#L175' title='Defined at 175.'>decode_str</a>
+<li><a href='#L183' title='Defined at 183.'>error_ret</a>
+<li><a href='#L194' title='Defined at 194.'>get_normal_name</a>
+<li><a href='#L225' title='Defined at 225.'>get_coding_spec</a>
+<li><a href='#L272' title='Defined at 272.'>check_coding_spec</a>
+<li><a href='#L316' title='Defined at 316.'>check_bom</a>
+<li><a href='#L391' title='Defined at 391.'>fp_readl</a>
+<li><a href='#L462' title='Defined at 462.'>fp_setreadl</a>
+<li><a href='#L502' title='Defined at 502.'>fp_getc</a>
+<li><a href='#L508' title='Defined at 508.'>fp_ungetc</a>
+<li><a href='#L515' title='Defined at 515.'>valid_utf8</a>
+<li><a href='#L544' title='Defined at 544.'>decoding_fgets</a>
+<li><a href='#L606' title='Defined at 606.'>decoding_feof</a>
+<li><a href='#L628' title='Defined at 628.'>buf_getc</a>
+<li><a href='#L635' title='Defined at 635.'>buf_ungetc</a>
+<li><a href='#L644' title='Defined at 644.'>buf_setreadl</a>
+<li><a href='#L653' title='Defined at 653.'>translate_into_utf8</a>
+<li><a href='#L665' title='Defined at 665.'>translate_newlines</a>
+<li><a href='#L709' title='Defined at 709.'>decode_str</a>
+<li><a href='#L769' title='Defined at 769.'>PyTokenizer_FromString</a>
+<li><a href='#L786' title='Defined at 786.'>PyTokenizer_FromUTF8</a>
+<li><a href='#L817' title='Defined at 817.'>PyTokenizer_FromFile</a>
+<li><a href='#L849' title='Defined at 849.'>PyTokenizer_Free</a>
+<li><a href='#L867' title='Defined at 867.'>tok_nextc</a>
+<li><a href='#L1064' title='Defined at 1064.'>tok_backup</a>
+<li><a href='#L1078' title='Defined at 1078.'>PyToken_OneChar</a>
+<li><a href='#L1110' title='Defined at 1110.'>PyToken_TwoChars</a>
+<li><a href='#L1184' title='Defined at 1184.'>PyToken_ThreeChars</a>
+<li><a href='#L1242' title='Defined at 1242.'>indenterror</a>
+<li><a href='#L1262' title='Defined at 1262.'>verify_identifier</a>
+<li><a href='#L1287' title='Defined at 1287.'>tok_get</a>
+<li><a href='#L1682' title='Defined at 1682.'>PyTokenizer_Get</a>
+<li><a href='#L1702' title='Defined at 1702.'>PyTokenizer_FindEncoding</a>
+<li><a href='#L1737' title='Defined at 1737.'>tok_dump</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Tokenizer implementation */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='551.html'>pgenheaders.h</a>"
+<a name='L6'>
+<a name='L7'><font color='darkred'>#include</font> &lt;<a href='2809.html'>ctype.h</a>&gt;
+<a name='L8'><font color='darkred'>#include</font> &lt;assert.h&gt;
+<a name='L9'>
+<a name='L10'><font color='darkred'>#include</font> "<a href='2852.html'>tokenizer.h</a>"
+<a name='L11'><font color='darkred'>#include</font> "<a href='521.html'>errcode.h</a>"
+<a name='L12'>
+<a name='L13'><font color='darkred'>#ifndef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L14'><font color='darkred'>#include</font> "<a href='587.html'>unicodeobject.h</a>"
+<a name='L15'><font color='darkred'>#include</font> "<a href='507.html'>bytesobject.h</a>"
+<a name='L16'><font color='darkred'>#include</font> "<a href='523.html'>fileobject.h</a>"
+<a name='L17'><font color='darkred'>#include</font> "<a href='512.html'>codecs.h</a>"
+<a name='L18'><font color='darkred'>#include</font> "<a href='499.html'>abstract.h</a>"
+<a name='L19'><font color='darkred'>#endif</font> <i><font color='green'>/* PGEN */</font></i>
+<a name='L20'>
+<a name='L21'><font color='darkred'>#define</font> <a href='../S/2851.html#L1409' title='Refered from 1409 in Parser/tokenizer.c.'>is_potential_identifier_start</a>(c) (\
+<a name='L22'>              (c &gt;= 'a' &amp;&amp; c &lt;= 'z')\
+<a name='L23'>               || (c &gt;= 'A' &amp;&amp; c &lt;= 'Z')\
+<a name='L24'>               || c == '_'\
+<a name='L25'>               || (c &gt;= 128))
+<a name='L26'>
+<a name='L27'><font color='darkred'>#define</font> <a href='../S/2851.html#L1421' title='Refered from 1421 in Parser/tokenizer.c.'>is_potential_identifier_char</a>(c) (\
+<a name='L28'>              (c &gt;= 'a' &amp;&amp; c &lt;= 'z')\
+<a name='L29'>               || (c &gt;= 'A' &amp;&amp; c &lt;= 'Z')\
+<a name='L30'>               || (c &gt;= '0' &amp;&amp; c &lt;= '9')\
+<a name='L31'>               || c == '_'\
+<a name='L32'>               || (c &gt;= 128))
+<a name='L33'>
+<a name='L34'><b>extern</b> <b>char</b> *<a href='../D/3582.html' title='Multiple defined in 2 places.'>PyOS_Readline</a>(FILE *, FILE *, <b>char</b> *);
+<a name='L35'><i><font color='green'>/* Return malloc'ed string including trailing \n;</font></i>
+<a name='L36'><i><font color='green'>   empty malloc'ed string for EOF;</font></i>
+<a name='L37'><i><font color='green'>   NULL if interrupted */</font></i>
+<a name='L38'>
+<a name='L39'><i><font color='green'>/* Don't ever change this -- it would break the portability of Python code */</font></i>
+<a name='L40'><font color='darkred'>#define</font> <a href='../S/2851.html#L123' title='Refered from 123 in Parser/tokenizer.c.'>TABSIZE</a> 8
+<a name='L41'>
+<a name='L42'><i><font color='green'>/* Forward */</font></i>
+<a name='L43'><b>static</b> <b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *<a href='../S/2851.html#L113' title='Defined at 113 in Parser/tokenizer.c.'>tok_new</a>(<b>void</b>);
+<a name='L44'><b>static</b> <b>int</b> <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(<b>struct</b> tok_state *tok);
+<a name='L45'><b>static</b> <b>void</b> <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(<b>struct</b> tok_state *tok, <b>int</b> c);
+<a name='L46'>
+<a name='L47'>
+<a name='L48'><i><font color='green'>/* Token names */</font></i>
+<a name='L49'>
+<a name='L50'><b>char</b> *_PyParser_TokenNames[] = <font color='red'>{</font>
+<a name='L51'>    "ENDMARKER",
+<a name='L52'>    "NAME",
+<a name='L53'>    "NUMBER",
+<a name='L54'>    "STRING",
+<a name='L55'>    "NEWLINE",
+<a name='L56'>    "INDENT",
+<a name='L57'>    "DEDENT",
+<a name='L58'>    "LPAR",
+<a name='L59'>    "RPAR",
+<a name='L60'>    "LSQB",
+<a name='L61'>    "RSQB",
+<a name='L62'>    "COLON",
+<a name='L63'>    "COMMA",
+<a name='L64'>    "SEMI",
+<a name='L65'>    "PLUS",
+<a name='L66'>    "MINUS",
+<a name='L67'>    "STAR",
+<a name='L68'>    "SLASH",
+<a name='L69'>    "VBAR",
+<a name='L70'>    "AMPER",
+<a name='L71'>    "LESS",
+<a name='L72'>    "GREATER",
+<a name='L73'>    "EQUAL",
+<a name='L74'>    "DOT",
+<a name='L75'>    "PERCENT",
+<a name='L76'>    "LBRACE",
+<a name='L77'>    "RBRACE",
+<a name='L78'>    "EQEQUAL",
+<a name='L79'>    "NOTEQUAL",
+<a name='L80'>    "LESSEQUAL",
+<a name='L81'>    "GREATEREQUAL",
+<a name='L82'>    "TILDE",
+<a name='L83'>    "CIRCUMFLEX",
+<a name='L84'>    "LEFTSHIFT",
+<a name='L85'>    "RIGHTSHIFT",
+<a name='L86'>    "DOUBLESTAR",
+<a name='L87'>    "PLUSEQUAL",
+<a name='L88'>    "MINEQUAL",
+<a name='L89'>    "STAREQUAL",
+<a name='L90'>    "SLASHEQUAL",
+<a name='L91'>    "PERCENTEQUAL",
+<a name='L92'>    "AMPEREQUAL",
+<a name='L93'>    "VBAREQUAL",
+<a name='L94'>    "CIRCUMFLEXEQUAL",
+<a name='L95'>    "LEFTSHIFTEQUAL",
+<a name='L96'>    "RIGHTSHIFTEQUAL",
+<a name='L97'>    "DOUBLESTAREQUAL",
+<a name='L98'>    "DOUBLESLASH",
+<a name='L99'>    "DOUBLESLASHEQUAL",
+<a name='L100'>    "AT",
+<a name='L101'>    "RARROW",
+<a name='L102'>    "ELLIPSIS",
+<a name='L103'>    <i><font color='green'>/* This table must match the #defines in token.h! */</font></i>
+<a name='L104'>    "OP",
+<a name='L105'>    "&lt;ERRORTOKEN&gt;",
+<a name='L106'>    "&lt;N_TOKENS&gt;"
+<a name='L107'><font color='red'>}</font>;
+<a name='L108'>
+<a name='L109'>
+<a name='L110'><i><font color='green'>/* Create and initialize a new tok_state structure */</font></i>
+<a name='L111'>
+<a name='L112'><b>static</b> <b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *
+<a name='L113'><a href='../R/10934.html' title='Multiple refered from 4 places.'>tok_new</a>(<b>void</b>)
+<a name='L114'><font color='red'>{</font>
+<a name='L115'>    <b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *tok = (<b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *)PyMem_MALLOC(
+<a name='L116'>                                            <b>sizeof</b>(<b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a>));
+<a name='L117'>    <b>if</b> (tok == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L118'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L119'>    tok-&gt;buf = tok-&gt;cur = tok-&gt;end = tok-&gt;inp = tok-&gt;start = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L120'>    tok-&gt;done = <a href='../S/521.html#L16' title='Defined at 16 in Include/errcode.h.'>E_OK</a>;
+<a name='L121'>    tok-&gt;fp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L122'>    tok-&gt;input = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L123'>    tok-&gt;tabsize = <a href='../S/2851.html#L40' title='Defined at 40 in Parser/tokenizer.c.'>TABSIZE</a>;
+<a name='L124'>    tok-&gt;indent = 0;
+<a name='L125'>    tok-&gt;indstack[0] = 0;
+<a name='L126'>    tok-&gt;atbol = 1;
+<a name='L127'>    tok-&gt;pendin = 0;
+<a name='L128'>    tok-&gt;prompt = tok-&gt;nextprompt = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L129'>    tok-&gt;lineno = 0;
+<a name='L130'>    tok-&gt;level = 0;
+<a name='L131'>    tok-&gt;filename = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L132'>    tok-&gt;altwarning = 1;
+<a name='L133'>    tok-&gt;alterror = 1;
+<a name='L134'>    tok-&gt;alttabsize = 1;
+<a name='L135'>    tok-&gt;altindstack[0] = 0;
+<a name='L136'>    tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> = <a href='../S/2852.html#L16' title='Defined at 16 in Parser/tokenizer.h.'>STATE_INIT</a>;
+<a name='L137'>    tok-&gt;decoding_erred = 0;
+<a name='L138'>    tok-&gt;read_coding_spec = 0;
+<a name='L139'>    tok-&gt;enc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L140'>    tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L141'>    tok-&gt;cont_line = 0;
+<a name='L142'><font color='darkred'>#ifndef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L143'>    tok-&gt;decoding_readline = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L144'>    tok-&gt;decoding_buffer = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L145'><font color='darkred'>#endif</font>
+<a name='L146'>    <b>return</b> tok;
+<a name='L147'><font color='red'>}</font>
+<a name='L148'>
+<a name='L149'><b>static</b> <b>char</b> *
+<a name='L150'><a href='../R/9208.html' title='Multiple refered from 4 places.'>new_string</a>(<b>const</b> <b>char</b> *s, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len)
+<a name='L151'><font color='red'>{</font>
+<a name='L152'>    <b>char</b>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = (<b>char</b> *)PyMem_MALLOC(len + 1);
+<a name='L153'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L154'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, s, len);
+<a name='L155'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>[len] = '\0';
+<a name='L156'>    <font color='red'>}</font>
+<a name='L157'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L158'><font color='red'>}</font>
+<a name='L159'>
+<a name='L160'><font color='darkred'>#ifdef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L161'>
+<a name='L162'><b>static</b> <b>char</b> *
+<a name='L163'><a href='../R/7205.html' title='Multiple refered from 2 places.'>decoding_fgets</a>(<b>char</b> *s, <b>int</b> size, <b>struct</b> tok_state *tok)
+<a name='L164'><font color='red'>{</font>
+<a name='L165'>    <b>return</b> fgets(s, size, tok-&gt;fp);
+<a name='L166'><font color='red'>}</font>
+<a name='L167'>
+<a name='L168'><b>static</b> <b>int</b>
+<a name='L169'><a href='../S/2851.html#L995' title='Refered from 995 in Parser/tokenizer.c.'>decoding_feof</a>(<b>struct</b> tok_state *tok)
+<a name='L170'><font color='red'>{</font>
+<a name='L171'>    <b>return</b> feof(tok-&gt;fp);
+<a name='L172'><font color='red'>}</font>
+<a name='L173'>
+<a name='L174'><b>static</b> <b>char</b> *
+<a name='L175'><a href='../S/2851.html#L774' title='Refered from 774 in Parser/tokenizer.c.'>decode_str</a>(<b>const</b> <b>char</b> *str, <b>int</b> exec_input, <b>struct</b> tok_state *tok)
+<a name='L176'><font color='red'>{</font>
+<a name='L177'>    <b>return</b> <a href='../S/2851.html#L150' title='Defined at 150 in Parser/tokenizer.c.'>new_string</a>(str, strlen(str));
+<a name='L178'><font color='red'>}</font>
+<a name='L179'>
+<a name='L180'><font color='darkred'>#else</font> <i><font color='green'>/* PGEN */</font></i>
+<a name='L181'>
+<a name='L182'><b>static</b> <b>char</b> *
+<a name='L183'><a href='../R/7606.html' title='Multiple refered from 10 places.'>error_ret</a>(<b>struct</b> tok_state *tok) <i><font color='green'>/* XXX */</font></i>
+<a name='L184'><font color='red'>{</font>
+<a name='L185'>    tok-&gt;decoding_erred = 1;
+<a name='L186'>    <b>if</b> (tok-&gt;fp != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; tok-&gt;buf != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <i><font color='green'>/* see PyTokenizer_Free */</font></i>
+<a name='L187'>        PyMem_FREE(tok-&gt;buf);
+<a name='L188'>    tok-&gt;buf = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L189'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;                <i><font color='green'>/* as if it were EOF */</font></i>
+<a name='L190'><font color='red'>}</font>
+<a name='L191'>
+<a name='L192'>
+<a name='L193'><b>static</b> <b>char</b> *
+<a name='L194'><a href='../S/2851.html#L254' title='Refered from 254 in Parser/tokenizer.c.'>get_normal_name</a>(<b>char</b> *s)        <i><font color='green'>/* for utf-8 and latin-1 */</font></i>
+<a name='L195'><font color='red'>{</font>
+<a name='L196'>    <b>char</b> buf[13];
+<a name='L197'>    <b>int</b> i;
+<a name='L198'>    <b>for</b> (i = 0; i &lt; 12; i++) <font color='red'>{</font>
+<a name='L199'>        <b>int</b> c = s[i];
+<a name='L200'>        <b>if</b> (c == '\0')
+<a name='L201'>            <b>break</b>;
+<a name='L202'>        <b>else</b> <b>if</b> (c == '_')
+<a name='L203'>            buf[i] = '-';
+<a name='L204'>        <b>else</b>
+<a name='L205'>            buf[i] = <a href='../D/11819.html' title='Multiple defined in 2 places.'>tolower</a>(c);
+<a name='L206'>    <font color='red'>}</font>
+<a name='L207'>    buf[i] = '\0';
+<a name='L208'>    <b>if</b> (strcmp(buf, "utf-8") == 0 ||
+<a name='L209'>        strncmp(buf, "utf-8-", 6) == 0)
+<a name='L210'>        <b>return</b> "utf-8";
+<a name='L211'>    <b>else</b> <b>if</b> (strcmp(buf, "latin-1") == 0 ||
+<a name='L212'>             strcmp(buf, "iso-8859-1") == 0 ||
+<a name='L213'>             strcmp(buf, "iso-latin-1") == 0 ||
+<a name='L214'>             strncmp(buf, "latin-1-", 8) == 0 ||
+<a name='L215'>             strncmp(buf, "iso-8859-1-", 11) == 0 ||
+<a name='L216'>             strncmp(buf, "iso-latin-1-", 12) == 0)
+<a name='L217'>        <b>return</b> "iso-8859-1";
+<a name='L218'>    <b>else</b>
+<a name='L219'>        <b>return</b> s;
+<a name='L220'><font color='red'>}</font>
+<a name='L221'>
+<a name='L222'><i><font color='green'>/* Return the coding spec in S, or NULL if none is found.  */</font></i>
+<a name='L223'>
+<a name='L224'><b>static</b> <b>char</b> *
+<a name='L225'><a href='../S/2851.html#L281' title='Refered from 281 in Parser/tokenizer.c.'>get_coding_spec</a>(<b>const</b> <b>char</b> *s, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size)
+<a name='L226'><font color='red'>{</font>
+<a name='L227'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L228'>    <i><font color='green'>/* Coding spec must be in a comment, and that comment must be</font></i>
+<a name='L229'><i><font color='green'>     * the only statement on the source code line. */</font></i>
+<a name='L230'>    <b>for</b> (i = 0; i &lt; size - 6; i++) <font color='red'>{</font>
+<a name='L231'>        <b>if</b> (s[i] == '#')
+<a name='L232'>            <b>break</b>;
+<a name='L233'>        <b>if</b> (s[i] != ' ' &amp;&amp; s[i] != '\t' &amp;&amp; s[i] != '\014')
+<a name='L234'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L235'>    <font color='red'>}</font>
+<a name='L236'>    <b>for</b> (; i &lt; size - 6; i++) <font color='red'>{</font> <i><font color='green'>/* XXX inefficient search */</font></i>
+<a name='L237'>        <b>const</b> <b>char</b>* t = s + i;
+<a name='L238'>        <b>if</b> (strncmp(t, "coding", 6) == 0) <font color='red'>{</font>
+<a name='L239'>            <b>const</b> <b>char</b>* begin = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L240'>            t += 6;
+<a name='L241'>            <b>if</b> (t[0] != ':' &amp;&amp; t[0] != '=')
+<a name='L242'>                <b>continue</b>;
+<a name='L243'>            <b>do</b> <font color='red'>{</font>
+<a name='L244'>                t++;
+<a name='L245'>            <font color='red'>}</font> <b>while</b> (t[0] == '\x20' || t[0] == '\t');
+<a name='L246'>
+<a name='L247'>            begin = t;
+<a name='L248'>            <b>while</b> (<a href='../S/556.html#L23' title='Defined at 23 in Include/pyctype.h.'>Py_ISALNUM</a>(t[0]) ||
+<a name='L249'>                   t[0] == '-' || t[0] == '_' || t[0] == '.')
+<a name='L250'>                t++;
+<a name='L251'>
+<a name='L252'>            <b>if</b> (begin &lt; t) <font color='red'>{</font>
+<a name='L253'>                <b>char</b>* r = <a href='../S/2851.html#L150' title='Defined at 150 in Parser/tokenizer.c.'>new_string</a>(begin, t - begin);
+<a name='L254'>                <b>char</b>* q = <a href='../S/2851.html#L194' title='Defined at 194 in Parser/tokenizer.c.'>get_normal_name</a>(r);
+<a name='L255'>                <b>if</b> (r != q) <font color='red'>{</font>
+<a name='L256'>                    PyMem_FREE(r);
+<a name='L257'>                    r = <a href='../S/2851.html#L150' title='Defined at 150 in Parser/tokenizer.c.'>new_string</a>(q, strlen(q));
+<a name='L258'>                <font color='red'>}</font>
+<a name='L259'>                <b>return</b> r;
+<a name='L260'>            <font color='red'>}</font>
+<a name='L261'>        <font color='red'>}</font>
+<a name='L262'>    <font color='red'>}</font>
+<a name='L263'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L264'><font color='red'>}</font>
+<a name='L265'>
+<a name='L266'><i><font color='green'>/* Check whether the line contains a coding spec. If it does,</font></i>
+<a name='L267'><i><font color='green'>   invoke the set_readline function for the new encoding.</font></i>
+<a name='L268'><i><font color='green'>   This function receives the tok_state and the new encoding.</font></i>
+<a name='L269'><i><font color='green'>   Return 1 on success, 0 on failure.  */</font></i>
+<a name='L270'>
+<a name='L271'><b>static</b> <b>int</b>
+<a name='L272'><a href='../R/6622.html' title='Multiple refered from 3 places.'>check_coding_spec</a>(<b>const</b> <b>char</b>* line, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size, <b>struct</b> tok_state *tok,
+<a name='L273'>                  <b>int</b> set_readline(<b>struct</b> tok_state *, <b>const</b> <b>char</b> *))
+<a name='L274'><font color='red'>{</font>
+<a name='L275'>    <b>char</b> * cs;
+<a name='L276'>    <b>int</b> r = 1;
+<a name='L277'>
+<a name='L278'>    <b>if</b> (tok-&gt;cont_line)
+<a name='L279'>        <i><font color='green'>/* It's a continuation line, so it can't be a coding spec. */</font></i>
+<a name='L280'>        <b>return</b> 1;
+<a name='L281'>    cs = <a href='../S/2851.html#L225' title='Defined at 225 in Parser/tokenizer.c.'>get_coding_spec</a>(line, size);
+<a name='L282'>    <b>if</b> (cs != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L283'>        tok-&gt;read_coding_spec = 1;
+<a name='L284'>        <b>if</b> (tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L285'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> == <a href='../S/2852.html#L17' title='Defined at 17 in Parser/tokenizer.h.'>STATE_RAW</a>);
+<a name='L286'>            <b>if</b> (strcmp(cs, "utf-8") == 0) <font color='red'>{</font>
+<a name='L287'>                tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = cs;
+<a name='L288'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L289'>                r = set_readline(tok, cs);
+<a name='L290'>                <b>if</b> (r) <font color='red'>{</font>
+<a name='L291'>                    tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = cs;
+<a name='L292'>                    tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> = <a href='../S/2852.html#L18' title='Defined at 18 in Parser/tokenizer.h.'>STATE_NORMAL</a>;
+<a name='L293'>                <font color='red'>}</font>
+<a name='L294'>                <b>else</b>
+<a name='L295'>                    PyMem_FREE(cs);
+<a name='L296'>            <font color='red'>}</font>
+<a name='L297'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>                <i><font color='green'>/* then, compare cs with BOM */</font></i>
+<a name='L298'>            r = (strcmp(tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>, cs) == 0);
+<a name='L299'>            PyMem_FREE(cs);
+<a name='L300'>        <font color='red'>}</font>
+<a name='L301'>    <font color='red'>}</font>
+<a name='L302'>    <b>if</b> (!r) <font color='red'>{</font>
+<a name='L303'>        cs = tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>;
+<a name='L304'>        <b>if</b> (!cs)
+<a name='L305'>            cs = "with BOM";
+<a name='L306'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError, "encoding problem: %s", cs);
+<a name='L307'>    <font color='red'>}</font>
+<a name='L308'>    <b>return</b> r;
+<a name='L309'><font color='red'>}</font>
+<a name='L310'>
+<a name='L311'><i><font color='green'>/* See whether the file starts with a BOM. If it does,</font></i>
+<a name='L312'><i><font color='green'>   invoke the set_readline function with the new encoding.</font></i>
+<a name='L313'><i><font color='green'>   Return 1 on success, 0 on failure.  */</font></i>
+<a name='L314'>
+<a name='L315'><b>static</b> <b>int</b>
+<a name='L316'><a href='../R/6620.html' title='Multiple refered from 2 places.'>check_bom</a>(<b>int</b> get_char(<b>struct</b> tok_state *),
+<a name='L317'>          <b>void</b> unget_char(<b>int</b>, <b>struct</b> tok_state *),
+<a name='L318'>          <b>int</b> set_readline(<b>struct</b> tok_state *, <b>const</b> <b>char</b> *),
+<a name='L319'>          <b>struct</b> tok_state *tok)
+<a name='L320'><font color='red'>{</font>
+<a name='L321'>    <b>int</b> ch1, ch2, ch3;
+<a name='L322'>    ch1 = get_char(tok);
+<a name='L323'>    tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> = <a href='../S/2852.html#L17' title='Defined at 17 in Parser/tokenizer.h.'>STATE_RAW</a>;
+<a name='L324'>    <b>if</b> (ch1 == EOF) <font color='red'>{</font>
+<a name='L325'>        <b>return</b> 1;
+<a name='L326'>    <font color='red'>}</font> <b>else</b> <b>if</b> (ch1 == 0xEF) <font color='red'>{</font>
+<a name='L327'>        ch2 = get_char(tok);
+<a name='L328'>        <b>if</b> (ch2 != 0xBB) <font color='red'>{</font>
+<a name='L329'>            unget_char(ch2, tok);
+<a name='L330'>            unget_char(ch1, tok);
+<a name='L331'>            <b>return</b> 1;
+<a name='L332'>        <font color='red'>}</font>
+<a name='L333'>        ch3 = get_char(tok);
+<a name='L334'>        <b>if</b> (ch3 != 0xBF) <font color='red'>{</font>
+<a name='L335'>            unget_char(ch3, tok);
+<a name='L336'>            unget_char(ch2, tok);
+<a name='L337'>            unget_char(ch1, tok);
+<a name='L338'>            <b>return</b> 1;
+<a name='L339'>        <font color='red'>}</font>
+<a name='L340'><font color='darkred'>#if</font> 0
+<a name='L341'>    <i><font color='green'>/* Disable support for UTF-16 BOMs until a decision</font></i>
+<a name='L342'><i><font color='green'>       is made whether this needs to be supported.  */</font></i>
+<a name='L343'>    <font color='red'>}</font> <b>else</b> <b>if</b> (ch1 == 0xFE) <font color='red'>{</font>
+<a name='L344'>        ch2 = get_char(tok);
+<a name='L345'>        <b>if</b> (ch2 != 0xFF) <font color='red'>{</font>
+<a name='L346'>            unget_char(ch2, tok);
+<a name='L347'>            unget_char(ch1, tok);
+<a name='L348'>            <b>return</b> 1;
+<a name='L349'>        <font color='red'>}</font>
+<a name='L350'>        <b>if</b> (!set_readline(tok, "utf-16-be"))
+<a name='L351'>            <b>return</b> 0;
+<a name='L352'>        tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> = <a href='../S/2852.html#L18' title='Defined at 18 in Parser/tokenizer.h.'>STATE_NORMAL</a>;
+<a name='L353'>    <font color='red'>}</font> <b>else</b> <b>if</b> (ch1 == 0xFF) <font color='red'>{</font>
+<a name='L354'>        ch2 = get_char(tok);
+<a name='L355'>        <b>if</b> (ch2 != 0xFE) <font color='red'>{</font>
+<a name='L356'>            unget_char(ch2, tok);
+<a name='L357'>            unget_char(ch1, tok);
+<a name='L358'>            <b>return</b> 1;
+<a name='L359'>        <font color='red'>}</font>
+<a name='L360'>        <b>if</b> (!set_readline(tok, "utf-16-le"))
+<a name='L361'>            <b>return</b> 0;
+<a name='L362'>        tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> = <a href='../S/2852.html#L18' title='Defined at 18 in Parser/tokenizer.h.'>STATE_NORMAL</a>;
+<a name='L363'><font color='darkred'>#endif</font>
+<a name='L364'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L365'>        unget_char(ch1, tok);
+<a name='L366'>        <b>return</b> 1;
+<a name='L367'>    <font color='red'>}</font>
+<a name='L368'>    <b>if</b> (tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L369'>        PyMem_FREE(tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L370'>    tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = <a href='../S/2851.html#L150' title='Defined at 150 in Parser/tokenizer.c.'>new_string</a>("utf-8", 5);     <i><font color='green'>/* resulting is in utf-8 */</font></i>
+<a name='L371'>    <i><font color='green'>/* No need to set_readline: input is already utf-8 */</font></i>
+<a name='L372'>    <b>return</b> 1;
+<a name='L373'><font color='red'>}</font>
+<a name='L374'>
+<a name='L375'><i><font color='green'>/* Read a line of text from TOK into S, using the stream in TOK.</font></i>
+<a name='L376'><i><font color='green'>   Return NULL on failure, else S.</font></i>
+<a name='L377'><i><font color='green'></font></i>
+<a name='L378'><i><font color='green'>   On entry, tok-&gt;decoding_buffer will be one of:</font></i>
+<a name='L379'><i><font color='green'>     1) NULL: need to call tok-&gt;decoding_readline to get a new line</font></i>
+<a name='L380'><i><font color='green'>     2) PyUnicodeObject *: decoding_feof has called tok-&gt;decoding_readline and</font></i>
+<a name='L381'><i><font color='green'>       stored the result in tok-&gt;decoding_buffer</font></i>
+<a name='L382'><i><font color='green'>     3) PyByteArrayObject *: previous call to fp_readl did not have enough room</font></i>
+<a name='L383'><i><font color='green'>       (in the s buffer) to copy entire contents of the line read</font></i>
+<a name='L384'><i><font color='green'>       by tok-&gt;decoding_readline.  tok-&gt;decoding_buffer has the overflow.</font></i>
+<a name='L385'><i><font color='green'>       In this case, fp_readl is called in a loop (with an expanded buffer)</font></i>
+<a name='L386'><i><font color='green'>       until the buffer ends with a '\n' (or until the end of the file is</font></i>
+<a name='L387'><i><font color='green'>       reached): see tok_nextc and its calls to decoding_fgets.</font></i>
+<a name='L388'><i><font color='green'>*/</font></i>
+<a name='L389'>
+<a name='L390'><b>static</b> <b>char</b> *
+<a name='L391'><a href='../S/2851.html#L553' title='Refered from 553 in Parser/tokenizer.c.'>fp_readl</a>(<b>char</b> *s, <b>int</b> size, <b>struct</b> tok_state *tok)
+<a name='L392'><font color='red'>{</font>
+<a name='L393'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* bufobj;
+<a name='L394'>    <b>const</b> <b>char</b> *buf;
+<a name='L395'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> buflen;
+<a name='L396'>
+<a name='L397'>    <i><font color='green'>/* Ask for one less byte so we can terminate it */</font></i>
+<a name='L398'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(size &gt; 0);
+<a name='L399'>    size--;
+<a name='L400'>
+<a name='L401'>    <b>if</b> (tok-&gt;decoding_buffer) <font color='red'>{</font>
+<a name='L402'>        bufobj = tok-&gt;decoding_buffer;
+<a name='L403'>        Py_INCREF(bufobj);
+<a name='L404'>    <font color='red'>}</font>
+<a name='L405'>    <b>else</b>
+<a name='L406'>    <font color='red'>{</font>
+<a name='L407'>        bufobj = <a href='../S/2775.html#L2135' title='Defined at 2135 in Objects/abstract.c.'>PyObject_CallObject</a>(tok-&gt;decoding_readline, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L408'>        <b>if</b> (bufobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L409'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L410'>    <font color='red'>}</font>
+<a name='L411'>    <b>if</b> (PyUnicode_CheckExact(bufobj))
+<a name='L412'>    <font color='red'>{</font>
+<a name='L413'>        buf = <a href='../S/2828.html#L1903' title='Defined at 1903 in Objects/unicodeobject.c.'>_PyUnicode_AsStringAndSize</a>(bufobj, &amp;buflen);
+<a name='L414'>        <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L415'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L416'>        <font color='red'>}</font>
+<a name='L417'>    <font color='red'>}</font>
+<a name='L418'>    <b>else</b>
+<a name='L419'>    <font color='red'>{</font>
+<a name='L420'>        buf = <a href='../S/2777.html#L168' title='Defined at 168 in Objects/bytearrayobject.c.'>PyByteArray_AsString</a>(bufobj);
+<a name='L421'>        <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L422'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L423'>        <font color='red'>}</font>
+<a name='L424'>        buflen = PyByteArray_GET_SIZE(bufobj);
+<a name='L425'>    <font color='red'>}</font>
+<a name='L426'>
+<a name='L427'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tok-&gt;decoding_buffer);
+<a name='L428'>    <b>if</b> (buflen &gt; size) <font color='red'>{</font>
+<a name='L429'>        <i><font color='green'>/* Too many chars, the rest goes into tok-&gt;decoding_buffer */</font></i>
+<a name='L430'>        tok-&gt;decoding_buffer = <a href='../S/2777.html#L116' title='Defined at 116 in Objects/bytearrayobject.c.'>PyByteArray_FromStringAndSize</a>(buf+size,
+<a name='L431'>                                                         buflen-size);
+<a name='L432'>        <b>if</b> (tok-&gt;decoding_buffer == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L433'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L434'>        buflen = size;
+<a name='L435'>    <font color='red'>}</font>
+<a name='L436'>    <b>else</b>
+<a name='L437'>        tok-&gt;decoding_buffer = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L438'>
+<a name='L439'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(s, buf, buflen);
+<a name='L440'>    s[buflen] = '\0';
+<a name='L441'>    <b>if</b> (buflen == 0) <i><font color='green'>/* EOF */</font></i>
+<a name='L442'>        s = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L443'>    Py_DECREF(bufobj);
+<a name='L444'>    <b>return</b> s;
+<a name='L445'>
+<a name='L446'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L447'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(bufobj);
+<a name='L448'>    <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L449'><font color='red'>}</font>
+<a name='L450'>
+<a name='L451'><i><font color='green'>/* Set the readline function for TOK to a StreamReader's</font></i>
+<a name='L452'><i><font color='green'>   readline function. The StreamReader is named ENC.</font></i>
+<a name='L453'><i><font color='green'></font></i>
+<a name='L454'><i><font color='green'>   This function is called from check_bom and check_coding_spec.</font></i>
+<a name='L455'><i><font color='green'></font></i>
+<a name='L456'><i><font color='green'>   ENC is usually identical to the future value of tok-&gt;encoding,</font></i>
+<a name='L457'><i><font color='green'>   except for the (currently unsupported) case of UTF-16.</font></i>
+<a name='L458'><i><font color='green'></font></i>
+<a name='L459'><i><font color='green'>   Return 1 on success, 0 on failure. */</font></i>
+<a name='L460'>
+<a name='L461'><b>static</b> <b>int</b>
+<a name='L462'><a href='../R/7908.html' title='Multiple refered from 2 places.'>fp_setreadl</a>(<b>struct</b> tok_state *tok, <b>const</b> <b>char</b>* enc)
+<a name='L463'><font color='red'>{</font>
+<a name='L464'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *readline = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *stream = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *io = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L465'>    <b>int</b> fd;
+<a name='L466'>
+<a name='L467'>    io = <a href='../S/3120.html#L2348' title='Defined at 2348 in Python/import.c.'>PyImport_ImportModuleNoBlock</a>("io");
+<a name='L468'>    <b>if</b> (io == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L469'>        <b>goto</b> cleanup;
+<a name='L470'>
+<a name='L471'>    fd = <a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(tok-&gt;fp);
+<a name='L472'>    <b>if</b> (lseek(fd, 0, <a href='../D/4576.html' title='Multiple defined in 2 places.'>SEEK_SET</a>) == (<a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a>)-1) <font color='red'>{</font>
+<a name='L473'>        <a href='../S/3106.html#L430' title='Defined at 430 in Python/errors.c.'>PyErr_SetFromErrnoWithFilename</a>(PyExc_OSError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L474'>        <b>goto</b> cleanup;
+<a name='L475'>    <font color='red'>}</font>
+<a name='L476'>
+<a name='L477'>    stream = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(io, "open", "isisOOO",
+<a name='L478'>                    fd, "r", -1, enc, Py_None, Py_None, Py_False);
+<a name='L479'>    <b>if</b> (stream == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L480'>        <b>goto</b> cleanup;
+<a name='L481'>
+<a name='L482'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tok-&gt;decoding_readline);
+<a name='L483'>    readline = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(stream, "readline");
+<a name='L484'>    tok-&gt;decoding_readline = readline;
+<a name='L485'>
+<a name='L486'>    <i><font color='green'>/* The file has been reopened; parsing will restart from</font></i>
+<a name='L487'><i><font color='green'>     * the beginning of the file, we have to reset the line number.</font></i>
+<a name='L488'><i><font color='green'>     * But this function has been called from inside tok_nextc() which</font></i>
+<a name='L489'><i><font color='green'>     * will increment lineno before it returns. So we set it -1 so that</font></i>
+<a name='L490'><i><font color='green'>     * the next call to tok_nextc() will start with tok-&gt;lineno == 0.</font></i>
+<a name='L491'><i><font color='green'>     */</font></i>
+<a name='L492'>    tok-&gt;lineno = -1;
+<a name='L493'>
+<a name='L494'>  cleanup:
+<a name='L495'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(stream);
+<a name='L496'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(io);
+<a name='L497'>    <b>return</b> readline != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L498'><font color='red'>}</font>
+<a name='L499'>
+<a name='L500'><i><font color='green'>/* Fetch the next byte from TOK. */</font></i>
+<a name='L501'>
+<a name='L502'><b>static</b> <b>int</b> <a href='../S/2851.html#L564' title='Refered from 564 in Parser/tokenizer.c.'>fp_getc</a>(<b>struct</b> tok_state *tok) <font color='red'>{</font>
+<a name='L503'>    <b>return</b> getc(tok-&gt;fp);
+<a name='L504'><font color='red'>}</font>
+<a name='L505'>
+<a name='L506'><i><font color='green'>/* Unfetch the last byte back into TOK.  */</font></i>
+<a name='L507'>
+<a name='L508'><b>static</b> <b>void</b> <a href='../S/2851.html#L564' title='Refered from 564 in Parser/tokenizer.c.'>fp_ungetc</a>(<b>int</b> c, <b>struct</b> tok_state *tok) <font color='red'>{</font>
+<a name='L509'>    ungetc(c, tok-&gt;fp);
+<a name='L510'><font color='red'>}</font>
+<a name='L511'>
+<a name='L512'><i><font color='green'>/* Check whether the characters at s start a valid</font></i>
+<a name='L513'><i><font color='green'>   UTF-8 sequence. Return the number of characters forming</font></i>
+<a name='L514'><i><font color='green'>   the sequence if yes, 0 if not.  */</font></i>
+<a name='L515'><b>static</b> <b>int</b> <a href='../S/2851.html#L581' title='Refered from 581 in Parser/tokenizer.c.'>valid_utf8</a>(<b>const</b> <b>unsigned</b> <b>char</b>* s)
+<a name='L516'><font color='red'>{</font>
+<a name='L517'>    <b>int</b> expected = 0;
+<a name='L518'>    <b>int</b> length;
+<a name='L519'>    <b>if</b> (*s &lt; 0x80)
+<a name='L520'>        <i><font color='green'>/* single-byte code */</font></i>
+<a name='L521'>        <b>return</b> 1;
+<a name='L522'>    <b>if</b> (*s &lt; 0xc0)
+<a name='L523'>        <i><font color='green'>/* following byte */</font></i>
+<a name='L524'>        <b>return</b> 0;
+<a name='L525'>    <b>if</b> (*s &lt; 0xE0)
+<a name='L526'>        expected = 1;
+<a name='L527'>    <b>else</b> <b>if</b> (*s &lt; 0xF0)
+<a name='L528'>        expected = 2;
+<a name='L529'>    <b>else</b> <b>if</b> (*s &lt; 0xF8)
+<a name='L530'>        expected = 3;
+<a name='L531'>    <b>else</b>
+<a name='L532'>        <b>return</b> 0;
+<a name='L533'>    length = expected + 1;
+<a name='L534'>    <b>for</b> (; expected; expected--)
+<a name='L535'>        <b>if</b> (s[expected] &lt; 0x80 || s[expected] &gt;= 0xC0)
+<a name='L536'>            <b>return</b> 0;
+<a name='L537'>    <b>return</b> length;
+<a name='L538'><font color='red'>}</font>
+<a name='L539'>
+<a name='L540'><i><font color='green'>/* Read a line of input from TOK. Determine encoding</font></i>
+<a name='L541'><i><font color='green'>   if necessary.  */</font></i>
+<a name='L542'>
+<a name='L543'><b>static</b> <b>char</b> *
+<a name='L544'><a href='../R/7205.html' title='Multiple refered from 2 places.'>decoding_fgets</a>(<b>char</b> *s, <b>int</b> size, <b>struct</b> tok_state *tok)
+<a name='L545'><font color='red'>{</font>
+<a name='L546'>    <b>char</b> *line = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L547'>    <b>int</b> badchar = 0;
+<a name='L548'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *filename;
+<a name='L549'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L550'>        <b>if</b> (tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> == <a href='../S/2852.html#L18' title='Defined at 18 in Parser/tokenizer.h.'>STATE_NORMAL</a>) <font color='red'>{</font>
+<a name='L551'>            <i><font color='green'>/* We already have a codec associated with</font></i>
+<a name='L552'><i><font color='green'>               this input. */</font></i>
+<a name='L553'>            line = <a href='../S/2851.html#L391' title='Defined at 391 in Parser/tokenizer.c.'>fp_readl</a>(s, size, tok);
+<a name='L554'>            <b>break</b>;
+<a name='L555'>        <font color='red'>}</font> <b>else</b> <b>if</b> (tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> == <a href='../S/2852.html#L17' title='Defined at 17 in Parser/tokenizer.h.'>STATE_RAW</a>) <font color='red'>{</font>
+<a name='L556'>            <i><font color='green'>/* We want a 'raw' read. */</font></i>
+<a name='L557'>            line = <a href='../D/4299.html' title='Multiple defined in 2 places.'>Py_UniversalNewlineFgets</a>(s, size,
+<a name='L558'>                                            tok-&gt;fp, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L559'>            <b>break</b>;
+<a name='L560'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L561'>            <i><font color='green'>/* We have not yet determined the encoding.</font></i>
+<a name='L562'><i><font color='green'>               If an encoding is found, use the file-pointer</font></i>
+<a name='L563'><i><font color='green'>               reader functions from now on. */</font></i>
+<a name='L564'>            <b>if</b> (!<a href='../S/2851.html#L316' title='Defined at 316 in Parser/tokenizer.c.'>check_bom</a>(<a href='../S/2851.html#L502' title='Defined at 502 in Parser/tokenizer.c.'>fp_getc</a>, <a href='../S/2851.html#L508' title='Defined at 508 in Parser/tokenizer.c.'>fp_ungetc</a>, <a href='../S/2851.html#L462' title='Defined at 462 in Parser/tokenizer.c.'>fp_setreadl</a>, tok))
+<a name='L565'>                <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L566'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> != <a href='../S/2852.html#L16' title='Defined at 16 in Parser/tokenizer.h.'>STATE_INIT</a>);
+<a name='L567'>        <font color='red'>}</font>
+<a name='L568'>    <font color='red'>}</font>
+<a name='L569'>    <b>if</b> (line != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; tok-&gt;lineno &lt; 2 &amp;&amp; !tok-&gt;read_coding_spec) <font color='red'>{</font>
+<a name='L570'>        <b>if</b> (!<a href='../S/2851.html#L272' title='Defined at 272 in Parser/tokenizer.c.'>check_coding_spec</a>(line, strlen(line), tok, <a href='../S/2851.html#L462' title='Defined at 462 in Parser/tokenizer.c.'>fp_setreadl</a>)) <font color='red'>{</font>
+<a name='L571'>            <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L572'>        <font color='red'>}</font>
+<a name='L573'>    <font color='red'>}</font>
+<a name='L574'><font color='darkred'>#ifndef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L575'>    <i><font color='green'>/* The default encoding is UTF-8, so make sure we don't have any</font></i>
+<a name='L576'><i><font color='green'>       non-UTF-8 sequences in it. */</font></i>
+<a name='L577'>    <b>if</b> (line &amp;&amp; !tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>) <font color='red'>{</font>
+<a name='L578'>        <b>unsigned</b> <b>char</b> *c;
+<a name='L579'>        <b>int</b> length;
+<a name='L580'>        <b>for</b> (c = (<b>unsigned</b> <b>char</b> *)line; *c; c += length)
+<a name='L581'>            <b>if</b> (!(length = <a href='../S/2851.html#L515' title='Defined at 515 in Parser/tokenizer.c.'>valid_utf8</a>(c))) <font color='red'>{</font>
+<a name='L582'>                badchar = *c;
+<a name='L583'>                <b>break</b>;
+<a name='L584'>            <font color='red'>}</font>
+<a name='L585'>    <font color='red'>}</font>
+<a name='L586'>    <b>if</b> (badchar) <font color='red'>{</font>
+<a name='L587'>        <i><font color='green'>/* Need to add 1 to the line number, since this line</font></i>
+<a name='L588'><i><font color='green'>           has not been counted, yet.  */</font></i>
+<a name='L589'>        filename = <a href='../D/3975.html' title='Multiple defined in 3 places.'>PyUnicode_DecodeFSDefault</a>(tok-&gt;filename);
+<a name='L590'>        <b>if</b> (filename != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L591'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError,
+<a name='L592'>                    "Non-UTF-8 code starting with '\\x%.2x' "
+<a name='L593'>                    "in file %U on line %i, "
+<a name='L594'>                    "but no encoding declared; "
+<a name='L595'>                    "see http://python.org/dev/peps/pep-0263/ for details",
+<a name='L596'>                    badchar, filename, tok-&gt;lineno + 1);
+<a name='L597'>            Py_DECREF(filename);
+<a name='L598'>        <font color='red'>}</font>
+<a name='L599'>        <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L600'>    <font color='red'>}</font>
+<a name='L601'><font color='darkred'>#endif</font>
+<a name='L602'>    <b>return</b> line;
+<a name='L603'><font color='red'>}</font>
+<a name='L604'>
+<a name='L605'><b>static</b> <b>int</b>
+<a name='L606'><a href='../S/2851.html#L995' title='Refered from 995 in Parser/tokenizer.c.'>decoding_feof</a>(<b>struct</b> tok_state *tok)
+<a name='L607'><font color='red'>{</font>
+<a name='L608'>    <b>if</b> (tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> != <a href='../S/2852.html#L18' title='Defined at 18 in Parser/tokenizer.h.'>STATE_NORMAL</a>) <font color='red'>{</font>
+<a name='L609'>        <b>return</b> feof(tok-&gt;fp);
+<a name='L610'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L611'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* buf = tok-&gt;decoding_buffer;
+<a name='L612'>        <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L613'>            buf = <a href='../S/2775.html#L2135' title='Defined at 2135 in Objects/abstract.c.'>PyObject_CallObject</a>(tok-&gt;decoding_readline, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L614'>            <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L615'>                <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L616'>                <b>return</b> 1;
+<a name='L617'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L618'>                tok-&gt;decoding_buffer = buf;
+<a name='L619'>            <font color='red'>}</font>
+<a name='L620'>        <font color='red'>}</font>
+<a name='L621'>        <b>return</b> <a href='../D/3640.html' title='Multiple defined in 3 places.'>PyObject_Length</a>(buf) == 0;
+<a name='L622'>    <font color='red'>}</font>
+<a name='L623'><font color='red'>}</font>
+<a name='L624'>
+<a name='L625'><i><font color='green'>/* Fetch a byte from TOK, using the string buffer. */</font></i>
+<a name='L626'>
+<a name='L627'><b>static</b> <b>int</b>
+<a name='L628'><a href='../S/2851.html#L721' title='Refered from 721 in Parser/tokenizer.c.'>buf_getc</a>(<b>struct</b> tok_state *tok) <font color='red'>{</font>
+<a name='L629'>    <b>return</b> <a href='../S/570.html#L144' title='Defined at 144 in Include/Python.h.'>Py_CHARMASK</a>(*tok-&gt;str++);
+<a name='L630'><font color='red'>}</font>
+<a name='L631'>
+<a name='L632'><i><font color='green'>/* Unfetch a byte from TOK, using the string buffer. */</font></i>
+<a name='L633'>
+<a name='L634'><b>static</b> <b>void</b>
+<a name='L635'><a href='../S/2851.html#L721' title='Refered from 721 in Parser/tokenizer.c.'>buf_ungetc</a>(<b>int</b> c, <b>struct</b> tok_state *tok) <font color='red'>{</font>
+<a name='L636'>    tok-&gt;str--;
+<a name='L637'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/570.html#L144' title='Defined at 144 in Include/Python.h.'>Py_CHARMASK</a>(*tok-&gt;str) == c);        <i><font color='green'>/* tok-&gt;cur may point to read-only segment */</font></i>
+<a name='L638'><font color='red'>}</font>
+<a name='L639'>
+<a name='L640'><i><font color='green'>/* Set the readline function for TOK to ENC. For the string-based</font></i>
+<a name='L641'><i><font color='green'>   tokenizer, this means to just record the encoding. */</font></i>
+<a name='L642'>
+<a name='L643'><b>static</b> <b>int</b>
+<a name='L644'><a href='../R/6280.html' title='Multiple refered from 3 places.'>buf_setreadl</a>(<b>struct</b> tok_state *tok, <b>const</b> <b>char</b>* enc) <font color='red'>{</font>
+<a name='L645'>    tok-&gt;enc = enc;
+<a name='L646'>    <b>return</b> 1;
+<a name='L647'><font color='red'>}</font>
+<a name='L648'>
+<a name='L649'><i><font color='green'>/* Return a UTF-8 encoding Python string object from the</font></i>
+<a name='L650'><i><font color='green'>   C byte string STR, which is encoded with ENC. */</font></i>
+<a name='L651'>
+<a name='L652'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L653'><a href='../R/10948.html' title='Multiple refered from 3 places.'>translate_into_utf8</a>(<b>const</b> <b>char</b>* str, <b>const</b> <b>char</b>* enc) <font color='red'>{</font>
+<a name='L654'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *utf8;
+<a name='L655'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* buf = <a href='../D/3972.html' title='Multiple defined in 3 places.'>PyUnicode_Decode</a>(str, strlen(str), enc, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L656'>    <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L657'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L658'>    utf8 = <a href='../D/3959.html' title='Multiple defined in 3 places.'>PyUnicode_AsUTF8String</a>(buf);
+<a name='L659'>    Py_DECREF(buf);
+<a name='L660'>    <b>return</b> utf8;
+<a name='L661'><font color='red'>}</font>
+<a name='L662'>
+<a name='L663'>
+<a name='L664'><b>static</b> <b>char</b> *
+<a name='L665'><a href='../R/10949.html' title='Multiple refered from 3 places.'>translate_newlines</a>(<b>const</b> <b>char</b> *s, <b>int</b> exec_input, <b>struct</b> tok_state *tok) <font color='red'>{</font>
+<a name='L666'>    <b>int</b> skip_next_lf = 0, needed_length = strlen(s) + 2, final_length;
+<a name='L667'>    <b>char</b> *buf, *current;
+<a name='L668'>    <b>char</b> c = '\0';
+<a name='L669'>    buf = PyMem_MALLOC(needed_length);
+<a name='L670'>    <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L671'>        tok-&gt;done = <a href='../S/521.html#L21' title='Defined at 21 in Include/errcode.h.'>E_NOMEM</a>;
+<a name='L672'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L673'>    <font color='red'>}</font>
+<a name='L674'>    <b>for</b> (current = buf; *s; s++, current++) <font color='red'>{</font>
+<a name='L675'>        c = *s;
+<a name='L676'>        <b>if</b> (skip_next_lf) <font color='red'>{</font>
+<a name='L677'>            skip_next_lf = 0;
+<a name='L678'>            <b>if</b> (c == '\n') <font color='red'>{</font>
+<a name='L679'>                c = *++s;
+<a name='L680'>                <b>if</b> (!c)
+<a name='L681'>                    <b>break</b>;
+<a name='L682'>            <font color='red'>}</font>
+<a name='L683'>        <font color='red'>}</font>
+<a name='L684'>        <b>if</b> (c == '\r') <font color='red'>{</font>
+<a name='L685'>            skip_next_lf = 1;
+<a name='L686'>            c = '\n';
+<a name='L687'>        <font color='red'>}</font>
+<a name='L688'>        *current = c;
+<a name='L689'>    <font color='red'>}</font>
+<a name='L690'>    <i><font color='green'>/* If this is exec input, add a newline to the end of the string if</font></i>
+<a name='L691'><i><font color='green'>       there isn't one already. */</font></i>
+<a name='L692'>    <b>if</b> (exec_input &amp;&amp; c != '\n') <font color='red'>{</font>
+<a name='L693'>        *current = '\n';
+<a name='L694'>        current++;
+<a name='L695'>    <font color='red'>}</font>
+<a name='L696'>    *current = '\0';
+<a name='L697'>    final_length = current - buf + 1;
+<a name='L698'>    <b>if</b> (final_length &lt; needed_length &amp;&amp; final_length)
+<a name='L699'>        <i><font color='green'>/* should never fail */</font></i>
+<a name='L700'>        buf = PyMem_REALLOC(buf, final_length);
+<a name='L701'>    <b>return</b> buf;
+<a name='L702'><font color='red'>}</font>
+<a name='L703'>
+<a name='L704'><i><font color='green'>/* Decode a byte string STR for use as the buffer of TOK.</font></i>
+<a name='L705'><i><font color='green'>   Look for encoding declarations inside STR, and record them</font></i>
+<a name='L706'><i><font color='green'>   inside TOK.  */</font></i>
+<a name='L707'>
+<a name='L708'><b>static</b> <b>const</b> <b>char</b> *
+<a name='L709'><a href='../S/2851.html#L774' title='Refered from 774 in Parser/tokenizer.c.'>decode_str</a>(<b>const</b> <b>char</b> *input, <b>int</b> single, <b>struct</b> tok_state *tok)
+<a name='L710'><font color='red'>{</font>
+<a name='L711'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* utf8 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L712'>    <b>const</b> <b>char</b> *str;
+<a name='L713'>    <b>const</b> <b>char</b> *s;
+<a name='L714'>    <b>const</b> <b>char</b> *newl[2] = <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L715'>    <b>int</b> lineno = 0;
+<a name='L716'>    tok-&gt;input = str = <a href='../S/2851.html#L665' title='Defined at 665 in Parser/tokenizer.c.'>translate_newlines</a>(input, single, tok);
+<a name='L717'>    <b>if</b> (str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L718'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L719'>    tok-&gt;enc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L720'>    tok-&gt;str = str;
+<a name='L721'>    <b>if</b> (!<a href='../S/2851.html#L316' title='Defined at 316 in Parser/tokenizer.c.'>check_bom</a>(<a href='../S/2851.html#L628' title='Defined at 628 in Parser/tokenizer.c.'>buf_getc</a>, <a href='../S/2851.html#L635' title='Defined at 635 in Parser/tokenizer.c.'>buf_ungetc</a>, <a href='../S/2851.html#L644' title='Defined at 644 in Parser/tokenizer.c.'>buf_setreadl</a>, tok))
+<a name='L722'>        <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L723'>    str = tok-&gt;str;             <i><font color='green'>/* string after BOM if any */</font></i>
+<a name='L724'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(str);
+<a name='L725'>    <b>if</b> (tok-&gt;enc != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L726'>        utf8 = <a href='../S/2851.html#L653' title='Defined at 653 in Parser/tokenizer.c.'>translate_into_utf8</a>(str, tok-&gt;enc);
+<a name='L727'>        <b>if</b> (utf8 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L728'>            <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L729'>        str = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(utf8);
+<a name='L730'>    <font color='red'>}</font>
+<a name='L731'>    <b>for</b> (s = str;; s++) <font color='red'>{</font>
+<a name='L732'>        <b>if</b> (*s == '\0') <b>break</b>;
+<a name='L733'>        <b>else</b> <b>if</b> (*s == '\n') <font color='red'>{</font>
+<a name='L734'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(lineno &lt; 2);
+<a name='L735'>            newl[lineno] = s;
+<a name='L736'>            lineno++;
+<a name='L737'>            <b>if</b> (lineno == 2) <b>break</b>;
+<a name='L738'>        <font color='red'>}</font>
+<a name='L739'>    <font color='red'>}</font>
+<a name='L740'>    tok-&gt;enc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L741'>    <i><font color='green'>/* need to check line 1 and 2 separately since check_coding_spec</font></i>
+<a name='L742'><i><font color='green'>       assumes a single line as input */</font></i>
+<a name='L743'>    <b>if</b> (newl[0]) <font color='red'>{</font>
+<a name='L744'>        <b>if</b> (!<a href='../S/2851.html#L272' title='Defined at 272 in Parser/tokenizer.c.'>check_coding_spec</a>(str, newl[0] - str, tok, <a href='../S/2851.html#L644' title='Defined at 644 in Parser/tokenizer.c.'>buf_setreadl</a>))
+<a name='L745'>            <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L746'>        <b>if</b> (tok-&gt;enc == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; newl[1]) <font color='red'>{</font>
+<a name='L747'>            <b>if</b> (!<a href='../S/2851.html#L272' title='Defined at 272 in Parser/tokenizer.c.'>check_coding_spec</a>(newl[0]+1, newl[1] - newl[0],
+<a name='L748'>                                   tok, <a href='../S/2851.html#L644' title='Defined at 644 in Parser/tokenizer.c.'>buf_setreadl</a>))
+<a name='L749'>                <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L750'>        <font color='red'>}</font>
+<a name='L751'>    <font color='red'>}</font>
+<a name='L752'>    <b>if</b> (tok-&gt;enc != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L753'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(utf8 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L754'>        utf8 = <a href='../S/2851.html#L653' title='Defined at 653 in Parser/tokenizer.c.'>translate_into_utf8</a>(str, tok-&gt;enc);
+<a name='L755'>        <b>if</b> (utf8 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L756'>            <b>return</b> <a href='../S/2851.html#L183' title='Defined at 183 in Parser/tokenizer.c.'>error_ret</a>(tok);
+<a name='L757'>        str = PyBytes_AS_STRING(utf8);
+<a name='L758'>    <font color='red'>}</font>
+<a name='L759'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(tok-&gt;decoding_buffer == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L760'>    tok-&gt;decoding_buffer = utf8; <i><font color='green'>/* CAUTION */</font></i>
+<a name='L761'>    <b>return</b> str;
+<a name='L762'><font color='red'>}</font>
+<a name='L763'>
+<a name='L764'><font color='darkred'>#endif</font> <i><font color='green'>/* PGEN */</font></i>
+<a name='L765'>
+<a name='L766'><i><font color='green'>/* Set up tokenizer for string */</font></i>
+<a name='L767'>
+<a name='L768'><b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *
+<a name='L769'><a href='../R/3474.html' title='Multiple refered from 2 places.'>PyTokenizer_FromString</a>(<b>const</b> <b>char</b> *str, <b>int</b> exec_input)
+<a name='L770'><font color='red'>{</font>
+<a name='L771'>    <b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *tok = <a href='../S/2851.html#L113' title='Defined at 113 in Parser/tokenizer.c.'>tok_new</a>();
+<a name='L772'>    <b>if</b> (tok == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L773'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L774'>    str = (<b>char</b> *)<a href='../D/7978.html' title='Multiple defined in 2 places.'>decode_str</a>(str, exec_input, tok);
+<a name='L775'>    <b>if</b> (str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L776'>        <a href='../S/2851.html#L849' title='Defined at 849 in Parser/tokenizer.c.'>PyTokenizer_Free</a>(tok);
+<a name='L777'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L778'>    <font color='red'>}</font>
+<a name='L779'>
+<a name='L780'>    <i><font color='green'>/* XXX: constify members. */</font></i>
+<a name='L781'>    tok-&gt;buf = tok-&gt;cur = tok-&gt;end = tok-&gt;inp = (<b>char</b>*)str;
+<a name='L782'>    <b>return</b> tok;
+<a name='L783'><font color='red'>}</font>
+<a name='L784'>
+<a name='L785'><b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *
+<a name='L786'><a href='../R/3475.html' title='Multiple refered from 2 places.'>PyTokenizer_FromUTF8</a>(<b>const</b> <b>char</b> *str, <b>int</b> exec_input)
+<a name='L787'><font color='red'>{</font>
+<a name='L788'>    <b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *tok = <a href='../S/2851.html#L113' title='Defined at 113 in Parser/tokenizer.c.'>tok_new</a>();
+<a name='L789'>    <b>if</b> (tok == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L790'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L791'><font color='darkred'>#ifndef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L792'>    tok-&gt;input = str = <a href='../S/2851.html#L665' title='Defined at 665 in Parser/tokenizer.c.'>translate_newlines</a>(str, exec_input, tok);
+<a name='L793'><font color='darkred'>#endif</font>
+<a name='L794'>    <b>if</b> (str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L795'>        <a href='../S/2851.html#L849' title='Defined at 849 in Parser/tokenizer.c.'>PyTokenizer_Free</a>(tok);
+<a name='L796'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L797'>    <font color='red'>}</font>
+<a name='L798'>    tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> = <a href='../S/2852.html#L17' title='Defined at 17 in Parser/tokenizer.h.'>STATE_RAW</a>;
+<a name='L799'>    tok-&gt;read_coding_spec = 1;
+<a name='L800'>    tok-&gt;enc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L801'>    tok-&gt;str = str;
+<a name='L802'>    tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = (<b>char</b> *)PyMem_MALLOC(6);
+<a name='L803'>    <b>if</b> (!tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>) <font color='red'>{</font>
+<a name='L804'>        <a href='../S/2851.html#L849' title='Defined at 849 in Parser/tokenizer.c.'>PyTokenizer_Free</a>(tok);
+<a name='L805'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L806'>    <font color='red'>}</font>
+<a name='L807'>    strcpy(tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>, "utf-8");
+<a name='L808'>
+<a name='L809'>    <i><font color='green'>/* XXX: constify members. */</font></i>
+<a name='L810'>    tok-&gt;buf = tok-&gt;cur = tok-&gt;end = tok-&gt;inp = (<b>char</b>*)str;
+<a name='L811'>    <b>return</b> tok;
+<a name='L812'><font color='red'>}</font>
+<a name='L813'>
+<a name='L814'><i><font color='green'>/* Set up tokenizer for file */</font></i>
+<a name='L815'>
+<a name='L816'><b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *
+<a name='L817'><a href='../R/3473.html' title='Multiple refered from 3 places.'>PyTokenizer_FromFile</a>(FILE *fp, <b>char</b>* enc, <b>char</b> *ps1, <b>char</b> *ps2)
+<a name='L818'><font color='red'>{</font>
+<a name='L819'>    <b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *tok = <a href='../S/2851.html#L113' title='Defined at 113 in Parser/tokenizer.c.'>tok_new</a>();
+<a name='L820'>    <b>if</b> (tok == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L821'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L822'>    <b>if</b> ((tok-&gt;buf = (<b>char</b> *)PyMem_MALLOC(BUFSIZ)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L823'>        <a href='../S/2851.html#L849' title='Defined at 849 in Parser/tokenizer.c.'>PyTokenizer_Free</a>(tok);
+<a name='L824'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L825'>    <font color='red'>}</font>
+<a name='L826'>    tok-&gt;cur = tok-&gt;inp = tok-&gt;buf;
+<a name='L827'>    tok-&gt;end = tok-&gt;buf + BUFSIZ;
+<a name='L828'>    tok-&gt;fp = fp;
+<a name='L829'>    tok-&gt;prompt = ps1;
+<a name='L830'>    tok-&gt;nextprompt = ps2;
+<a name='L831'>    <b>if</b> (enc != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L832'>        <i><font color='green'>/* Must copy encoding declaration since it</font></i>
+<a name='L833'><i><font color='green'>           gets copied into the parse tree. */</font></i>
+<a name='L834'>        tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = PyMem_MALLOC(strlen(enc)+1);
+<a name='L835'>        <b>if</b> (!tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>) <font color='red'>{</font>
+<a name='L836'>            <a href='../S/2851.html#L849' title='Defined at 849 in Parser/tokenizer.c.'>PyTokenizer_Free</a>(tok);
+<a name='L837'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L838'>        <font color='red'>}</font>
+<a name='L839'>        strcpy(tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>, enc);
+<a name='L840'>        tok-&gt;<a href='../S/2852.html#L15' title='Defined at 15 in Parser/tokenizer.h.'>decoding_state</a> = <a href='../S/2852.html#L18' title='Defined at 18 in Parser/tokenizer.h.'>STATE_NORMAL</a>;
+<a name='L841'>    <font color='red'>}</font>
+<a name='L842'>    <b>return</b> tok;
+<a name='L843'><font color='red'>}</font>
+<a name='L844'>
+<a name='L845'>
+<a name='L846'><i><font color='green'>/* Free a tok_state structure */</font></i>
+<a name='L847'>
+<a name='L848'><b>void</b>
+<a name='L849'><a href='../R/3472.html' title='Multiple refered from 9 places.'>PyTokenizer_Free</a>(<b>struct</b> tok_state *tok)
+<a name='L850'><font color='red'>{</font>
+<a name='L851'>    <b>if</b> (tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L852'>        PyMem_FREE(tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L853'><font color='darkred'>#ifndef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L854'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tok-&gt;decoding_readline);
+<a name='L855'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tok-&gt;decoding_buffer);
+<a name='L856'><font color='darkred'>#endif</font>
+<a name='L857'>    <b>if</b> (tok-&gt;fp != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; tok-&gt;buf != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L858'>        PyMem_FREE(tok-&gt;buf);
+<a name='L859'>    <b>if</b> (tok-&gt;input)
+<a name='L860'>        PyMem_FREE((<b>char</b> *)tok-&gt;input);
+<a name='L861'>    PyMem_FREE(tok);
+<a name='L862'><font color='red'>}</font>
+<a name='L863'>
+<a name='L864'><i><font color='green'>/* Get next char, updating state; error code goes into tok-&gt;done */</font></i>
+<a name='L865'>
+<a name='L866'><b>static</b> <b>int</b>
+<a name='L867'><a href='../R/10935.html' title='Multiple refered from 31 places.'>tok_nextc</a>(<b>register</b> <b>struct</b> tok_state *tok)
+<a name='L868'><font color='red'>{</font>
+<a name='L869'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L870'>        <b>if</b> (tok-&gt;cur != tok-&gt;inp) <font color='red'>{</font>
+<a name='L871'>            <b>return</b> <a href='../S/570.html#L144' title='Defined at 144 in Include/Python.h.'>Py_CHARMASK</a>(*tok-&gt;cur++); <i><font color='green'>/* Fast path */</font></i>
+<a name='L872'>        <font color='red'>}</font>
+<a name='L873'>        <b>if</b> (tok-&gt;done != <a href='../S/521.html#L16' title='Defined at 16 in Include/errcode.h.'>E_OK</a>)
+<a name='L874'>            <b>return</b> EOF;
+<a name='L875'>        <b>if</b> (tok-&gt;fp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L876'>            <b>char</b> *end = strchr(tok-&gt;inp, '\n');
+<a name='L877'>            <b>if</b> (end != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L878'>                end++;
+<a name='L879'>            <b>else</b> <font color='red'>{</font>
+<a name='L880'>                end = strchr(tok-&gt;inp, '\0');
+<a name='L881'>                <b>if</b> (end == tok-&gt;inp) <font color='red'>{</font>
+<a name='L882'>                    tok-&gt;done = <a href='../S/521.html#L17' title='Defined at 17 in Include/errcode.h.'>E_EOF</a>;
+<a name='L883'>                    <b>return</b> EOF;
+<a name='L884'>                <font color='red'>}</font>
+<a name='L885'>            <font color='red'>}</font>
+<a name='L886'>            <b>if</b> (tok-&gt;start == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L887'>                tok-&gt;buf = tok-&gt;cur;
+<a name='L888'>            tok-&gt;line_start = tok-&gt;cur;
+<a name='L889'>            tok-&gt;lineno++;
+<a name='L890'>            tok-&gt;inp = end;
+<a name='L891'>            <b>return</b> <a href='../S/570.html#L144' title='Defined at 144 in Include/Python.h.'>Py_CHARMASK</a>(*tok-&gt;cur++);
+<a name='L892'>        <font color='red'>}</font>
+<a name='L893'>        <b>if</b> (tok-&gt;prompt != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L894'>            <b>char</b> *newtok = <a href='../D/3582.html' title='Multiple defined in 2 places.'>PyOS_Readline</a>(stdin, stdout, tok-&gt;prompt);
+<a name='L895'><font color='darkred'>#ifndef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L896'>            <b>if</b> (newtok != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L897'>                <b>char</b> *translated = <a href='../S/2851.html#L665' title='Defined at 665 in Parser/tokenizer.c.'>translate_newlines</a>(newtok, 0, tok);
+<a name='L898'>                PyMem_FREE(newtok);
+<a name='L899'>                <b>if</b> (translated == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L900'>                    <b>return</b> EOF;
+<a name='L901'>                newtok = translated;
+<a name='L902'>            <font color='red'>}</font>
+<a name='L903'>            <b>if</b> (tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> &amp;&amp; newtok &amp;&amp; *newtok) <font color='red'>{</font>
+<a name='L904'>                <i><font color='green'>/* Recode to UTF-8 */</font></i>
+<a name='L905'>                <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> buflen;
+<a name='L906'>                <b>const</b> <b>char</b>* buf;
+<a name='L907'>                <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *u = <a href='../S/2851.html#L653' title='Defined at 653 in Parser/tokenizer.c.'>translate_into_utf8</a>(newtok, tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L908'>                PyMem_FREE(newtok);
+<a name='L909'>                <b>if</b> (!u) <font color='red'>{</font>
+<a name='L910'>                    tok-&gt;done = <a href='../S/521.html#L28' title='Defined at 28 in Include/errcode.h.'>E_DECODE</a>;
+<a name='L911'>                    <b>return</b> EOF;
+<a name='L912'>                <font color='red'>}</font>
+<a name='L913'>                buflen = PyBytes_GET_SIZE(u);
+<a name='L914'>                buf = PyBytes_AS_STRING(u);
+<a name='L915'>                <b>if</b> (!buf) <font color='red'>{</font>
+<a name='L916'>                    Py_DECREF(u);
+<a name='L917'>                    tok-&gt;done = <a href='../S/521.html#L28' title='Defined at 28 in Include/errcode.h.'>E_DECODE</a>;
+<a name='L918'>                    <b>return</b> EOF;
+<a name='L919'>                <font color='red'>}</font>
+<a name='L920'>                newtok = PyMem_MALLOC(buflen+1);
+<a name='L921'>                strcpy(newtok, buf);
+<a name='L922'>                Py_DECREF(u);
+<a name='L923'>            <font color='red'>}</font>
+<a name='L924'><font color='darkred'>#endif</font>
+<a name='L925'>            <b>if</b> (tok-&gt;nextprompt != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L926'>                tok-&gt;prompt = tok-&gt;nextprompt;
+<a name='L927'>            <b>if</b> (newtok == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L928'>                tok-&gt;done = <a href='../S/521.html#L18' title='Defined at 18 in Include/errcode.h.'>E_INTR</a>;
+<a name='L929'>            <b>else</b> <b>if</b> (*newtok == '\0') <font color='red'>{</font>
+<a name='L930'>                PyMem_FREE(newtok);
+<a name='L931'>                tok-&gt;done = <a href='../S/521.html#L17' title='Defined at 17 in Include/errcode.h.'>E_EOF</a>;
+<a name='L932'>            <font color='red'>}</font>
+<a name='L933'>            <b>else</b> <b>if</b> (tok-&gt;start != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L934'>                <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> start = tok-&gt;start - tok-&gt;buf;
+<a name='L935'>                <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> oldlen = tok-&gt;cur - tok-&gt;buf;
+<a name='L936'>                <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> newlen = oldlen + strlen(newtok);
+<a name='L937'>                <b>char</b> *buf = tok-&gt;buf;
+<a name='L938'>                buf = (<b>char</b> *)PyMem_REALLOC(buf, newlen+1);
+<a name='L939'>                tok-&gt;lineno++;
+<a name='L940'>                <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L941'>                    PyMem_FREE(tok-&gt;buf);
+<a name='L942'>                    tok-&gt;buf = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L943'>                    PyMem_FREE(newtok);
+<a name='L944'>                    tok-&gt;done = <a href='../S/521.html#L21' title='Defined at 21 in Include/errcode.h.'>E_NOMEM</a>;
+<a name='L945'>                    <b>return</b> EOF;
+<a name='L946'>                <font color='red'>}</font>
+<a name='L947'>                tok-&gt;buf = buf;
+<a name='L948'>                tok-&gt;cur = tok-&gt;buf + oldlen;
+<a name='L949'>                tok-&gt;line_start = tok-&gt;cur;
+<a name='L950'>                strcpy(tok-&gt;buf + oldlen, newtok);
+<a name='L951'>                PyMem_FREE(newtok);
+<a name='L952'>                tok-&gt;inp = tok-&gt;buf + newlen;
+<a name='L953'>                tok-&gt;end = tok-&gt;inp + 1;
+<a name='L954'>                tok-&gt;start = tok-&gt;buf + start;
+<a name='L955'>            <font color='red'>}</font>
+<a name='L956'>            <b>else</b> <font color='red'>{</font>
+<a name='L957'>                tok-&gt;lineno++;
+<a name='L958'>                <b>if</b> (tok-&gt;buf != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L959'>                    PyMem_FREE(tok-&gt;buf);
+<a name='L960'>                tok-&gt;buf = newtok;
+<a name='L961'>                tok-&gt;line_start = tok-&gt;buf;
+<a name='L962'>                tok-&gt;cur = tok-&gt;buf;
+<a name='L963'>                tok-&gt;line_start = tok-&gt;buf;
+<a name='L964'>                tok-&gt;inp = strchr(tok-&gt;buf, '\0');
+<a name='L965'>                tok-&gt;end = tok-&gt;inp + 1;
+<a name='L966'>            <font color='red'>}</font>
+<a name='L967'>        <font color='red'>}</font>
+<a name='L968'>        <b>else</b> <font color='red'>{</font>
+<a name='L969'>            <b>int</b> done = 0;
+<a name='L970'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> cur = 0;
+<a name='L971'>            <b>char</b> *pt;
+<a name='L972'>            <b>if</b> (tok-&gt;start == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L973'>                <b>if</b> (tok-&gt;buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L974'>                    tok-&gt;buf = (<b>char</b> *)
+<a name='L975'>                        PyMem_MALLOC(BUFSIZ);
+<a name='L976'>                    <b>if</b> (tok-&gt;buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L977'>                        tok-&gt;done = <a href='../S/521.html#L21' title='Defined at 21 in Include/errcode.h.'>E_NOMEM</a>;
+<a name='L978'>                        <b>return</b> EOF;
+<a name='L979'>                    <font color='red'>}</font>
+<a name='L980'>                    tok-&gt;end = tok-&gt;buf + BUFSIZ;
+<a name='L981'>                <font color='red'>}</font>
+<a name='L982'>                <b>if</b> (<a href='../D/7985.html' title='Multiple defined in 2 places.'>decoding_fgets</a>(tok-&gt;buf, (<b>int</b>)(tok-&gt;end - tok-&gt;buf),
+<a name='L983'>                          tok) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L984'>                    tok-&gt;done = <a href='../S/521.html#L17' title='Defined at 17 in Include/errcode.h.'>E_EOF</a>;
+<a name='L985'>                    done = 1;
+<a name='L986'>                <font color='red'>}</font>
+<a name='L987'>                <b>else</b> <font color='red'>{</font>
+<a name='L988'>                    tok-&gt;done = <a href='../S/521.html#L16' title='Defined at 16 in Include/errcode.h.'>E_OK</a>;
+<a name='L989'>                    tok-&gt;inp = strchr(tok-&gt;buf, '\0');
+<a name='L990'>                    done = tok-&gt;inp[-1] == '\n';
+<a name='L991'>                <font color='red'>}</font>
+<a name='L992'>            <font color='red'>}</font>
+<a name='L993'>            <b>else</b> <font color='red'>{</font>
+<a name='L994'>                cur = tok-&gt;cur - tok-&gt;buf;
+<a name='L995'>                <b>if</b> (<a href='../D/7984.html' title='Multiple defined in 2 places.'>decoding_feof</a>(tok)) <font color='red'>{</font>
+<a name='L996'>                    tok-&gt;done = <a href='../S/521.html#L17' title='Defined at 17 in Include/errcode.h.'>E_EOF</a>;
+<a name='L997'>                    done = 1;
+<a name='L998'>                <font color='red'>}</font>
+<a name='L999'>                <b>else</b>
+<a name='L1000'>                    tok-&gt;done = <a href='../S/521.html#L16' title='Defined at 16 in Include/errcode.h.'>E_OK</a>;
+<a name='L1001'>            <font color='red'>}</font>
+<a name='L1002'>            tok-&gt;lineno++;
+<a name='L1003'>            <i><font color='green'>/* Read until '\n' or EOF */</font></i>
+<a name='L1004'>            <b>while</b> (!done) <font color='red'>{</font>
+<a name='L1005'>                <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> curstart = tok-&gt;start == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ? -1 :
+<a name='L1006'>                          tok-&gt;start - tok-&gt;buf;
+<a name='L1007'>                <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> curvalid = tok-&gt;inp - tok-&gt;buf;
+<a name='L1008'>                <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> newsize = curvalid + BUFSIZ;
+<a name='L1009'>                <b>char</b> *newbuf = tok-&gt;buf;
+<a name='L1010'>                newbuf = (<b>char</b> *)PyMem_REALLOC(newbuf,
+<a name='L1011'>                                               newsize);
+<a name='L1012'>                <b>if</b> (newbuf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1013'>                    tok-&gt;done = <a href='../S/521.html#L21' title='Defined at 21 in Include/errcode.h.'>E_NOMEM</a>;
+<a name='L1014'>                    tok-&gt;cur = tok-&gt;inp;
+<a name='L1015'>                    <b>return</b> EOF;
+<a name='L1016'>                <font color='red'>}</font>
+<a name='L1017'>                tok-&gt;buf = newbuf;
+<a name='L1018'>                tok-&gt;inp = tok-&gt;buf + curvalid;
+<a name='L1019'>                tok-&gt;end = tok-&gt;buf + newsize;
+<a name='L1020'>                tok-&gt;start = curstart &lt; 0 ? <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> :
+<a name='L1021'>                         tok-&gt;buf + curstart;
+<a name='L1022'>                <b>if</b> (<a href='../D/7985.html' title='Multiple defined in 2 places.'>decoding_fgets</a>(tok-&gt;inp,
+<a name='L1023'>                               (<b>int</b>)(tok-&gt;end - tok-&gt;inp),
+<a name='L1024'>                               tok) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1025'>                    <i><font color='green'>/* Break out early on decoding</font></i>
+<a name='L1026'><i><font color='green'>                       errors, as tok-&gt;buf will be NULL</font></i>
+<a name='L1027'><i><font color='green'>                     */</font></i>
+<a name='L1028'>                    <b>if</b> (tok-&gt;decoding_erred)
+<a name='L1029'>                        <b>return</b> EOF;
+<a name='L1030'>                    <i><font color='green'>/* Last line does not end in \n,</font></i>
+<a name='L1031'><i><font color='green'>                       fake one */</font></i>
+<a name='L1032'>                    strcpy(tok-&gt;inp, "\n");
+<a name='L1033'>                <font color='red'>}</font>
+<a name='L1034'>                tok-&gt;inp = strchr(tok-&gt;inp, '\0');
+<a name='L1035'>                done = tok-&gt;inp[-1] == '\n';
+<a name='L1036'>            <font color='red'>}</font>
+<a name='L1037'>            <b>if</b> (tok-&gt;buf != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1038'>                tok-&gt;cur = tok-&gt;buf + cur;
+<a name='L1039'>                tok-&gt;line_start = tok-&gt;cur;
+<a name='L1040'>                <i><font color='green'>/* replace "\r\n" with "\n" */</font></i>
+<a name='L1041'>                <i><font color='green'>/* For Mac leave the \r, giving a syntax error */</font></i>
+<a name='L1042'>                pt = tok-&gt;inp - 2;
+<a name='L1043'>                <b>if</b> (pt &gt;= tok-&gt;buf &amp;&amp; *pt == '\r') <font color='red'>{</font>
+<a name='L1044'>                    *pt++ = '\n';
+<a name='L1045'>                    *pt = '\0';
+<a name='L1046'>                    tok-&gt;inp = pt;
+<a name='L1047'>                <font color='red'>}</font>
+<a name='L1048'>            <font color='red'>}</font>
+<a name='L1049'>        <font color='red'>}</font>
+<a name='L1050'>        <b>if</b> (tok-&gt;done != <a href='../S/521.html#L16' title='Defined at 16 in Include/errcode.h.'>E_OK</a>) <font color='red'>{</font>
+<a name='L1051'>            <b>if</b> (tok-&gt;prompt != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1052'>                <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("\n");
+<a name='L1053'>            tok-&gt;cur = tok-&gt;inp;
+<a name='L1054'>            <b>return</b> EOF;
+<a name='L1055'>        <font color='red'>}</font>
+<a name='L1056'>    <font color='red'>}</font>
+<a name='L1057'>    <i><font color='green'>/*NOTREACHED*/</font></i>
+<a name='L1058'><font color='red'>}</font>
+<a name='L1059'>
+<a name='L1060'>
+<a name='L1061'><i><font color='green'>/* Back-up one character */</font></i>
+<a name='L1062'>
+<a name='L1063'><b>static</b> <b>void</b>
+<a name='L1064'><a href='../R/10932.html' title='Multiple refered from 15 places.'>tok_backup</a>(<b>register</b> <b>struct</b> tok_state *tok, <b>register</b> <b>int</b> c)
+<a name='L1065'><font color='red'>{</font>
+<a name='L1066'>    <b>if</b> (c != EOF) <font color='red'>{</font>
+<a name='L1067'>        <b>if</b> (--tok-&gt;cur &lt; tok-&gt;buf)
+<a name='L1068'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("tok_backup: beginning of buffer");
+<a name='L1069'>        <b>if</b> (*tok-&gt;cur != c)
+<a name='L1070'>            *tok-&gt;cur = c;
+<a name='L1071'>    <font color='red'>}</font>
+<a name='L1072'><font color='red'>}</font>
+<a name='L1073'>
+<a name='L1074'>
+<a name='L1075'><i><font color='green'>/* Return the token corresponding to a single character */</font></i>
+<a name='L1076'>
+<a name='L1077'><b>int</b>
+<a name='L1078'><a href='../R/3468.html' title='Multiple refered from 2 places.'>PyToken_OneChar</a>(<b>int</b> c)
+<a name='L1079'><font color='red'>{</font>
+<a name='L1080'>    <b>switch</b> (c) <font color='red'>{</font>
+<a name='L1081'>    <b>case</b> '(':           <b>return</b> <a href='../S/582.html#L19' title='Defined at 19 in Include/token.h.'>LPAR</a>;
+<a name='L1082'>    <b>case</b> ')':           <b>return</b> <a href='../S/582.html#L20' title='Defined at 20 in Include/token.h.'>RPAR</a>;
+<a name='L1083'>    <b>case</b> '[':           <b>return</b> <a href='../S/582.html#L21' title='Defined at 21 in Include/token.h.'>LSQB</a>;
+<a name='L1084'>    <b>case</b> ']':           <b>return</b> <a href='../S/582.html#L22' title='Defined at 22 in Include/token.h.'>RSQB</a>;
+<a name='L1085'>    <b>case</b> ':':           <b>return</b> <a href='../S/582.html#L23' title='Defined at 23 in Include/token.h.'>COLON</a>;
+<a name='L1086'>    <b>case</b> ',':           <b>return</b> <a href='../S/582.html#L24' title='Defined at 24 in Include/token.h.'>COMMA</a>;
+<a name='L1087'>    <b>case</b> ';':           <b>return</b> <a href='../S/582.html#L25' title='Defined at 25 in Include/token.h.'>SEMI</a>;
+<a name='L1088'>    <b>case</b> '+':           <b>return</b> <a href='../S/582.html#L26' title='Defined at 26 in Include/token.h.'>PLUS</a>;
+<a name='L1089'>    <b>case</b> '-':           <b>return</b> <a href='../S/582.html#L27' title='Defined at 27 in Include/token.h.'>MINUS</a>;
+<a name='L1090'>    <b>case</b> '*':           <b>return</b> <a href='../S/582.html#L28' title='Defined at 28 in Include/token.h.'>STAR</a>;
+<a name='L1091'>    <b>case</b> '/':           <b>return</b> <a href='../S/582.html#L29' title='Defined at 29 in Include/token.h.'>SLASH</a>;
+<a name='L1092'>    <b>case</b> '|':           <b>return</b> <a href='../S/582.html#L30' title='Defined at 30 in Include/token.h.'>VBAR</a>;
+<a name='L1093'>    <b>case</b> '&amp;':           <b>return</b> <a href='../S/582.html#L31' title='Defined at 31 in Include/token.h.'>AMPER</a>;
+<a name='L1094'>    <b>case</b> '&lt;':           <b>return</b> <a href='../S/582.html#L32' title='Defined at 32 in Include/token.h.'>LESS</a>;
+<a name='L1095'>    <b>case</b> '&gt;':           <b>return</b> <a href='../S/582.html#L33' title='Defined at 33 in Include/token.h.'>GREATER</a>;
+<a name='L1096'>    <b>case</b> '=':           <b>return</b> <a href='../D/952.html' title='Multiple defined in 2 places.'>EQUAL</a>;
+<a name='L1097'>    <b>case</b> '.':           <b>return</b> <a href='../S/582.html#L35' title='Defined at 35 in Include/token.h.'>DOT</a>;
+<a name='L1098'>    <b>case</b> '%':           <b>return</b> <a href='../S/582.html#L36' title='Defined at 36 in Include/token.h.'>PERCENT</a>;
+<a name='L1099'>    <b>case</b> '{':           <b>return</b> <a href='../S/582.html#L38' title='Defined at 38 in Include/token.h.'>LBRACE</a>;
+<a name='L1100'>    <b>case</b> '}':           <b>return</b> <a href='../S/582.html#L39' title='Defined at 39 in Include/token.h.'>RBRACE</a>;
+<a name='L1101'>    <b>case</b> '^':           <b>return</b> <a href='../S/582.html#L45' title='Defined at 45 in Include/token.h.'>CIRCUMFLEX</a>;
+<a name='L1102'>    <b>case</b> '~':           <b>return</b> <a href='../D/5147.html' title='Multiple defined in 2 places.'>TILDE</a>;
+<a name='L1103'>    <b>case</b> '@':       <b>return</b> <a href='../S/582.html#L62' title='Defined at 62 in Include/token.h.'>AT</a>;
+<a name='L1104'>    <b>default</b>:            <b>return</b> <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>;
+<a name='L1105'>    <font color='red'>}</font>
+<a name='L1106'><font color='red'>}</font>
+<a name='L1107'>
+<a name='L1108'>
+<a name='L1109'><b>int</b>
+<a name='L1110'><a href='../R/3470.html' title='Multiple refered from 2 places.'>PyToken_TwoChars</a>(<b>int</b> c1, <b>int</b> c2)
+<a name='L1111'><font color='red'>{</font>
+<a name='L1112'>    <b>switch</b> (c1) <font color='red'>{</font>
+<a name='L1113'>    <b>case</b> '=':
+<a name='L1114'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1115'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L40' title='Defined at 40 in Include/token.h.'>EQEQUAL</a>;
+<a name='L1116'>        <font color='red'>}</font>
+<a name='L1117'>        <b>break</b>;
+<a name='L1118'>    <b>case</b> '!':
+<a name='L1119'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1120'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L41' title='Defined at 41 in Include/token.h.'>NOTEQUAL</a>;
+<a name='L1121'>        <font color='red'>}</font>
+<a name='L1122'>        <b>break</b>;
+<a name='L1123'>    <b>case</b> '&lt;':
+<a name='L1124'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1125'>        <b>case</b> '&gt;':               <b>return</b> <a href='../S/582.html#L41' title='Defined at 41 in Include/token.h.'>NOTEQUAL</a>;
+<a name='L1126'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L42' title='Defined at 42 in Include/token.h.'>LESSEQUAL</a>;
+<a name='L1127'>        <b>case</b> '&lt;':               <b>return</b> <a href='../S/582.html#L46' title='Defined at 46 in Include/token.h.'>LEFTSHIFT</a>;
+<a name='L1128'>        <font color='red'>}</font>
+<a name='L1129'>        <b>break</b>;
+<a name='L1130'>    <b>case</b> '&gt;':
+<a name='L1131'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1132'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L43' title='Defined at 43 in Include/token.h.'>GREATEREQUAL</a>;
+<a name='L1133'>        <b>case</b> '&gt;':               <b>return</b> <a href='../S/582.html#L47' title='Defined at 47 in Include/token.h.'>RIGHTSHIFT</a>;
+<a name='L1134'>        <font color='red'>}</font>
+<a name='L1135'>        <b>break</b>;
+<a name='L1136'>    <b>case</b> '+':
+<a name='L1137'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1138'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L49' title='Defined at 49 in Include/token.h.'>PLUSEQUAL</a>;
+<a name='L1139'>        <font color='red'>}</font>
+<a name='L1140'>        <b>break</b>;
+<a name='L1141'>    <b>case</b> '-':
+<a name='L1142'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1143'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L50' title='Defined at 50 in Include/token.h.'>MINEQUAL</a>;
+<a name='L1144'>        <b>case</b> '&gt;':               <b>return</b> <a href='../S/582.html#L63' title='Defined at 63 in Include/token.h.'>RARROW</a>;
+<a name='L1145'>        <font color='red'>}</font>
+<a name='L1146'>        <b>break</b>;
+<a name='L1147'>    <b>case</b> '*':
+<a name='L1148'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1149'>        <b>case</b> '*':               <b>return</b> <a href='../S/582.html#L48' title='Defined at 48 in Include/token.h.'>DOUBLESTAR</a>;
+<a name='L1150'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L51' title='Defined at 51 in Include/token.h.'>STAREQUAL</a>;
+<a name='L1151'>        <font color='red'>}</font>
+<a name='L1152'>        <b>break</b>;
+<a name='L1153'>    <b>case</b> '/':
+<a name='L1154'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1155'>        <b>case</b> '/':               <b>return</b> <a href='../S/582.html#L60' title='Defined at 60 in Include/token.h.'>DOUBLESLASH</a>;
+<a name='L1156'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L52' title='Defined at 52 in Include/token.h.'>SLASHEQUAL</a>;
+<a name='L1157'>        <font color='red'>}</font>
+<a name='L1158'>        <b>break</b>;
+<a name='L1159'>    <b>case</b> '|':
+<a name='L1160'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1161'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L55' title='Defined at 55 in Include/token.h.'>VBAREQUAL</a>;
+<a name='L1162'>        <font color='red'>}</font>
+<a name='L1163'>        <b>break</b>;
+<a name='L1164'>    <b>case</b> '%':
+<a name='L1165'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1166'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L53' title='Defined at 53 in Include/token.h.'>PERCENTEQUAL</a>;
+<a name='L1167'>        <font color='red'>}</font>
+<a name='L1168'>        <b>break</b>;
+<a name='L1169'>    <b>case</b> '&amp;':
+<a name='L1170'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1171'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L54' title='Defined at 54 in Include/token.h.'>AMPEREQUAL</a>;
+<a name='L1172'>        <font color='red'>}</font>
+<a name='L1173'>        <b>break</b>;
+<a name='L1174'>    <b>case</b> '^':
+<a name='L1175'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1176'>        <b>case</b> '=':               <b>return</b> <a href='../S/582.html#L56' title='Defined at 56 in Include/token.h.'>CIRCUMFLEXEQUAL</a>;
+<a name='L1177'>        <font color='red'>}</font>
+<a name='L1178'>        <b>break</b>;
+<a name='L1179'>    <font color='red'>}</font>
+<a name='L1180'>    <b>return</b> <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>;
+<a name='L1181'><font color='red'>}</font>
+<a name='L1182'>
+<a name='L1183'><b>int</b>
+<a name='L1184'><a href='../R/3469.html' title='Multiple refered from 2 places.'>PyToken_ThreeChars</a>(<b>int</b> c1, <b>int</b> c2, <b>int</b> c3)
+<a name='L1185'><font color='red'>{</font>
+<a name='L1186'>    <b>switch</b> (c1) <font color='red'>{</font>
+<a name='L1187'>    <b>case</b> '&lt;':
+<a name='L1188'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1189'>        <b>case</b> '&lt;':
+<a name='L1190'>            <b>switch</b> (c3) <font color='red'>{</font>
+<a name='L1191'>            <b>case</b> '=':
+<a name='L1192'>                <b>return</b> <a href='../S/582.html#L57' title='Defined at 57 in Include/token.h.'>LEFTSHIFTEQUAL</a>;
+<a name='L1193'>            <font color='red'>}</font>
+<a name='L1194'>            <b>break</b>;
+<a name='L1195'>        <font color='red'>}</font>
+<a name='L1196'>        <b>break</b>;
+<a name='L1197'>    <b>case</b> '&gt;':
+<a name='L1198'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1199'>        <b>case</b> '&gt;':
+<a name='L1200'>            <b>switch</b> (c3) <font color='red'>{</font>
+<a name='L1201'>            <b>case</b> '=':
+<a name='L1202'>                <b>return</b> <a href='../S/582.html#L58' title='Defined at 58 in Include/token.h.'>RIGHTSHIFTEQUAL</a>;
+<a name='L1203'>            <font color='red'>}</font>
+<a name='L1204'>            <b>break</b>;
+<a name='L1205'>        <font color='red'>}</font>
+<a name='L1206'>        <b>break</b>;
+<a name='L1207'>    <b>case</b> '*':
+<a name='L1208'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1209'>        <b>case</b> '*':
+<a name='L1210'>            <b>switch</b> (c3) <font color='red'>{</font>
+<a name='L1211'>            <b>case</b> '=':
+<a name='L1212'>                <b>return</b> <a href='../S/582.html#L59' title='Defined at 59 in Include/token.h.'>DOUBLESTAREQUAL</a>;
+<a name='L1213'>            <font color='red'>}</font>
+<a name='L1214'>            <b>break</b>;
+<a name='L1215'>        <font color='red'>}</font>
+<a name='L1216'>        <b>break</b>;
+<a name='L1217'>    <b>case</b> '/':
+<a name='L1218'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1219'>        <b>case</b> '/':
+<a name='L1220'>            <b>switch</b> (c3) <font color='red'>{</font>
+<a name='L1221'>            <b>case</b> '=':
+<a name='L1222'>                <b>return</b> <a href='../S/582.html#L61' title='Defined at 61 in Include/token.h.'>DOUBLESLASHEQUAL</a>;
+<a name='L1223'>            <font color='red'>}</font>
+<a name='L1224'>            <b>break</b>;
+<a name='L1225'>        <font color='red'>}</font>
+<a name='L1226'>        <b>break</b>;
+<a name='L1227'>    <b>case</b> '.':
+<a name='L1228'>        <b>switch</b> (c2) <font color='red'>{</font>
+<a name='L1229'>        <b>case</b> '.':
+<a name='L1230'>            <b>switch</b> (c3) <font color='red'>{</font>
+<a name='L1231'>            <b>case</b> '.':
+<a name='L1232'>                <b>return</b> <a href='../S/582.html#L64' title='Defined at 64 in Include/token.h.'>ELLIPSIS</a>;
+<a name='L1233'>            <font color='red'>}</font>
+<a name='L1234'>            <b>break</b>;
+<a name='L1235'>        <font color='red'>}</font>
+<a name='L1236'>        <b>break</b>;
+<a name='L1237'>    <font color='red'>}</font>
+<a name='L1238'>    <b>return</b> <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>;
+<a name='L1239'><font color='red'>}</font>
+<a name='L1240'>
+<a name='L1241'><b>static</b> <b>int</b>
+<a name='L1242'><a href='../R/8345.html' title='Multiple refered from 3 places.'>indenterror</a>(<b>struct</b> tok_state *tok)
+<a name='L1243'><font color='red'>{</font>
+<a name='L1244'>    <b>if</b> (tok-&gt;alterror) <font color='red'>{</font>
+<a name='L1245'>        tok-&gt;done = <a href='../S/521.html#L24' title='Defined at 24 in Include/errcode.h.'>E_TABSPACE</a>;
+<a name='L1246'>        tok-&gt;cur = tok-&gt;inp;
+<a name='L1247'>        <b>return</b> 1;
+<a name='L1248'>    <font color='red'>}</font>
+<a name='L1249'>    <b>if</b> (tok-&gt;altwarning) <font color='red'>{</font>
+<a name='L1250'>        <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("%s: inconsistent use of tabs and spaces "
+<a name='L1251'>                          "in indentation\n", tok-&gt;filename);
+<a name='L1252'>        tok-&gt;altwarning = 0;
+<a name='L1253'>    <font color='red'>}</font>
+<a name='L1254'>    <b>return</b> 0;
+<a name='L1255'><font color='red'>}</font>
+<a name='L1256'>
+<a name='L1257'><font color='darkred'>#ifdef</font> <a href='../D/2487.html' title='Multiple defined in 3 places.'>PGEN</a>
+<a name='L1258'><font color='darkred'>#define</font> <a href='../S/2851.html#L1428' title='Refered from 1428 in Parser/tokenizer.c.'>verify_identifier</a>(tok) 1
+<a name='L1259'><font color='darkred'>#else</font>
+<a name='L1260'><i><font color='green'>/* Verify that the identifier follows PEP 3131. */</font></i>
+<a name='L1261'><b>static</b> <b>int</b>
+<a name='L1262'><a href='../S/2851.html#L1428' title='Refered from 1428 in Parser/tokenizer.c.'>verify_identifier</a>(<b>struct</b> tok_state *tok)
+<a name='L1263'><font color='red'>{</font>
+<a name='L1264'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *s;
+<a name='L1265'>    <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1266'>    s = <a href='../D/3987.html' title='Multiple defined in 3 places.'>PyUnicode_DecodeUTF8</a>(tok-&gt;start, tok-&gt;cur - tok-&gt;start, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1267'>    <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1268'>        <b>if</b> (<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_UnicodeDecodeError)) <font color='red'>{</font>
+<a name='L1269'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1270'>            tok-&gt;done = <a href='../S/521.html#L32' title='Defined at 32 in Include/errcode.h.'>E_IDENTIFIER</a>;
+<a name='L1271'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1272'>            tok-&gt;done = <a href='../S/521.html#L23' title='Defined at 23 in Include/errcode.h.'>E_ERROR</a>;
+<a name='L1273'>        <font color='red'>}</font>
+<a name='L1274'>        <b>return</b> 0;
+<a name='L1275'>    <font color='red'>}</font>
+<a name='L1276'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4024.html' title='Multiple defined in 3 places.'>PyUnicode_IsIdentifier</a>(s);
+<a name='L1277'>    Py_DECREF(s);
+<a name='L1278'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == 0)
+<a name='L1279'>        tok-&gt;done = <a href='../S/521.html#L32' title='Defined at 32 in Include/errcode.h.'>E_IDENTIFIER</a>;
+<a name='L1280'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1281'><font color='red'>}</font>
+<a name='L1282'><font color='darkred'>#endif</font>
+<a name='L1283'>
+<a name='L1284'><i><font color='green'>/* Get next token, after space stripping etc. */</font></i>
+<a name='L1285'>
+<a name='L1286'><b>static</b> <b>int</b>
+<a name='L1287'><a href='../S/2851.html#L1684' title='Refered from 1684 in Parser/tokenizer.c.'>tok_get</a>(<b>register</b> <b>struct</b> tok_state *tok, <b>char</b> **p_start, <b>char</b> **p_end)
+<a name='L1288'><font color='red'>{</font>
+<a name='L1289'>    <b>register</b> <b>int</b> c;
+<a name='L1290'>    <b>int</b> blankline, nonascii;
+<a name='L1291'>
+<a name='L1292'>    *p_start = *p_end = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1293'>  nextline:
+<a name='L1294'>    tok-&gt;start = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1295'>    blankline = 0;
+<a name='L1296'>
+<a name='L1297'>    <i><font color='green'>/* Get indentation level */</font></i>
+<a name='L1298'>    <b>if</b> (tok-&gt;atbol) <font color='red'>{</font>
+<a name='L1299'>        <b>register</b> <b>int</b> col = 0;
+<a name='L1300'>        <b>register</b> <b>int</b> altcol = 0;
+<a name='L1301'>        tok-&gt;atbol = 0;
+<a name='L1302'>        <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1303'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1304'>            <b>if</b> (c == ' ')
+<a name='L1305'>                col++, altcol++;
+<a name='L1306'>            <b>else</b> <b>if</b> (c == '\t') <font color='red'>{</font>
+<a name='L1307'>                col = (col/tok-&gt;tabsize + 1) * tok-&gt;tabsize;
+<a name='L1308'>                altcol = (altcol/tok-&gt;alttabsize + 1)
+<a name='L1309'>                    * tok-&gt;alttabsize;
+<a name='L1310'>            <font color='red'>}</font>
+<a name='L1311'>            <b>else</b> <b>if</b> (c == '\014') <i><font color='green'>/* Control-L (formfeed) */</font></i>
+<a name='L1312'>                col = altcol = 0; <i><font color='green'>/* For Emacs users */</font></i>
+<a name='L1313'>            <b>else</b>
+<a name='L1314'>                <b>break</b>;
+<a name='L1315'>        <font color='red'>}</font>
+<a name='L1316'>        <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1317'>        <b>if</b> (c == '#' || c == '\n') <font color='red'>{</font>
+<a name='L1318'>            <i><font color='green'>/* Lines with only whitespace and/or comments</font></i>
+<a name='L1319'><i><font color='green'>               shouldn't affect the indentation and are</font></i>
+<a name='L1320'><i><font color='green'>               not passed to the parser as NEWLINE tokens,</font></i>
+<a name='L1321'><i><font color='green'>               except *totally* empty lines in interactive</font></i>
+<a name='L1322'><i><font color='green'>               mode, which signal the end of a command group. */</font></i>
+<a name='L1323'>            <b>if</b> (col == 0 &amp;&amp; c == '\n' &amp;&amp; tok-&gt;prompt != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1324'>                blankline = 0; <i><font color='green'>/* Let it through */</font></i>
+<a name='L1325'>            <b>else</b>
+<a name='L1326'>                blankline = 1; <i><font color='green'>/* Ignore completely */</font></i>
+<a name='L1327'>            <i><font color='green'>/* We can't jump back right here since we still</font></i>
+<a name='L1328'><i><font color='green'>               may need to skip to the end of a comment */</font></i>
+<a name='L1329'>        <font color='red'>}</font>
+<a name='L1330'>        <b>if</b> (!blankline &amp;&amp; tok-&gt;level == 0) <font color='red'>{</font>
+<a name='L1331'>            <b>if</b> (col == tok-&gt;indstack[tok-&gt;indent]) <font color='red'>{</font>
+<a name='L1332'>                <i><font color='green'>/* No change */</font></i>
+<a name='L1333'>                <b>if</b> (altcol != tok-&gt;altindstack[tok-&gt;indent]) <font color='red'>{</font>
+<a name='L1334'>                    <b>if</b> (<a href='../S/2851.html#L1242' title='Defined at 1242 in Parser/tokenizer.c.'>indenterror</a>(tok))
+<a name='L1335'>                        <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1336'>                <font color='red'>}</font>
+<a name='L1337'>            <font color='red'>}</font>
+<a name='L1338'>            <b>else</b> <b>if</b> (col &gt; tok-&gt;indstack[tok-&gt;indent]) <font color='red'>{</font>
+<a name='L1339'>                <i><font color='green'>/* Indent -- always one */</font></i>
+<a name='L1340'>                <b>if</b> (tok-&gt;indent+1 &gt;= <a href='../S/2852.html#L13' title='Defined at 13 in Parser/tokenizer.h.'>MAXINDENT</a>) <font color='red'>{</font>
+<a name='L1341'>                    tok-&gt;done = <a href='../S/521.html#L26' title='Defined at 26 in Include/errcode.h.'>E_TOODEEP</a>;
+<a name='L1342'>                    tok-&gt;cur = tok-&gt;inp;
+<a name='L1343'>                    <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1344'>                <font color='red'>}</font>
+<a name='L1345'>                <b>if</b> (altcol &lt;= tok-&gt;altindstack[tok-&gt;indent]) <font color='red'>{</font>
+<a name='L1346'>                    <b>if</b> (<a href='../S/2851.html#L1242' title='Defined at 1242 in Parser/tokenizer.c.'>indenterror</a>(tok))
+<a name='L1347'>                        <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1348'>                <font color='red'>}</font>
+<a name='L1349'>                tok-&gt;pendin++;
+<a name='L1350'>                tok-&gt;indstack[++tok-&gt;indent] = col;
+<a name='L1351'>                tok-&gt;altindstack[tok-&gt;indent] = altcol;
+<a name='L1352'>            <font color='red'>}</font>
+<a name='L1353'>            <b>else</b> <i><font color='green'>/* col &lt; tok-&gt;indstack[tok-&gt;indent] */</font></i> <font color='red'>{</font>
+<a name='L1354'>                <i><font color='green'>/* Dedent -- any number, must be consistent */</font></i>
+<a name='L1355'>                <b>while</b> (tok-&gt;indent &gt; 0 &amp;&amp;
+<a name='L1356'>                    col &lt; tok-&gt;indstack[tok-&gt;indent]) <font color='red'>{</font>
+<a name='L1357'>                    tok-&gt;pendin--;
+<a name='L1358'>                    tok-&gt;indent--;
+<a name='L1359'>                <font color='red'>}</font>
+<a name='L1360'>                <b>if</b> (col != tok-&gt;indstack[tok-&gt;indent]) <font color='red'>{</font>
+<a name='L1361'>                    tok-&gt;done = <a href='../S/521.html#L27' title='Defined at 27 in Include/errcode.h.'>E_DEDENT</a>;
+<a name='L1362'>                    tok-&gt;cur = tok-&gt;inp;
+<a name='L1363'>                    <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1364'>                <font color='red'>}</font>
+<a name='L1365'>                <b>if</b> (altcol != tok-&gt;altindstack[tok-&gt;indent]) <font color='red'>{</font>
+<a name='L1366'>                    <b>if</b> (<a href='../S/2851.html#L1242' title='Defined at 1242 in Parser/tokenizer.c.'>indenterror</a>(tok))
+<a name='L1367'>                        <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1368'>                <font color='red'>}</font>
+<a name='L1369'>            <font color='red'>}</font>
+<a name='L1370'>        <font color='red'>}</font>
+<a name='L1371'>    <font color='red'>}</font>
+<a name='L1372'>
+<a name='L1373'>    tok-&gt;start = tok-&gt;cur;
+<a name='L1374'>
+<a name='L1375'>    <i><font color='green'>/* Return pending indents/dedents */</font></i>
+<a name='L1376'>    <b>if</b> (tok-&gt;pendin != 0) <font color='red'>{</font>
+<a name='L1377'>        <b>if</b> (tok-&gt;pendin &lt; 0) <font color='red'>{</font>
+<a name='L1378'>            tok-&gt;pendin++;
+<a name='L1379'>            <b>return</b> <a href='../S/582.html#L18' title='Defined at 18 in Include/token.h.'>DEDENT</a>;
+<a name='L1380'>        <font color='red'>}</font>
+<a name='L1381'>        <b>else</b> <font color='red'>{</font>
+<a name='L1382'>            tok-&gt;pendin--;
+<a name='L1383'>            <b>return</b> <a href='../S/582.html#L17' title='Defined at 17 in Include/token.h.'>INDENT</a>;
+<a name='L1384'>        <font color='red'>}</font>
+<a name='L1385'>    <font color='red'>}</font>
+<a name='L1386'>
+<a name='L1387'> again:
+<a name='L1388'>    tok-&gt;start = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1389'>    <i><font color='green'>/* Skip spaces */</font></i>
+<a name='L1390'>    <b>do</b> <font color='red'>{</font>
+<a name='L1391'>        c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1392'>    <font color='red'>}</font> <b>while</b> (c == ' ' || c == '\t' || c == '\014');
+<a name='L1393'>
+<a name='L1394'>    <i><font color='green'>/* Set start of current token */</font></i>
+<a name='L1395'>    tok-&gt;start = tok-&gt;cur - 1;
+<a name='L1396'>
+<a name='L1397'>    <i><font color='green'>/* Skip comment */</font></i>
+<a name='L1398'>    <b>if</b> (c == '#')
+<a name='L1399'>        <b>while</b> (c != EOF &amp;&amp; c != '\n')
+<a name='L1400'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1401'>
+<a name='L1402'>    <i><font color='green'>/* Check for EOF and errors now */</font></i>
+<a name='L1403'>    <b>if</b> (c == EOF) <font color='red'>{</font>
+<a name='L1404'>        <b>return</b> tok-&gt;done == <a href='../S/521.html#L17' title='Defined at 17 in Include/errcode.h.'>E_EOF</a> ? <a href='../S/582.html#L12' title='Defined at 12 in Include/token.h.'>ENDMARKER</a> : <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1405'>    <font color='red'>}</font>
+<a name='L1406'>
+<a name='L1407'>    <i><font color='green'>/* Identifier (most frequent token!) */</font></i>
+<a name='L1408'>    nonascii = 0;
+<a name='L1409'>    <b>if</b> (<a href='../S/2851.html#L21' title='Defined at 21 in Parser/tokenizer.c.'>is_potential_identifier_start</a>(c)) <font color='red'>{</font>
+<a name='L1410'>        <i><font color='green'>/* Process b"", r"" and br"" */</font></i>
+<a name='L1411'>        <b>if</b> (c == 'b' || c == 'B') <font color='red'>{</font>
+<a name='L1412'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1413'>            <b>if</b> (c == '"' || c == '\'')
+<a name='L1414'>                <b>goto</b> letter_quote;
+<a name='L1415'>        <font color='red'>}</font>
+<a name='L1416'>        <b>if</b> (c == 'r' || c == 'R') <font color='red'>{</font>
+<a name='L1417'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1418'>            <b>if</b> (c == '"' || c == '\'')
+<a name='L1419'>                <b>goto</b> letter_quote;
+<a name='L1420'>        <font color='red'>}</font>
+<a name='L1421'>        <b>while</b> (<a href='../S/2851.html#L27' title='Defined at 27 in Parser/tokenizer.c.'>is_potential_identifier_char</a>(c)) <font color='red'>{</font>
+<a name='L1422'>            <b>if</b> (c &gt;= 128)
+<a name='L1423'>                nonascii = 1;
+<a name='L1424'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1425'>        <font color='red'>}</font>
+<a name='L1426'>        <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1427'>        <b>if</b> (nonascii &amp;&amp;
+<a name='L1428'>            !<a href='../D/12252.html' title='Multiple defined in 2 places.'>verify_identifier</a>(tok)) <font color='red'>{</font>
+<a name='L1429'>            tok-&gt;done = <a href='../S/521.html#L32' title='Defined at 32 in Include/errcode.h.'>E_IDENTIFIER</a>;
+<a name='L1430'>            <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1431'>        <font color='red'>}</font>
+<a name='L1432'>        *p_start = tok-&gt;start;
+<a name='L1433'>        *p_end = tok-&gt;cur;
+<a name='L1434'>        <b>return</b> <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>;
+<a name='L1435'>    <font color='red'>}</font>
+<a name='L1436'>
+<a name='L1437'>    <i><font color='green'>/* Newline */</font></i>
+<a name='L1438'>    <b>if</b> (c == '\n') <font color='red'>{</font>
+<a name='L1439'>        tok-&gt;atbol = 1;
+<a name='L1440'>        <b>if</b> (blankline || tok-&gt;level &gt; 0)
+<a name='L1441'>            <b>goto</b> nextline;
+<a name='L1442'>        *p_start = tok-&gt;start;
+<a name='L1443'>        *p_end = tok-&gt;cur - 1; <i><font color='green'>/* Leave '\n' out of the string */</font></i>
+<a name='L1444'>        tok-&gt;cont_line = 0;
+<a name='L1445'>        <b>return</b> <a href='../S/582.html#L16' title='Defined at 16 in Include/token.h.'>NEWLINE</a>;
+<a name='L1446'>    <font color='red'>}</font>
+<a name='L1447'>
+<a name='L1448'>    <i><font color='green'>/* Period or number starting with period? */</font></i>
+<a name='L1449'>    <b>if</b> (c == '.') <font color='red'>{</font>
+<a name='L1450'>        c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1451'>        <b>if</b> (isdigit(c)) <font color='red'>{</font>
+<a name='L1452'>            <b>goto</b> fraction;
+<a name='L1453'>        <font color='red'>}</font> <b>else</b> <b>if</b> (c == '.') <font color='red'>{</font>
+<a name='L1454'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1455'>            <b>if</b> (c == '.') <font color='red'>{</font>
+<a name='L1456'>                *p_start = tok-&gt;start;
+<a name='L1457'>                *p_end = tok-&gt;cur;
+<a name='L1458'>                <b>return</b> <a href='../S/582.html#L64' title='Defined at 64 in Include/token.h.'>ELLIPSIS</a>;
+<a name='L1459'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1460'>                <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1461'>            <font color='red'>}</font>
+<a name='L1462'>            <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, '.');
+<a name='L1463'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1464'>            <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1465'>        <font color='red'>}</font>
+<a name='L1466'>        *p_start = tok-&gt;start;
+<a name='L1467'>        *p_end = tok-&gt;cur;
+<a name='L1468'>        <b>return</b> <a href='../S/582.html#L35' title='Defined at 35 in Include/token.h.'>DOT</a>;
+<a name='L1469'>    <font color='red'>}</font>
+<a name='L1470'>
+<a name='L1471'>    <i><font color='green'>/* Number */</font></i>
+<a name='L1472'>    <b>if</b> (isdigit(c)) <font color='red'>{</font>
+<a name='L1473'>        <b>if</b> (c == '0') <font color='red'>{</font>
+<a name='L1474'>            <i><font color='green'>/* Hex, octal or binary -- maybe. */</font></i>
+<a name='L1475'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1476'>            <b>if</b> (c == '.')
+<a name='L1477'>                <b>goto</b> fraction;
+<a name='L1478'>            <b>if</b> (c == 'j' || c == 'J')
+<a name='L1479'>                <b>goto</b> imaginary;
+<a name='L1480'>            <b>if</b> (c == 'x' || c == 'X') <font color='red'>{</font>
+<a name='L1481'>
+<a name='L1482'>                <i><font color='green'>/* Hex */</font></i>
+<a name='L1483'>                c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1484'>                <b>if</b> (!isxdigit(c)) <font color='red'>{</font>
+<a name='L1485'>                    tok-&gt;done = <a href='../S/521.html#L19' title='Defined at 19 in Include/errcode.h.'>E_TOKEN</a>;
+<a name='L1486'>                    <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1487'>                    <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1488'>                <font color='red'>}</font>
+<a name='L1489'>                <b>do</b> <font color='red'>{</font>
+<a name='L1490'>                    c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1491'>                <font color='red'>}</font> <b>while</b> (isxdigit(c));
+<a name='L1492'>            <font color='red'>}</font>
+<a name='L1493'>            <b>else</b> <b>if</b> (c == 'o' || c == 'O') <font color='red'>{</font>
+<a name='L1494'>                <i><font color='green'>/* Octal */</font></i>
+<a name='L1495'>                c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1496'>                <b>if</b> (c &lt; '0' || c &gt;= '8') <font color='red'>{</font>
+<a name='L1497'>                    tok-&gt;done = <a href='../S/521.html#L19' title='Defined at 19 in Include/errcode.h.'>E_TOKEN</a>;
+<a name='L1498'>                    <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1499'>                    <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1500'>                <font color='red'>}</font>
+<a name='L1501'>                <b>do</b> <font color='red'>{</font>
+<a name='L1502'>                    c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1503'>                <font color='red'>}</font> <b>while</b> ('0' &lt;= c &amp;&amp; c &lt; '8');
+<a name='L1504'>            <font color='red'>}</font>
+<a name='L1505'>            <b>else</b> <b>if</b> (c == 'b' || c == 'B') <font color='red'>{</font>
+<a name='L1506'>                <i><font color='green'>/* Binary */</font></i>
+<a name='L1507'>                c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1508'>                <b>if</b> (c != '0' &amp;&amp; c != '1') <font color='red'>{</font>
+<a name='L1509'>                    tok-&gt;done = <a href='../S/521.html#L19' title='Defined at 19 in Include/errcode.h.'>E_TOKEN</a>;
+<a name='L1510'>                    <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1511'>                    <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1512'>                <font color='red'>}</font>
+<a name='L1513'>                <b>do</b> <font color='red'>{</font>
+<a name='L1514'>                    c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1515'>                <font color='red'>}</font> <b>while</b> (c == '0' || c == '1');
+<a name='L1516'>            <font color='red'>}</font>
+<a name='L1517'>            <b>else</b> <font color='red'>{</font>
+<a name='L1518'>                <b>int</b> nonzero = 0;
+<a name='L1519'>                <i><font color='green'>/* maybe old-style octal; c is first char of it */</font></i>
+<a name='L1520'>                <i><font color='green'>/* in any case, allow '0' as a literal */</font></i>
+<a name='L1521'>                <b>while</b> (c == '0')
+<a name='L1522'>                    c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1523'>                <b>while</b> (isdigit(c)) <font color='red'>{</font>
+<a name='L1524'>                    nonzero = 1;
+<a name='L1525'>                    c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1526'>                <font color='red'>}</font>
+<a name='L1527'>                <b>if</b> (c == '.')
+<a name='L1528'>                    <b>goto</b> fraction;
+<a name='L1529'>                <b>else</b> <b>if</b> (c == 'e' || c == 'E')
+<a name='L1530'>                    <b>goto</b> exponent;
+<a name='L1531'>                <b>else</b> <b>if</b> (c == 'j' || c == 'J')
+<a name='L1532'>                    <b>goto</b> imaginary;
+<a name='L1533'>                <b>else</b> <b>if</b> (nonzero) <font color='red'>{</font>
+<a name='L1534'>                    tok-&gt;done = <a href='../S/521.html#L19' title='Defined at 19 in Include/errcode.h.'>E_TOKEN</a>;
+<a name='L1535'>                    <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1536'>                    <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1537'>                <font color='red'>}</font>
+<a name='L1538'>            <font color='red'>}</font>
+<a name='L1539'>        <font color='red'>}</font>
+<a name='L1540'>        <b>else</b> <font color='red'>{</font>
+<a name='L1541'>            <i><font color='green'>/* Decimal */</font></i>
+<a name='L1542'>            <b>do</b> <font color='red'>{</font>
+<a name='L1543'>                c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1544'>            <font color='red'>}</font> <b>while</b> (isdigit(c));
+<a name='L1545'>            <font color='red'>{</font>
+<a name='L1546'>                <i><font color='green'>/* Accept floating point numbers. */</font></i>
+<a name='L1547'>                <b>if</b> (c == '.') <font color='red'>{</font>
+<a name='L1548'>        fraction:
+<a name='L1549'>                    <i><font color='green'>/* Fraction */</font></i>
+<a name='L1550'>                    <b>do</b> <font color='red'>{</font>
+<a name='L1551'>                        c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1552'>                    <font color='red'>}</font> <b>while</b> (isdigit(c));
+<a name='L1553'>                <font color='red'>}</font>
+<a name='L1554'>                <b>if</b> (c == 'e' || c == 'E') <font color='red'>{</font>
+<a name='L1555'>        exponent:
+<a name='L1556'>                    <i><font color='green'>/* Exponent part */</font></i>
+<a name='L1557'>                    c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1558'>                    <b>if</b> (c == '+' || c == '-')
+<a name='L1559'>                        c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1560'>                    <b>if</b> (!isdigit(c)) <font color='red'>{</font>
+<a name='L1561'>                        tok-&gt;done = <a href='../S/521.html#L19' title='Defined at 19 in Include/errcode.h.'>E_TOKEN</a>;
+<a name='L1562'>                        <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1563'>                        <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1564'>                    <font color='red'>}</font>
+<a name='L1565'>                    <b>do</b> <font color='red'>{</font>
+<a name='L1566'>                        c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1567'>                    <font color='red'>}</font> <b>while</b> (isdigit(c));
+<a name='L1568'>                <font color='red'>}</font>
+<a name='L1569'>                <b>if</b> (c == 'j' || c == 'J')
+<a name='L1570'>                    <i><font color='green'>/* Imaginary part */</font></i>
+<a name='L1571'>        imaginary:
+<a name='L1572'>                    c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1573'>            <font color='red'>}</font>
+<a name='L1574'>        <font color='red'>}</font>
+<a name='L1575'>        <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1576'>        *p_start = tok-&gt;start;
+<a name='L1577'>        *p_end = tok-&gt;cur;
+<a name='L1578'>        <b>return</b> <a href='../S/582.html#L14' title='Defined at 14 in Include/token.h.'>NUMBER</a>;
+<a name='L1579'>    <font color='red'>}</font>
+<a name='L1580'>
+<a name='L1581'>  letter_quote:
+<a name='L1582'>    <i><font color='green'>/* String */</font></i>
+<a name='L1583'>    <b>if</b> (c == '\'' || c == '"') <font color='red'>{</font>
+<a name='L1584'>        <b>int</b> quote = c;
+<a name='L1585'>        <b>int</b> quote_size = 1;             <i><font color='green'>/* 1 or 3 */</font></i>
+<a name='L1586'>        <b>int</b> end_quote_size = 0;
+<a name='L1587'>
+<a name='L1588'>        <i><font color='green'>/* Find the quote size and start of string */</font></i>
+<a name='L1589'>        c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1590'>        <b>if</b> (c == quote) <font color='red'>{</font>
+<a name='L1591'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1592'>            <b>if</b> (c == quote)
+<a name='L1593'>                quote_size = 3;
+<a name='L1594'>            <b>else</b>
+<a name='L1595'>                end_quote_size = 1;     <i><font color='green'>/* empty string found */</font></i>
+<a name='L1596'>        <font color='red'>}</font>
+<a name='L1597'>        <b>if</b> (c != quote)
+<a name='L1598'>            <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c);
+<a name='L1599'>
+<a name='L1600'>        <i><font color='green'>/* Get rest of string */</font></i>
+<a name='L1601'>        <b>while</b> (end_quote_size != quote_size) <font color='red'>{</font>
+<a name='L1602'>            c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1603'>            <b>if</b> (c == EOF) <font color='red'>{</font>
+<a name='L1604'>                <b>if</b> (quote_size == 3)
+<a name='L1605'>                    tok-&gt;done = <a href='../S/521.html#L29' title='Defined at 29 in Include/errcode.h.'>E_EOFS</a>;
+<a name='L1606'>                <b>else</b>
+<a name='L1607'>                    tok-&gt;done = <a href='../S/521.html#L30' title='Defined at 30 in Include/errcode.h.'>E_EOLS</a>;
+<a name='L1608'>                tok-&gt;cur = tok-&gt;inp;
+<a name='L1609'>                <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1610'>            <font color='red'>}</font>
+<a name='L1611'>            <b>if</b> (quote_size == 1 &amp;&amp; c == '\n') <font color='red'>{</font>
+<a name='L1612'>                tok-&gt;done = <a href='../S/521.html#L30' title='Defined at 30 in Include/errcode.h.'>E_EOLS</a>;
+<a name='L1613'>                tok-&gt;cur = tok-&gt;inp;
+<a name='L1614'>                <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1615'>            <font color='red'>}</font>
+<a name='L1616'>            <b>if</b> (c == quote)
+<a name='L1617'>                end_quote_size += 1;
+<a name='L1618'>            <b>else</b> <font color='red'>{</font>
+<a name='L1619'>                end_quote_size = 0;
+<a name='L1620'>                <b>if</b> (c == '\\')
+<a name='L1621'>                c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);  <i><font color='green'>/* skip escaped char */</font></i>
+<a name='L1622'>            <font color='red'>}</font>
+<a name='L1623'>        <font color='red'>}</font>
+<a name='L1624'>
+<a name='L1625'>        *p_start = tok-&gt;start;
+<a name='L1626'>        *p_end = tok-&gt;cur;
+<a name='L1627'>        <b>return</b> <a href='../D/4973.html' title='Multiple defined in 2 places.'>STRING</a>;
+<a name='L1628'>    <font color='red'>}</font>
+<a name='L1629'>
+<a name='L1630'>    <i><font color='green'>/* Line continuation */</font></i>
+<a name='L1631'>    <b>if</b> (c == '\\') <font color='red'>{</font>
+<a name='L1632'>        c = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1633'>        <b>if</b> (c != '\n') <font color='red'>{</font>
+<a name='L1634'>            tok-&gt;done = <a href='../S/521.html#L31' title='Defined at 31 in Include/errcode.h.'>E_LINECONT</a>;
+<a name='L1635'>            tok-&gt;cur = tok-&gt;inp;
+<a name='L1636'>            <b>return</b> <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1637'>        <font color='red'>}</font>
+<a name='L1638'>        tok-&gt;cont_line = 1;
+<a name='L1639'>        <b>goto</b> again; <i><font color='green'>/* Read next line */</font></i>
+<a name='L1640'>    <font color='red'>}</font>
+<a name='L1641'>
+<a name='L1642'>    <i><font color='green'>/* Check for two-character token */</font></i>
+<a name='L1643'>    <font color='red'>{</font>
+<a name='L1644'>        <b>int</b> c2 = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1645'>        <b>int</b> token = <a href='../S/2851.html#L1110' title='Defined at 1110 in Parser/tokenizer.c.'>PyToken_TwoChars</a>(c, c2);
+<a name='L1646'>        <b>if</b> (token != <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>) <font color='red'>{</font>
+<a name='L1647'>            <b>int</b> c3 = <a href='../S/2851.html#L867' title='Defined at 867 in Parser/tokenizer.c.'>tok_nextc</a>(tok);
+<a name='L1648'>            <b>int</b> token3 = <a href='../S/2851.html#L1184' title='Defined at 1184 in Parser/tokenizer.c.'>PyToken_ThreeChars</a>(c, c2, c3);
+<a name='L1649'>            <b>if</b> (token3 != <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>) <font color='red'>{</font>
+<a name='L1650'>                token = token3;
+<a name='L1651'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1652'>                <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c3);
+<a name='L1653'>            <font color='red'>}</font>
+<a name='L1654'>            *p_start = tok-&gt;start;
+<a name='L1655'>            *p_end = tok-&gt;cur;
+<a name='L1656'>            <b>return</b> token;
+<a name='L1657'>        <font color='red'>}</font>
+<a name='L1658'>        <a href='../S/2851.html#L1064' title='Defined at 1064 in Parser/tokenizer.c.'>tok_backup</a>(tok, c2);
+<a name='L1659'>    <font color='red'>}</font>
+<a name='L1660'>
+<a name='L1661'>    <i><font color='green'>/* Keep track of parentheses nesting level */</font></i>
+<a name='L1662'>    <b>switch</b> (c) <font color='red'>{</font>
+<a name='L1663'>    <b>case</b> '(':
+<a name='L1664'>    <b>case</b> '[':
+<a name='L1665'>    <b>case</b> '{':
+<a name='L1666'>        tok-&gt;level++;
+<a name='L1667'>        <b>break</b>;
+<a name='L1668'>    <b>case</b> ')':
+<a name='L1669'>    <b>case</b> ']':
+<a name='L1670'>    <b>case</b> '}':
+<a name='L1671'>        tok-&gt;level--;
+<a name='L1672'>        <b>break</b>;
+<a name='L1673'>    <font color='red'>}</font>
+<a name='L1674'>
+<a name='L1675'>    <i><font color='green'>/* Punctuation character */</font></i>
+<a name='L1676'>    *p_start = tok-&gt;start;
+<a name='L1677'>    *p_end = tok-&gt;cur;
+<a name='L1678'>    <b>return</b> <a href='../S/2851.html#L1078' title='Defined at 1078 in Parser/tokenizer.c.'>PyToken_OneChar</a>(c);
+<a name='L1679'><font color='red'>}</font>
+<a name='L1680'>
+<a name='L1681'><b>int</b>
+<a name='L1682'><a href='../R/3476.html' title='Multiple refered from 3 places.'>PyTokenizer_Get</a>(<b>struct</b> tok_state *tok, <b>char</b> **p_start, <b>char</b> **p_end)
+<a name='L1683'><font color='red'>{</font>
+<a name='L1684'>    <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2851.html#L1287' title='Defined at 1287 in Parser/tokenizer.c.'>tok_get</a>(tok, p_start, p_end);
+<a name='L1685'>    <b>if</b> (tok-&gt;decoding_erred) <font color='red'>{</font>
+<a name='L1686'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/582.html#L67' title='Defined at 67 in Include/token.h.'>ERRORTOKEN</a>;
+<a name='L1687'>        tok-&gt;done = <a href='../S/521.html#L28' title='Defined at 28 in Include/errcode.h.'>E_DECODE</a>;
+<a name='L1688'>    <font color='red'>}</font>
+<a name='L1689'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1690'><font color='red'>}</font>
+<a name='L1691'>
+<a name='L1692'><i><font color='green'>/* Get -*- encoding -*- from a Python file.</font></i>
+<a name='L1693'><i><font color='green'></font></i>
+<a name='L1694'><i><font color='green'>   PyTokenizer_FindEncoding returns NULL when it can't find the encoding in</font></i>
+<a name='L1695'><i><font color='green'>   the first or second line of the file (in which case the encoding</font></i>
+<a name='L1696'><i><font color='green'>   should be assumed to be PyUnicode_GetDefaultEncoding()).</font></i>
+<a name='L1697'><i><font color='green'></font></i>
+<a name='L1698'><i><font color='green'>   The char * returned is malloc'ed via PyMem_MALLOC() and thus must be freed</font></i>
+<a name='L1699'><i><font color='green'>   by the caller.</font></i>
+<a name='L1700'><i><font color='green'>*/</font></i>
+<a name='L1701'><b>char</b> *
+<a name='L1702'><a href='../R/3471.html' title='Multiple refered from 5 places.'>PyTokenizer_FindEncoding</a>(<b>int</b> fd)
+<a name='L1703'><font color='red'>{</font>
+<a name='L1704'>    <b>struct</b> <a href='../S/2852.html#L22' title='Defined at 22 in Parser/tokenizer.h.'>tok_state</a> *tok;
+<a name='L1705'>    FILE *fp;
+<a name='L1706'>    <b>char</b> *p_start =<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> , *p_end =<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> , *<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1707'>
+<a name='L1708'>    fd = dup(fd);
+<a name='L1709'>    <b>if</b> (fd &lt; 0) <font color='red'>{</font>
+<a name='L1710'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1711'>    <font color='red'>}</font>
+<a name='L1712'>    fp = <a href='../D/8463.html' title='Multiple defined in 4 places.'>fdopen</a>(fd, "r");
+<a name='L1713'>    <b>if</b> (fp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1714'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1715'>    <font color='red'>}</font>
+<a name='L1716'>    tok = <a href='../S/2851.html#L817' title='Defined at 817 in Parser/tokenizer.c.'>PyTokenizer_FromFile</a>(fp, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1717'>    <b>if</b> (tok == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1718'>        fclose(fp);
+<a name='L1719'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1720'>    <font color='red'>}</font>
+<a name='L1721'>    <b>while</b> (tok-&gt;lineno &lt; 2 &amp;&amp; tok-&gt;done == <a href='../S/521.html#L16' title='Defined at 16 in Include/errcode.h.'>E_OK</a>) <font color='red'>{</font>
+<a name='L1722'>        <a href='../S/2851.html#L1682' title='Defined at 1682 in Parser/tokenizer.c.'>PyTokenizer_Get</a>(tok, &amp;p_start, &amp;p_end);
+<a name='L1723'>    <font color='red'>}</font>
+<a name='L1724'>    fclose(fp);
+<a name='L1725'>    <b>if</b> (tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>) <font color='red'>{</font>
+<a name='L1726'>        <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = (<b>char</b> *)PyMem_MALLOC(strlen(tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>) + 1);
+<a name='L1727'>        <b>if</b> (<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>)
+<a name='L1728'>        strcpy(<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>, tok-&gt;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L1729'>    <font color='red'>}</font>
+<a name='L1730'>    <a href='../S/2851.html#L849' title='Defined at 849 in Parser/tokenizer.c.'>PyTokenizer_Free</a>(tok);
+<a name='L1731'>    <b>return</b> <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>;
+<a name='L1732'><font color='red'>}</font>
+<a name='L1733'>
+<a name='L1734'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L1735'>
+<a name='L1736'><b>void</b>
+<a name='L1737'>tok_dump(<b>int</b> type, <b>char</b> *start, <b>char</b> *end)
+<a name='L1738'><font color='red'>{</font>
+<a name='L1739'>    printf("%s", _PyParser_TokenNames[type]);
+<a name='L1740'>    <b>if</b> (type == <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a> || type == <a href='../S/582.html#L14' title='Defined at 14 in Include/token.h.'>NUMBER</a> || type == <a href='../D/4973.html' title='Multiple defined in 2 places.'>STRING</a> || type == <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>)
+<a name='L1741'>        printf("(%.*s)", (<b>int</b>)(end - start), start);
+<a name='L1742'><font color='red'>}</font>
+<a name='L1743'>
+<a name='L1744'><font color='darkred'>#endif</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L113'>[^]</a><a href='#L1737'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

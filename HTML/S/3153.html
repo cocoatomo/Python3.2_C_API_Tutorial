@@ -1,0 +1,292 @@
+<html>
+<head>
+<title>Python/thread_sgi.h</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/thread_sgi.h</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L30'>[^]</a><a href='#L254'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2><a href='3145.html#L99' title='Included from 99 in Python/thread.c.'>INCLUDED FROM</a></h2>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L30' title='Defined at 30.'>PyThread__init_thread</a>
+<li><a href='#L78' title='Defined at 78.'>clean_threads</a>
+<li><a href='#L112' title='Defined at 112.'>PyThread_start_new_thread</a>
+<li><a href='#L170' title='Defined at 170.'>PyThread_get_thread_ident</a>
+<li><a href='#L175' title='Defined at 175.'>PyThread_exit_thread</a>
+<li><a href='#L217' title='Defined at 217.'>PyThread_allocate_lock</a>
+<li><a href='#L232' title='Defined at 232.'>PyThread_free_lock</a>
+<li><a href='#L238' title='Defined at 238.'>PyThread_acquire_lock</a>
+<li><a href='#L254' title='Defined at 254.'>PyThread_release_lock</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L3'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L4'><font color='darkred'>#include</font> &lt;signal.h&gt;
+<a name='L5'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L6'><font color='darkred'>#include</font> &lt;sys/wait.h&gt;
+<a name='L7'><font color='darkred'>#include</font> &lt;sys/prctl.h&gt;
+<a name='L8'><font color='darkred'>#include</font> &lt;ulocks.h&gt;
+<a name='L9'><font color='darkred'>#include</font> &lt;errno.h&gt;
+<a name='L10'>
+<a name='L11'><font color='darkred'>#define</font> <a href='../R/1450.html' title='Multiple refered from 2 places.'>HDR_SIZE</a>        2680    <i><font color='green'>/* sizeof(ushdr_t) */</font></i>
+<a name='L12'><font color='darkred'>#define</font> <a href='../R/1845.html' title='Multiple refered from 2 places.'>MAXPROC</a>         100     <i><font color='green'>/* max # of threads that can be started */</font></i>
+<a name='L13'>
+<a name='L14'><b>static</b> usptr_t *shared_arena;
+<a name='L15'><b>static</b> ulock_t count_lock;      <i><font color='green'>/* protection for some variables */</font></i>
+<a name='L16'><b>static</b> ulock_t wait_lock;       <i><font color='green'>/* lock used to wait for other threads */</font></i>
+<a name='L17'><b>static</b> <b>int</b> waiting_for_threads; <i><font color='green'>/* protected by count_lock */</font></i>
+<a name='L18'><b>static</b> <b>int</b> nthreads;            <i><font color='green'>/* protected by count_lock */</font></i>
+<a name='L19'><b>static</b> <b>int</b> exit_status;
+<a name='L20'><b>static</b> <b>int</b> exiting;             <i><font color='green'>/* we're already exiting (for maybe_exit) */</font></i>
+<a name='L21'><b>static</b> <a href='../D/10365.html' title='Multiple defined in 4 places.'>pid_t</a> my_pid;            <i><font color='green'>/* PID of main thread */</font></i>
+<a name='L22'><b>static</b> <b>struct</b> <a href='../R/9531.html' title='Multiple refered from 9 places.'>pidlist</a> <font color='red'>{</font>
+<a name='L23'>    <a href='../D/10365.html' title='Multiple defined in 4 places.'>pid_t</a> parent;
+<a name='L24'>    <a href='../D/10365.html' title='Multiple defined in 4 places.'>pid_t</a> child;
+<a name='L25'><font color='red'>}</font> <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[<a href='../S/3153.html#L12' title='Defined at 12 in Python/thread_sgi.h.'>MAXPROC</a>];     <i><font color='green'>/* PIDs of other threads; protected by count_lock */</font></i>
+<a name='L26'><b>static</b> <b>int</b> maxpidindex;         <i><font color='green'>/* # of PIDs in pidlist */</font></i>
+<a name='L27'><i><font color='green'>/*</font></i>
+<a name='L28'><i><font color='green'> * Initialization.</font></i>
+<a name='L29'><i><font color='green'> */</font></i>
+<a name='L30'><b>static</b> <b>void</b> <a href='../R/3449.html' title='Multiple refered from 2 places.'>PyThread__init_thread</a>(<b>void</b>)
+<a name='L31'><font color='red'>{</font>
+<a name='L32'><font color='darkred'>#ifdef</font> USE_DL
+<a name='L33'>    <b>long</b> addr, size;
+<a name='L34'><font color='darkred'>#endif</font> <i><font color='green'>/* USE_DL */</font></i>
+<a name='L35'>
+<a name='L36'>
+<a name='L37'><font color='darkred'>#ifdef</font> USE_DL
+<a name='L38'>    <b>if</b> ((size = usconfig(CONF_INITSIZE, 64*1024)) &lt; 0)
+<a name='L39'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_INITSIZE (check)");
+<a name='L40'>    <b>if</b> (usconfig(CONF_INITSIZE, size) &lt; 0)
+<a name='L41'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_INITSIZE (reset)");
+<a name='L42'>    addr = (<b>long</b>) dl_getrange(size + <a href='../S/3153.html#L11' title='Defined at 11 in Python/thread_sgi.h.'>HDR_SIZE</a>);
+<a name='L43'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("trying to use addr %p-%p for shared arena\n", addr, addr+size));
+<a name='L44'>    errno = 0;
+<a name='L45'>    <b>if</b> ((addr = usconfig(CONF_ATTACHADDR, addr)) &lt; 0 &amp;&amp; errno != 0)
+<a name='L46'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_ATTACHADDR (set)");
+<a name='L47'><font color='darkred'>#endif</font> <i><font color='green'>/* USE_DL */</font></i>
+<a name='L48'>    <b>if</b> (usconfig(CONF_INITUSERS, 16) &lt; 0)
+<a name='L49'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_INITUSERS");
+<a name='L50'>    my_pid = getpid();          <i><font color='green'>/* so that we know which is the main thread */</font></i>
+<a name='L51'>    <b>if</b> (usconfig(CONF_ARENATYPE, US_SHAREDONLY) &lt; 0)
+<a name='L52'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_ARENATYPE");
+<a name='L53'>    usconfig(CONF_LOCKTYPE, US_DEBUG); <i><font color='green'>/* XXX */</font></i>
+<a name='L54'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L55'>    <b>if</b> (thread_debug &amp; 4)
+<a name='L56'>        usconfig(CONF_LOCKTYPE, US_DEBUGPLUS);
+<a name='L57'>    <b>else</b> <b>if</b> (thread_debug &amp; 2)
+<a name='L58'>        usconfig(CONF_LOCKTYPE, US_DEBUG);
+<a name='L59'><font color='darkred'>#endif</font> <i><font color='green'>/* Py_DEBUG */</font></i>
+<a name='L60'>    <b>if</b> ((shared_arena = usinit(tmpnam(0))) == 0)
+<a name='L61'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usinit");
+<a name='L62'><font color='darkred'>#ifdef</font> USE_DL
+<a name='L63'>    <b>if</b> (usconfig(CONF_ATTACHADDR, addr) &lt; 0) <i><font color='green'>/* reset address */</font></i>
+<a name='L64'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_ATTACHADDR (reset)");
+<a name='L65'><font color='darkred'>#endif</font> <i><font color='green'>/* USE_DL */</font></i>
+<a name='L66'>    <b>if</b> ((count_lock = usnewlock(shared_arena)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L67'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usnewlock (count_lock)");
+<a name='L68'>    (<b>void</b>) usinitlock(count_lock);
+<a name='L69'>    <b>if</b> ((wait_lock = usnewlock(shared_arena)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L70'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usnewlock (wait_lock)");
+<a name='L71'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("arena start: %p, arena size: %ld\n",  shared_arena, (<b>long</b>) usconfig(CONF_GETSIZE, shared_arena)));
+<a name='L72'><font color='red'>}</font>
+<a name='L73'>
+<a name='L74'><i><font color='green'>/*</font></i>
+<a name='L75'><i><font color='green'> * Thread support.</font></i>
+<a name='L76'><i><font color='green'> */</font></i>
+<a name='L77'>
+<a name='L78'><b>static</b> <b>void</b> <a href='../S/3153.html#L146' title='Refered from 146 in Python/thread_sgi.h.'>clean_threads</a>(<b>void</b>)
+<a name='L79'><font color='red'>{</font>
+<a name='L80'>    <b>int</b> i, j;
+<a name='L81'>    <a href='../D/10365.html' title='Multiple defined in 4 places.'>pid_t</a> mypid, pid;
+<a name='L82'>
+<a name='L83'>    <i><font color='green'>/* clean up any exited threads */</font></i>
+<a name='L84'>    mypid = getpid();
+<a name='L85'>    i = 0;
+<a name='L86'>    <b>while</b> (i &lt; maxpidindex) <font color='red'>{</font>
+<a name='L87'>        <b>if</b> (<a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[i].parent == mypid &amp;&amp; (pid = <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[i].child) &gt; 0) <font color='red'>{</font>
+<a name='L88'>            pid = waitpid(pid, 0, WNOHANG);
+<a name='L89'>            <b>if</b> (pid &gt; 0) <font color='red'>{</font>
+<a name='L90'>                <i><font color='green'>/* a thread has exited */</font></i>
+<a name='L91'>                <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[i] = <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[--maxpidindex];
+<a name='L92'>                <i><font color='green'>/* remove references to children of dead proc */</font></i>
+<a name='L93'>                <b>for</b> (j = 0; j &lt; maxpidindex; j++)
+<a name='L94'>                    <b>if</b> (<a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[j].parent == pid)
+<a name='L95'>                        <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[j].child = -1;
+<a name='L96'>                <b>continue</b>; <i><font color='green'>/* don't increment i */</font></i>
+<a name='L97'>            <font color='red'>}</font>
+<a name='L98'>        <font color='red'>}</font>
+<a name='L99'>        i++;
+<a name='L100'>    <font color='red'>}</font>
+<a name='L101'>    <i><font color='green'>/* clean up the list */</font></i>
+<a name='L102'>    i = 0;
+<a name='L103'>    <b>while</b> (i &lt; maxpidindex) <font color='red'>{</font>
+<a name='L104'>        <b>if</b> (<a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[i].child == -1) <font color='red'>{</font>
+<a name='L105'>            <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[i] = <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[--maxpidindex];
+<a name='L106'>            <b>continue</b>; <i><font color='green'>/* don't increment i */</font></i>
+<a name='L107'>        <font color='red'>}</font>
+<a name='L108'>        i++;
+<a name='L109'>    <font color='red'>}</font>
+<a name='L110'><font color='red'>}</font>
+<a name='L111'>
+<a name='L112'><b>long</b> <a href='../R/3465.html' title='Multiple refered from 3 places.'>PyThread_start_new_thread</a>(<b>void</b> (*func)(<b>void</b> *), <b>void</b> *arg)
+<a name='L113'><font color='red'>{</font>
+<a name='L114'><font color='darkred'>#ifdef</font> USE_DL
+<a name='L115'>    <b>long</b> addr, size;
+<a name='L116'>    <b>static</b> <b>int</b> local_initialized = 0;
+<a name='L117'><font color='darkred'>#endif</font> <i><font color='green'>/* USE_DL */</font></i>
+<a name='L118'>    <b>int</b> success = 0;            <i><font color='green'>/* init not needed when SOLARIS_THREADS and */</font></i>
+<a name='L119'>                <i><font color='green'>/* C_THREADS implemented properly */</font></i>
+<a name='L120'>
+<a name='L121'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_start_new_thread called\n"));
+<a name='L122'>    <b>if</b> (!initialized)
+<a name='L123'>        <a href='../S/3145.html#L73' title='Defined at 73 in Python/thread.c.'>PyThread_init_thread</a>();
+<a name='L124'>    <b>switch</b> (ussetlock(count_lock)) <font color='red'>{</font>
+<a name='L125'>    <b>case</b> 0: <b>return</b> 0;
+<a name='L126'>    <b>case</b> -1: <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("ussetlock (count_lock)");
+<a name='L127'>    <font color='red'>}</font>
+<a name='L128'>    <b>if</b> (maxpidindex &gt;= <a href='../S/3153.html#L12' title='Defined at 12 in Python/thread_sgi.h.'>MAXPROC</a>)
+<a name='L129'>        success = -1;
+<a name='L130'>    <b>else</b> <font color='red'>{</font>
+<a name='L131'><font color='darkred'>#ifdef</font> USE_DL
+<a name='L132'>        <b>if</b> (!local_initialized) <font color='red'>{</font>
+<a name='L133'>            <b>if</b> ((size = usconfig(CONF_INITSIZE, 64*1024)) &lt; 0)
+<a name='L134'>                <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_INITSIZE (check)");
+<a name='L135'>            <b>if</b> (usconfig(CONF_INITSIZE, size) &lt; 0)
+<a name='L136'>                <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_INITSIZE (reset)");
+<a name='L137'>            addr = (<b>long</b>) dl_getrange(size + <a href='../S/3153.html#L11' title='Defined at 11 in Python/thread_sgi.h.'>HDR_SIZE</a>);
+<a name='L138'>            <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("trying to use addr %p-%p for sproc\n",
+<a name='L139'>                     addr, addr+size));
+<a name='L140'>            errno = 0;
+<a name='L141'>            <b>if</b> ((addr = usconfig(CONF_ATTACHADDR, addr)) &lt; 0 &amp;&amp;
+<a name='L142'>                errno != 0)
+<a name='L143'>                <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_ATTACHADDR (set)");
+<a name='L144'>        <font color='red'>}</font>
+<a name='L145'><font color='darkred'>#endif</font> <i><font color='green'>/* USE_DL */</font></i>
+<a name='L146'>        <a href='../S/3153.html#L78' title='Defined at 78 in Python/thread_sgi.h.'>clean_threads</a>();
+<a name='L147'>        <b>if</b> ((success = sproc(func, PR_SALL, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)) &lt; 0)
+<a name='L148'>            <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("sproc");
+<a name='L149'><font color='darkred'>#ifdef</font> USE_DL
+<a name='L150'>        <b>if</b> (!local_initialized) <font color='red'>{</font>
+<a name='L151'>            <b>if</b> (usconfig(CONF_ATTACHADDR, addr) &lt; 0)
+<a name='L152'>                <i><font color='green'>/* reset address */</font></i>
+<a name='L153'>                <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usconfig - CONF_ATTACHADDR (reset)");
+<a name='L154'>            local_initialized = 1;
+<a name='L155'>        <font color='red'>}</font>
+<a name='L156'><font color='darkred'>#endif</font> <i><font color='green'>/* USE_DL */</font></i>
+<a name='L157'>        <b>if</b> (success &gt;= 0) <font color='red'>{</font>
+<a name='L158'>            nthreads++;
+<a name='L159'>            <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[maxpidindex].parent = getpid();
+<a name='L160'>            <a href='../S/3153.html#L22' title='Defined at 22 in Python/thread_sgi.h.'>pidlist</a>[maxpidindex++].child = success;
+<a name='L161'>            <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("pidlist[%d] = %d\n",
+<a name='L162'>                     maxpidindex-1, success));
+<a name='L163'>        <font color='red'>}</font>
+<a name='L164'>    <font color='red'>}</font>
+<a name='L165'>    <b>if</b> (usunsetlock(count_lock) &lt; 0)
+<a name='L166'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usunsetlock (count_lock)");
+<a name='L167'>    <b>return</b> success;
+<a name='L168'><font color='red'>}</font>
+<a name='L169'>
+<a name='L170'><b>long</b> <a href='../R/3460.html' title='Multiple refered from 64 places.'>PyThread_get_thread_ident</a>(<b>void</b>)
+<a name='L171'><font color='red'>{</font>
+<a name='L172'>    <b>return</b> getpid();
+<a name='L173'><font color='red'>}</font>
+<a name='L174'>
+<a name='L175'><b>void</b> <a href='../S/2615.html#L1017' title='Refered from 1017 in Modules/_threadmodule.c.'>PyThread_exit_thread</a>(<b>void</b>)
+<a name='L176'><font color='red'>{</font>
+<a name='L177'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_exit_thread called\n"));
+<a name='L178'>    <b>if</b> (!initialized)
+<a name='L179'>        exit(0);
+<a name='L180'>    <b>if</b> (ussetlock(count_lock) &lt; 0)
+<a name='L181'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("ussetlock (count_lock)");
+<a name='L182'>    nthreads--;
+<a name='L183'>    <b>if</b> (getpid() == my_pid) <font color='red'>{</font>
+<a name='L184'>        <i><font color='green'>/* main thread; wait for other threads to exit */</font></i>
+<a name='L185'>        exiting = 1;
+<a name='L186'>        waiting_for_threads = 1;
+<a name='L187'>        <b>if</b> (ussetlock(wait_lock) &lt; 0)
+<a name='L188'>            <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("ussetlock (wait_lock)");
+<a name='L189'>        <b>for</b> (;;) <font color='red'>{</font>
+<a name='L190'>            <b>if</b> (nthreads &lt; 0) <font color='red'>{</font>
+<a name='L191'>                <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("really exit (%d)\n", exit_status));
+<a name='L192'>                exit(exit_status);
+<a name='L193'>            <font color='red'>}</font>
+<a name='L194'>            <b>if</b> (usunsetlock(count_lock) &lt; 0)
+<a name='L195'>                <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usunsetlock (count_lock)");
+<a name='L196'>            <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("waiting for other threads (%d)\n", nthreads));
+<a name='L197'>            <b>if</b> (ussetlock(wait_lock) &lt; 0)
+<a name='L198'>                <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("ussetlock (wait_lock)");
+<a name='L199'>            <b>if</b> (ussetlock(count_lock) &lt; 0)
+<a name='L200'>                <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("ussetlock (count_lock)");
+<a name='L201'>        <font color='red'>}</font>
+<a name='L202'>    <font color='red'>}</font>
+<a name='L203'>    <i><font color='green'>/* not the main thread */</font></i>
+<a name='L204'>    <b>if</b> (waiting_for_threads) <font color='red'>{</font>
+<a name='L205'>        <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("main thread is waiting\n"));
+<a name='L206'>        <b>if</b> (usunsetlock(wait_lock) &lt; 0)
+<a name='L207'>            <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usunsetlock (wait_lock)");
+<a name='L208'>    <font color='red'>}</font>
+<a name='L209'>    <b>if</b> (usunsetlock(count_lock) &lt; 0)
+<a name='L210'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usunsetlock (count_lock)");
+<a name='L211'>    _exit(0);
+<a name='L212'><font color='red'>}</font>
+<a name='L213'>
+<a name='L214'><i><font color='green'>/*</font></i>
+<a name='L215'><i><font color='green'> * Lock support.</font></i>
+<a name='L216'><i><font color='green'> */</font></i>
+<a name='L217'><a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a> <a href='../R/3452.html' title='Multiple refered from 21 places.'>PyThread_allocate_lock</a>(<b>void</b>)
+<a name='L218'><font color='red'>{</font>
+<a name='L219'>    ulock_t <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>;
+<a name='L220'>
+<a name='L221'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_allocate_lock called\n"));
+<a name='L222'>    <b>if</b> (!initialized)
+<a name='L223'>        <a href='../S/3145.html#L73' title='Defined at 73 in Python/thread.c.'>PyThread_init_thread</a>();
+<a name='L224'>
+<a name='L225'>    <b>if</b> ((<a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a> = usnewlock(shared_arena)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L226'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usnewlock");
+<a name='L227'>    (<b>void</b>) usinitlock(<a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>);
+<a name='L228'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_allocate_lock() -&gt; %p\n", <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>));
+<a name='L229'>    <b>return</b> (<a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a>) <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>;
+<a name='L230'><font color='red'>}</font>
+<a name='L231'>
+<a name='L232'><b>void</b> <a href='../R/3457.html' title='Multiple refered from 15 places.'>PyThread_free_lock</a>(PyThread_type_lock lock)
+<a name='L233'><font color='red'>{</font>
+<a name='L234'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_free_lock(%p) called\n", <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>));
+<a name='L235'>    usfreelock((ulock_t) <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>, shared_arena);
+<a name='L236'><font color='red'>}</font>
+<a name='L237'>
+<a name='L238'><b>int</b> <a href='../R/3450.html' title='Multiple refered from 35 places.'>PyThread_acquire_lock</a>(PyThread_type_lock lock, <b>int</b> waitflag)
+<a name='L239'><font color='red'>{</font>
+<a name='L240'>    <b>int</b> success;
+<a name='L241'>
+<a name='L242'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_acquire_lock(%p, %d) called\n", <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>, waitflag));
+<a name='L243'>    errno = 0;                  <i><font color='green'>/* clear it just in case */</font></i>
+<a name='L244'>    <b>if</b> (waitflag)
+<a name='L245'>        success = ussetlock((ulock_t) <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>);
+<a name='L246'>    <b>else</b>
+<a name='L247'>        success = uscsetlock((ulock_t) <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>, 1); <i><font color='green'>/* Try it once */</font></i>
+<a name='L248'>    <b>if</b> (success &lt; 0)
+<a name='L249'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>(waitflag ? "ussetlock" : "uscsetlock");
+<a name='L250'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_acquire_lock(%p, %d) -&gt; %d\n", <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>, waitflag, success));
+<a name='L251'>    <b>return</b> success;
+<a name='L252'><font color='red'>}</font>
+<a name='L253'>
+<a name='L254'><b>void</b> <a href='../R/3462.html' title='Multiple refered from 31 places.'>PyThread_release_lock</a>(PyThread_type_lock lock)
+<a name='L255'><font color='red'>{</font>
+<a name='L256'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_release_lock(%p) called\n", <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>));
+<a name='L257'>    <b>if</b> (usunsetlock((ulock_t) <a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>) &lt; 0)
+<a name='L258'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("usunsetlock");
+<a name='L259'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L30'>[^]</a><a href='#L254'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

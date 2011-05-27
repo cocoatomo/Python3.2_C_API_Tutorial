@@ -1,0 +1,404 @@
+<html>
+<head>
+<title>Modules/_sqlite/cache.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3387.html'>_sqlite</a>/cache.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L29'>[^]</a><a href='#L361'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L29' title='Defined at 29.'>pysqlite_new_node</a>
+<li><a href='#L50' title='Defined at 50.'>pysqlite_node_dealloc</a>
+<li><a href='#L58' title='Defined at 58.'>pysqlite_cache_init</a>
+<li><a href='#L90' title='Defined at 90.'>pysqlite_cache_dealloc</a>
+<li><a href='#L116' title='Defined at 116.'>pysqlite_cache_get</a>
+<li><a href='#L215' title='Defined at 215.'>pysqlite_cache_display</a>
+<li><a href='#L361' title='Defined at 361.'>pysqlite_cache_setup_types</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* cache .c - a LRU cache</font></i>
+<a name='L2'><i><font color='green'> *</font></i>
+<a name='L3'><i><font color='green'> * Copyright (C) 2004-2010 Gerhard Häring &lt;gh@ghaering.de&gt;</font></i>
+<a name='L4'><i><font color='green'> *</font></i>
+<a name='L5'><i><font color='green'> * This file is part of pysqlite.</font></i>
+<a name='L6'><i><font color='green'> *</font></i>
+<a name='L7'><i><font color='green'> * This software is provided 'as-is', without any express or implied</font></i>
+<a name='L8'><i><font color='green'> * warranty.  In no event will the authors be held liable for any damages</font></i>
+<a name='L9'><i><font color='green'> * arising from the use of this software.</font></i>
+<a name='L10'><i><font color='green'> *</font></i>
+<a name='L11'><i><font color='green'> * Permission is granted to anyone to use this software for any purpose,</font></i>
+<a name='L12'><i><font color='green'> * including commercial applications, and to alter it and redistribute it</font></i>
+<a name='L13'><i><font color='green'> * freely, subject to the following restrictions:</font></i>
+<a name='L14'><i><font color='green'> *</font></i>
+<a name='L15'><i><font color='green'> * 1. The origin of this software must not be misrepresented; you must not</font></i>
+<a name='L16'><i><font color='green'> *    claim that you wrote the original software. If you use this software</font></i>
+<a name='L17'><i><font color='green'> *    in a product, an acknowledgment in the product documentation would be</font></i>
+<a name='L18'><i><font color='green'> *    appreciated but is not required.</font></i>
+<a name='L19'><i><font color='green'> * 2. Altered source versions must be plainly marked as such, and must not be</font></i>
+<a name='L20'><i><font color='green'> *    misrepresented as being the original software.</font></i>
+<a name='L21'><i><font color='green'> * 3. This notice may not be removed or altered from any source distribution.</font></i>
+<a name='L22'><i><font color='green'> */</font></i>
+<a name='L23'>
+<a name='L24'><font color='darkred'>#include</font> "<a href='2606.html'>sqlitecompat.h</a>"
+<a name='L25'><font color='darkred'>#include</font> "<a href='2593.html'>cache.h</a>"
+<a name='L26'><font color='darkred'>#include</font> &lt;limits.h&gt;
+<a name='L27'>
+<a name='L28'><i><font color='green'>/* only used internally */</font></i>
+<a name='L29'><a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>* <a href='../S/2592.html#L190' title='Refered from 190 in Modules/_sqlite/cache.c.'>pysqlite_new_node</a>(PyObject* key, PyObject* data)
+<a name='L30'><font color='red'>{</font>
+<a name='L31'>    <a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>* <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L32'>
+<a name='L33'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = (<a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>*) (pysqlite_NodeType.tp_alloc(&amp;pysqlite_NodeType, 0));
+<a name='L34'>    <b>if</b> (!<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>) <font color='red'>{</font>
+<a name='L35'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L36'>    <font color='red'>}</font>
+<a name='L37'>
+<a name='L38'>    Py_INCREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L39'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L40'>
+<a name='L41'>    Py_INCREF(data);
+<a name='L42'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;data = data;
+<a name='L43'>
+<a name='L44'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L45'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;next = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L46'>
+<a name='L47'>    <b>return</b> <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L48'><font color='red'>}</font>
+<a name='L49'>
+<a name='L50'><b>void</b> <a href='../R/9891.html' title='Multiple refered from 2 places.'>pysqlite_node_dealloc</a>(pysqlite_Node* self)
+<a name='L51'><font color='red'>{</font>
+<a name='L52'>    Py_DECREF(self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L53'>    Py_DECREF(self-&gt;data);
+<a name='L54'>
+<a name='L55'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self);
+<a name='L56'><font color='red'>}</font>
+<a name='L57'>
+<a name='L58'><b>int</b> <a href='../R/9841.html' title='Multiple refered from 2 places.'>pysqlite_cache_init</a>(pysqlite_Cache* self, PyObject* args, PyObject* kwargs)
+<a name='L59'><font color='red'>{</font>
+<a name='L60'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* factory;
+<a name='L61'>    <b>int</b> size = 10;
+<a name='L62'>
+<a name='L63'>    self-&gt;factory = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L64'>
+<a name='L65'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O|i", &amp;factory, &amp;size)) <font color='red'>{</font>
+<a name='L66'>        <b>return</b> -1;
+<a name='L67'>    <font color='red'>}</font>
+<a name='L68'>
+<a name='L69'>    <i><font color='green'>/* minimum cache size is 5 entries */</font></i>
+<a name='L70'>    <b>if</b> (size &lt; 5) <font color='red'>{</font>
+<a name='L71'>        size = 5;
+<a name='L72'>    <font color='red'>}</font>
+<a name='L73'>    self-&gt;size = size;
+<a name='L74'>    self-&gt;first = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L75'>    self-&gt;last = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L76'>
+<a name='L77'>    self-&gt;mapping = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L78'>    <b>if</b> (!self-&gt;mapping) <font color='red'>{</font>
+<a name='L79'>        <b>return</b> -1;
+<a name='L80'>    <font color='red'>}</font>
+<a name='L81'>
+<a name='L82'>    Py_INCREF(factory);
+<a name='L83'>    self-&gt;factory = factory;
+<a name='L84'>
+<a name='L85'>    self-&gt;decref_factory = 1;
+<a name='L86'>
+<a name='L87'>    <b>return</b> 0;
+<a name='L88'><font color='red'>}</font>
+<a name='L89'>
+<a name='L90'><b>void</b> <a href='../R/9838.html' title='Multiple refered from 2 places.'>pysqlite_cache_dealloc</a>(pysqlite_Cache* self)
+<a name='L91'><font color='red'>{</font>
+<a name='L92'>    <a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>* <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L93'>    <a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>* delete_node;
+<a name='L94'>
+<a name='L95'>    <b>if</b> (!self-&gt;factory) <font color='red'>{</font>
+<a name='L96'>        <i><font color='green'>/* constructor failed, just get out of here */</font></i>
+<a name='L97'>        <b>return</b>;
+<a name='L98'>    <font color='red'>}</font>
+<a name='L99'>
+<a name='L100'>    <i><font color='green'>/* iterate over all nodes and deallocate them */</font></i>
+<a name='L101'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = self-&gt;first;
+<a name='L102'>    <b>while</b> (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>) <font color='red'>{</font>
+<a name='L103'>        delete_node = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L104'>        <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;next;
+<a name='L105'>        Py_DECREF(delete_node);
+<a name='L106'>    <font color='red'>}</font>
+<a name='L107'>
+<a name='L108'>    <b>if</b> (self-&gt;decref_factory) <font color='red'>{</font>
+<a name='L109'>        Py_DECREF(self-&gt;factory);
+<a name='L110'>    <font color='red'>}</font>
+<a name='L111'>    Py_DECREF(self-&gt;mapping);
+<a name='L112'>
+<a name='L113'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self);
+<a name='L114'><font color='red'>}</font>
+<a name='L115'>
+<a name='L116'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9840.html' title='Multiple refered from 3 places.'>pysqlite_cache_get</a>(pysqlite_Cache* self, PyObject* args)
+<a name='L117'><font color='red'>{</font>
+<a name='L118'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L119'>    <a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>* <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L120'>    <a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>* ptr;
+<a name='L121'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* data;
+<a name='L122'>
+<a name='L123'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = (<a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>*)<a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(self-&gt;mapping, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L124'>    <b>if</b> (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>) <font color='red'>{</font>
+<a name='L125'>        <i><font color='green'>/* an entry for this key already exists in the cache */</font></i>
+<a name='L126'>
+<a name='L127'>        <i><font color='green'>/* increase usage counter of the node found */</font></i>
+<a name='L128'>        <b>if</b> (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;count &lt; <a href='../D/1965.html' title='Multiple defined in 2 places.'>LONG_MAX</a>) <font color='red'>{</font>
+<a name='L129'>            <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;count++;
+<a name='L130'>        <font color='red'>}</font>
+<a name='L131'>
+<a name='L132'>        <i><font color='green'>/* if necessary, reorder entries in the cache by swapping positions */</font></i>
+<a name='L133'>        <b>if</b> (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev &amp;&amp; <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;count &gt; <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev-&gt;count) <font color='red'>{</font>
+<a name='L134'>            ptr = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev;
+<a name='L135'>
+<a name='L136'>            <b>while</b> (ptr-&gt;prev &amp;&amp; <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;count &gt; ptr-&gt;prev-&gt;count) <font color='red'>{</font>
+<a name='L137'>                ptr = ptr-&gt;prev;
+<a name='L138'>            <font color='red'>}</font>
+<a name='L139'>
+<a name='L140'>            <b>if</b> (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;next) <font color='red'>{</font>
+<a name='L141'>                <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;next-&gt;prev = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev;
+<a name='L142'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L143'>                self-&gt;last = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev;
+<a name='L144'>            <font color='red'>}</font>
+<a name='L145'>            <b>if</b> (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev) <font color='red'>{</font>
+<a name='L146'>                <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev-&gt;next = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;next;
+<a name='L147'>            <font color='red'>}</font>
+<a name='L148'>            <b>if</b> (ptr-&gt;prev) <font color='red'>{</font>
+<a name='L149'>                ptr-&gt;prev-&gt;next = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L150'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L151'>                self-&gt;first = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L152'>            <font color='red'>}</font>
+<a name='L153'>
+<a name='L154'>            <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;next = ptr;
+<a name='L155'>            <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev = ptr-&gt;prev;
+<a name='L156'>            <b>if</b> (!<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev) <font color='red'>{</font>
+<a name='L157'>                self-&gt;first = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L158'>            <font color='red'>}</font>
+<a name='L159'>            ptr-&gt;prev = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L160'>        <font color='red'>}</font>
+<a name='L161'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L162'>        <i><font color='green'>/* There is no entry for this key in the cache, yet. We'll insert a new</font></i>
+<a name='L163'><i><font color='green'>         * entry in the cache, and make space if necessary by throwing the</font></i>
+<a name='L164'><i><font color='green'>         * least used item out of the cache. */</font></i>
+<a name='L165'>
+<a name='L166'>        <b>if</b> (<a href='../S/2787.html#L1620' title='Defined at 1620 in Objects/dictobject.c.'>PyDict_Size</a>(self-&gt;mapping) == self-&gt;size) <font color='red'>{</font>
+<a name='L167'>            <b>if</b> (self-&gt;last) <font color='red'>{</font>
+<a name='L168'>                <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = self-&gt;last;
+<a name='L169'>
+<a name='L170'>                <b>if</b> (<a href='../S/2787.html#L832' title='Defined at 832 in Objects/dictobject.c.'>PyDict_DelItem</a>(self-&gt;mapping, self-&gt;last-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>) != 0) <font color='red'>{</font>
+<a name='L171'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L172'>                <font color='red'>}</font>
+<a name='L173'>
+<a name='L174'>                <b>if</b> (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev) <font color='red'>{</font>
+<a name='L175'>                    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev-&gt;next = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L176'>                <font color='red'>}</font>
+<a name='L177'>                self-&gt;last = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev;
+<a name='L178'>                <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L179'>
+<a name='L180'>                Py_DECREF(<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>);
+<a name='L181'>            <font color='red'>}</font>
+<a name='L182'>        <font color='red'>}</font>
+<a name='L183'>
+<a name='L184'>        data = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(self-&gt;factory, "O", <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L185'>
+<a name='L186'>        <b>if</b> (!data) <font color='red'>{</font>
+<a name='L187'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L188'>        <font color='red'>}</font>
+<a name='L189'>
+<a name='L190'>        <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = <a href='../S/2592.html#L29' title='Defined at 29 in Modules/_sqlite/cache.c.'>pysqlite_new_node</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, data);
+<a name='L191'>        <b>if</b> (!<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>) <font color='red'>{</font>
+<a name='L192'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L193'>        <font color='red'>}</font>
+<a name='L194'>        <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;prev = self-&gt;last;
+<a name='L195'>
+<a name='L196'>        Py_DECREF(data);
+<a name='L197'>
+<a name='L198'>        <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(self-&gt;mapping, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>) != 0) <font color='red'>{</font>
+<a name='L199'>            Py_DECREF(<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>);
+<a name='L200'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L201'>        <font color='red'>}</font>
+<a name='L202'>
+<a name='L203'>        <b>if</b> (self-&gt;last) <font color='red'>{</font>
+<a name='L204'>            self-&gt;last-&gt;next = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L205'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L206'>            self-&gt;first = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L207'>        <font color='red'>}</font>
+<a name='L208'>        self-&gt;last = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L209'>    <font color='red'>}</font>
+<a name='L210'>
+<a name='L211'>    Py_INCREF(<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;data);
+<a name='L212'>    <b>return</b> <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>-&gt;data;
+<a name='L213'><font color='red'>}</font>
+<a name='L214'>
+<a name='L215'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2592.html#L272' title='Refered from 272 in Modules/_sqlite/cache.c.'>pysqlite_cache_display</a>(pysqlite_Cache* self, PyObject* args)
+<a name='L216'><font color='red'>{</font>
+<a name='L217'>    <a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>* ptr;
+<a name='L218'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* prevkey;
+<a name='L219'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* nextkey;
+<a name='L220'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* fmt_args;
+<a name='L221'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* template;
+<a name='L222'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* display_str;
+<a name='L223'>
+<a name='L224'>    ptr = self-&gt;first;
+<a name='L225'>
+<a name='L226'>    <b>while</b> (ptr) <font color='red'>{</font>
+<a name='L227'>        <b>if</b> (ptr-&gt;prev) <font color='red'>{</font>
+<a name='L228'>            prevkey = ptr-&gt;prev-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L229'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L230'>            prevkey = Py_None;
+<a name='L231'>        <font color='red'>}</font>
+<a name='L232'>        Py_INCREF(prevkey);
+<a name='L233'>
+<a name='L234'>        <b>if</b> (ptr-&gt;next) <font color='red'>{</font>
+<a name='L235'>            nextkey = ptr-&gt;next-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L236'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L237'>            nextkey = Py_None;
+<a name='L238'>        <font color='red'>}</font>
+<a name='L239'>        Py_INCREF(nextkey);
+<a name='L240'>
+<a name='L241'>        fmt_args = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("OOO", prevkey, ptr-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, nextkey);
+<a name='L242'>        <b>if</b> (!fmt_args) <font color='red'>{</font>
+<a name='L243'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L244'>        <font color='red'>}</font>
+<a name='L245'>        template = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("%s &lt;- %s -&gt;%s\n");
+<a name='L246'>        <b>if</b> (!template) <font color='red'>{</font>
+<a name='L247'>            Py_DECREF(fmt_args);
+<a name='L248'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L249'>        <font color='red'>}</font>
+<a name='L250'>        display_str = <a href='../D/4006.html' title='Multiple defined in 3 places.'>PyUnicode_Format</a>(template, fmt_args);
+<a name='L251'>        Py_DECREF(template);
+<a name='L252'>        Py_DECREF(fmt_args);
+<a name='L253'>        <b>if</b> (!display_str) <font color='red'>{</font>
+<a name='L254'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L255'>        <font color='red'>}</font>
+<a name='L256'>        <a href='../S/2803.html#L261' title='Defined at 261 in Objects/object.c.'>PyObject_Print</a>(display_str, stdout, Py_PRINT_RAW);
+<a name='L257'>        Py_DECREF(display_str);
+<a name='L258'>
+<a name='L259'>        Py_DECREF(prevkey);
+<a name='L260'>        Py_DECREF(nextkey);
+<a name='L261'>
+<a name='L262'>        ptr = ptr-&gt;next;
+<a name='L263'>    <font color='red'>}</font>
+<a name='L264'>
+<a name='L265'>    Py_INCREF(Py_None);
+<a name='L266'>    <b>return</b> Py_None;
+<a name='L267'><font color='red'>}</font>
+<a name='L268'>
+<a name='L269'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> cache_methods[] = <font color='red'>{</font>
+<a name='L270'>    <font color='red'>{</font>"get", (PyCFunction)<a href='../S/2592.html#L116' title='Defined at 116 in Modules/_sqlite/cache.c.'>pysqlite_cache_get</a>, METH_O,
+<a name='L271'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Gets an entry from the cache or calls the factory function to produce one.")<font color='red'>}</font>,
+<a name='L272'>    <font color='red'>{</font>"display", (PyCFunction)<a href='../S/2592.html#L215' title='Defined at 215 in Modules/_sqlite/cache.c.'>pysqlite_cache_display</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L273'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("For debugging only.")<font color='red'>}</font>,
+<a name='L274'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L275'><font color='red'>}</font>;
+<a name='L276'>
+<a name='L277'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> pysqlite_NodeType = <font color='red'>{</font>
+<a name='L278'>        <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L279'>        <a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> "Node",                             <i><font color='green'>/* tp_name */</font></i>
+<a name='L280'>        <b>sizeof</b>(<a href='../S/2593.html#L40' title='Defined at 40 in Modules/_sqlite/cache.h.'>pysqlite_Node</a>),                          <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L281'>        0,                                              <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L282'>        (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2592.html#L50' title='Defined at 50 in Modules/_sqlite/cache.c.'>pysqlite_node_dealloc</a>,              <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L283'>        0,                                              <i><font color='green'>/* tp_print */</font></i>
+<a name='L284'>        0,                                              <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L285'>        0,                                              <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L286'>        0,                                              <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L287'>        0,                                              <i><font color='green'>/* tp_repr */</font></i>
+<a name='L288'>        0,                                              <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L289'>        0,                                              <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L290'>        0,                                              <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L291'>        0,                                              <i><font color='green'>/* tp_hash */</font></i>
+<a name='L292'>        0,                                              <i><font color='green'>/* tp_call */</font></i>
+<a name='L293'>        0,                                              <i><font color='green'>/* tp_str */</font></i>
+<a name='L294'>        0,                                              <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L295'>        0,                                              <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L296'>        0,                                              <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L297'>        Py_TPFLAGS_DEFAULT|Py_TPFLAGS_BASETYPE,         <i><font color='green'>/* tp_flags */</font></i>
+<a name='L298'>        0,                                              <i><font color='green'>/* tp_doc */</font></i>
+<a name='L299'>        0,                                              <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L300'>        0,                                              <i><font color='green'>/* tp_clear */</font></i>
+<a name='L301'>        0,                                              <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L302'>        0,                                              <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L303'>        0,                                              <i><font color='green'>/* tp_iter */</font></i>
+<a name='L304'>        0,                                              <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L305'>        0,                                              <i><font color='green'>/* tp_methods */</font></i>
+<a name='L306'>        0,                                              <i><font color='green'>/* tp_members */</font></i>
+<a name='L307'>        0,                                              <i><font color='green'>/* tp_getset */</font></i>
+<a name='L308'>        0,                                              <i><font color='green'>/* tp_base */</font></i>
+<a name='L309'>        0,                                              <i><font color='green'>/* tp_dict */</font></i>
+<a name='L310'>        0,                                              <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L311'>        0,                                              <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L312'>        0,                                              <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L313'>        (initproc)0,                                    <i><font color='green'>/* tp_init */</font></i>
+<a name='L314'>        0,                                              <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L315'>        0,                                              <i><font color='green'>/* tp_new */</font></i>
+<a name='L316'>        0                                               <i><font color='green'>/* tp_free */</font></i>
+<a name='L317'><font color='red'>}</font>;
+<a name='L318'>
+<a name='L319'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> pysqlite_CacheType = <font color='red'>{</font>
+<a name='L320'>        <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L321'>        <a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".Cache",                           <i><font color='green'>/* tp_name */</font></i>
+<a name='L322'>        <b>sizeof</b>(<a href='../S/2593.html#L59' title='Defined at 59 in Modules/_sqlite/cache.h.'>pysqlite_Cache</a>),                         <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L323'>        0,                                              <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L324'>        (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2592.html#L90' title='Defined at 90 in Modules/_sqlite/cache.c.'>pysqlite_cache_dealloc</a>,             <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L325'>        0,                                              <i><font color='green'>/* tp_print */</font></i>
+<a name='L326'>        0,                                              <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L327'>        0,                                              <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L328'>        0,                                              <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L329'>        0,                                              <i><font color='green'>/* tp_repr */</font></i>
+<a name='L330'>        0,                                              <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L331'>        0,                                              <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L332'>        0,                                              <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L333'>        0,                                              <i><font color='green'>/* tp_hash */</font></i>
+<a name='L334'>        0,                                              <i><font color='green'>/* tp_call */</font></i>
+<a name='L335'>        0,                                              <i><font color='green'>/* tp_str */</font></i>
+<a name='L336'>        0,                                              <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L337'>        0,                                              <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L338'>        0,                                              <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L339'>        Py_TPFLAGS_DEFAULT|Py_TPFLAGS_BASETYPE,         <i><font color='green'>/* tp_flags */</font></i>
+<a name='L340'>        0,                                              <i><font color='green'>/* tp_doc */</font></i>
+<a name='L341'>        0,                                              <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L342'>        0,                                              <i><font color='green'>/* tp_clear */</font></i>
+<a name='L343'>        0,                                              <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L344'>        0,                                              <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L345'>        0,                                              <i><font color='green'>/* tp_iter */</font></i>
+<a name='L346'>        0,                                              <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L347'>        cache_methods,                                  <i><font color='green'>/* tp_methods */</font></i>
+<a name='L348'>        0,                                              <i><font color='green'>/* tp_members */</font></i>
+<a name='L349'>        0,                                              <i><font color='green'>/* tp_getset */</font></i>
+<a name='L350'>        0,                                              <i><font color='green'>/* tp_base */</font></i>
+<a name='L351'>        0,                                              <i><font color='green'>/* tp_dict */</font></i>
+<a name='L352'>        0,                                              <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L353'>        0,                                              <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L354'>        0,                                              <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L355'>        (initproc)<a href='../S/2592.html#L58' title='Defined at 58 in Modules/_sqlite/cache.c.'>pysqlite_cache_init</a>,                  <i><font color='green'>/* tp_init */</font></i>
+<a name='L356'>        0,                                              <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L357'>        0,                                              <i><font color='green'>/* tp_new */</font></i>
+<a name='L358'>        0                                               <i><font color='green'>/* tp_free */</font></i>
+<a name='L359'><font color='red'>}</font>;
+<a name='L360'>
+<a name='L361'><b>extern</b> <b>int</b> <a href='../R/9842.html' title='Multiple refered from 2 places.'>pysqlite_cache_setup_types</a>(<b>void</b>)
+<a name='L362'><font color='red'>{</font>
+<a name='L363'>    <b>int</b> rc;
+<a name='L364'>
+<a name='L365'>    pysqlite_NodeType.tp_new = <a href='../S/2824.html#L730' title='Defined at 730 in Objects/typeobject.c.'>PyType_GenericNew</a>;
+<a name='L366'>    pysqlite_CacheType.tp_new = <a href='../S/2824.html#L730' title='Defined at 730 in Objects/typeobject.c.'>PyType_GenericNew</a>;
+<a name='L367'>
+<a name='L368'>    rc = <a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;pysqlite_NodeType);
+<a name='L369'>    <b>if</b> (rc &lt; 0) <font color='red'>{</font>
+<a name='L370'>        <b>return</b> rc;
+<a name='L371'>    <font color='red'>}</font>
+<a name='L372'>
+<a name='L373'>    rc = <a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;pysqlite_CacheType);
+<a name='L374'>    <b>return</b> rc;
+<a name='L375'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L29'>[^]</a><a href='#L361'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

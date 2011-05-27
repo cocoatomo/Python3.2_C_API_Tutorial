@@ -1,0 +1,1264 @@
+<html>
+<head>
+<title>Objects/rangeobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/rangeobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L24'>[^]</a><a href='#L1102'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L24' title='Defined at 24.'>validate_step</a>
+<li><a href='#L51' title='Defined at 51.'>make_range_object</a>
+<li><a href='#L78' title='Defined at 78.'>range_new</a>
+<li><a href='#L143' title='Defined at 143.'>range_dealloc</a>
+<li><a href='#L157' title='Defined at 157.'>compute_range_length</a>
+<li><a href='#L228' title='Defined at 228.'>range_length</a>
+<li><a href='#L234' title='Defined at 234.'>compute_item</a>
+<li><a href='#L249' title='Defined at 249.'>compute_range_item</a>
+<li><a href='#L308' title='Defined at 308.'>range_item</a>
+<li><a href='#L325' title='Defined at 325.'>compute_slice_element</a>
+<li><a href='#L346' title='Defined at 346.'>compute_slice_indices</a>
+<li><a href='#L509' title='Defined at 509.'>compute_slice</a>
+<li><a href='#L553' title='Defined at 553.'>range_contains_long</a>
+<li><a href='#L603' title='Defined at 603.'>range_contains</a>
+<li><a href='#L613' title='Defined at 613.'>range_count</a>
+<li><a href='#L633' title='Defined at 633.'>range_index</a>
+<li><a href='#L676' title='Defined at 676.'>range_repr</a>
+<li><a href='#L697' title='Defined at 697.'>range_reduce</a>
+<li><a href='#L704' title='Defined at 704.'>range_subscript</a>
+<li><a href='#L809' title='Defined at 809.'>rangeiter_next</a>
+<li><a href='#L820' title='Defined at 820.'>rangeiter_len</a>
+<li><a href='#L882' title='Defined at 882.'>get_len_of_range</a>
+<li><a href='#L910' title='Defined at 910.'>fast_range_iter</a>
+<li><a href='#L931' title='Defined at 931.'>rangeiter_new</a>
+<li><a href='#L954' title='Defined at 954.'>longrangeiter_len</a>
+<li><a href='#L966' title='Defined at 966.'>longrangeiter_dealloc</a>
+<li><a href='#L976' title='Defined at 976.'>longrangeiter_next</a>
+<li><a href='#L1044' title='Defined at 1044.'>range_iter</a>
+<li><a href='#L1102' title='Defined at 1102.'>range_reverse</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Range object implementation */</font></i>
+<a name='L2'>
+<a name='L3'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L4'>
+<a name='L5'><i><font color='green'>/* Support objects whose length is &gt; PY_SSIZE_T_MAX.</font></i>
+<a name='L6'><i><font color='green'></font></i>
+<a name='L7'><i><font color='green'>   This could be sped up for small PyLongs if they fit in an Py_ssize_t.</font></i>
+<a name='L8'><i><font color='green'>   This only matters on Win64.  Though we could use PY_LONG_LONG which</font></i>
+<a name='L9'><i><font color='green'>   would presumably help perf.</font></i>
+<a name='L10'><i><font color='green'>*/</font></i>
+<a name='L11'>
+<a name='L12'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L13'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L14'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *start;
+<a name='L15'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *stop;
+<a name='L16'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *step;
+<a name='L17'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *length;
+<a name='L18'><font color='red'>}</font> <a href='../R/9962.html' title='Multiple refered from 8 places.'>rangeobject</a>;
+<a name='L19'>
+<a name='L20'><i><font color='green'>/* Helper function for validating step.  Always returns a new reference or</font></i>
+<a name='L21'><i><font color='green'>   NULL on error.</font></i>
+<a name='L22'><i><font color='green'>*/</font></i>
+<a name='L23'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L24'><a href='../S/2805.html#L118' title='Refered from 118 in Objects/rangeobject.c.'>validate_step</a>(PyObject *step)
+<a name='L25'><font color='red'>{</font>
+<a name='L26'>    <i><font color='green'>/* No step specified, use a step of 1. */</font></i>
+<a name='L27'>    <b>if</b> (!step)
+<a name='L28'>        <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1);
+<a name='L29'>
+<a name='L30'>    step = <a href='../S/2775.html#L1196' title='Defined at 1196 in Objects/abstract.c.'>PyNumber_Index</a>(step);
+<a name='L31'>    <b>if</b> (step) <font color='red'>{</font>
+<a name='L32'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> istep = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(step, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L33'>        <b>if</b> (istep == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L34'>            <i><font color='green'>/* Ignore OverflowError, we know the value isn't 0. */</font></i>
+<a name='L35'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L36'>        <font color='red'>}</font>
+<a name='L37'>        <b>else</b> <b>if</b> (istep == 0) <font color='red'>{</font>
+<a name='L38'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L39'>                            "range() arg 3 must not be zero");
+<a name='L40'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(step);
+<a name='L41'>        <font color='red'>}</font>
+<a name='L42'>    <font color='red'>}</font>
+<a name='L43'>
+<a name='L44'>    <b>return</b> step;
+<a name='L45'><font color='red'>}</font>
+<a name='L46'>
+<a name='L47'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L48'><a href='../S/2805.html#L157' title='Defined at 157 in Objects/rangeobject.c.'>compute_range_length</a>(PyObject *start, PyObject *stop, PyObject *step);
+<a name='L49'>
+<a name='L50'><b>static</b> <a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a> *
+<a name='L51'><a href='../R/8845.html' title='Multiple refered from 2 places.'>make_range_object</a>(PyTypeObject *type, PyObject *start,
+<a name='L52'>                  PyObject *stop, PyObject *step)
+<a name='L53'><font color='red'>{</font>
+<a name='L54'>    <a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a> *obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L55'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *length;
+<a name='L56'>    length = <a href='../S/2805.html#L157' title='Defined at 157 in Objects/rangeobject.c.'>compute_range_length</a>(start, stop, step);
+<a name='L57'>    <b>if</b> (length == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L58'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L59'>    <font color='red'>}</font>
+<a name='L60'>    obj = PyObject_New(<a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a>, type);
+<a name='L61'>    <b>if</b> (obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L62'>        Py_DECREF(length);
+<a name='L63'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L64'>    <font color='red'>}</font>
+<a name='L65'>    obj-&gt;start = start;
+<a name='L66'>    obj-&gt;stop = stop;
+<a name='L67'>    obj-&gt;step = step;
+<a name='L68'>    obj-&gt;length = length;
+<a name='L69'>    <b>return</b> obj;
+<a name='L70'><font color='red'>}</font>
+<a name='L71'>
+<a name='L72'><i><font color='green'>/* XXX(nnorwitz): should we error check if the user passes any empty ranges?</font></i>
+<a name='L73'><i><font color='green'>   range(-10)</font></i>
+<a name='L74'><i><font color='green'>   range(0, -5)</font></i>
+<a name='L75'><i><font color='green'>   range(0, 5, -1)</font></i>
+<a name='L76'><i><font color='green'>*/</font></i>
+<a name='L77'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L78'><a href='../S/2805.html#L790' title='Refered from 790 in Objects/rangeobject.c.'>range_new</a>(PyTypeObject *type, PyObject *args, PyObject *kw)
+<a name='L79'><font color='red'>{</font>
+<a name='L80'>    <a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a> *obj;
+<a name='L81'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *start = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *stop = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *step = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L82'>
+<a name='L83'>    <b>if</b> (!<a href='../S/3112.html#L1777' title='Defined at 1777 in Python/getargs.c.'>_PyArg_NoKeywords</a>("range()", kw))
+<a name='L84'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L85'>
+<a name='L86'>    <b>if</b> (<a href='../S/2823.html#L112' title='Defined at 112 in Objects/tupleobject.c.'>PyTuple_Size</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>) &lt;= 1) <font color='red'>{</font>
+<a name='L87'>        <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "range", 1, 1, &amp;stop))
+<a name='L88'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L89'>        stop = <a href='../S/2775.html#L1196' title='Defined at 1196 in Objects/abstract.c.'>PyNumber_Index</a>(stop);
+<a name='L90'>        <b>if</b> (!stop)
+<a name='L91'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L92'>        start = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L93'>        <b>if</b> (!start) <font color='red'>{</font>
+<a name='L94'>            Py_DECREF(stop);
+<a name='L95'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L96'>        <font color='red'>}</font>
+<a name='L97'>        step = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1);
+<a name='L98'>        <b>if</b> (!step) <font color='red'>{</font>
+<a name='L99'>            Py_DECREF(stop);
+<a name='L100'>            Py_DECREF(start);
+<a name='L101'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L102'>        <font color='red'>}</font>
+<a name='L103'>    <font color='red'>}</font>
+<a name='L104'>    <b>else</b> <font color='red'>{</font>
+<a name='L105'>        <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "range", 2, 3,
+<a name='L106'>                               &amp;start, &amp;stop, &amp;step))
+<a name='L107'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L108'>
+<a name='L109'>        <i><font color='green'>/* Convert borrowed refs to owned refs */</font></i>
+<a name='L110'>        start = <a href='../S/2775.html#L1196' title='Defined at 1196 in Objects/abstract.c.'>PyNumber_Index</a>(start);
+<a name='L111'>        <b>if</b> (!start)
+<a name='L112'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L113'>        stop = <a href='../S/2775.html#L1196' title='Defined at 1196 in Objects/abstract.c.'>PyNumber_Index</a>(stop);
+<a name='L114'>        <b>if</b> (!stop) <font color='red'>{</font>
+<a name='L115'>            Py_DECREF(start);
+<a name='L116'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L117'>        <font color='red'>}</font>
+<a name='L118'>        step = <a href='../S/2805.html#L24' title='Defined at 24 in Objects/rangeobject.c.'>validate_step</a>(step);    <i><font color='green'>/* Caution, this can clear exceptions */</font></i>
+<a name='L119'>        <b>if</b> (!step) <font color='red'>{</font>
+<a name='L120'>            Py_DECREF(start);
+<a name='L121'>            Py_DECREF(stop);
+<a name='L122'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L123'>        <font color='red'>}</font>
+<a name='L124'>    <font color='red'>}</font>
+<a name='L125'>
+<a name='L126'>    obj = <a href='../S/2805.html#L51' title='Defined at 51 in Objects/rangeobject.c.'>make_range_object</a>(type, start, stop, step);
+<a name='L127'>    <b>if</b> (obj != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L128'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) obj;
+<a name='L129'>
+<a name='L130'>    <i><font color='green'>/* Failed to create object, release attributes */</font></i>
+<a name='L131'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(start);
+<a name='L132'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(stop);
+<a name='L133'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(step);
+<a name='L134'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L135'><font color='red'>}</font>
+<a name='L136'>
+<a name='L137'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(range_doc,
+<a name='L138'>"range([start,] stop[, step]) -&gt; range object\n\
+<a name='L139'>\n\
+<a name='L140'>Returns a virtual sequence of numbers from start to stop by step.");
+<a name='L141'>
+<a name='L142'><b>static</b> <b>void</b>
+<a name='L143'><a href='../S/2805.html#L757' title='Refered from 757 in Objects/rangeobject.c.'>range_dealloc</a>(rangeobject *r)
+<a name='L144'><font color='red'>{</font>
+<a name='L145'>    Py_DECREF(r-&gt;start);
+<a name='L146'>    Py_DECREF(r-&gt;stop);
+<a name='L147'>    Py_DECREF(r-&gt;step);
+<a name='L148'>    Py_DECREF(r-&gt;length);
+<a name='L149'>    PyObject_Del(r);
+<a name='L150'><font color='red'>}</font>
+<a name='L151'>
+<a name='L152'><i><font color='green'>/* Return number of items in range (lo, hi, step) as a PyLong object,</font></i>
+<a name='L153'><i><font color='green'> * when arguments are PyLong objects.  Arguments MUST return 1 with</font></i>
+<a name='L154'><i><font color='green'> * PyLong_Check().  Return NULL when there is an error.</font></i>
+<a name='L155'><i><font color='green'> */</font></i>
+<a name='L156'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L157'><a href='../R/6956.html' title='Multiple refered from 2 places.'>compute_range_length</a>(PyObject *start, PyObject *stop, PyObject *step)
+<a name='L158'><font color='red'>{</font>
+<a name='L159'>    <i><font color='green'>/* -------------------------------------------------------------</font></i>
+<a name='L160'><i><font color='green'>    Algorithm is equal to that of get_len_of_range(), but it operates</font></i>
+<a name='L161'><i><font color='green'>    on PyObjects (which are assumed to be PyLong objects).</font></i>
+<a name='L162'><i><font color='green'>    ---------------------------------------------------------------*/</font></i>
+<a name='L163'>    <b>int</b> cmp_result;
+<a name='L164'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *lo, *hi;
+<a name='L165'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L166'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *one = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L167'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp1 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *tmp2 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L168'>                <i><font color='green'>/* holds sub-expression evaluations */</font></i>
+<a name='L169'>
+<a name='L170'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *zero = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L171'>    <b>if</b> (zero == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L172'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L173'>    cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(step, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GT</a>);
+<a name='L174'>    Py_DECREF(zero);
+<a name='L175'>    <b>if</b> (cmp_result == -1)
+<a name='L176'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L177'>
+<a name='L178'>    <b>if</b> (cmp_result == 1) <font color='red'>{</font>
+<a name='L179'>        lo = start;
+<a name='L180'>        hi = stop;
+<a name='L181'>        Py_INCREF(step);
+<a name='L182'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L183'>        lo = stop;
+<a name='L184'>        hi = start;
+<a name='L185'>        step = <a href='../S/2775.html#L1136' title='Defined at 1136 in Objects/abstract.c.'>PyNumber_Negative</a>(step);
+<a name='L186'>        <b>if</b> (!step)
+<a name='L187'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L188'>    <font color='red'>}</font>
+<a name='L189'>
+<a name='L190'>    <i><font color='green'>/* if (lo &gt;= hi), return length of 0. */</font></i>
+<a name='L191'>    <b>if</b> (<a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(lo, hi, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GE</a>) == 1) <font color='red'>{</font>
+<a name='L192'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(step);
+<a name='L193'>        <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L194'>    <font color='red'>}</font>
+<a name='L195'>
+<a name='L196'>    <b>if</b> ((one = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1L)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L197'>        <b>goto</b> Fail;
+<a name='L198'>
+<a name='L199'>    <b>if</b> ((tmp1 = PyNumber_Subtract(hi, lo)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L200'>        <b>goto</b> Fail;
+<a name='L201'>
+<a name='L202'>    <b>if</b> ((<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a> = PyNumber_Subtract(tmp1, one)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L203'>        <b>goto</b> Fail;
+<a name='L204'>
+<a name='L205'>    <b>if</b> ((tmp2 = <a href='../S/2775.html#L968' title='Defined at 968 in Objects/abstract.c.'>PyNumber_FloorDivide</a>(<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a>, step)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L206'>        <b>goto</b> Fail;
+<a name='L207'>
+<a name='L208'>    <b>if</b> ((<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PyNumber_Add(tmp2, one)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L209'>        <b>goto</b> Fail;
+<a name='L210'>
+<a name='L211'>    Py_DECREF(tmp2);
+<a name='L212'>    Py_DECREF(<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a>);
+<a name='L213'>    Py_DECREF(step);
+<a name='L214'>    Py_DECREF(tmp1);
+<a name='L215'>    Py_DECREF(one);
+<a name='L216'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L217'>
+<a name='L218'>  Fail:
+<a name='L219'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp2);
+<a name='L220'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a>);
+<a name='L221'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(step);
+<a name='L222'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp1);
+<a name='L223'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(one);
+<a name='L224'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L225'><font color='red'>}</font>
+<a name='L226'>
+<a name='L227'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L228'><a href='../R/9952.html' title='Multiple refered from 2 places.'>range_length</a>(rangeobject *r)
+<a name='L229'><font color='red'>{</font>
+<a name='L230'>    <b>return</b> <a href='../S/2799.html#L433' title='Defined at 433 in Objects/longobject.c.'>PyLong_AsSsize_t</a>(r-&gt;length);
+<a name='L231'><font color='red'>}</font>
+<a name='L232'>
+<a name='L233'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L234'><a href='../R/6954.html' title='Multiple refered from 3 places.'>compute_item</a>(rangeobject *r, PyObject *i)
+<a name='L235'><font color='red'>{</font>
+<a name='L236'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *incr, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L237'>    <i><font color='green'>/* PyLong equivalent to:</font></i>
+<a name='L238'><i><font color='green'>     *    return r-&gt;start + (i * r-&gt;step)</font></i>
+<a name='L239'><i><font color='green'>     */</font></i>
+<a name='L240'>    incr = <a href='../S/2775.html#L949' title='Defined at 949 in Objects/abstract.c.'>PyNumber_Multiply</a>(i, r-&gt;step);
+<a name='L241'>    <b>if</b> (!incr)
+<a name='L242'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L243'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PyNumber_Add(r-&gt;start, incr);
+<a name='L244'>    Py_DECREF(incr);
+<a name='L245'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L246'><font color='red'>}</font>
+<a name='L247'>
+<a name='L248'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L249'><a href='../R/6955.html' title='Multiple refered from 2 places.'>compute_range_item</a>(rangeobject *r, PyObject *arg)
+<a name='L250'><font color='red'>{</font>
+<a name='L251'>    <b>int</b> cmp_result;
+<a name='L252'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *i, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L253'>
+<a name='L254'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *zero = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L255'>    <b>if</b> (zero == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L256'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L257'>
+<a name='L258'>    <i><font color='green'>/* PyLong equivalent to:</font></i>
+<a name='L259'><i><font color='green'>     *   if (arg &lt; 0) {</font></i>
+<a name='L260'><i><font color='green'>     *     i = r-&gt;length + arg</font></i>
+<a name='L261'><i><font color='green'>     *   } else {</font></i>
+<a name='L262'><i><font color='green'>     *     i = arg</font></i>
+<a name='L263'><i><font color='green'>     *   }</font></i>
+<a name='L264'><i><font color='green'>     */</font></i>
+<a name='L265'>    cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L266'>    <b>if</b> (cmp_result == -1) <font color='red'>{</font>
+<a name='L267'>        Py_DECREF(zero);
+<a name='L268'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L269'>    <font color='red'>}</font>
+<a name='L270'>    <b>if</b> (cmp_result == 1) <font color='red'>{</font>
+<a name='L271'>      i = PyNumber_Add(r-&gt;length, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L272'>      <b>if</b> (!i) <font color='red'>{</font>
+<a name='L273'>        Py_DECREF(zero);
+<a name='L274'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L275'>      <font color='red'>}</font>
+<a name='L276'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L277'>      i = <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L278'>      Py_INCREF(i);
+<a name='L279'>    <font color='red'>}</font>
+<a name='L280'>
+<a name='L281'>    <i><font color='green'>/* PyLong equivalent to:</font></i>
+<a name='L282'><i><font color='green'>     *   if (i &lt; 0 || i &gt;= r-&gt;length) {</font></i>
+<a name='L283'><i><font color='green'>     *     &lt;report index out of bounds&gt;</font></i>
+<a name='L284'><i><font color='green'>     *   }</font></i>
+<a name='L285'><i><font color='green'>     */</font></i>
+<a name='L286'>    cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(i, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L287'>    Py_DECREF(zero);
+<a name='L288'>    <b>if</b> (cmp_result == 0) <font color='red'>{</font>
+<a name='L289'>        cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(i, r-&gt;length, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GE</a>);
+<a name='L290'>    <font color='red'>}</font>
+<a name='L291'>    <b>if</b> (cmp_result == -1) <font color='red'>{</font>
+<a name='L292'>       Py_DECREF(i);
+<a name='L293'>       <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L294'>    <font color='red'>}</font>
+<a name='L295'>    <b>if</b> (cmp_result == 1) <font color='red'>{</font>
+<a name='L296'>        Py_DECREF(i);
+<a name='L297'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L298'>                        "range object index out of range");
+<a name='L299'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L300'>    <font color='red'>}</font>
+<a name='L301'>
+<a name='L302'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2805.html#L234' title='Defined at 234 in Objects/rangeobject.c.'>compute_item</a>(r, i);
+<a name='L303'>    Py_DECREF(i);
+<a name='L304'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L305'><font color='red'>}</font>
+<a name='L306'>
+<a name='L307'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L308'><a href='../S/2805.html#L668' title='Refered from 668 in Objects/rangeobject.c.'>range_item</a>(rangeobject *r, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i)
+<a name='L309'><font color='red'>{</font>
+<a name='L310'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res, *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(i);
+<a name='L311'>    <b>if</b> (!<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>) <font color='red'>{</font>
+<a name='L312'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L313'>    <font color='red'>}</font>
+<a name='L314'>    res = <a href='../S/2805.html#L249' title='Defined at 249 in Objects/rangeobject.c.'>compute_range_item</a>(r, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L315'>    Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L316'>    <b>return</b> res;
+<a name='L317'><font color='red'>}</font>
+<a name='L318'>
+<a name='L319'><i><font color='green'>/* Additional helpers, since the standard slice helpers</font></i>
+<a name='L320'><i><font color='green'> * all clip to PY_SSIZE_T_MAX</font></i>
+<a name='L321'><i><font color='green'> */</font></i>
+<a name='L322'>
+<a name='L323'><i><font color='green'>/* Replace _PyEval_SliceIndex */</font></i>
+<a name='L324'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L325'><a href='../R/6958.html' title='Multiple refered from 3 places.'>compute_slice_element</a>(PyObject *obj)
+<a name='L326'><font color='red'>{</font>
+<a name='L327'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L328'>    <b>if</b> (obj != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L329'>        <b>if</b> (PyIndex_Check(obj)) <font color='red'>{</font>
+<a name='L330'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2775.html#L1196' title='Defined at 1196 in Objects/abstract.c.'>PyNumber_Index</a>(obj);
+<a name='L331'>        <font color='red'>}</font>
+<a name='L332'>    <font color='red'>}</font>
+<a name='L333'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L334'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L335'>                        "slice indices must be integers or "
+<a name='L336'>                        "None or have an __index__ method");
+<a name='L337'>    <font color='red'>}</font>
+<a name='L338'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L339'><font color='red'>}</font>
+<a name='L340'>
+<a name='L341'><i><font color='green'>/* Replace PySlice_GetIndicesEx</font></i>
+<a name='L342'><i><font color='green'> *   Result indicates whether or not the slice is empty</font></i>
+<a name='L343'><i><font color='green'> *    (-1 = error, 0 = empty slice, 1 = slice contains elements)</font></i>
+<a name='L344'><i><font color='green'> */</font></i>
+<a name='L345'><b>static</b> <b>int</b>
+<a name='L346'><a href='../S/2805.html#L517' title='Refered from 517 in Objects/rangeobject.c.'>compute_slice_indices</a>(rangeobject *r, PySliceObject *slice,
+<a name='L347'>                      PyObject **start, PyObject **stop, PyObject **step)
+<a name='L348'><font color='red'>{</font>
+<a name='L349'>    <b>int</b> cmp_result, has_elements;
+<a name='L350'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> clamped_step = 0;
+<a name='L351'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *zero = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *one = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *neg_one = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *candidate = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L352'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp_start = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *tmp_stop = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *tmp_step = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L353'>    zero = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L354'>    <b>if</b> (zero == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L355'>    one = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1);
+<a name='L356'>    <b>if</b> (one == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L357'>    neg_one = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(-1);
+<a name='L358'>    <b>if</b> (neg_one == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L359'>
+<a name='L360'>    <i><font color='green'>/* Calculate step value */</font></i>
+<a name='L361'>    <b>if</b> (slice-&gt;step == Py_None) <font color='red'>{</font>
+<a name='L362'>        clamped_step = 1;
+<a name='L363'>        tmp_step = one;
+<a name='L364'>        Py_INCREF(tmp_step);
+<a name='L365'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L366'>        <b>if</b> (!<a href='../S/3091.html#L4209' title='Defined at 4209 in Python/ceval.c.'>_PyEval_SliceIndex</a>(slice-&gt;step, &amp;clamped_step)) <b>goto</b> Fail;
+<a name='L367'>        <b>if</b> (clamped_step == 0) <font color='red'>{</font>
+<a name='L368'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L369'>                            "slice step cannot be zero");
+<a name='L370'>            <b>goto</b> Fail;
+<a name='L371'>        <font color='red'>}</font>
+<a name='L372'>        tmp_step = <a href='../S/2805.html#L325' title='Defined at 325 in Objects/rangeobject.c.'>compute_slice_element</a>(slice-&gt;step);
+<a name='L373'>        <b>if</b> (tmp_step == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L374'>    <font color='red'>}</font>
+<a name='L375'>
+<a name='L376'>    <i><font color='green'>/* Calculate start value */</font></i>
+<a name='L377'>    <b>if</b> (slice-&gt;start == Py_None) <font color='red'>{</font>
+<a name='L378'>        <b>if</b> (clamped_step &lt; 0) <font color='red'>{</font>
+<a name='L379'>            tmp_start = PyNumber_Subtract(r-&gt;length, one);
+<a name='L380'>            <b>if</b> (tmp_start == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L381'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L382'>            tmp_start = zero;
+<a name='L383'>            Py_INCREF(tmp_start);
+<a name='L384'>        <font color='red'>}</font>
+<a name='L385'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L386'>        candidate = <a href='../S/2805.html#L325' title='Defined at 325 in Objects/rangeobject.c.'>compute_slice_element</a>(slice-&gt;start);
+<a name='L387'>        <b>if</b> (candidate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L388'>        cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(candidate, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L389'>        <b>if</b> (cmp_result == -1) <b>goto</b> Fail;
+<a name='L390'>        <b>if</b> (cmp_result) <font color='red'>{</font>
+<a name='L391'>            <i><font color='green'>/* candidate &lt; 0 */</font></i>
+<a name='L392'>            tmp_start = PyNumber_Add(r-&gt;length, candidate);
+<a name='L393'>            <b>if</b> (tmp_start == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L394'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(candidate);
+<a name='L395'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L396'>            <i><font color='green'>/* candidate &gt;= 0 */</font></i>
+<a name='L397'>            tmp_start = candidate;
+<a name='L398'>            candidate = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L399'>        <font color='red'>}</font>
+<a name='L400'>        cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(tmp_start, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L401'>        <b>if</b> (cmp_result == -1) <b>goto</b> Fail;
+<a name='L402'>        <b>if</b> (cmp_result) <font color='red'>{</font>
+<a name='L403'>            <i><font color='green'>/* tmp_start &lt; 0 */</font></i>
+<a name='L404'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tmp_start);
+<a name='L405'>            <b>if</b> (clamped_step &lt; 0) <font color='red'>{</font>
+<a name='L406'>                tmp_start = neg_one;
+<a name='L407'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L408'>                tmp_start = zero;
+<a name='L409'>            <font color='red'>}</font>
+<a name='L410'>            Py_INCREF(tmp_start);
+<a name='L411'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L412'>            <i><font color='green'>/* tmp_start &gt;= 0 */</font></i>
+<a name='L413'>            cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(tmp_start, r-&gt;length, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GE</a>);
+<a name='L414'>            <b>if</b> (cmp_result == -1) <b>goto</b> Fail;
+<a name='L415'>            <b>if</b> (cmp_result) <font color='red'>{</font>
+<a name='L416'>                <i><font color='green'>/* tmp_start &gt;= r-&gt;length */</font></i>
+<a name='L417'>                <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tmp_start);
+<a name='L418'>                <b>if</b> (clamped_step &lt; 0) <font color='red'>{</font>
+<a name='L419'>                    tmp_start = PyNumber_Subtract(r-&gt;length, one);
+<a name='L420'>                    <b>if</b> (tmp_start == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L421'>                <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L422'>                    tmp_start = r-&gt;length;
+<a name='L423'>                    Py_INCREF(tmp_start);
+<a name='L424'>                <font color='red'>}</font>
+<a name='L425'>            <font color='red'>}</font>
+<a name='L426'>        <font color='red'>}</font>
+<a name='L427'>    <font color='red'>}</font>
+<a name='L428'>
+<a name='L429'>    <i><font color='green'>/* Calculate stop value */</font></i>
+<a name='L430'>    <b>if</b> (slice-&gt;stop == Py_None) <font color='red'>{</font>
+<a name='L431'>        <b>if</b> (clamped_step &lt; 0) <font color='red'>{</font>
+<a name='L432'>            tmp_stop = neg_one;
+<a name='L433'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L434'>            tmp_stop = r-&gt;length;
+<a name='L435'>        <font color='red'>}</font>
+<a name='L436'>        Py_INCREF(tmp_stop);
+<a name='L437'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L438'>        candidate = <a href='../S/2805.html#L325' title='Defined at 325 in Objects/rangeobject.c.'>compute_slice_element</a>(slice-&gt;stop);
+<a name='L439'>        <b>if</b> (candidate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L440'>        cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(candidate, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L441'>        <b>if</b> (cmp_result == -1) <b>goto</b> Fail;
+<a name='L442'>        <b>if</b> (cmp_result) <font color='red'>{</font>
+<a name='L443'>            <i><font color='green'>/* candidate &lt; 0 */</font></i>
+<a name='L444'>            tmp_stop = PyNumber_Add(r-&gt;length, candidate);
+<a name='L445'>            <b>if</b> (tmp_stop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L446'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(candidate);
+<a name='L447'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L448'>            <i><font color='green'>/* candidate &gt;= 0 */</font></i>
+<a name='L449'>            tmp_stop = candidate;
+<a name='L450'>            candidate = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L451'>        <font color='red'>}</font>
+<a name='L452'>        cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(tmp_stop, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L453'>        <b>if</b> (cmp_result == -1) <b>goto</b> Fail;
+<a name='L454'>        <b>if</b> (cmp_result) <font color='red'>{</font>
+<a name='L455'>            <i><font color='green'>/* tmp_stop &lt; 0 */</font></i>
+<a name='L456'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tmp_stop);
+<a name='L457'>            <b>if</b> (clamped_step &lt; 0) <font color='red'>{</font>
+<a name='L458'>                tmp_stop = neg_one;
+<a name='L459'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L460'>                tmp_stop = zero;
+<a name='L461'>            <font color='red'>}</font>
+<a name='L462'>            Py_INCREF(tmp_stop);
+<a name='L463'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L464'>            <i><font color='green'>/* tmp_stop &gt;= 0 */</font></i>
+<a name='L465'>            cmp_result = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(tmp_stop, r-&gt;length, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GE</a>);
+<a name='L466'>            <b>if</b> (cmp_result == -1) <b>goto</b> Fail;
+<a name='L467'>            <b>if</b> (cmp_result) <font color='red'>{</font>
+<a name='L468'>                <i><font color='green'>/* tmp_stop &gt;= r-&gt;length */</font></i>
+<a name='L469'>                <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tmp_stop);
+<a name='L470'>                <b>if</b> (clamped_step &lt; 0) <font color='red'>{</font>
+<a name='L471'>                    tmp_stop = PyNumber_Subtract(r-&gt;length, one);
+<a name='L472'>                    <b>if</b> (tmp_stop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> Fail;
+<a name='L473'>                <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L474'>                    tmp_stop = r-&gt;length;
+<a name='L475'>                    Py_INCREF(tmp_start);
+<a name='L476'>                <font color='red'>}</font>
+<a name='L477'>            <font color='red'>}</font>
+<a name='L478'>        <font color='red'>}</font>
+<a name='L479'>    <font color='red'>}</font>
+<a name='L480'>
+<a name='L481'>    <i><font color='green'>/* Check if the slice is empty or not */</font></i>
+<a name='L482'>    <b>if</b> (clamped_step &lt; 0) <font color='red'>{</font>
+<a name='L483'>        has_elements = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(tmp_start, tmp_stop, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GT</a>);
+<a name='L484'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L485'>        has_elements = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(tmp_start, tmp_stop, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L486'>    <font color='red'>}</font>
+<a name='L487'>    <b>if</b> (has_elements == -1) <b>goto</b> Fail;
+<a name='L488'>
+<a name='L489'>    *start = tmp_start;
+<a name='L490'>    *stop = tmp_stop;
+<a name='L491'>    *step = tmp_step;
+<a name='L492'>    Py_DECREF(neg_one);
+<a name='L493'>    Py_DECREF(one);
+<a name='L494'>    Py_DECREF(zero);
+<a name='L495'>    <b>return</b> has_elements;
+<a name='L496'>
+<a name='L497'>  Fail:
+<a name='L498'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp_start);
+<a name='L499'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp_stop);
+<a name='L500'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp_step);
+<a name='L501'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(candidate);
+<a name='L502'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(neg_one);
+<a name='L503'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(one);
+<a name='L504'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(zero);
+<a name='L505'>    <b>return</b> -1;
+<a name='L506'><font color='red'>}</font>
+<a name='L507'>
+<a name='L508'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L509'><a href='../S/2805.html#L716' title='Refered from 716 in Objects/rangeobject.c.'>compute_slice</a>(rangeobject *r, PyObject *_slice)
+<a name='L510'><font color='red'>{</font>
+<a name='L511'>    PySliceObject *slice = (PySliceObject *) <a href='../S/569.html#L319' title='Defined at 319 in Include/Python-ast.h.'>_slice</a>;
+<a name='L512'>    <a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L513'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *start = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *stop = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *step = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L514'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *substart = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *substop = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *substep = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L515'>    <b>int</b> has_elements;
+<a name='L516'>
+<a name='L517'>    has_elements = <a href='../S/2805.html#L346' title='Defined at 346 in Objects/rangeobject.c.'>compute_slice_indices</a>(r, slice, &amp;start, &amp;stop, &amp;step);
+<a name='L518'>    <b>if</b> (has_elements == -1) <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L519'>
+<a name='L520'>    substep = <a href='../S/2775.html#L949' title='Defined at 949 in Objects/abstract.c.'>PyNumber_Multiply</a>(r-&gt;step, step);
+<a name='L521'>    <b>if</b> (substep == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> fail;
+<a name='L522'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(step);
+<a name='L523'>
+<a name='L524'>    substart = <a href='../S/2805.html#L234' title='Defined at 234 in Objects/rangeobject.c.'>compute_item</a>(r, start);
+<a name='L525'>    <b>if</b> (substart == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> fail;
+<a name='L526'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(start);
+<a name='L527'>
+<a name='L528'>    <b>if</b> (has_elements) <font color='red'>{</font>
+<a name='L529'>        substop = <a href='../S/2805.html#L234' title='Defined at 234 in Objects/rangeobject.c.'>compute_item</a>(r, stop);
+<a name='L530'>        <b>if</b> (substop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>goto</b> fail;
+<a name='L531'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L532'>        substop = substart;
+<a name='L533'>        Py_INCREF(substop);
+<a name='L534'>    <font color='red'>}</font>
+<a name='L535'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(stop);
+<a name='L536'>
+<a name='L537'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2805.html#L51' title='Defined at 51 in Objects/rangeobject.c.'>make_range_object</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(r), substart, substop, substep);
+<a name='L538'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L539'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L540'>    <font color='red'>}</font>
+<a name='L541'>fail:
+<a name='L542'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(start);
+<a name='L543'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(stop);
+<a name='L544'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(step);
+<a name='L545'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(substart);
+<a name='L546'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(substop);
+<a name='L547'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(substep);
+<a name='L548'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L549'><font color='red'>}</font>
+<a name='L550'>
+<a name='L551'><i><font color='green'>/* Assumes (PyLong_CheckExact(ob) || PyBool_Check(ob)) */</font></i>
+<a name='L552'><b>static</b> <b>int</b>
+<a name='L553'><a href='../R/9946.html' title='Multiple refered from 3 places.'>range_contains_long</a>(rangeobject *r, PyObject *ob)
+<a name='L554'><font color='red'>{</font>
+<a name='L555'>    <b>int</b> cmp1, cmp2, cmp3;
+<a name='L556'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp1 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L557'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp2 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L558'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *zero = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L559'>    <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = -1;
+<a name='L560'>
+<a name='L561'>    zero = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L562'>    <b>if</b> (zero == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <i><font color='green'>/* MemoryError in int(0) */</font></i>
+<a name='L563'>        <b>goto</b> end;
+<a name='L564'>
+<a name='L565'>    <i><font color='green'>/* Check if the value can possibly be in the range. */</font></i>
+<a name='L566'>
+<a name='L567'>    cmp1 = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(r-&gt;step, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GT</a>);
+<a name='L568'>    <b>if</b> (cmp1 == -1)
+<a name='L569'>        <b>goto</b> end;
+<a name='L570'>    <b>if</b> (cmp1 == 1) <font color='red'>{</font> <i><font color='green'>/* positive steps: start &lt;= ob &lt; stop */</font></i>
+<a name='L571'>        cmp2 = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(r-&gt;start, ob, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LE</a>);
+<a name='L572'>        cmp3 = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(ob, r-&gt;stop, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L573'>    <font color='red'>}</font>
+<a name='L574'>    <b>else</b> <font color='red'>{</font> <i><font color='green'>/* negative steps: stop &lt; ob &lt;= start */</font></i>
+<a name='L575'>        cmp2 = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(ob, r-&gt;start, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LE</a>);
+<a name='L576'>        cmp3 = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(r-&gt;stop, ob, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>);
+<a name='L577'>    <font color='red'>}</font>
+<a name='L578'>
+<a name='L579'>    <b>if</b> (cmp2 == -1 || cmp3 == -1) <i><font color='green'>/* TypeError */</font></i>
+<a name='L580'>        <b>goto</b> end;
+<a name='L581'>    <b>if</b> (cmp2 == 0 || cmp3 == 0) <font color='red'>{</font> <i><font color='green'>/* ob outside of range */</font></i>
+<a name='L582'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = 0;
+<a name='L583'>        <b>goto</b> end;
+<a name='L584'>    <font color='red'>}</font>
+<a name='L585'>
+<a name='L586'>    <i><font color='green'>/* Check that the stride does not invalidate ob's membership. */</font></i>
+<a name='L587'>    tmp1 = PyNumber_Subtract(ob, r-&gt;start);
+<a name='L588'>    <b>if</b> (tmp1 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L589'>        <b>goto</b> end;
+<a name='L590'>    tmp2 = <a href='../S/2775.html#L980' title='Defined at 980 in Objects/abstract.c.'>PyNumber_Remainder</a>(tmp1, r-&gt;step);
+<a name='L591'>    <b>if</b> (tmp2 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L592'>        <b>goto</b> end;
+<a name='L593'>    <i><font color='green'>/* result = (int(ob) - start % step) == 0 */</font></i>
+<a name='L594'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(tmp2, zero, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L595'>  end:
+<a name='L596'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp1);
+<a name='L597'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp2);
+<a name='L598'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(zero);
+<a name='L599'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L600'><font color='red'>}</font>
+<a name='L601'>
+<a name='L602'><b>static</b> <b>int</b>
+<a name='L603'><a href='../S/2805.html#L672' title='Refered from 672 in Objects/rangeobject.c.'>range_contains</a>(rangeobject *r, PyObject *ob)
+<a name='L604'><font color='red'>{</font>
+<a name='L605'>    <b>if</b> (PyLong_CheckExact(ob) || <a href='../S/2618.html#L46' title='Defined at 46 in Modules/_tkinter.c.'>PyBool_Check</a>(ob))
+<a name='L606'>        <b>return</b> <a href='../S/2805.html#L553' title='Defined at 553 in Objects/rangeobject.c.'>range_contains_long</a>(r, ob);
+<a name='L607'>
+<a name='L608'>    <b>return</b> (<b>int</b>)<a href='../S/2775.html#L1868' title='Defined at 1868 in Objects/abstract.c.'>_PySequence_IterSearch</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)r, ob,
+<a name='L609'>                                       PY_ITERSEARCH_CONTAINS);
+<a name='L610'><font color='red'>}</font>
+<a name='L611'>
+<a name='L612'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L613'><a href='../S/2805.html#L747' title='Refered from 747 in Objects/rangeobject.c.'>range_count</a>(rangeobject *r, PyObject *ob)
+<a name='L614'><font color='red'>{</font>
+<a name='L615'>    <b>if</b> (PyLong_CheckExact(ob) || <a href='../S/2618.html#L46' title='Defined at 46 in Modules/_tkinter.c.'>PyBool_Check</a>(ob)) <font color='red'>{</font>
+<a name='L616'>        <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2805.html#L553' title='Defined at 553 in Objects/rangeobject.c.'>range_contains_long</a>(r, ob);
+<a name='L617'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == -1)
+<a name='L618'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L619'>        <b>else</b> <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)
+<a name='L620'>            <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1);
+<a name='L621'>        <b>else</b>
+<a name='L622'>            <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L623'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L624'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count;
+<a name='L625'>        count = <a href='../S/2775.html#L1868' title='Defined at 1868 in Objects/abstract.c.'>_PySequence_IterSearch</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)r, ob, PY_ITERSEARCH_COUNT);
+<a name='L626'>        <b>if</b> (count == -1)
+<a name='L627'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L628'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(count);
+<a name='L629'>    <font color='red'>}</font>
+<a name='L630'><font color='red'>}</font>
+<a name='L631'>
+<a name='L632'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L633'><a href='../S/2805.html#L748' title='Refered from 748 in Objects/rangeobject.c.'>range_index</a>(rangeobject *r, PyObject *ob)
+<a name='L634'><font color='red'>{</font>
+<a name='L635'>    <b>int</b> contains;
+<a name='L636'>
+<a name='L637'>    <b>if</b> (!PyLong_CheckExact(ob) &amp;&amp; !<a href='../S/2618.html#L46' title='Defined at 46 in Modules/_tkinter.c.'>PyBool_Check</a>(ob)) <font color='red'>{</font>
+<a name='L638'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> index;
+<a name='L639'>        index = <a href='../S/2775.html#L1868' title='Defined at 1868 in Objects/abstract.c.'>_PySequence_IterSearch</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)r, ob, PY_ITERSEARCH_INDEX);
+<a name='L640'>        <b>if</b> (index == -1)
+<a name='L641'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L642'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(index);
+<a name='L643'>    <font color='red'>}</font>
+<a name='L644'>
+<a name='L645'>    contains = <a href='../S/2805.html#L553' title='Defined at 553 in Objects/rangeobject.c.'>range_contains_long</a>(r, ob);
+<a name='L646'>    <b>if</b> (contains == -1)
+<a name='L647'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L648'>
+<a name='L649'>    <b>if</b> (contains) <font color='red'>{</font>
+<a name='L650'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *idx, *tmp = PyNumber_Subtract(ob, r-&gt;start);
+<a name='L651'>        <b>if</b> (tmp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L652'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L653'>        <i><font color='green'>/* idx = (ob - r.start) // r.step */</font></i>
+<a name='L654'>        idx = <a href='../S/2775.html#L968' title='Defined at 968 in Objects/abstract.c.'>PyNumber_FloorDivide</a>(tmp, r-&gt;step);
+<a name='L655'>        Py_DECREF(tmp);
+<a name='L656'>        <b>return</b> idx;
+<a name='L657'>    <font color='red'>}</font>
+<a name='L658'>
+<a name='L659'>    <i><font color='green'>/* object is not in the range */</font></i>
+<a name='L660'>    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError, "%R is not in range", ob);
+<a name='L661'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L662'><font color='red'>}</font>
+<a name='L663'>
+<a name='L664'><b>static</b> <a href='../S/544.html#L261' title='Defined at 261 in Include/object.h.'>PySequenceMethods</a> range_as_sequence = <font color='red'>{</font>
+<a name='L665'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2805.html#L228' title='Defined at 228 in Objects/rangeobject.c.'>range_length</a>,      <i><font color='green'>/* sq_length */</font></i>
+<a name='L666'>    0,                          <i><font color='green'>/* sq_concat */</font></i>
+<a name='L667'>    0,                          <i><font color='green'>/* sq_repeat */</font></i>
+<a name='L668'>    (ssizeargfunc)<a href='../S/2805.html#L308' title='Defined at 308 in Objects/rangeobject.c.'>range_item</a>,   <i><font color='green'>/* sq_item */</font></i>
+<a name='L669'>    0,                          <i><font color='green'>/* sq_slice */</font></i>
+<a name='L670'>    0,                          <i><font color='green'>/* sq_ass_item */</font></i>
+<a name='L671'>    0,                          <i><font color='green'>/* sq_ass_slice */</font></i>
+<a name='L672'>    (objobjproc)<a href='../S/2805.html#L603' title='Defined at 603 in Objects/rangeobject.c.'>range_contains</a>, <i><font color='green'>/* sq_contains */</font></i>
+<a name='L673'><font color='red'>}</font>;
+<a name='L674'>
+<a name='L675'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L676'><a href='../S/2805.html#L762' title='Refered from 762 in Objects/rangeobject.c.'>range_repr</a>(rangeobject *r)
+<a name='L677'><font color='red'>{</font>
+<a name='L678'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> istep;
+<a name='L679'>
+<a name='L680'>    <i><font color='green'>/* Check for special case values for printing.  We don't always</font></i>
+<a name='L681'><i><font color='green'>       need the step value.  We don't care about errors</font></i>
+<a name='L682'><i><font color='green'>       (it means overflow), so clear the errors. */</font></i>
+<a name='L683'>    istep = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(r-&gt;step, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L684'>    <b>if</b> (istep != 1 || (istep == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())) <font color='red'>{</font>
+<a name='L685'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L686'>    <font color='red'>}</font>
+<a name='L687'>
+<a name='L688'>    <b>if</b> (istep == 1)
+<a name='L689'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("range(%R, %R)", r-&gt;start, r-&gt;stop);
+<a name='L690'>    <b>else</b>
+<a name='L691'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("range(%R, %R, %R)",
+<a name='L692'>                                    r-&gt;start, r-&gt;stop, r-&gt;step);
+<a name='L693'><font color='red'>}</font>
+<a name='L694'>
+<a name='L695'><i><font color='green'>/* Pickling support */</font></i>
+<a name='L696'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L697'><a href='../S/2805.html#L746' title='Refered from 746 in Objects/rangeobject.c.'>range_reduce</a>(rangeobject *r, PyObject *args)
+<a name='L698'><font color='red'>{</font>
+<a name='L699'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("(O(OOO))", <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(r),
+<a name='L700'>                         r-&gt;start, r-&gt;stop, r-&gt;step);
+<a name='L701'><font color='red'>}</font>
+<a name='L702'>
+<a name='L703'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L704'><a href='../S/2805.html#L727' title='Refered from 727 in Objects/rangeobject.c.'>range_subscript</a>(rangeobject* self, PyObject* item)
+<a name='L705'><font color='red'>{</font>
+<a name='L706'>    <b>if</b> (PyIndex_Check(item)) <font color='red'>{</font>
+<a name='L707'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *i, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L708'>        i = <a href='../S/2775.html#L1196' title='Defined at 1196 in Objects/abstract.c.'>PyNumber_Index</a>(item);
+<a name='L709'>        <b>if</b> (!i)
+<a name='L710'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L711'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2805.html#L249' title='Defined at 249 in Objects/rangeobject.c.'>compute_range_item</a>(self, i);
+<a name='L712'>        Py_DECREF(i);
+<a name='L713'>        <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L714'>    <font color='red'>}</font>
+<a name='L715'>    <b>if</b> (PySlice_Check(item)) <font color='red'>{</font>
+<a name='L716'>        <b>return</b> <a href='../S/2805.html#L509' title='Defined at 509 in Objects/rangeobject.c.'>compute_slice</a>(self, item);
+<a name='L717'>    <font color='red'>}</font>
+<a name='L718'>    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L719'>                 "range indices must be integers or slices, not %.200s",
+<a name='L720'>                 item-&gt;ob_type-&gt;tp_name);
+<a name='L721'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L722'><font color='red'>}</font>
+<a name='L723'>
+<a name='L724'>
+<a name='L725'><b>static</b> <a href='../S/544.html#L267' title='Defined at 267 in Include/object.h.'>PyMappingMethods</a> range_as_mapping = <font color='red'>{</font>
+<a name='L726'>        (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2805.html#L228' title='Defined at 228 in Objects/rangeobject.c.'>range_length</a>,       <i><font color='green'>/* mp_length */</font></i>
+<a name='L727'>        (binaryfunc)<a href='../S/2805.html#L704' title='Defined at 704 in Objects/rangeobject.c.'>range_subscript</a>, <i><font color='green'>/* mp_subscript */</font></i>
+<a name='L728'>        (objobjargproc)0,            <i><font color='green'>/* mp_ass_subscript */</font></i>
+<a name='L729'><font color='red'>}</font>;
+<a name='L730'>
+<a name='L731'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * <a href='../S/2805.html#L1044' title='Defined at 1044 in Objects/rangeobject.c.'>range_iter</a>(PyObject *seq);
+<a name='L732'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * <a href='../S/2805.html#L1102' title='Defined at 1102 in Objects/rangeobject.c.'>range_reverse</a>(PyObject *seq);
+<a name='L733'>
+<a name='L734'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(reverse_doc,
+<a name='L735'>"Returns a reverse iterator.");
+<a name='L736'>
+<a name='L737'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(count_doc,
+<a name='L738'>"rangeobject.count(value) -&gt; integer -- return number of occurrences of value");
+<a name='L739'>
+<a name='L740'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(index_doc,
+<a name='L741'>"rangeobject.index(value, [start, [stop]]) -&gt; integer -- return index of value.\n"
+<a name='L742'>"Raises ValueError if the value is not present.");
+<a name='L743'>
+<a name='L744'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> range_methods[] = <font color='red'>{</font>
+<a name='L745'>    <font color='red'>{</font>"__reversed__",    (PyCFunction)<a href='../S/2805.html#L1102' title='Defined at 1102 in Objects/rangeobject.c.'>range_reverse</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, reverse_doc<font color='red'>}</font>,
+<a name='L746'>    <font color='red'>{</font>"__reduce__",      (PyCFunction)<a href='../S/2805.html#L697' title='Defined at 697 in Objects/rangeobject.c.'>range_reduce</a>,  <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L747'>    <font color='red'>{</font>"count",           (PyCFunction)<a href='../S/2805.html#L613' title='Defined at 613 in Objects/rangeobject.c.'>range_count</a>,   METH_O,      count_doc<font color='red'>}</font>,
+<a name='L748'>    <font color='red'>{</font>"index",           (PyCFunction)<a href='../S/2805.html#L633' title='Defined at 633 in Objects/rangeobject.c.'>range_index</a>,   METH_O,      index_doc<font color='red'>}</font>,
+<a name='L749'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L750'><font color='red'>}</font>;
+<a name='L751'>
+<a name='L752'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyRange_Type = <font color='red'>{</font>
+<a name='L753'>        <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L754'>        "range",                <i><font color='green'>/* Name of this type */</font></i>
+<a name='L755'>        <b>sizeof</b>(<a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a>),    <i><font color='green'>/* Basic object size */</font></i>
+<a name='L756'>        0,                      <i><font color='green'>/* Item size for varobject */</font></i>
+<a name='L757'>        (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2805.html#L143' title='Defined at 143 in Objects/rangeobject.c.'>range_dealloc</a>, <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L758'>        0,                      <i><font color='green'>/* tp_print */</font></i>
+<a name='L759'>        0,                      <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L760'>        0,                      <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L761'>        0,                      <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L762'>        (reprfunc)<a href='../S/2805.html#L676' title='Defined at 676 in Objects/rangeobject.c.'>range_repr</a>,   <i><font color='green'>/* tp_repr */</font></i>
+<a name='L763'>        0,                      <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L764'>        &amp;range_as_sequence,     <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L765'>        &amp;range_as_mapping,      <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L766'>        0,                      <i><font color='green'>/* tp_hash */</font></i>
+<a name='L767'>        0,                      <i><font color='green'>/* tp_call */</font></i>
+<a name='L768'>        0,                      <i><font color='green'>/* tp_str */</font></i>
+<a name='L769'>        <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,  <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L770'>        0,                      <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L771'>        0,                      <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L772'>        Py_TPFLAGS_DEFAULT,     <i><font color='green'>/* tp_flags */</font></i>
+<a name='L773'>        range_doc,              <i><font color='green'>/* tp_doc */</font></i>
+<a name='L774'>        0,                      <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L775'>        0,                      <i><font color='green'>/* tp_clear */</font></i>
+<a name='L776'>        0,                      <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L777'>        0,                      <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L778'>        <a href='../S/2805.html#L1044' title='Defined at 1044 in Objects/rangeobject.c.'>range_iter</a>,             <i><font color='green'>/* tp_iter */</font></i>
+<a name='L779'>        0,                      <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L780'>        range_methods,          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L781'>        0,                      <i><font color='green'>/* tp_members */</font></i>
+<a name='L782'>        0,                      <i><font color='green'>/* tp_getset */</font></i>
+<a name='L783'>        0,                      <i><font color='green'>/* tp_base */</font></i>
+<a name='L784'>        0,                      <i><font color='green'>/* tp_dict */</font></i>
+<a name='L785'>        0,                      <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L786'>        0,                      <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L787'>        0,                      <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L788'>        0,                      <i><font color='green'>/* tp_init */</font></i>
+<a name='L789'>        0,                      <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L790'>        <a href='../S/2805.html#L78' title='Defined at 78 in Objects/rangeobject.c.'>range_new</a>,              <i><font color='green'>/* tp_new */</font></i>
+<a name='L791'><font color='red'>}</font>;
+<a name='L792'>
+<a name='L793'><i><font color='green'>/*********************** range Iterator **************************/</font></i>
+<a name='L794'>
+<a name='L795'><i><font color='green'>/* There are 2 types of iterators, one for C longs, the other for</font></i>
+<a name='L796'><i><font color='green'>   Python longs (ie, PyObjects).  This should make iteration fast</font></i>
+<a name='L797'><i><font color='green'>   in the normal case, but possible for any numeric value.</font></i>
+<a name='L798'><i><font color='green'>*/</font></i>
+<a name='L799'>
+<a name='L800'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L801'>        <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L802'>        <b>long</b>    index;
+<a name='L803'>        <b>long</b>    start;
+<a name='L804'>        <b>long</b>    step;
+<a name='L805'>        <b>long</b>    len;
+<a name='L806'><font color='red'>}</font> <a href='../R/9961.html' title='Multiple refered from 2 places.'>rangeiterobject</a>;
+<a name='L807'>
+<a name='L808'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L809'><a href='../S/2805.html#L864' title='Refered from 864 in Objects/rangeobject.c.'>rangeiter_next</a>(rangeiterobject *r)
+<a name='L810'><font color='red'>{</font>
+<a name='L811'>    <b>if</b> (r-&gt;index &lt; r-&gt;len)
+<a name='L812'>        <i><font color='green'>/* cast to unsigned to avoid possible signed overflow</font></i>
+<a name='L813'><i><font color='green'>           in intermediate calculations. */</font></i>
+<a name='L814'>        <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)(r-&gt;start +
+<a name='L815'>                                      (<b>unsigned</b> <b>long</b>)(r-&gt;index++) * r-&gt;step));
+<a name='L816'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L817'><font color='red'>}</font>
+<a name='L818'>
+<a name='L819'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L820'><a href='../S/2805.html#L829' title='Refered from 829 in Objects/rangeobject.c.'>rangeiter_len</a>(rangeiterobject *r)
+<a name='L821'><font color='red'>{</font>
+<a name='L822'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(r-&gt;len - r-&gt;index);
+<a name='L823'><font color='red'>}</font>
+<a name='L824'>
+<a name='L825'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(length_hint_doc,
+<a name='L826'>             "Private method returning an estimate of len(list(it)).");
+<a name='L827'>
+<a name='L828'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> rangeiter_methods[] = <font color='red'>{</font>
+<a name='L829'>    <font color='red'>{</font>"__length_hint__", (PyCFunction)<a href='../S/2805.html#L820' title='Defined at 820 in Objects/rangeobject.c.'>rangeiter_len</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L830'>        length_hint_doc<font color='red'>}</font>,
+<a name='L831'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L832'><font color='red'>}</font>;
+<a name='L833'>
+<a name='L834'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2805.html#L931' title='Defined at 931 in Objects/rangeobject.c.'>rangeiter_new</a>(PyTypeObject *, PyObject *args, PyObject *kw);
+<a name='L835'>
+<a name='L836'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyRangeIter_Type = <font color='red'>{</font>
+<a name='L837'>        <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L838'>        "range_iterator",                        <i><font color='green'>/* tp_name */</font></i>
+<a name='L839'>        <b>sizeof</b>(<a href='../S/2805.html#L806' title='Defined at 806 in Objects/rangeobject.c.'>rangeiterobject</a>),                <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L840'>        0,                                      <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L841'>        <i><font color='green'>/* methods */</font></i>
+<a name='L842'>        (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)PyObject_Del,               <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L843'>        0,                                      <i><font color='green'>/* tp_print */</font></i>
+<a name='L844'>        0,                                      <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L845'>        0,                                      <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L846'>        0,                                      <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L847'>        0,                                      <i><font color='green'>/* tp_repr */</font></i>
+<a name='L848'>        0,                                      <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L849'>        0,                                      <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L850'>        0,                                      <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L851'>        0,                                      <i><font color='green'>/* tp_hash */</font></i>
+<a name='L852'>        0,                                      <i><font color='green'>/* tp_call */</font></i>
+<a name='L853'>        0,                                      <i><font color='green'>/* tp_str */</font></i>
+<a name='L854'>        <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L855'>        0,                                      <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L856'>        0,                                      <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L857'>        Py_TPFLAGS_DEFAULT,                     <i><font color='green'>/* tp_flags */</font></i>
+<a name='L858'>        0,                                      <i><font color='green'>/* tp_doc */</font></i>
+<a name='L859'>        0,                                      <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L860'>        0,                                      <i><font color='green'>/* tp_clear */</font></i>
+<a name='L861'>        0,                                      <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L862'>        0,                                      <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L863'>        <a href='../S/2803.html#L933' title='Defined at 933 in Objects/object.c.'>PyObject_SelfIter</a>,                      <i><font color='green'>/* tp_iter */</font></i>
+<a name='L864'>        (iternextfunc)<a href='../S/2805.html#L809' title='Defined at 809 in Objects/rangeobject.c.'>rangeiter_next</a>,           <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L865'>        rangeiter_methods,                      <i><font color='green'>/* tp_methods */</font></i>
+<a name='L866'>        0,                                      <i><font color='green'>/* tp_members */</font></i>
+<a name='L867'>        0,                                      <i><font color='green'>/* tp_getset */</font></i>
+<a name='L868'>        0,                                      <i><font color='green'>/* tp_base */</font></i>
+<a name='L869'>        0,                                      <i><font color='green'>/* tp_dict */</font></i>
+<a name='L870'>        0,                                      <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L871'>        0,                                      <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L872'>        0,                                      <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L873'>        0,                                      <i><font color='green'>/* tp_init */</font></i>
+<a name='L874'>        0,                                      <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L875'>        <a href='../S/2805.html#L931' title='Defined at 931 in Objects/rangeobject.c.'>rangeiter_new</a>,                          <i><font color='green'>/* tp_new */</font></i>
+<a name='L876'><font color='red'>}</font>;
+<a name='L877'>
+<a name='L878'><i><font color='green'>/* Return number of items in range (lo, hi, step).  step != 0</font></i>
+<a name='L879'><i><font color='green'> * required.  The result always fits in an unsigned long.</font></i>
+<a name='L880'><i><font color='green'> */</font></i>
+<a name='L881'><b>static</b> <b>unsigned</b> <b>long</b>
+<a name='L882'><a href='../R/8065.html' title='Multiple refered from 2 places.'>get_len_of_range</a>(<b>long</b> lo, <b>long</b> hi, <b>long</b> step)
+<a name='L883'><font color='red'>{</font>
+<a name='L884'>    <i><font color='green'>/* -------------------------------------------------------------</font></i>
+<a name='L885'><i><font color='green'>    If step &gt; 0 and lo &gt;= hi, or step &lt; 0 and lo &lt;= hi, the range is empty.</font></i>
+<a name='L886'><i><font color='green'>    Else for step &gt; 0, if n values are in the range, the last one is</font></i>
+<a name='L887'><i><font color='green'>    lo + (n-1)*step, which must be &lt;= hi-1.  Rearranging,</font></i>
+<a name='L888'><i><font color='green'>    n &lt;= (hi - lo - 1)/step + 1, so taking the floor of the RHS gives</font></i>
+<a name='L889'><i><font color='green'>    the proper value.  Since lo &lt; hi in this case, hi-lo-1 &gt;= 0, so</font></i>
+<a name='L890'><i><font color='green'>    the RHS is non-negative and so truncation is the same as the</font></i>
+<a name='L891'><i><font color='green'>    floor.  Letting M be the largest positive long, the worst case</font></i>
+<a name='L892'><i><font color='green'>    for the RHS numerator is hi=M, lo=-M-1, and then</font></i>
+<a name='L893'><i><font color='green'>    hi-lo-1 = M-(-M-1)-1 = 2*M.  Therefore unsigned long has enough</font></i>
+<a name='L894'><i><font color='green'>    precision to compute the RHS exactly.  The analysis for step &lt; 0</font></i>
+<a name='L895'><i><font color='green'>    is similar.</font></i>
+<a name='L896'><i><font color='green'>    ---------------------------------------------------------------*/</font></i>
+<a name='L897'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(step != 0);
+<a name='L898'>    <b>if</b> (step &gt; 0 &amp;&amp; lo &lt; hi)
+<a name='L899'>        <b>return</b> 1UL + (hi - 1UL - lo) / step;
+<a name='L900'>    <b>else</b> <b>if</b> (step &lt; 0 &amp;&amp; lo &gt; hi)
+<a name='L901'>        <b>return</b> 1UL + (lo - 1UL - hi) / (0UL - step);
+<a name='L902'>    <b>else</b>
+<a name='L903'>        <b>return</b> 0UL;
+<a name='L904'><font color='red'>}</font>
+<a name='L905'>
+<a name='L906'><i><font color='green'>/* Initialize a rangeiter object.  If the length of the rangeiter object</font></i>
+<a name='L907'><i><font color='green'>   is not representable as a C long, OverflowError is raised. */</font></i>
+<a name='L908'>
+<a name='L909'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L910'><a href='../R/7664.html' title='Multiple refered from 3 places.'>fast_range_iter</a>(<b>long</b> start, <b>long</b> stop, <b>long</b> step)
+<a name='L911'><font color='red'>{</font>
+<a name='L912'>    <a href='../S/2805.html#L806' title='Defined at 806 in Objects/rangeobject.c.'>rangeiterobject</a> *it = PyObject_New(<a href='../S/2805.html#L806' title='Defined at 806 in Objects/rangeobject.c.'>rangeiterobject</a>, &amp;PyRangeIter_Type);
+<a name='L913'>    <b>unsigned</b> <b>long</b> ulen;
+<a name='L914'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L915'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L916'>    it-&gt;start = start;
+<a name='L917'>    it-&gt;step = step;
+<a name='L918'>    ulen = <a href='../S/2805.html#L882' title='Defined at 882 in Objects/rangeobject.c.'>get_len_of_range</a>(start, stop, step);
+<a name='L919'>    <b>if</b> (ulen &gt; (<b>unsigned</b> <b>long</b>)<a href='../D/1965.html' title='Multiple defined in 2 places.'>LONG_MAX</a>) <font color='red'>{</font>
+<a name='L920'>        Py_DECREF(it);
+<a name='L921'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L922'>                        "range too large to represent as a range_iterator");
+<a name='L923'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L924'>    <font color='red'>}</font>
+<a name='L925'>    it-&gt;len = (<b>long</b>)ulen;
+<a name='L926'>    it-&gt;index = 0;
+<a name='L927'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)it;
+<a name='L928'><font color='red'>}</font>
+<a name='L929'>
+<a name='L930'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L931'><a href='../R/9959.html' title='Multiple refered from 2 places.'>rangeiter_new</a>(PyTypeObject *type, PyObject *args, PyObject *kw)
+<a name='L932'><font color='red'>{</font>
+<a name='L933'>    <b>long</b> start, stop, step;
+<a name='L934'>
+<a name='L935'>    <b>if</b> (!<a href='../S/3112.html#L1777' title='Defined at 1777 in Python/getargs.c.'>_PyArg_NoKeywords</a>("rangeiter()", kw))
+<a name='L936'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L937'>
+<a name='L938'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "lll;rangeiter() requires 3 int arguments",
+<a name='L939'>                          &amp;start, &amp;stop, &amp;step))
+<a name='L940'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L941'>
+<a name='L942'>    <b>return</b> <a href='../S/2805.html#L910' title='Defined at 910 in Objects/rangeobject.c.'>fast_range_iter</a>(start, stop, step);
+<a name='L943'><font color='red'>}</font>
+<a name='L944'>
+<a name='L945'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L946'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L947'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *index;
+<a name='L948'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *start;
+<a name='L949'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *step;
+<a name='L950'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *len;
+<a name='L951'><font color='red'>}</font> <a href='../R/8802.html' title='Multiple refered from 5 places.'>longrangeiterobject</a>;
+<a name='L952'>
+<a name='L953'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L954'><a href='../S/2805.html#L960' title='Refered from 960 in Objects/rangeobject.c.'>longrangeiter_len</a>(longrangeiterobject *r, PyObject *no_args)
+<a name='L955'><font color='red'>{</font>
+<a name='L956'>    <b>return</b> PyNumber_Subtract(r-&gt;len, r-&gt;index);
+<a name='L957'><font color='red'>}</font>
+<a name='L958'>
+<a name='L959'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> longrangeiter_methods[] = <font color='red'>{</font>
+<a name='L960'>    <font color='red'>{</font>"__length_hint__", (PyCFunction)<a href='../S/2805.html#L954' title='Defined at 954 in Objects/rangeobject.c.'>longrangeiter_len</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L961'>        length_hint_doc<font color='red'>}</font>,
+<a name='L962'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L963'><font color='red'>}</font>;
+<a name='L964'>
+<a name='L965'><b>static</b> <b>void</b>
+<a name='L966'><a href='../S/2805.html#L1016' title='Refered from 1016 in Objects/rangeobject.c.'>longrangeiter_dealloc</a>(longrangeiterobject *r)
+<a name='L967'><font color='red'>{</font>
+<a name='L968'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r-&gt;index);
+<a name='L969'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r-&gt;start);
+<a name='L970'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r-&gt;step);
+<a name='L971'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r-&gt;len);
+<a name='L972'>    PyObject_Del(r);
+<a name='L973'><font color='red'>}</font>
+<a name='L974'>
+<a name='L975'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L976'><a href='../S/2805.html#L1038' title='Refered from 1038 in Objects/rangeobject.c.'>longrangeiter_next</a>(longrangeiterobject *r)
+<a name='L977'><font color='red'>{</font>
+<a name='L978'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *one, *product, *new_index, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L979'>    <b>if</b> (<a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(r-&gt;index, r-&gt;len, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>) != 1)
+<a name='L980'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L981'>
+<a name='L982'>    one = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1);
+<a name='L983'>    <b>if</b> (!one)
+<a name='L984'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L985'>
+<a name='L986'>    new_index = PyNumber_Add(r-&gt;index, one);
+<a name='L987'>    Py_DECREF(one);
+<a name='L988'>    <b>if</b> (!new_index)
+<a name='L989'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L990'>
+<a name='L991'>    product = <a href='../S/2775.html#L949' title='Defined at 949 in Objects/abstract.c.'>PyNumber_Multiply</a>(r-&gt;index, r-&gt;step);
+<a name='L992'>    <b>if</b> (!product) <font color='red'>{</font>
+<a name='L993'>        Py_DECREF(new_index);
+<a name='L994'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L995'>    <font color='red'>}</font>
+<a name='L996'>
+<a name='L997'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PyNumber_Add(r-&gt;start, product);
+<a name='L998'>    Py_DECREF(product);
+<a name='L999'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L1000'>        Py_DECREF(r-&gt;index);
+<a name='L1001'>        r-&gt;index = new_index;
+<a name='L1002'>    <font color='red'>}</font>
+<a name='L1003'>    <b>else</b> <font color='red'>{</font>
+<a name='L1004'>        Py_DECREF(new_index);
+<a name='L1005'>    <font color='red'>}</font>
+<a name='L1006'>
+<a name='L1007'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1008'><font color='red'>}</font>
+<a name='L1009'>
+<a name='L1010'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyLongRangeIter_Type = <font color='red'>{</font>
+<a name='L1011'>        <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L1012'>        "longrange_iterator",                   <i><font color='green'>/* tp_name */</font></i>
+<a name='L1013'>        <b>sizeof</b>(<a href='../S/2805.html#L951' title='Defined at 951 in Objects/rangeobject.c.'>longrangeiterobject</a>),            <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L1014'>        0,                                      <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L1015'>        <i><font color='green'>/* methods */</font></i>
+<a name='L1016'>        (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2805.html#L966' title='Defined at 966 in Objects/rangeobject.c.'>longrangeiter_dealloc</a>,      <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L1017'>        0,                                      <i><font color='green'>/* tp_print */</font></i>
+<a name='L1018'>        0,                                      <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L1019'>        0,                                      <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L1020'>        0,                                      <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L1021'>        0,                                      <i><font color='green'>/* tp_repr */</font></i>
+<a name='L1022'>        0,                                      <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L1023'>        0,                                      <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L1024'>        0,                                      <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L1025'>        0,                                      <i><font color='green'>/* tp_hash */</font></i>
+<a name='L1026'>        0,                                      <i><font color='green'>/* tp_call */</font></i>
+<a name='L1027'>        0,                                      <i><font color='green'>/* tp_str */</font></i>
+<a name='L1028'>        <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L1029'>        0,                                      <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L1030'>        0,                                      <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L1031'>        Py_TPFLAGS_DEFAULT,                     <i><font color='green'>/* tp_flags */</font></i>
+<a name='L1032'>        0,                                      <i><font color='green'>/* tp_doc */</font></i>
+<a name='L1033'>        0,                                      <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1034'>        0,                                      <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1035'>        0,                                      <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1036'>        0,                                      <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L1037'>        <a href='../S/2803.html#L933' title='Defined at 933 in Objects/object.c.'>PyObject_SelfIter</a>,                      <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1038'>        (iternextfunc)<a href='../S/2805.html#L976' title='Defined at 976 in Objects/rangeobject.c.'>longrangeiter_next</a>,       <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1039'>        longrangeiter_methods,                  <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1040'>        0,
+<a name='L1041'><font color='red'>}</font>;
+<a name='L1042'>
+<a name='L1043'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1044'><a href='../R/9951.html' title='Multiple refered from 2 places.'>range_iter</a>(PyObject *seq)
+<a name='L1045'><font color='red'>{</font>
+<a name='L1046'>    <a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a> *r = (<a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a> *)seq;
+<a name='L1047'>    <a href='../S/2805.html#L951' title='Defined at 951 in Objects/rangeobject.c.'>longrangeiterobject</a> *it;
+<a name='L1048'>    <b>long</b> lstart, lstop, lstep;
+<a name='L1049'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *int_it;
+<a name='L1050'>
+<a name='L1051'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyRange_Check(seq));
+<a name='L1052'>
+<a name='L1053'>    <i><font color='green'>/* If all three fields and the length convert to long, use the int</font></i>
+<a name='L1054'><i><font color='green'>     * version */</font></i>
+<a name='L1055'>    lstart = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(r-&gt;start);
+<a name='L1056'>    <b>if</b> (lstart == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1057'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1058'>        <b>goto</b> long_range;
+<a name='L1059'>    <font color='red'>}</font>
+<a name='L1060'>    lstop = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(r-&gt;stop);
+<a name='L1061'>    <b>if</b> (lstop == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1062'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1063'>        <b>goto</b> long_range;
+<a name='L1064'>    <font color='red'>}</font>
+<a name='L1065'>    lstep = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(r-&gt;step);
+<a name='L1066'>    <b>if</b> (lstep == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1067'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1068'>        <b>goto</b> long_range;
+<a name='L1069'>    <font color='red'>}</font>
+<a name='L1070'>    int_it = <a href='../S/2805.html#L910' title='Defined at 910 in Objects/rangeobject.c.'>fast_range_iter</a>(lstart, lstop, lstep);
+<a name='L1071'>    <b>if</b> (int_it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; <a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_OverflowError)) <font color='red'>{</font>
+<a name='L1072'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1073'>        <b>goto</b> long_range;
+<a name='L1074'>    <font color='red'>}</font>
+<a name='L1075'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)int_it;
+<a name='L1076'>
+<a name='L1077'>  long_range:
+<a name='L1078'>    it = PyObject_New(<a href='../S/2805.html#L951' title='Defined at 951 in Objects/rangeobject.c.'>longrangeiterobject</a>, &amp;PyLongRangeIter_Type);
+<a name='L1079'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1080'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1081'>
+<a name='L1082'>    <i><font color='green'>/* Do all initialization here, so we can DECREF on failure. */</font></i>
+<a name='L1083'>    it-&gt;start = r-&gt;start;
+<a name='L1084'>    it-&gt;step = r-&gt;step;
+<a name='L1085'>    it-&gt;len = r-&gt;length;
+<a name='L1086'>    Py_INCREF(it-&gt;start);
+<a name='L1087'>    Py_INCREF(it-&gt;step);
+<a name='L1088'>    Py_INCREF(it-&gt;len);
+<a name='L1089'>
+<a name='L1090'>    it-&gt;index = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L1091'>    <b>if</b> (!it-&gt;index)
+<a name='L1092'>        <b>goto</b> create_failure;
+<a name='L1093'>
+<a name='L1094'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)it;
+<a name='L1095'>
+<a name='L1096'>create_failure:
+<a name='L1097'>    Py_DECREF(it);
+<a name='L1098'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1099'><font color='red'>}</font>
+<a name='L1100'>
+<a name='L1101'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1102'><a href='../R/9956.html' title='Multiple refered from 2 places.'>range_reverse</a>(PyObject *seq)
+<a name='L1103'><font color='red'>{</font>
+<a name='L1104'>    <a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a> *range = (<a href='../S/2805.html#L18' title='Defined at 18 in Objects/rangeobject.c.'>rangeobject</a>*) seq;
+<a name='L1105'>    <a href='../S/2805.html#L951' title='Defined at 951 in Objects/rangeobject.c.'>longrangeiterobject</a> *it;
+<a name='L1106'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *one, *sum, *<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a>, *product;
+<a name='L1107'>    <b>long</b> lstart, lstop, lstep, new_start, new_stop;
+<a name='L1108'>    <b>unsigned</b> <b>long</b> ulen;
+<a name='L1109'>
+<a name='L1110'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyRange_Check(seq));
+<a name='L1111'>
+<a name='L1112'>    <i><font color='green'>/* reversed(range(start, stop, step)) can be expressed as</font></i>
+<a name='L1113'><i><font color='green'>       range(start+(n-1)*step, start-step, -step), where n is the number of</font></i>
+<a name='L1114'><i><font color='green'>       integers in the range.</font></i>
+<a name='L1115'><i><font color='green'></font></i>
+<a name='L1116'><i><font color='green'>       If each of start, stop, step, -step, start-step, and the length</font></i>
+<a name='L1117'><i><font color='green'>       of the iterator is representable as a C long, use the int</font></i>
+<a name='L1118'><i><font color='green'>       version.  This excludes some cases where the reversed range is</font></i>
+<a name='L1119'><i><font color='green'>       representable as a range_iterator, but it's good enough for</font></i>
+<a name='L1120'><i><font color='green'>       common cases and it makes the checks simple. */</font></i>
+<a name='L1121'>
+<a name='L1122'>    lstart = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(range-&gt;start);
+<a name='L1123'>    <b>if</b> (lstart == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1124'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1125'>        <b>goto</b> long_range;
+<a name='L1126'>    <font color='red'>}</font>
+<a name='L1127'>    lstop = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(range-&gt;stop);
+<a name='L1128'>    <b>if</b> (lstop == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1129'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1130'>        <b>goto</b> long_range;
+<a name='L1131'>    <font color='red'>}</font>
+<a name='L1132'>    lstep = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(range-&gt;step);
+<a name='L1133'>    <b>if</b> (lstep == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1134'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1135'>        <b>goto</b> long_range;
+<a name='L1136'>    <font color='red'>}</font>
+<a name='L1137'>    <i><font color='green'>/* check for possible overflow of -lstep */</font></i>
+<a name='L1138'>    <b>if</b> (lstep == <a href='../S/565.html#L767' title='Defined at 767 in Include/pyport.h.'>LONG_MIN</a>)
+<a name='L1139'>        <b>goto</b> long_range;
+<a name='L1140'>
+<a name='L1141'>    <i><font color='green'>/* check for overflow of lstart - lstep:</font></i>
+<a name='L1142'><i><font color='green'></font></i>
+<a name='L1143'><i><font color='green'>       for lstep &gt; 0, need only check whether lstart - lstep &lt; LONG_MIN.</font></i>
+<a name='L1144'><i><font color='green'>       for lstep &lt; 0, need only check whether lstart - lstep &gt; LONG_MAX</font></i>
+<a name='L1145'><i><font color='green'></font></i>
+<a name='L1146'><i><font color='green'>       Rearrange these inequalities as:</font></i>
+<a name='L1147'><i><font color='green'></font></i>
+<a name='L1148'><i><font color='green'>           lstart - LONG_MIN &lt; lstep  (lstep &gt; 0)</font></i>
+<a name='L1149'><i><font color='green'>           LONG_MAX - lstart &lt; -lstep  (lstep &lt; 0)</font></i>
+<a name='L1150'><i><font color='green'></font></i>
+<a name='L1151'><i><font color='green'>       and compute both sides as unsigned longs, to avoid the</font></i>
+<a name='L1152'><i><font color='green'>       possibility of undefined behaviour due to signed overflow. */</font></i>
+<a name='L1153'>
+<a name='L1154'>    <b>if</b> (lstep &gt; 0) <font color='red'>{</font>
+<a name='L1155'>         <b>if</b> ((<b>unsigned</b> <b>long</b>)lstart - <a href='../S/565.html#L767' title='Defined at 767 in Include/pyport.h.'>LONG_MIN</a> &lt; (<b>unsigned</b> <b>long</b>)lstep)
+<a name='L1156'>            <b>goto</b> long_range;
+<a name='L1157'>    <font color='red'>}</font>
+<a name='L1158'>    <b>else</b> <font color='red'>{</font>
+<a name='L1159'>        <b>if</b> (<a href='../D/1965.html' title='Multiple defined in 2 places.'>LONG_MAX</a> - (<b>unsigned</b> <b>long</b>)lstart &lt; 0UL - lstep)
+<a name='L1160'>            <b>goto</b> long_range;
+<a name='L1161'>    <font color='red'>}</font>
+<a name='L1162'>
+<a name='L1163'>    ulen = <a href='../S/2805.html#L882' title='Defined at 882 in Objects/rangeobject.c.'>get_len_of_range</a>(lstart, lstop, lstep);
+<a name='L1164'>    <b>if</b> (ulen &gt; (<b>unsigned</b> <b>long</b>)<a href='../D/1965.html' title='Multiple defined in 2 places.'>LONG_MAX</a>)
+<a name='L1165'>        <b>goto</b> long_range;
+<a name='L1166'>
+<a name='L1167'>    new_stop = lstart - lstep;
+<a name='L1168'>    new_start = (<b>long</b>)(new_stop + ulen * lstep);
+<a name='L1169'>    <b>return</b> <a href='../S/2805.html#L910' title='Defined at 910 in Objects/rangeobject.c.'>fast_range_iter</a>(new_start, new_stop, -lstep);
+<a name='L1170'>
+<a name='L1171'>long_range:
+<a name='L1172'>    it = PyObject_New(<a href='../S/2805.html#L951' title='Defined at 951 in Objects/rangeobject.c.'>longrangeiterobject</a>, &amp;PyLongRangeIter_Type);
+<a name='L1173'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1174'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1175'>
+<a name='L1176'>    <i><font color='green'>/* start + (len - 1) * step */</font></i>
+<a name='L1177'>    it-&gt;len = range-&gt;length;
+<a name='L1178'>    Py_INCREF(it-&gt;len);
+<a name='L1179'>
+<a name='L1180'>    one = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1);
+<a name='L1181'>    <b>if</b> (!one)
+<a name='L1182'>        <b>goto</b> create_failure;
+<a name='L1183'>
+<a name='L1184'>    <a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a> = PyNumber_Subtract(it-&gt;len, one);
+<a name='L1185'>    Py_DECREF(one);
+<a name='L1186'>    <b>if</b> (!<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a>)
+<a name='L1187'>        <b>goto</b> create_failure;
+<a name='L1188'>
+<a name='L1189'>    product = <a href='../S/2775.html#L949' title='Defined at 949 in Objects/abstract.c.'>PyNumber_Multiply</a>(<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a>, range-&gt;step);
+<a name='L1190'>    Py_DECREF(<a href='../S/3095.html#L906' title='Defined at 906 in Python/dtoa.c.'>diff</a>);
+<a name='L1191'>    <b>if</b> (!product)
+<a name='L1192'>        <b>goto</b> create_failure;
+<a name='L1193'>
+<a name='L1194'>    sum = PyNumber_Add(range-&gt;start, product);
+<a name='L1195'>    Py_DECREF(product);
+<a name='L1196'>    it-&gt;start = sum;
+<a name='L1197'>    <b>if</b> (!it-&gt;start)
+<a name='L1198'>        <b>goto</b> create_failure;
+<a name='L1199'>
+<a name='L1200'>    it-&gt;step = <a href='../S/2775.html#L1136' title='Defined at 1136 in Objects/abstract.c.'>PyNumber_Negative</a>(range-&gt;step);
+<a name='L1201'>    <b>if</b> (!it-&gt;step)
+<a name='L1202'>        <b>goto</b> create_failure;
+<a name='L1203'>
+<a name='L1204'>    it-&gt;index = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L1205'>    <b>if</b> (!it-&gt;index)
+<a name='L1206'>        <b>goto</b> create_failure;
+<a name='L1207'>
+<a name='L1208'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)it;
+<a name='L1209'>
+<a name='L1210'>create_failure:
+<a name='L1211'>    Py_DECREF(it);
+<a name='L1212'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1213'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L24'>[^]</a><a href='#L1102'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

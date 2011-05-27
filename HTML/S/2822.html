@@ -1,0 +1,418 @@
+<html>
+<head>
+<title>Objects/structseq.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/structseq.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L29'>[^]</a><a href='#L382'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L29' title='Defined at 29.'>PyStructSequence_New</a>
+<li><a href='#L47' title='Defined at 47.'>PyStructSequence_SetItem</a>
+<li><a href='#L53' title='Defined at 53.'>PyStructSequence_GetItem</a>
+<li><a href='#L59' title='Defined at 59.'>structseq_dealloc</a>
+<li><a href='#L71' title='Defined at 71.'>structseq_new</a>
+<li><a href='#L156' title='Defined at 156.'>structseq_repr</a>
+<li><a href='#L230' title='Defined at 230.'>structseq_reduce</a>
+<li><a href='#L318' title='Defined at 318.'>PyStructSequence_InitType</a>
+<li><a href='#L382' title='Defined at 382.'>PyStructSequence_NewType</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Implementation helper: a struct that looks like a tuple.  See timemodule</font></i>
+<a name='L2'><i><font color='green'>   and posixmodule for example uses. */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L6'>
+<a name='L7'><b>static</b> <b>char</b> visible_length_key[] = "n_sequence_fields";
+<a name='L8'><b>static</b> <b>char</b> real_length_key[] = "n_fields";
+<a name='L9'><b>static</b> <b>char</b> unnamed_fields_key[] = "n_unnamed_fields";
+<a name='L10'>
+<a name='L11'><i><font color='green'>/* Fields with this name have only a field index, not a field name.</font></i>
+<a name='L12'><i><font color='green'>   They are only allowed for indices &lt; n_visible_fields. */</font></i>
+<a name='L13'><b>char</b> *PyStructSequence_UnnamedField = "unnamed field";
+<a name='L14'>
+<a name='L15'><font color='darkred'>#define</font> <a href='../R/4852.html' title='Multiple refered from 2 places.'>VISIBLE_SIZE</a>(op) <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(op)
+<a name='L16'><font color='darkred'>#define</font> <a href='../R/4853.html' title='Multiple refered from 2 places.'>VISIBLE_SIZE_TP</a>(tp) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>( \
+<a name='L17'>                      <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>((tp)-&gt;tp_dict, visible_length_key))
+<a name='L18'>
+<a name='L19'><font color='darkred'>#define</font> <a href='../R/3911.html' title='Multiple refered from 3 places.'>REAL_SIZE_TP</a>(tp) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>( \
+<a name='L20'>                      <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>((tp)-&gt;tp_dict, real_length_key))
+<a name='L21'><font color='darkred'>#define</font> <a href='../R/3910.html' title='Multiple refered from 2 places.'>REAL_SIZE</a>(op) <a href='../S/2822.html#L19' title='Defined at 19 in Objects/structseq.c.'>REAL_SIZE_TP</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(op))
+<a name='L22'>
+<a name='L23'><font color='darkred'>#define</font> <a href='../R/4738.html' title='Multiple refered from 2 places.'>UNNAMED_FIELDS_TP</a>(tp) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>( \
+<a name='L24'>                      <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>((tp)-&gt;tp_dict, unnamed_fields_key))
+<a name='L25'><font color='darkred'>#define</font> <a href='../S/2822.html#L240' title='Refered from 240 in Objects/structseq.c.'>UNNAMED_FIELDS</a>(op) <a href='../S/2822.html#L23' title='Defined at 23 in Objects/structseq.c.'>UNNAMED_FIELDS_TP</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(op))
+<a name='L26'>
+<a name='L27'>
+<a name='L28'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L29'><a href='../R/3409.html' title='Multiple refered from 15 places.'>PyStructSequence_New</a>(PyTypeObject *type)
+<a name='L30'><font color='red'>{</font>
+<a name='L31'>    PyStructSequence *obj;
+<a name='L32'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size = <a href='../S/2822.html#L19' title='Defined at 19 in Objects/structseq.c.'>REAL_SIZE_TP</a>(type), i;
+<a name='L33'>
+<a name='L34'>    obj = PyObject_GC_NewVar(PyStructSequence, type, size);
+<a name='L35'>    <b>if</b> (obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L36'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L37'>    <i><font color='green'>/* Hack the size of the variable object, so invisible fields don't appear</font></i>
+<a name='L38'><i><font color='green'>     to Python code. */</font></i>
+<a name='L39'>    <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(obj) = <a href='../S/2822.html#L16' title='Defined at 16 in Objects/structseq.c.'>VISIBLE_SIZE_TP</a>(type);
+<a name='L40'>    <b>for</b> (i = 0; i &lt; size; i++)
+<a name='L41'>        obj-&gt;ob_item[i] = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L42'>
+<a name='L43'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)obj;
+<a name='L44'><font color='red'>}</font>
+<a name='L45'>
+<a name='L46'><b>void</b>
+<a name='L47'>PyStructSequence_SetItem(PyObject* op, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, PyObject* v)
+<a name='L48'><font color='red'>{</font>
+<a name='L49'>    PyStructSequence_SET_ITEM(op, i, v);
+<a name='L50'><font color='red'>}</font>
+<a name='L51'>
+<a name='L52'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L53'>PyStructSequence_GetItem(PyObject* op, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i)
+<a name='L54'><font color='red'>{</font>
+<a name='L55'>    <b>return</b> PyStructSequence_GET_ITEM(op, i);
+<a name='L56'><font color='red'>}</font>
+<a name='L57'>
+<a name='L58'><b>static</b> <b>void</b>
+<a name='L59'><a href='../S/2822.html#L281' title='Refered from 281 in Objects/structseq.c.'>structseq_dealloc</a>(PyStructSequence *obj)
+<a name='L60'><font color='red'>{</font>
+<a name='L61'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, size;
+<a name='L62'>    
+<a name='L63'>    size = <a href='../S/2822.html#L21' title='Defined at 21 in Objects/structseq.c.'>REAL_SIZE</a>(obj);
+<a name='L64'>    <b>for</b> (i = 0; i &lt; size; ++i) <font color='red'>{</font>
+<a name='L65'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(obj-&gt;ob_item[i]);
+<a name='L66'>    <font color='red'>}</font>
+<a name='L67'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(obj);
+<a name='L68'><font color='red'>}</font>
+<a name='L69'>
+<a name='L70'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L71'><a href='../R/10604.html' title='Multiple refered from 4 places.'>structseq_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds)
+<a name='L72'><font color='red'>{</font>
+<a name='L73'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L74'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L75'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ob;
+<a name='L76'>    PyStructSequence *res = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L77'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len, min_len, max_len, i, n_unnamed_fields;
+<a name='L78'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"sequence", "dict", 0<font color='red'>}</font>;
+<a name='L79'>
+<a name='L80'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "O|O:structseq",
+<a name='L81'>                                     kwlist, &amp;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, &amp;dict))
+<a name='L82'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L83'>
+<a name='L84'>    <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../S/2775.html#L1836' title='Defined at 1836 in Objects/abstract.c.'>PySequence_Fast</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, "constructor requires a sequence");
+<a name='L85'>
+<a name='L86'>    <b>if</b> (!<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>) <font color='red'>{</font>
+<a name='L87'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L88'>    <font color='red'>}</font>
+<a name='L89'>
+<a name='L90'>    <b>if</b> (dict &amp;&amp; !PyDict_Check(dict)) <font color='red'>{</font>
+<a name='L91'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L92'>                     "%.500s() takes a dict as second arg, if any",
+<a name='L93'>                     type-&gt;tp_name);
+<a name='L94'>        Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L95'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L96'>    <font color='red'>}</font>
+<a name='L97'>
+<a name='L98'>    len = PySequence_Fast_GET_SIZE(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L99'>    min_len = <a href='../S/2822.html#L16' title='Defined at 16 in Objects/structseq.c.'>VISIBLE_SIZE_TP</a>(type);
+<a name='L100'>    max_len = <a href='../S/2822.html#L19' title='Defined at 19 in Objects/structseq.c.'>REAL_SIZE_TP</a>(type);
+<a name='L101'>    n_unnamed_fields = <a href='../S/2822.html#L23' title='Defined at 23 in Objects/structseq.c.'>UNNAMED_FIELDS_TP</a>(type);
+<a name='L102'>
+<a name='L103'>    <b>if</b> (min_len != max_len) <font color='red'>{</font>
+<a name='L104'>        <b>if</b> (len &lt; min_len) <font color='red'>{</font>
+<a name='L105'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L106'>           "%.500s() takes an at least %zd-sequence (%zd-sequence given)",
+<a name='L107'>                                 type-&gt;tp_name, min_len, len);
+<a name='L108'>                    Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L109'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L110'>        <font color='red'>}</font>
+<a name='L111'>
+<a name='L112'>        <b>if</b> (len &gt; max_len) <font color='red'>{</font>
+<a name='L113'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L114'>           "%.500s() takes an at most %zd-sequence (%zd-sequence given)",
+<a name='L115'>                                 type-&gt;tp_name, max_len, len);
+<a name='L116'>                    Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L117'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L118'>        <font color='red'>}</font>
+<a name='L119'>    <font color='red'>}</font>
+<a name='L120'>    <b>else</b> <font color='red'>{</font>
+<a name='L121'>        <b>if</b> (len != min_len) <font color='red'>{</font>
+<a name='L122'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L123'>           "%.500s() takes a %zd-sequence (%zd-sequence given)",
+<a name='L124'>                                 type-&gt;tp_name, min_len, len);
+<a name='L125'>                    Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L126'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L127'>        <font color='red'>}</font>
+<a name='L128'>    <font color='red'>}</font>
+<a name='L129'>
+<a name='L130'>    res = (PyStructSequence*) <a href='../S/2822.html#L29' title='Defined at 29 in Objects/structseq.c.'>PyStructSequence_New</a>(type);
+<a name='L131'>    <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L132'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L133'>    <font color='red'>}</font>
+<a name='L134'>    <b>for</b> (i = 0; i &lt; len; ++i) <font color='red'>{</font>
+<a name='L135'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = PySequence_Fast_GET_ITEM(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, i);
+<a name='L136'>        Py_INCREF(v);
+<a name='L137'>        res-&gt;ob_item[i] = v;
+<a name='L138'>    <font color='red'>}</font>
+<a name='L139'>    <b>for</b> (; i &lt; max_len; ++i) <font color='red'>{</font>
+<a name='L140'>        <b>if</b> (dict &amp;&amp; (ob = <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(
+<a name='L141'>            dict, type-&gt;tp_members[i-n_unnamed_fields].name))) <font color='red'>{</font>
+<a name='L142'>        <font color='red'>}</font>
+<a name='L143'>        <b>else</b> <font color='red'>{</font>
+<a name='L144'>            ob = Py_None;
+<a name='L145'>        <font color='red'>}</font>
+<a name='L146'>        Py_INCREF(ob);
+<a name='L147'>        res-&gt;ob_item[i] = ob;
+<a name='L148'>    <font color='red'>}</font>
+<a name='L149'>
+<a name='L150'>    Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L151'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) res;
+<a name='L152'><font color='red'>}</font>
+<a name='L153'>
+<a name='L154'>
+<a name='L155'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L156'><a href='../S/2822.html#L286' title='Refered from 286 in Objects/structseq.c.'>structseq_repr</a>(PyStructSequence *obj)
+<a name='L157'><font color='red'>{</font>
+<a name='L158'>    <i><font color='green'>/* buffer and type size were chosen well considered. */</font></i>
+<a name='L159'><font color='darkred'>#define</font> <a href='../R/3940.html' title='Multiple refered from 2 places.'>REPR_BUFFER_SIZE</a> 512
+<a name='L160'><font color='darkred'>#define</font> <a href='../S/2822.html#L172' title='Refered from 172 in Objects/structseq.c.'>TYPE_MAXSIZE</a> 100
+<a name='L161'>
+<a name='L162'>    <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *typ = <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(obj);
+<a name='L163'>    <b>int</b> i, removelast = 0;
+<a name='L164'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L165'>    <b>char</b> buf[<a href='../S/2822.html#L159' title='Defined at 159 in Objects/structseq.c.'>REPR_BUFFER_SIZE</a>];
+<a name='L166'>    <b>char</b> *endofbuf, *pbuf = buf;
+<a name='L167'>
+<a name='L168'>    <i><font color='green'>/* pointer to end of writeable buffer; safes space for "...)\0" */</font></i>
+<a name='L169'>    endofbuf= &amp;buf[<a href='../S/2822.html#L159' title='Defined at 159 in Objects/structseq.c.'>REPR_BUFFER_SIZE</a>-5];
+<a name='L170'>
+<a name='L171'>    <i><font color='green'>/* "typename(", limited to  TYPE_MAXSIZE */</font></i>
+<a name='L172'>    len = strlen(typ-&gt;tp_name) &gt; <a href='../S/2822.html#L160' title='Defined at 160 in Objects/structseq.c.'>TYPE_MAXSIZE</a> ? <a href='../S/2822.html#L160' title='Defined at 160 in Objects/structseq.c.'>TYPE_MAXSIZE</a> :
+<a name='L173'>                            strlen(typ-&gt;tp_name);
+<a name='L174'>    strncpy(pbuf, typ-&gt;tp_name, len);
+<a name='L175'>    pbuf += len;
+<a name='L176'>    *pbuf++ = '(';
+<a name='L177'>
+<a name='L178'>    <b>for</b> (i=0; i &lt; <a href='../S/2822.html#L15' title='Defined at 15 in Objects/structseq.c.'>VISIBLE_SIZE</a>(obj); i++) <font color='red'>{</font>
+<a name='L179'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *val, *repr;
+<a name='L180'>        <b>char</b> *cname, *crepr;
+<a name='L181'>
+<a name='L182'>        cname = typ-&gt;tp_members[i].name;
+<a name='L183'>        <b>if</b> (cname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L184'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SystemError, "In structseq_repr(), member %d name is NULL"
+<a name='L185'>                         " for type %.500s", i, typ-&gt;tp_name);
+<a name='L186'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L187'>        <font color='red'>}</font>
+<a name='L188'>        val = PyStructSequence_GET_ITEM(obj, i);
+<a name='L189'>        repr = <a href='../S/2803.html#L368' title='Defined at 368 in Objects/object.c.'>PyObject_Repr</a>(val);
+<a name='L190'>        <b>if</b> (repr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L191'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L192'>        crepr = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(repr);
+<a name='L193'>        <b>if</b> (crepr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L194'>            Py_DECREF(repr);
+<a name='L195'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L196'>        <font color='red'>}</font>
+<a name='L197'>
+<a name='L198'>        <i><font color='green'>/* + 3: keep space for "=" and ", " */</font></i>
+<a name='L199'>        len = strlen(cname) + strlen(crepr) + 3;
+<a name='L200'>        <b>if</b> ((pbuf+len) &lt;= endofbuf) <font color='red'>{</font>
+<a name='L201'>            strcpy(pbuf, cname);
+<a name='L202'>            pbuf += strlen(cname);
+<a name='L203'>            *pbuf++ = '=';
+<a name='L204'>            strcpy(pbuf, crepr);
+<a name='L205'>            pbuf += strlen(crepr);
+<a name='L206'>            *pbuf++ = ',';
+<a name='L207'>            *pbuf++ = ' ';
+<a name='L208'>            removelast = 1;
+<a name='L209'>            Py_DECREF(repr);
+<a name='L210'>        <font color='red'>}</font>
+<a name='L211'>        <b>else</b> <font color='red'>{</font>
+<a name='L212'>            strcpy(pbuf, "...");
+<a name='L213'>            pbuf += 3;
+<a name='L214'>            removelast = 0;
+<a name='L215'>            Py_DECREF(repr);
+<a name='L216'>            <b>break</b>;
+<a name='L217'>        <font color='red'>}</font>
+<a name='L218'>    <font color='red'>}</font>
+<a name='L219'>    <b>if</b> (removelast) <font color='red'>{</font>
+<a name='L220'>        <i><font color='green'>/* overwrite last ", " */</font></i>
+<a name='L221'>        pbuf-=2;
+<a name='L222'>    <font color='red'>}</font>
+<a name='L223'>    *pbuf++ = ')';
+<a name='L224'>    *pbuf = '\0';
+<a name='L225'>
+<a name='L226'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(buf);
+<a name='L227'><font color='red'>}</font>
+<a name='L228'>
+<a name='L229'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L230'><a href='../S/2822.html#L272' title='Refered from 272 in Objects/structseq.c.'>structseq_reduce</a>(PyStructSequence* self)
+<a name='L231'><font color='red'>{</font>
+<a name='L232'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* tup;
+<a name='L233'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* dict;
+<a name='L234'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L235'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n_fields, n_visible_fields, n_unnamed_fields;
+<a name='L236'>    <b>int</b> i;
+<a name='L237'>
+<a name='L238'>    n_fields = <a href='../S/2822.html#L21' title='Defined at 21 in Objects/structseq.c.'>REAL_SIZE</a>(self);
+<a name='L239'>    n_visible_fields = <a href='../S/2822.html#L15' title='Defined at 15 in Objects/structseq.c.'>VISIBLE_SIZE</a>(self);
+<a name='L240'>    n_unnamed_fields = <a href='../S/2822.html#L25' title='Defined at 25 in Objects/structseq.c.'>UNNAMED_FIELDS</a>(self);
+<a name='L241'>    tup = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(n_visible_fields);
+<a name='L242'>    <b>if</b> (!tup) <font color='red'>{</font>
+<a name='L243'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L244'>    <font color='red'>}</font>
+<a name='L245'>
+<a name='L246'>    dict = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L247'>    <b>if</b> (!dict) <font color='red'>{</font>
+<a name='L248'>        Py_DECREF(tup);
+<a name='L249'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L250'>    <font color='red'>}</font>
+<a name='L251'>
+<a name='L252'>    <b>for</b> (i = 0; i &lt; n_visible_fields; i++) <font color='red'>{</font>
+<a name='L253'>        Py_INCREF(self-&gt;ob_item[i]);
+<a name='L254'>        PyTuple_SET_ITEM(tup, i, self-&gt;ob_item[i]);
+<a name='L255'>    <font color='red'>}</font>
+<a name='L256'>
+<a name='L257'>    <b>for</b> (; i &lt; n_fields; i++) <font color='red'>{</font>
+<a name='L258'>        <b>char</b> *n = <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_members[i-n_unnamed_fields].name;
+<a name='L259'>        <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, n,
+<a name='L260'>                             self-&gt;ob_item[i]);
+<a name='L261'>    <font color='red'>}</font>
+<a name='L262'>
+<a name='L263'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("(O(OO))", <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self), tup, dict);
+<a name='L264'>
+<a name='L265'>    Py_DECREF(tup);
+<a name='L266'>    Py_DECREF(dict);
+<a name='L267'>
+<a name='L268'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L269'><font color='red'>}</font>
+<a name='L270'>
+<a name='L271'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> structseq_methods[] = <font color='red'>{</font>
+<a name='L272'>    <font color='red'>{</font>"__reduce__", (PyCFunction)<a href='../S/2822.html#L230' title='Defined at 230 in Objects/structseq.c.'>structseq_reduce</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L273'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L274'><font color='red'>}</font>;
+<a name='L275'>
+<a name='L276'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> _struct_sequence_template = <font color='red'>{</font>
+<a name='L277'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L278'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,                                       <i><font color='green'>/* tp_name */</font></i>
+<a name='L279'>    <b>sizeof</b>(PyStructSequence) - <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *), <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L280'>    <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *),                         <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L281'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2822.html#L59' title='Defined at 59 in Objects/structseq.c.'>structseq_dealloc</a>,              <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L282'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L283'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L284'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L285'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L286'>    (reprfunc)<a href='../S/2822.html#L156' title='Defined at 156 in Objects/structseq.c.'>structseq_repr</a>,                   <i><font color='green'>/* tp_repr */</font></i>
+<a name='L287'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L288'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L289'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L290'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L291'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L292'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L293'>    0,                                          <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L294'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L295'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L296'>    Py_TPFLAGS_DEFAULT,                         <i><font color='green'>/* tp_flags */</font></i>
+<a name='L297'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,                                       <i><font color='green'>/* tp_doc */</font></i>
+<a name='L298'>    0,                                          <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L299'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L300'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L301'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L302'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L303'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L304'>    structseq_methods,                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L305'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,                                       <i><font color='green'>/* tp_members */</font></i>
+<a name='L306'>    0,                                          <i><font color='green'>/* tp_getset */</font></i>
+<a name='L307'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L308'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L309'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L310'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L311'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L312'>    0,                                          <i><font color='green'>/* tp_init */</font></i>
+<a name='L313'>    0,                                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L314'>    <a href='../S/2822.html#L71' title='Defined at 71 in Objects/structseq.c.'>structseq_new</a>,                              <i><font color='green'>/* tp_new */</font></i>
+<a name='L315'><font color='red'>}</font>;
+<a name='L316'>
+<a name='L317'><b>void</b>
+<a name='L318'><a href='../R/3408.html' title='Multiple refered from 16 places.'>PyStructSequence_InitType</a>(PyTypeObject *type, PyStructSequence_Desc *desc)
+<a name='L319'><font color='red'>{</font>
+<a name='L320'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict;
+<a name='L321'>    <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a>* members;
+<a name='L322'>    <b>int</b> n_members, n_unnamed_members, i, k;
+<a name='L323'>
+<a name='L324'><font color='darkred'>#ifdef</font> <a href='../S/544.html#L56' title='Defined at 56 in Include/object.h.'>Py_TRACE_REFS</a>
+<a name='L325'>    <i><font color='green'>/* if the type object was chained, unchain it first</font></i>
+<a name='L326'><i><font color='green'>       before overwriting its storage */</font></i>
+<a name='L327'>    <b>if</b> (type-&gt;ob_base.ob_base._ob_next) <font color='red'>{</font>
+<a name='L328'>        <a href='../D/6292.html' title='Multiple defined in 2 places.'>_Py_ForgetReference</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)type);
+<a name='L329'>    <font color='red'>}</font>
+<a name='L330'><font color='darkred'>#endif</font>
+<a name='L331'>
+<a name='L332'>    n_unnamed_members = 0;
+<a name='L333'>    <b>for</b> (i = 0; desc-&gt;fields[i].name != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; ++i)
+<a name='L334'>        <b>if</b> (desc-&gt;fields[i].name == PyStructSequence_UnnamedField)
+<a name='L335'>            n_unnamed_members++;
+<a name='L336'>    n_members = i;
+<a name='L337'>
+<a name='L338'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(type, &amp;_struct_sequence_template, <b>sizeof</b>(<a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a>));
+<a name='L339'>    type-&gt;tp_base = &amp;PyTuple_Type;
+<a name='L340'>    type-&gt;tp_name = desc-&gt;name;
+<a name='L341'>    type-&gt;tp_doc = desc-&gt;doc;
+<a name='L342'>
+<a name='L343'>    members = PyMem_NEW(<a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a>, n_members-n_unnamed_members+1);
+<a name='L344'>    <b>if</b> (members == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L345'>        <b>return</b>;
+<a name='L346'>
+<a name='L347'>    <b>for</b> (i = k = 0; i &lt; n_members; ++i) <font color='red'>{</font>
+<a name='L348'>        <b>if</b> (desc-&gt;fields[i].name == PyStructSequence_UnnamedField)
+<a name='L349'>            <b>continue</b>;
+<a name='L350'>        members[k].name = desc-&gt;fields[i].name;
+<a name='L351'>        members[k].type = <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>;
+<a name='L352'>        members[k].offset = <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(PyStructSequence, ob_item)
+<a name='L353'>          + i * <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*);
+<a name='L354'>        members[k].<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>;
+<a name='L355'>        members[k].doc = desc-&gt;fields[i].doc;
+<a name='L356'>        k++;
+<a name='L357'>    <font color='red'>}</font>
+<a name='L358'>    members[k].name = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L359'>
+<a name='L360'>    type-&gt;tp_members = members;
+<a name='L361'>
+<a name='L362'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(type) &lt; 0)
+<a name='L363'>        <b>return</b>;
+<a name='L364'>    Py_INCREF(type);
+<a name='L365'>
+<a name='L366'>    dict = type-&gt;tp_dict;
+<a name='L367'><font color='darkred'>#define</font> <a href='../R/4073.html' title='Multiple refered from 3 places.'>SET_DICT_FROM_INT</a>(key, value)                           \
+<a name='L368'>    <b>do</b> <font color='red'>{</font>                                                        \
+<a name='L369'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>) <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);            \
+<a name='L370'>        <b>if</b> (v != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>                                        \
+<a name='L371'>            <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, v);                 \
+<a name='L372'>            Py_DECREF(v);                                       \
+<a name='L373'>        <font color='red'>}</font>                                                       \
+<a name='L374'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L375'>
+<a name='L376'>    <a href='../S/2822.html#L367' title='Defined at 367 in Objects/structseq.c.'>SET_DICT_FROM_INT</a>(visible_length_key, desc-&gt;n_in_sequence);
+<a name='L377'>    <a href='../S/2822.html#L367' title='Defined at 367 in Objects/structseq.c.'>SET_DICT_FROM_INT</a>(real_length_key, n_members);
+<a name='L378'>    <a href='../S/2822.html#L367' title='Defined at 367 in Objects/structseq.c.'>SET_DICT_FROM_INT</a>(unnamed_fields_key, n_unnamed_members);
+<a name='L379'><font color='red'>}</font>
+<a name='L380'>
+<a name='L381'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a>*
+<a name='L382'>PyStructSequence_NewType(PyStructSequence_Desc *desc)
+<a name='L383'><font color='red'>{</font>
+<a name='L384'>    <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = (<a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a>*)<a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>(&amp;PyType_Type, 0);
+<a name='L385'>    <a href='../S/2822.html#L318' title='Defined at 318 in Objects/structseq.c.'>PyStructSequence_InitType</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, desc);
+<a name='L386'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L387'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L29'>[^]</a><a href='#L382'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

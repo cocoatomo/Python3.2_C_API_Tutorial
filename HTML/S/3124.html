@@ -1,0 +1,1425 @@
+<html>
+<head>
+<title>Python/marshal.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/marshal.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L72'>[^]</a><a href='#L1368'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L72' title='Defined at 72.'>w_more</a>
+<li><a href='#L94' title='Defined at 94.'>w_string</a>
+<li><a href='#L108' title='Defined at 108.'>w_short</a>
+<li><a href='#L115' title='Defined at 115.'>w_long</a>
+<li><a href='#L125' title='Defined at 125.'>w_long64</a>
+<li><a href='#L145' title='Defined at 145.'>w_PyLong</a>
+<li><a href='#L183' title='Defined at 183.'>w_object</a>
+<li><a href='#L441' title='Defined at 441.'>PyMarshal_WriteLongToFile</a>
+<li><a href='#L453' title='Defined at 453.'>PyMarshal_WriteObjectToFile</a>
+<li><a href='#L472' title='Defined at 472.'>r_string</a>
+<li><a href='#L485' title='Defined at 485.'>r_short</a>
+<li><a href='#L496' title='Defined at 496.'>r_long</a>
+<li><a href='#L527' title='Defined at 527.'>r_long64</a>
+<li><a href='#L551' title='Defined at 551.'>r_PyLong</a>
+<li><a href='#L611' title='Defined at 611.'>r_object</a>
+<li><a href='#L1025' title='Defined at 1025.'>read_object</a>
+<li><a href='#L1039' title='Defined at 1039.'>PyMarshal_ReadShortFromFile</a>
+<li><a href='#L1050' title='Defined at 1050.'>PyMarshal_ReadLongFromFile</a>
+<li><a href='#L1062' title='Defined at 1062.'>getfilesize</a>
+<li><a href='#L1079' title='Defined at 1079.'>PyMarshal_ReadLastObjectFromFile</a>
+<li><a href='#L1110' title='Defined at 1110.'>PyMarshal_ReadObjectFromFile</a>
+<li><a href='#L1124' title='Defined at 1124.'>PyMarshal_ReadObjectFromString</a>
+<li><a href='#L1139' title='Defined at 1139.'>PyMarshal_WriteObjectToString</a>
+<li><a href='#L1188' title='Defined at 1188.'>marshal_dump</a>
+<li><a href='#L1220' title='Defined at 1220.'>marshal_load</a>
+<li><a href='#L1267' title='Defined at 1267.'>marshal_dumps</a>
+<li><a href='#L1287' title='Defined at 1287.'>marshal_loads</a>
+<li><a href='#L1368' title='Defined at 1368.'>PyMarshal_Init</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Write Python objects to files and read them back.</font></i>
+<a name='L3'><i><font color='green'>   This is intended for writing and reading compiled Python code only;</font></i>
+<a name='L4'><i><font color='green'>   a true persistent storage facility would be much harder, since</font></i>
+<a name='L5'><i><font color='green'>   it would have to take circular links and sharing into account. */</font></i>
+<a name='L6'>
+<a name='L7'><font color='darkred'>#define</font> <a href='../R/2388.html' title='Multiple refered from 2 places.'>PY_SSIZE_T_CLEAN</a>
+<a name='L8'>
+<a name='L9'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L10'><font color='darkred'>#include</font> "<a href='535.html'>longintrepr.h</a>"
+<a name='L11'><font color='darkred'>#include</font> "<a href='511.html'>code.h</a>"
+<a name='L12'><font color='darkred'>#include</font> "<a href='537.html'>marshal.h</a>"
+<a name='L13'>
+<a name='L14'><font color='darkred'>#define</font> <a href='../R/4.html' title='Multiple refered from 38 places.'>ABS</a>(x) ((x) &lt; 0 ? -(x) : (x))
+<a name='L15'>
+<a name='L16'><i><font color='green'>/* High water mark to determine when the marshalled object is dangerously deep</font></i>
+<a name='L17'><i><font color='green'> * and risks coring the interpreter.  When the object stack gets this deep,</font></i>
+<a name='L18'><i><font color='green'> * raise an exception instead of continuing.</font></i>
+<a name='L19'><i><font color='green'> * On Windows debug builds, reduce this value.</font></i>
+<a name='L20'><i><font color='green'> */</font></i>
+<a name='L21'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>) &amp;&amp; <b>defined</b>(_DEBUG)
+<a name='L22'><font color='darkred'>#define</font> <a href='../R/1868.html' title='Multiple refered from 2 places.'>MAX_MARSHAL_STACK_DEPTH</a> 1500
+<a name='L23'><font color='darkred'>#else</font>
+<a name='L24'><font color='darkred'>#define</font> <a href='../R/1868.html' title='Multiple refered from 2 places.'>MAX_MARSHAL_STACK_DEPTH</a> 2000
+<a name='L25'><font color='darkred'>#endif</font>
+<a name='L26'>
+<a name='L27'><font color='darkred'>#define</font> <a href='../R/4599.html' title='Multiple refered from 2 places.'>TYPE_NULL</a>               '0'
+<a name='L28'><font color='darkred'>#define</font> <a href='../R/4598.html' title='Multiple refered from 2 places.'>TYPE_NONE</a>               'N'
+<a name='L29'><font color='darkred'>#define</font> <a href='../R/4590.html' title='Multiple refered from 2 places.'>TYPE_FALSE</a>              'F'
+<a name='L30'><font color='darkred'>#define</font> <a href='../R/4603.html' title='Multiple refered from 2 places.'>TYPE_TRUE</a>               'T'
+<a name='L31'><font color='darkred'>#define</font> <a href='../R/4601.html' title='Multiple refered from 2 places.'>TYPE_STOPITER</a>           'S'
+<a name='L32'><font color='darkred'>#define</font> <a href='../R/4589.html' title='Multiple refered from 2 places.'>TYPE_ELLIPSIS</a>           '.'
+<a name='L33'><font color='darkred'>#define</font> <a href='../R/4593.html' title='Multiple refered from 2 places.'>TYPE_INT</a>                'i'
+<a name='L34'><font color='darkred'>#define</font> <a href='../R/4594.html' title='Multiple refered from 2 places.'>TYPE_INT64</a>              'I'
+<a name='L35'><font color='darkred'>#define</font> <a href='../R/4591.html' title='Multiple refered from 5 places.'>TYPE_FLOAT</a>              'f'
+<a name='L36'><font color='darkred'>#define</font> <a href='../R/4584.html' title='Multiple refered from 2 places.'>TYPE_BINARY_FLOAT</a>       'g'
+<a name='L37'><font color='darkred'>#define</font> <a href='../R/4587.html' title='Multiple refered from 2 places.'>TYPE_COMPLEX</a>            'x'
+<a name='L38'><font color='darkred'>#define</font> <a href='../R/4583.html' title='Multiple refered from 2 places.'>TYPE_BINARY_COMPLEX</a>     'y'
+<a name='L39'><font color='darkred'>#define</font> <a href='../R/4596.html' title='Multiple refered from 5 places.'>TYPE_LONG</a>               'l'
+<a name='L40'><font color='darkred'>#define</font> <a href='../R/4602.html' title='Multiple refered from 3 places.'>TYPE_STRING</a>             's'
+<a name='L41'><font color='darkred'>#define</font> <a href='../R/4604.html' title='Multiple refered from 2 places.'>TYPE_TUPLE</a>              '('
+<a name='L42'><font color='darkred'>#define</font> <a href='../R/4595.html' title='Multiple refered from 2 places.'>TYPE_LIST</a>               '['
+<a name='L43'><font color='darkred'>#define</font> <a href='../R/4588.html' title='Multiple refered from 2 places.'>TYPE_DICT</a>               '{'
+<a name='L44'><font color='darkred'>#define</font> <a href='../R/4586.html' title='Multiple refered from 2 places.'>TYPE_CODE</a>               'c'
+<a name='L45'><font color='darkred'>#define</font> <a href='../R/4605.html' title='Multiple refered from 5 places.'>TYPE_UNICODE</a>            'u'
+<a name='L46'><font color='darkred'>#define</font> <a href='../R/4606.html' title='Multiple refered from 4 places.'>TYPE_UNKNOWN</a>            '?'
+<a name='L47'><font color='darkred'>#define</font> <a href='../R/4600.html' title='Multiple refered from 3 places.'>TYPE_SET</a>                '&lt;'
+<a name='L48'><font color='darkred'>#define</font> <a href='../R/4592.html' title='Multiple refered from 2 places.'>TYPE_FROZENSET</a>          '&gt;'
+<a name='L49'>
+<a name='L50'><font color='darkred'>#define</font> <a href='../R/4883.html' title='Multiple refered from 4 places.'>WFERR_OK</a> 0
+<a name='L51'><font color='darkred'>#define</font> <a href='../R/4884.html' title='Multiple refered from 13 places.'>WFERR_UNMARSHALLABLE</a> 1
+<a name='L52'><font color='darkred'>#define</font> <a href='../S/3124.html#L190' title='Refered from 190 in Python/marshal.c.'>WFERR_NESTEDTOODEEP</a> 2
+<a name='L53'><font color='darkred'>#define</font> <a href='../R/4882.html' title='Multiple refered from 4 places.'>WFERR_NOMEMORY</a> 3
+<a name='L54'>
+<a name='L55'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L56'>    FILE *fp;
+<a name='L57'>    <b>int</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;  <i><font color='green'>/* see WFERR_* values */</font></i>
+<a name='L58'>    <b>int</b> depth;
+<a name='L59'>    <i><font color='green'>/* If fp == NULL, the following are valid: */</font></i>
+<a name='L60'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *str;
+<a name='L61'>    <b>char</b> *ptr;
+<a name='L62'>    <b>char</b> *end;
+<a name='L63'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *strings; <i><font color='green'>/* dict on marshal, list on unmarshal */</font></i>
+<a name='L64'>    <b>int</b> version;
+<a name='L65'><font color='red'>}</font> <a href='../R/4885.html' title='Multiple refered from 11 places.'>WFILE</a>;
+<a name='L66'>
+<a name='L67'><font color='darkred'>#define</font> <a href='../R/11374.html' title='Multiple refered from 34 places.'>w_byte</a>(c, p) <b>if</b> (((p)-&gt;fp)) putc((c), (p)-&gt;fp); \
+<a name='L68'>                      <b>else</b> <b>if</b> ((p)-&gt;ptr != (p)-&gt;end) *(p)-&gt;ptr++ = (c); \
+<a name='L69'>                           <b>else</b> <a href='../S/3124.html#L72' title='Defined at 72 in Python/marshal.c.'>w_more</a>(c, p)
+<a name='L70'>
+<a name='L71'><b>static</b> <b>void</b>
+<a name='L72'><a href='../S/3124.html#L69' title='Refered from 69 in Python/marshal.c.'>w_more</a>(<b>int</b> c, <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> *p)
+<a name='L73'><font color='red'>{</font>
+<a name='L74'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size, newsize;
+<a name='L75'>    <b>if</b> (p-&gt;str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L76'>        <b>return</b>; <i><font color='green'>/* An error already occurred */</font></i>
+<a name='L77'>    size = <a href='../S/2779.html#L506' title='Defined at 506 in Objects/bytesobject.c.'>PyBytes_Size</a>(p-&gt;str);
+<a name='L78'>    newsize = size + size + 1024;
+<a name='L79'>    <b>if</b> (newsize &gt; 32*1024*1024) <font color='red'>{</font>
+<a name='L80'>        newsize = size + (size &gt;&gt; 3);           <i><font color='green'>/* 12.5% overallocation */</font></i>
+<a name='L81'>    <font color='red'>}</font>
+<a name='L82'>    <b>if</b> (<a href='../S/2779.html#L2822' title='Defined at 2822 in Objects/bytesobject.c.'>_PyBytes_Resize</a>(&amp;p-&gt;str, newsize) != 0) <font color='red'>{</font>
+<a name='L83'>        p-&gt;ptr = p-&gt;end = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L84'>    <font color='red'>}</font>
+<a name='L85'>    <b>else</b> <font color='red'>{</font>
+<a name='L86'>        p-&gt;ptr = PyBytes_AS_STRING((<a href='../S/507.html#L41' title='Defined at 41 in Include/bytesobject.h.'>PyBytesObject</a> *)p-&gt;str) + size;
+<a name='L87'>        p-&gt;end =
+<a name='L88'>            PyBytes_AS_STRING((<a href='../S/507.html#L41' title='Defined at 41 in Include/bytesobject.h.'>PyBytesObject</a> *)p-&gt;str) + newsize;
+<a name='L89'>        *p-&gt;ptr++ = <a href='../D/4230.html' title='Multiple defined in 2 places.'>Py_SAFE_DOWNCAST</a>(c, <b>int</b>, <b>char</b>);
+<a name='L90'>    <font color='red'>}</font>
+<a name='L91'><font color='red'>}</font>
+<a name='L92'>
+<a name='L93'><b>static</b> <b>void</b>
+<a name='L94'><a href='../R/11380.html' title='Multiple refered from 9 places.'>w_string</a>(<b>char</b> *s, <b>int</b> n, <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> *p)
+<a name='L95'><font color='red'>{</font>
+<a name='L96'>    <b>if</b> (p-&gt;fp != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L97'>        fwrite(s, 1, n, p-&gt;fp);
+<a name='L98'>    <font color='red'>}</font>
+<a name='L99'>    <b>else</b> <font color='red'>{</font>
+<a name='L100'>        <b>while</b> (--n &gt;= 0) <font color='red'>{</font>
+<a name='L101'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(*s, p);
+<a name='L102'>            s++;
+<a name='L103'>        <font color='red'>}</font>
+<a name='L104'>    <font color='red'>}</font>
+<a name='L105'><font color='red'>}</font>
+<a name='L106'>
+<a name='L107'><b>static</b> <b>void</b>
+<a name='L108'><a href='../R/11379.html' title='Multiple refered from 2 places.'>w_short</a>(<b>int</b> x, <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> *p)
+<a name='L109'><font color='red'>{</font>
+<a name='L110'>    <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>char</b>)( x      &amp; 0xff), p);
+<a name='L111'>    <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>char</b>)((x&gt;&gt; 8) &amp; 0xff), p);
+<a name='L112'><font color='red'>}</font>
+<a name='L113'>
+<a name='L114'><b>static</b> <b>void</b>
+<a name='L115'><a href='../R/11375.html' title='Multiple refered from 18 places.'>w_long</a>(<b>long</b> x, <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> *p)
+<a name='L116'><font color='red'>{</font>
+<a name='L117'>    <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>char</b>)( x      &amp; 0xff), p);
+<a name='L118'>    <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>char</b>)((x&gt;&gt; 8) &amp; 0xff), p);
+<a name='L119'>    <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>char</b>)((x&gt;&gt;16) &amp; 0xff), p);
+<a name='L120'>    <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>char</b>)((x&gt;&gt;24) &amp; 0xff), p);
+<a name='L121'><font color='red'>}</font>
+<a name='L122'>
+<a name='L123'><font color='darkred'>#if</font> <a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a> &gt; 4
+<a name='L124'><b>static</b> <b>void</b>
+<a name='L125'><a href='../S/3124.html#L222' title='Refered from 222 in Python/marshal.c.'>w_long64</a>(<b>long</b> x, <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> *p)
+<a name='L126'><font color='red'>{</font>
+<a name='L127'>    <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(x, p);
+<a name='L128'>    <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(x&gt;&gt;32, p);
+<a name='L129'><font color='red'>}</font>
+<a name='L130'><font color='darkred'>#endif</font>
+<a name='L131'>
+<a name='L132'><i><font color='green'>/* We assume that Python longs are stored internally in base some power of</font></i>
+<a name='L133'><i><font color='green'>   2**15; for the sake of portability we'll always read and write them in base</font></i>
+<a name='L134'><i><font color='green'>   exactly 2**15. */</font></i>
+<a name='L135'>
+<a name='L136'><font color='darkred'>#define</font> <a href='../R/3140.html' title='Multiple refered from 8 places.'>PyLong_MARSHAL_SHIFT</a> 15
+<a name='L137'><font color='darkred'>#define</font> <a href='../R/3137.html' title='Multiple refered from 3 places.'>PyLong_MARSHAL_BASE</a> ((<b>short</b>)1 &lt;&lt; <a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a>)
+<a name='L138'><font color='darkred'>#define</font> <a href='../R/3138.html' title='Multiple refered from 2 places.'>PyLong_MARSHAL_MASK</a> (<a href='../S/3124.html#L137' title='Defined at 137 in Python/marshal.c.'>PyLong_MARSHAL_BASE</a> - 1)
+<a name='L139'><font color='darkred'>#if</font> <a href='../D/3481.html' title='Multiple defined in 2 places.'>PyLong_SHIFT</a> % <a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a> != 0
+<a name='L140'><font color='darkred'>#error</font> "PyLong_SHIFT must be a multiple of PyLong_MARSHAL_SHIFT"
+<a name='L141'><font color='darkred'>#endif</font>
+<a name='L142'><font color='darkred'>#define</font> <a href='../R/3139.html' title='Multiple refered from 5 places.'>PyLong_MARSHAL_RATIO</a> (<a href='../D/3481.html' title='Multiple defined in 2 places.'>PyLong_SHIFT</a> / <a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a>)
+<a name='L143'>
+<a name='L144'><b>static</b> <b>void</b>
+<a name='L145'><a href='../S/3124.html#L215' title='Refered from 215 in Python/marshal.c.'>w_PyLong</a>(<b>const</b> PyLongObject *ob, <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> *p)
+<a name='L146'><font color='red'>{</font>
+<a name='L147'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, j, n, l;
+<a name='L148'>    <a href='../D/8164.html' title='Multiple defined in 2 places.'>digit</a> d;
+<a name='L149'>
+<a name='L150'>    <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../D/5208.html' title='Multiple defined in 2 places.'>TYPE_LONG</a>, p);
+<a name='L151'>    <b>if</b> (<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(ob) == 0) <font color='red'>{</font>
+<a name='L152'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)0, p);
+<a name='L153'>        <b>return</b>;
+<a name='L154'>    <font color='red'>}</font>
+<a name='L155'>
+<a name='L156'>    <i><font color='green'>/* set l to number of base PyLong_MARSHAL_BASE digits */</font></i>
+<a name='L157'>    n = <a href='../D/13.html' title='Multiple defined in 2 places.'>ABS</a>(<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(ob));
+<a name='L158'>    l = (n-1) * <a href='../S/3124.html#L142' title='Defined at 142 in Python/marshal.c.'>PyLong_MARSHAL_RATIO</a>;
+<a name='L159'>    d = ob-&gt;ob_digit[n-1];
+<a name='L160'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(d != 0); <i><font color='green'>/* a PyLong is always normalized */</font></i>
+<a name='L161'>    <b>do</b> <font color='red'>{</font>
+<a name='L162'>        d &gt;&gt;= <a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a>;
+<a name='L163'>        l++;
+<a name='L164'>    <font color='red'>}</font> <b>while</b> (d != 0);
+<a name='L165'>    <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)(<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(ob) &gt; 0 ? l : -l), p);
+<a name='L166'>
+<a name='L167'>    <b>for</b> (i=0; i &lt; n-1; i++) <font color='red'>{</font>
+<a name='L168'>        d = ob-&gt;ob_digit[i];
+<a name='L169'>        <b>for</b> (j=0; j &lt; <a href='../S/3124.html#L142' title='Defined at 142 in Python/marshal.c.'>PyLong_MARSHAL_RATIO</a>; j++) <font color='red'>{</font>
+<a name='L170'>            <a href='../S/3124.html#L108' title='Defined at 108 in Python/marshal.c.'>w_short</a>(d &amp; <a href='../S/3124.html#L138' title='Defined at 138 in Python/marshal.c.'>PyLong_MARSHAL_MASK</a>, p);
+<a name='L171'>            d &gt;&gt;= <a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a>;
+<a name='L172'>        <font color='red'>}</font>
+<a name='L173'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (d == 0);
+<a name='L174'>    <font color='red'>}</font>
+<a name='L175'>    d = ob-&gt;ob_digit[n-1];
+<a name='L176'>    <b>do</b> <font color='red'>{</font>
+<a name='L177'>        <a href='../S/3124.html#L108' title='Defined at 108 in Python/marshal.c.'>w_short</a>(d &amp; <a href='../S/3124.html#L138' title='Defined at 138 in Python/marshal.c.'>PyLong_MARSHAL_MASK</a>, p);
+<a name='L178'>        d &gt;&gt;= <a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a>;
+<a name='L179'>    <font color='red'>}</font> <b>while</b> (d != 0);
+<a name='L180'><font color='red'>}</font>
+<a name='L181'>
+<a name='L182'><b>static</b> <b>void</b>
+<a name='L183'><a href='../R/11378.html' title='Multiple refered from 17 places.'>w_object</a>(PyObject *v, <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> *p)
+<a name='L184'><font color='red'>{</font>
+<a name='L185'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, n;
+<a name='L186'>
+<a name='L187'>    p-&gt;depth++;
+<a name='L188'>
+<a name='L189'>    <b>if</b> (p-&gt;depth &gt; <a href='../D/2067.html' title='Multiple defined in 2 places.'>MAX_MARSHAL_STACK_DEPTH</a>) <font color='red'>{</font>
+<a name='L190'>        p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L52' title='Defined at 52 in Python/marshal.c.'>WFERR_NESTEDTOODEEP</a>;
+<a name='L191'>    <font color='red'>}</font>
+<a name='L192'>    <b>else</b> <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L193'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L27' title='Defined at 27 in Python/marshal.c.'>TYPE_NULL</a>, p);
+<a name='L194'>    <font color='red'>}</font>
+<a name='L195'>    <b>else</b> <b>if</b> (v == Py_None) <font color='red'>{</font>
+<a name='L196'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L28' title='Defined at 28 in Python/marshal.c.'>TYPE_NONE</a>, p);
+<a name='L197'>    <font color='red'>}</font>
+<a name='L198'>    <b>else</b> <b>if</b> (v == PyExc_StopIteration) <font color='red'>{</font>
+<a name='L199'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L31' title='Defined at 31 in Python/marshal.c.'>TYPE_STOPITER</a>, p);
+<a name='L200'>    <font color='red'>}</font>
+<a name='L201'>    <b>else</b> <b>if</b> (v == Py_Ellipsis) <font color='red'>{</font>
+<a name='L202'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L32' title='Defined at 32 in Python/marshal.c.'>TYPE_ELLIPSIS</a>, p);
+<a name='L203'>    <font color='red'>}</font>
+<a name='L204'>    <b>else</b> <b>if</b> (v == Py_False) <font color='red'>{</font>
+<a name='L205'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L29' title='Defined at 29 in Python/marshal.c.'>TYPE_FALSE</a>, p);
+<a name='L206'>    <font color='red'>}</font>
+<a name='L207'>    <b>else</b> <b>if</b> (v == Py_True) <font color='red'>{</font>
+<a name='L208'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L30' title='Defined at 30 in Python/marshal.c.'>TYPE_TRUE</a>, p);
+<a name='L209'>    <font color='red'>}</font>
+<a name='L210'>    <b>else</b> <b>if</b> (PyLong_CheckExact(v)) <font color='red'>{</font>
+<a name='L211'>        <b>long</b> x = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(v);
+<a name='L212'>        <b>if</b> ((x == -1)  &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L213'>            <a href='../S/536.html#L10' title='Defined at 10 in Include/longobject.h.'>PyLongObject</a> *ob = (<a href='../S/536.html#L10' title='Defined at 10 in Include/longobject.h.'>PyLongObject</a> *)v;
+<a name='L214'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L215'>            <a href='../S/3124.html#L145' title='Defined at 145 in Python/marshal.c.'>w_PyLong</a>(ob, p);
+<a name='L216'>        <font color='red'>}</font>
+<a name='L217'>        <b>else</b> <font color='red'>{</font>
+<a name='L218'><font color='darkred'>#if</font> <a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a> &gt; 4
+<a name='L219'>            <b>long</b> y = <a href='../D/4074.html' title='Multiple defined in 2 places.'>Py_ARITHMETIC_RIGHT_SHIFT</a>(<b>long</b>, x, 31);
+<a name='L220'>            <b>if</b> (y &amp;&amp; y != -1) <font color='red'>{</font>
+<a name='L221'>                <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L34' title='Defined at 34 in Python/marshal.c.'>TYPE_INT64</a>, p);
+<a name='L222'>                <a href='../S/3124.html#L125' title='Defined at 125 in Python/marshal.c.'>w_long64</a>(x, p);
+<a name='L223'>            <font color='red'>}</font>
+<a name='L224'>            <b>else</b>
+<a name='L225'><font color='darkred'>#endif</font>
+<a name='L226'>            <font color='red'>{</font>
+<a name='L227'>                <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L33' title='Defined at 33 in Python/marshal.c.'>TYPE_INT</a>, p);
+<a name='L228'>                <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(x, p);
+<a name='L229'>            <font color='red'>}</font>
+<a name='L230'>        <font color='red'>}</font>
+<a name='L231'>    <font color='red'>}</font>
+<a name='L232'>    <b>else</b> <b>if</b> (PyFloat_CheckExact(v)) <font color='red'>{</font>
+<a name='L233'>        <b>if</b> (p-&gt;version &gt; 1) <font color='red'>{</font>
+<a name='L234'>            <b>unsigned</b> <b>char</b> buf[8];
+<a name='L235'>            <b>if</b> (<a href='../S/2791.html#L2149' title='Defined at 2149 in Objects/floatobject.c.'>_PyFloat_Pack8</a>(<a href='../S/2791.html#L244' title='Defined at 244 in Objects/floatobject.c.'>PyFloat_AsDouble</a>(v),
+<a name='L236'>                               buf, 1) &lt; 0) <font color='red'>{</font>
+<a name='L237'>                p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L238'>                <b>return</b>;
+<a name='L239'>            <font color='red'>}</font>
+<a name='L240'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L36' title='Defined at 36 in Python/marshal.c.'>TYPE_BINARY_FLOAT</a>, p);
+<a name='L241'>            <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>((<b>char</b>*)buf, 8, p);
+<a name='L242'>        <font color='red'>}</font>
+<a name='L243'>        <b>else</b> <font color='red'>{</font>
+<a name='L244'>            <b>char</b> *buf = PyOS_double_to_string(PyFloat_AS_DOUBLE(v),
+<a name='L245'>                                              'g', 17, 0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L246'>            <b>if</b> (!buf) <font color='red'>{</font>
+<a name='L247'>                p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L53' title='Defined at 53 in Python/marshal.c.'>WFERR_NOMEMORY</a>;
+<a name='L248'>                <b>return</b>;
+<a name='L249'>            <font color='red'>}</font>
+<a name='L250'>            n = strlen(buf);
+<a name='L251'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../D/5203.html' title='Multiple defined in 2 places.'>TYPE_FLOAT</a>, p);
+<a name='L252'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>int</b>)n, p);
+<a name='L253'>            <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>(buf, (<b>int</b>)n, p);
+<a name='L254'>            <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(buf);
+<a name='L255'>        <font color='red'>}</font>
+<a name='L256'>    <font color='red'>}</font>
+<a name='L257'>    <b>else</b> <b>if</b> (PyComplex_CheckExact(v)) <font color='red'>{</font>
+<a name='L258'>        <b>if</b> (p-&gt;version &gt; 1) <font color='red'>{</font>
+<a name='L259'>            <b>unsigned</b> <b>char</b> buf[8];
+<a name='L260'>            <b>if</b> (<a href='../S/2791.html#L2149' title='Defined at 2149 in Objects/floatobject.c.'>_PyFloat_Pack8</a>(<a href='../S/2784.html#L244' title='Defined at 244 in Objects/complexobject.c.'>PyComplex_RealAsDouble</a>(v),
+<a name='L261'>                               buf, 1) &lt; 0) <font color='red'>{</font>
+<a name='L262'>                p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L263'>                <b>return</b>;
+<a name='L264'>            <font color='red'>}</font>
+<a name='L265'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L38' title='Defined at 38 in Python/marshal.c.'>TYPE_BINARY_COMPLEX</a>, p);
+<a name='L266'>            <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>((<b>char</b>*)buf, 8, p);
+<a name='L267'>            <b>if</b> (<a href='../S/2791.html#L2149' title='Defined at 2149 in Objects/floatobject.c.'>_PyFloat_Pack8</a>(<a href='../S/2784.html#L255' title='Defined at 255 in Objects/complexobject.c.'>PyComplex_ImagAsDouble</a>(v),
+<a name='L268'>                               buf, 1) &lt; 0) <font color='red'>{</font>
+<a name='L269'>                p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L270'>                <b>return</b>;
+<a name='L271'>            <font color='red'>}</font>
+<a name='L272'>            <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>((<b>char</b>*)buf, 8, p);
+<a name='L273'>        <font color='red'>}</font>
+<a name='L274'>        <b>else</b> <font color='red'>{</font>
+<a name='L275'>            <b>char</b> *buf;
+<a name='L276'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L37' title='Defined at 37 in Python/marshal.c.'>TYPE_COMPLEX</a>, p);
+<a name='L277'>            buf = PyOS_double_to_string(<a href='../S/2784.html#L244' title='Defined at 244 in Objects/complexobject.c.'>PyComplex_RealAsDouble</a>(v),
+<a name='L278'>                                        'g', 17, 0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L279'>            <b>if</b> (!buf) <font color='red'>{</font>
+<a name='L280'>                p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L53' title='Defined at 53 in Python/marshal.c.'>WFERR_NOMEMORY</a>;
+<a name='L281'>                <b>return</b>;
+<a name='L282'>            <font color='red'>}</font>
+<a name='L283'>            n = strlen(buf);
+<a name='L284'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>int</b>)n, p);
+<a name='L285'>            <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>(buf, (<b>int</b>)n, p);
+<a name='L286'>            <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(buf);
+<a name='L287'>            buf = PyOS_double_to_string(<a href='../S/2784.html#L255' title='Defined at 255 in Objects/complexobject.c.'>PyComplex_ImagAsDouble</a>(v),
+<a name='L288'>                                        'g', 17, 0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L289'>            <b>if</b> (!buf) <font color='red'>{</font>
+<a name='L290'>                p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L53' title='Defined at 53 in Python/marshal.c.'>WFERR_NOMEMORY</a>;
+<a name='L291'>                <b>return</b>;
+<a name='L292'>            <font color='red'>}</font>
+<a name='L293'>            n = strlen(buf);
+<a name='L294'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>((<b>int</b>)n, p);
+<a name='L295'>            <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>(buf, (<b>int</b>)n, p);
+<a name='L296'>            <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(buf);
+<a name='L297'>        <font color='red'>}</font>
+<a name='L298'>    <font color='red'>}</font>
+<a name='L299'>    <b>else</b> <b>if</b> (PyBytes_CheckExact(v)) <font color='red'>{</font>
+<a name='L300'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L40' title='Defined at 40 in Python/marshal.c.'>TYPE_STRING</a>, p);
+<a name='L301'>        n = PyBytes_GET_SIZE(v);
+<a name='L302'>        <b>if</b> (n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L303'>            <i><font color='green'>/* huge strings are not supported */</font></i>
+<a name='L304'>            p-&gt;depth--;
+<a name='L305'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L306'>            <b>return</b>;
+<a name='L307'>        <font color='red'>}</font>
+<a name='L308'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)n, p);
+<a name='L309'>        <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>(PyBytes_AS_STRING(v), (<b>int</b>)n, p);
+<a name='L310'>    <font color='red'>}</font>
+<a name='L311'>    <b>else</b> <b>if</b> (PyUnicode_CheckExact(v)) <font color='red'>{</font>
+<a name='L312'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *utf8;
+<a name='L313'>        utf8 = <a href='../D/4001.html' title='Multiple defined in 3 places.'>PyUnicode_EncodeUTF8</a>(<a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(v),
+<a name='L314'>                                    <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(v),
+<a name='L315'>                                    "surrogatepass");
+<a name='L316'>        <b>if</b> (utf8 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L317'>            p-&gt;depth--;
+<a name='L318'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L319'>            <b>return</b>;
+<a name='L320'>        <font color='red'>}</font>
+<a name='L321'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../D/5217.html' title='Multiple defined in 2 places.'>TYPE_UNICODE</a>, p);
+<a name='L322'>        n = PyBytes_GET_SIZE(utf8);
+<a name='L323'>        <b>if</b> (n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L324'>            p-&gt;depth--;
+<a name='L325'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L326'>            <b>return</b>;
+<a name='L327'>        <font color='red'>}</font>
+<a name='L328'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)n, p);
+<a name='L329'>        <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>(PyBytes_AS_STRING(utf8), (<b>int</b>)n, p);
+<a name='L330'>        Py_DECREF(utf8);
+<a name='L331'>    <font color='red'>}</font>
+<a name='L332'>    <b>else</b> <b>if</b> (PyTuple_CheckExact(v)) <font color='red'>{</font>
+<a name='L333'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L41' title='Defined at 41 in Python/marshal.c.'>TYPE_TUPLE</a>, p);
+<a name='L334'>        n = <a href='../S/2823.html#L112' title='Defined at 112 in Objects/tupleobject.c.'>PyTuple_Size</a>(v);
+<a name='L335'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)n, p);
+<a name='L336'>        <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L337'>            <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(PyTuple_GET_ITEM(v, i), p);
+<a name='L338'>        <font color='red'>}</font>
+<a name='L339'>    <font color='red'>}</font>
+<a name='L340'>    <b>else</b> <b>if</b> (PyList_CheckExact(v)) <font color='red'>{</font>
+<a name='L341'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L42' title='Defined at 42 in Python/marshal.c.'>TYPE_LIST</a>, p);
+<a name='L342'>        n = <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(v);
+<a name='L343'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)n, p);
+<a name='L344'>        <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L345'>            <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(PyList_GET_ITEM(v, i), p);
+<a name='L346'>        <font color='red'>}</font>
+<a name='L347'>    <font color='red'>}</font>
+<a name='L348'>    <b>else</b> <b>if</b> (<a href='../D/3104.html' title='Multiple defined in 2 places.'>PyDict_CheckExact</a>(v)) <font color='red'>{</font>
+<a name='L349'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos;
+<a name='L350'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L351'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L43' title='Defined at 43 in Python/marshal.c.'>TYPE_DICT</a>, p);
+<a name='L352'>        <i><font color='green'>/* This one is NULL object terminated! */</font></i>
+<a name='L353'>        pos = 0;
+<a name='L354'>        <b>while</b> (<a href='../S/2787.html#L954' title='Defined at 954 in Objects/dictobject.c.'>PyDict_Next</a>(v, &amp;pos, &amp;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, &amp;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)) <font color='red'>{</font>
+<a name='L355'>            <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, p);
+<a name='L356'>            <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, p);
+<a name='L357'>        <font color='red'>}</font>
+<a name='L358'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, p);
+<a name='L359'>    <font color='red'>}</font>
+<a name='L360'>    <b>else</b> <b>if</b> (<a href='../S/575.html#L73' title='Defined at 73 in Include/setobject.h.'>PyAnySet_CheckExact</a>(v)) <font color='red'>{</font>
+<a name='L361'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, *it;
+<a name='L362'>
+<a name='L363'>        <b>if</b> (PyObject_TypeCheck(v, &amp;PySet_Type))
+<a name='L364'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L47' title='Defined at 47 in Python/marshal.c.'>TYPE_SET</a>, p);
+<a name='L365'>        <b>else</b>
+<a name='L366'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L48' title='Defined at 48 in Python/marshal.c.'>TYPE_FROZENSET</a>, p);
+<a name='L367'>        n = <a href='../S/2775.html#L43' title='Defined at 43 in Objects/abstract.c.'>PyObject_Size</a>(v);
+<a name='L368'>        <b>if</b> (n == -1) <font color='red'>{</font>
+<a name='L369'>            p-&gt;depth--;
+<a name='L370'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L371'>            <b>return</b>;
+<a name='L372'>        <font color='red'>}</font>
+<a name='L373'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)n, p);
+<a name='L374'>        it = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(v);
+<a name='L375'>        <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L376'>            p-&gt;depth--;
+<a name='L377'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L378'>            <b>return</b>;
+<a name='L379'>        <font color='red'>}</font>
+<a name='L380'>        <b>while</b> ((<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it)) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L381'>            <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, p);
+<a name='L382'>            Py_DECREF(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L383'>        <font color='red'>}</font>
+<a name='L384'>        Py_DECREF(it);
+<a name='L385'>        <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L386'>            p-&gt;depth--;
+<a name='L387'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L388'>            <b>return</b>;
+<a name='L389'>        <font color='red'>}</font>
+<a name='L390'>    <font color='red'>}</font>
+<a name='L391'>    <b>else</b> <b>if</b> (PyCode_Check(v)) <font color='red'>{</font>
+<a name='L392'>        <a href='../S/511.html#L32' title='Defined at 32 in Include/code.h.'>PyCodeObject</a> *co = (<a href='../S/511.html#L32' title='Defined at 32 in Include/code.h.'>PyCodeObject</a> *)v;
+<a name='L393'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L44' title='Defined at 44 in Python/marshal.c.'>TYPE_CODE</a>, p);
+<a name='L394'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(co-&gt;co_argcount, p);
+<a name='L395'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(co-&gt;co_kwonlyargcount, p);
+<a name='L396'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(co-&gt;co_nlocals, p);
+<a name='L397'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(co-&gt;co_stacksize, p);
+<a name='L398'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(co-&gt;co_flags, p);
+<a name='L399'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_code, p);
+<a name='L400'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_consts, p);
+<a name='L401'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_names, p);
+<a name='L402'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_varnames, p);
+<a name='L403'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_freevars, p);
+<a name='L404'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_cellvars, p);
+<a name='L405'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_filename, p);
+<a name='L406'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_name, p);
+<a name='L407'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(co-&gt;co_firstlineno, p);
+<a name='L408'>        <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(co-&gt;co_lnotab, p);
+<a name='L409'>    <font color='red'>}</font>
+<a name='L410'>    <b>else</b> <b>if</b> (PyObject_CheckBuffer(v)) <font color='red'>{</font>
+<a name='L411'>        <i><font color='green'>/* Write unknown buffer-style objects as a string */</font></i>
+<a name='L412'>        <b>char</b> *s;
+<a name='L413'>        <a href='../S/544.html#L273' title='Defined at 273 in Include/object.h.'>PyBufferProcs</a> *pb = v-&gt;ob_type-&gt;tp_as_buffer;
+<a name='L414'>        <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> view;
+<a name='L415'>        <b>if</b> ((*pb-&gt;bf_getbuffer)(v, &amp;view, <a href='../S/544.html#L169' title='Defined at 169 in Include/object.h.'>PyBUF_SIMPLE</a>) != 0) <font color='red'>{</font>
+<a name='L416'>            <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../D/5218.html' title='Multiple defined in 2 places.'>TYPE_UNKNOWN</a>, p);
+<a name='L417'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L418'>        <font color='red'>}</font>
+<a name='L419'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../S/3124.html#L40' title='Defined at 40 in Python/marshal.c.'>TYPE_STRING</a>, p);
+<a name='L420'>        n = view.len;
+<a name='L421'>        s = view.buf;
+<a name='L422'>        <b>if</b> (n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L423'>            p-&gt;depth--;
+<a name='L424'>            p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L425'>            <b>return</b>;
+<a name='L426'>        <font color='red'>}</font>
+<a name='L427'>        <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>((<b>long</b>)n, p);
+<a name='L428'>        <a href='../S/3124.html#L94' title='Defined at 94 in Python/marshal.c.'>w_string</a>(s, (<b>int</b>)n, p);
+<a name='L429'>        <b>if</b> (pb-&gt;bf_releasebuffer != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L430'>            (*pb-&gt;bf_releasebuffer)(v, &amp;view);
+<a name='L431'>    <font color='red'>}</font>
+<a name='L432'>    <b>else</b> <font color='red'>{</font>
+<a name='L433'>        <a href='../S/3124.html#L67' title='Defined at 67 in Python/marshal.c.'>w_byte</a>(<a href='../D/5218.html' title='Multiple defined in 2 places.'>TYPE_UNKNOWN</a>, p);
+<a name='L434'>        p-&gt;<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>;
+<a name='L435'>    <font color='red'>}</font>
+<a name='L436'>    p-&gt;depth--;
+<a name='L437'><font color='red'>}</font>
+<a name='L438'>
+<a name='L439'><i><font color='green'>/* version currently has no effect for writing longs. */</font></i>
+<a name='L440'><b>void</b>
+<a name='L441'><a href='../R/3158.html' title='Multiple refered from 3 places.'>PyMarshal_WriteLongToFile</a>(<b>long</b> x, FILE *fp, <b>int</b> version)
+<a name='L442'><font color='red'>{</font>
+<a name='L443'>    <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> wf;
+<a name='L444'>    wf.fp = fp;
+<a name='L445'>    wf.<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L50' title='Defined at 50 in Python/marshal.c.'>WFERR_OK</a>;
+<a name='L446'>    wf.depth = 0;
+<a name='L447'>    wf.strings = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L448'>    wf.version = version;
+<a name='L449'>    <a href='../S/3124.html#L115' title='Defined at 115 in Python/marshal.c.'>w_long</a>(x, &amp;wf);
+<a name='L450'><font color='red'>}</font>
+<a name='L451'>
+<a name='L452'><b>void</b>
+<a name='L453'><a href='../S/3120.html#L1215' title='Refered from 1215 in Python/import.c.'>PyMarshal_WriteObjectToFile</a>(PyObject *x, FILE *fp, <b>int</b> version)
+<a name='L454'><font color='red'>{</font>
+<a name='L455'>    <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> wf;
+<a name='L456'>    wf.fp = fp;
+<a name='L457'>    wf.<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L50' title='Defined at 50 in Python/marshal.c.'>WFERR_OK</a>;
+<a name='L458'>    wf.depth = 0;
+<a name='L459'>    wf.strings = (version &gt; 0) ? <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>() : <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L460'>    wf.version = version;
+<a name='L461'>    <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(x, &amp;wf);
+<a name='L462'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(wf.strings);
+<a name='L463'><font color='red'>}</font>
+<a name='L464'>
+<a name='L465'><b>typedef</b> <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> <a href='../R/3967.html' title='Multiple refered from 13 places.'>RFILE</a>; <i><font color='green'>/* Same struct with different invariants */</font></i>
+<a name='L466'>
+<a name='L467'><font color='darkred'>#define</font> <a href='../R/10065.html' title='Multiple refered from 5 places.'>rs_byte</a>(p) (((p)-&gt;ptr &lt; (p)-&gt;end) ? (<b>unsigned</b> <b>char</b>)*(p)-&gt;ptr++ : EOF)
+<a name='L468'>
+<a name='L469'><font color='darkred'>#define</font> <a href='../R/9922.html' title='Multiple refered from 6 places.'>r_byte</a>(p) ((p)-&gt;fp ? getc((p)-&gt;fp) : <a href='../S/3124.html#L467' title='Defined at 467 in Python/marshal.c.'>rs_byte</a>(p))
+<a name='L470'>
+<a name='L471'><b>static</b> <b>int</b>
+<a name='L472'><a href='../R/9927.html' title='Multiple refered from 8 places.'>r_string</a>(<b>char</b> *s, <b>int</b> n, <a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> *p)
+<a name='L473'><font color='red'>{</font>
+<a name='L474'>    <b>if</b> (p-&gt;fp != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L475'>        <i><font color='green'>/* The result fits into int because it must be &lt;=n. */</font></i>
+<a name='L476'>        <b>return</b> (<b>int</b>)fread(s, 1, n, p-&gt;fp);
+<a name='L477'>    <b>if</b> (p-&gt;end - p-&gt;ptr &lt; n)
+<a name='L478'>        n = (<b>int</b>)(p-&gt;end - p-&gt;ptr);
+<a name='L479'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(s, p-&gt;ptr, n);
+<a name='L480'>    p-&gt;ptr += n;
+<a name='L481'>    <b>return</b> n;
+<a name='L482'><font color='red'>}</font>
+<a name='L483'>
+<a name='L484'><b>static</b> <b>int</b>
+<a name='L485'><a href='../R/9926.html' title='Multiple refered from 3 places.'>r_short</a>(<a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> *p)
+<a name='L486'><font color='red'>{</font>
+<a name='L487'>    <b>register</b> <b>short</b> x;
+<a name='L488'>    x = <a href='../S/3124.html#L469' title='Defined at 469 in Python/marshal.c.'>r_byte</a>(p);
+<a name='L489'>    x |= <a href='../S/3124.html#L469' title='Defined at 469 in Python/marshal.c.'>r_byte</a>(p) &lt;&lt; 8;
+<a name='L490'>    <i><font color='green'>/* Sign-extension, in case short greater than 16 bits */</font></i>
+<a name='L491'>    x |= -(x &amp; 0x8000);
+<a name='L492'>    <b>return</b> x;
+<a name='L493'><font color='red'>}</font>
+<a name='L494'>
+<a name='L495'><b>static</b> <b>long</b>
+<a name='L496'><a href='../R/9923.html' title='Multiple refered from 16 places.'>r_long</a>(<a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> *p)
+<a name='L497'><font color='red'>{</font>
+<a name='L498'>    <b>register</b> <b>long</b> x;
+<a name='L499'>    <b>register</b> FILE *fp = p-&gt;fp;
+<a name='L500'>    <b>if</b> (fp) <font color='red'>{</font>
+<a name='L501'>        x = getc(fp);
+<a name='L502'>        x |= (<b>long</b>)getc(fp) &lt;&lt; 8;
+<a name='L503'>        x |= (<b>long</b>)getc(fp) &lt;&lt; 16;
+<a name='L504'>        x |= (<b>long</b>)getc(fp) &lt;&lt; 24;
+<a name='L505'>    <font color='red'>}</font>
+<a name='L506'>    <b>else</b> <font color='red'>{</font>
+<a name='L507'>        x = <a href='../S/3124.html#L467' title='Defined at 467 in Python/marshal.c.'>rs_byte</a>(p);
+<a name='L508'>        x |= (<b>long</b>)<a href='../S/3124.html#L467' title='Defined at 467 in Python/marshal.c.'>rs_byte</a>(p) &lt;&lt; 8;
+<a name='L509'>        x |= (<b>long</b>)<a href='../S/3124.html#L467' title='Defined at 467 in Python/marshal.c.'>rs_byte</a>(p) &lt;&lt; 16;
+<a name='L510'>        x |= (<b>long</b>)<a href='../S/3124.html#L467' title='Defined at 467 in Python/marshal.c.'>rs_byte</a>(p) &lt;&lt; 24;
+<a name='L511'>    <font color='red'>}</font>
+<a name='L512'><font color='darkred'>#if</font> <a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a> &gt; 4
+<a name='L513'>    <i><font color='green'>/* Sign extension for 64-bit machines */</font></i>
+<a name='L514'>    x |= -(x &amp; 0x80000000L);
+<a name='L515'><font color='darkred'>#endif</font>
+<a name='L516'>    <b>return</b> x;
+<a name='L517'><font color='red'>}</font>
+<a name='L518'>
+<a name='L519'><i><font color='green'>/* r_long64 deals with the TYPE_INT64 code.  On a machine with</font></i>
+<a name='L520'><i><font color='green'>   sizeof(long) &gt; 4, it returns a Python int object, else a Python long</font></i>
+<a name='L521'><i><font color='green'>   object.  Note that w_long64 writes out TYPE_INT if 32 bits is enough,</font></i>
+<a name='L522'><i><font color='green'>   so there's no inefficiency here in returning a PyLong on 32-bit boxes</font></i>
+<a name='L523'><i><font color='green'>   for everything written via TYPE_INT64 (i.e., if an int is written via</font></i>
+<a name='L524'><i><font color='green'>   TYPE_INT64, it *needs* more than 32 bits).</font></i>
+<a name='L525'><i><font color='green'>*/</font></i>
+<a name='L526'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L527'><a href='../S/3124.html#L670' title='Refered from 670 in Python/marshal.c.'>r_long64</a>(<a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> *p)
+<a name='L528'><font color='red'>{</font>
+<a name='L529'>    <b>long</b> lo4 = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L530'>    <b>long</b> hi4 = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L531'><font color='darkred'>#if</font> <a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a> &gt; 4
+<a name='L532'>    <b>long</b> x = (hi4 &lt;&lt; 32) | (lo4 &amp; 0xFFFFFFFFL);
+<a name='L533'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(x);
+<a name='L534'><font color='darkred'>#else</font>
+<a name='L535'>    <b>unsigned</b> <b>char</b> buf[8];
+<a name='L536'>    <b>int</b> one = 1;
+<a name='L537'>    <b>int</b> is_little_endian = (<b>int</b>)*(<b>char</b>*)&amp;one;
+<a name='L538'>    <b>if</b> (is_little_endian) <font color='red'>{</font>
+<a name='L539'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(buf, &amp;lo4, 4);
+<a name='L540'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(buf+4, &amp;hi4, 4);
+<a name='L541'>    <font color='red'>}</font>
+<a name='L542'>    <b>else</b> <font color='red'>{</font>
+<a name='L543'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(buf, &amp;hi4, 4);
+<a name='L544'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(buf+4, &amp;lo4, 4);
+<a name='L545'>    <font color='red'>}</font>
+<a name='L546'>    <b>return</b> <a href='../S/2799.html#L683' title='Defined at 683 in Objects/longobject.c.'>_PyLong_FromByteArray</a>(buf, 8, is_little_endian, 1);
+<a name='L547'><font color='darkred'>#endif</font>
+<a name='L548'><font color='red'>}</font>
+<a name='L549'>
+<a name='L550'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L551'><a href='../S/3124.html#L674' title='Refered from 674 in Python/marshal.c.'>r_PyLong</a>(<a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> *p)
+<a name='L552'><font color='red'>{</font>
+<a name='L553'>    <a href='../S/536.html#L10' title='Defined at 10 in Include/longobject.h.'>PyLongObject</a> *ob;
+<a name='L554'>    <b>int</b> size, i, j, md, shorts_in_top_digit;
+<a name='L555'>    <b>long</b> n;
+<a name='L556'>    <a href='../D/8164.html' title='Multiple defined in 2 places.'>digit</a> d;
+<a name='L557'>
+<a name='L558'>    n = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L559'>    <b>if</b> (n == 0)
+<a name='L560'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)<a href='../S/2799.html#L126' title='Defined at 126 in Objects/longobject.c.'>_PyLong_New</a>(0);
+<a name='L561'>    <b>if</b> (n &lt; -<a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a> || n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L562'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L563'>                       "bad marshal data (long size out of range)");
+<a name='L564'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L565'>    <font color='red'>}</font>
+<a name='L566'>
+<a name='L567'>    size = 1 + (<a href='../D/13.html' title='Multiple defined in 2 places.'>ABS</a>(n) - 1) / <a href='../S/3124.html#L142' title='Defined at 142 in Python/marshal.c.'>PyLong_MARSHAL_RATIO</a>;
+<a name='L568'>    shorts_in_top_digit = 1 + (<a href='../D/13.html' title='Multiple defined in 2 places.'>ABS</a>(n) - 1) % <a href='../S/3124.html#L142' title='Defined at 142 in Python/marshal.c.'>PyLong_MARSHAL_RATIO</a>;
+<a name='L569'>    ob = <a href='../S/2799.html#L126' title='Defined at 126 in Objects/longobject.c.'>_PyLong_New</a>(size);
+<a name='L570'>    <b>if</b> (ob == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L571'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L572'>    <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(ob) = n &gt; 0 ? size : -size;
+<a name='L573'>
+<a name='L574'>    <b>for</b> (i = 0; i &lt; size-1; i++) <font color='red'>{</font>
+<a name='L575'>        d = 0;
+<a name='L576'>        <b>for</b> (j=0; j &lt; <a href='../S/3124.html#L142' title='Defined at 142 in Python/marshal.c.'>PyLong_MARSHAL_RATIO</a>; j++) <font color='red'>{</font>
+<a name='L577'>            md = <a href='../S/3124.html#L485' title='Defined at 485 in Python/marshal.c.'>r_short</a>(p);
+<a name='L578'>            <b>if</b> (md &lt; 0 || md &gt; <a href='../S/3124.html#L137' title='Defined at 137 in Python/marshal.c.'>PyLong_MARSHAL_BASE</a>)
+<a name='L579'>                <b>goto</b> bad_digit;
+<a name='L580'>            d += (<a href='../D/8164.html' title='Multiple defined in 2 places.'>digit</a>)md &lt;&lt; j*<a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a>;
+<a name='L581'>        <font color='red'>}</font>
+<a name='L582'>        ob-&gt;ob_digit[i] = d;
+<a name='L583'>    <font color='red'>}</font>
+<a name='L584'>    d = 0;
+<a name='L585'>    <b>for</b> (j=0; j &lt; shorts_in_top_digit; j++) <font color='red'>{</font>
+<a name='L586'>        md = <a href='../S/3124.html#L485' title='Defined at 485 in Python/marshal.c.'>r_short</a>(p);
+<a name='L587'>        <b>if</b> (md &lt; 0 || md &gt; <a href='../S/3124.html#L137' title='Defined at 137 in Python/marshal.c.'>PyLong_MARSHAL_BASE</a>)
+<a name='L588'>            <b>goto</b> bad_digit;
+<a name='L589'>        <i><font color='green'>/* topmost marshal digit should be nonzero */</font></i>
+<a name='L590'>        <b>if</b> (md == 0 &amp;&amp; j == shorts_in_top_digit - 1) <font color='red'>{</font>
+<a name='L591'>            Py_DECREF(ob);
+<a name='L592'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L593'>                "bad marshal data (unnormalized long data)");
+<a name='L594'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L595'>        <font color='red'>}</font>
+<a name='L596'>        d += (<a href='../D/8164.html' title='Multiple defined in 2 places.'>digit</a>)md &lt;&lt; j*<a href='../S/3124.html#L136' title='Defined at 136 in Python/marshal.c.'>PyLong_MARSHAL_SHIFT</a>;
+<a name='L597'>    <font color='red'>}</font>
+<a name='L598'>    <i><font color='green'>/* top digit should be nonzero, else the resulting PyLong won't be</font></i>
+<a name='L599'><i><font color='green'>       normalized */</font></i>
+<a name='L600'>    ob-&gt;ob_digit[size-1] = d;
+<a name='L601'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)ob;
+<a name='L602'>  bad_digit:
+<a name='L603'>    Py_DECREF(ob);
+<a name='L604'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L605'>                    "bad marshal data (digit out of range in long)");
+<a name='L606'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L607'><font color='red'>}</font>
+<a name='L608'>
+<a name='L609'>
+<a name='L610'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L611'><a href='../R/9925.html' title='Multiple refered from 17 places.'>r_object</a>(<a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> *p)
+<a name='L612'><font color='red'>{</font>
+<a name='L613'>    <i><font color='green'>/* NULL is a valid return value, it does not necessarily means that</font></i>
+<a name='L614'><i><font color='green'>       an exception is set. */</font></i>
+<a name='L615'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v, *v2;
+<a name='L616'>    <b>long</b> i, n;
+<a name='L617'>    <b>int</b> type = <a href='../S/3124.html#L469' title='Defined at 469 in Python/marshal.c.'>r_byte</a>(p);
+<a name='L618'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *retval;
+<a name='L619'>
+<a name='L620'>    p-&gt;depth++;
+<a name='L621'>
+<a name='L622'>    <b>if</b> (p-&gt;depth &gt; <a href='../D/2067.html' title='Multiple defined in 2 places.'>MAX_MARSHAL_STACK_DEPTH</a>) <font color='red'>{</font>
+<a name='L623'>        p-&gt;depth--;
+<a name='L624'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "recursion limit exceeded");
+<a name='L625'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L626'>    <font color='red'>}</font>
+<a name='L627'>
+<a name='L628'>    <b>switch</b> (type) <font color='red'>{</font>
+<a name='L629'>
+<a name='L630'>    <b>case</b> EOF:
+<a name='L631'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L632'>                        "EOF read where object expected");
+<a name='L633'>        retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L634'>        <b>break</b>;
+<a name='L635'>
+<a name='L636'>    <b>case</b> <a href='../S/3124.html#L27' title='Defined at 27 in Python/marshal.c.'>TYPE_NULL</a>:
+<a name='L637'>        retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L638'>        <b>break</b>;
+<a name='L639'>
+<a name='L640'>    <b>case</b> <a href='../S/3124.html#L28' title='Defined at 28 in Python/marshal.c.'>TYPE_NONE</a>:
+<a name='L641'>        Py_INCREF(Py_None);
+<a name='L642'>        retval = Py_None;
+<a name='L643'>        <b>break</b>;
+<a name='L644'>
+<a name='L645'>    <b>case</b> <a href='../S/3124.html#L31' title='Defined at 31 in Python/marshal.c.'>TYPE_STOPITER</a>:
+<a name='L646'>        Py_INCREF(PyExc_StopIteration);
+<a name='L647'>        retval = PyExc_StopIteration;
+<a name='L648'>        <b>break</b>;
+<a name='L649'>
+<a name='L650'>    <b>case</b> <a href='../S/3124.html#L32' title='Defined at 32 in Python/marshal.c.'>TYPE_ELLIPSIS</a>:
+<a name='L651'>        Py_INCREF(Py_Ellipsis);
+<a name='L652'>        retval = Py_Ellipsis;
+<a name='L653'>        <b>break</b>;
+<a name='L654'>
+<a name='L655'>    <b>case</b> <a href='../S/3124.html#L29' title='Defined at 29 in Python/marshal.c.'>TYPE_FALSE</a>:
+<a name='L656'>        Py_INCREF(Py_False);
+<a name='L657'>        retval = Py_False;
+<a name='L658'>        <b>break</b>;
+<a name='L659'>
+<a name='L660'>    <b>case</b> <a href='../S/3124.html#L30' title='Defined at 30 in Python/marshal.c.'>TYPE_TRUE</a>:
+<a name='L661'>        Py_INCREF(Py_True);
+<a name='L662'>        retval = Py_True;
+<a name='L663'>        <b>break</b>;
+<a name='L664'>
+<a name='L665'>    <b>case</b> <a href='../S/3124.html#L33' title='Defined at 33 in Python/marshal.c.'>TYPE_INT</a>:
+<a name='L666'>        retval = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p));
+<a name='L667'>        <b>break</b>;
+<a name='L668'>
+<a name='L669'>    <b>case</b> <a href='../S/3124.html#L34' title='Defined at 34 in Python/marshal.c.'>TYPE_INT64</a>:
+<a name='L670'>        retval = <a href='../S/3124.html#L527' title='Defined at 527 in Python/marshal.c.'>r_long64</a>(p);
+<a name='L671'>        <b>break</b>;
+<a name='L672'>
+<a name='L673'>    <b>case</b> <a href='../D/5208.html' title='Multiple defined in 2 places.'>TYPE_LONG</a>:
+<a name='L674'>        retval = <a href='../S/3124.html#L551' title='Defined at 551 in Python/marshal.c.'>r_PyLong</a>(p);
+<a name='L675'>        <b>break</b>;
+<a name='L676'>
+<a name='L677'>    <b>case</b> <a href='../D/5203.html' title='Multiple defined in 2 places.'>TYPE_FLOAT</a>:
+<a name='L678'>        <font color='red'>{</font>
+<a name='L679'>            <b>char</b> buf[256];
+<a name='L680'>            <b>double</b> dx;
+<a name='L681'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L682'>            n = <a href='../S/3124.html#L469' title='Defined at 469 in Python/marshal.c.'>r_byte</a>(p);
+<a name='L683'>            <b>if</b> (n == EOF || <a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>(buf, (<b>int</b>)n, p) != n) <font color='red'>{</font>
+<a name='L684'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L685'>                    "EOF read where object expected");
+<a name='L686'>                <b>break</b>;
+<a name='L687'>            <font color='red'>}</font>
+<a name='L688'>            buf[n] = '\0';
+<a name='L689'>            dx = <a href='../S/3136.html#L298' title='Defined at 298 in Python/pystrtod.c.'>PyOS_string_to_double</a>(buf, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L690'>            <b>if</b> (dx == -1.0 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L691'>                <b>break</b>;
+<a name='L692'>            retval = <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(dx);
+<a name='L693'>            <b>break</b>;
+<a name='L694'>        <font color='red'>}</font>
+<a name='L695'>
+<a name='L696'>    <b>case</b> <a href='../S/3124.html#L36' title='Defined at 36 in Python/marshal.c.'>TYPE_BINARY_FLOAT</a>:
+<a name='L697'>        <font color='red'>{</font>
+<a name='L698'>            <b>unsigned</b> <b>char</b> buf[8];
+<a name='L699'>            <b>double</b> x;
+<a name='L700'>            <b>if</b> (<a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>((<b>char</b>*)buf, 8, p) != 8) <font color='red'>{</font>
+<a name='L701'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L702'>                    "EOF read where object expected");
+<a name='L703'>                retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L704'>                <b>break</b>;
+<a name='L705'>            <font color='red'>}</font>
+<a name='L706'>            x = <a href='../S/2791.html#L2356' title='Defined at 2356 in Objects/floatobject.c.'>_PyFloat_Unpack8</a>(buf, 1);
+<a name='L707'>            <b>if</b> (x == -1.0 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L708'>                retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L709'>                <b>break</b>;
+<a name='L710'>            <font color='red'>}</font>
+<a name='L711'>            retval = <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(x);
+<a name='L712'>            <b>break</b>;
+<a name='L713'>        <font color='red'>}</font>
+<a name='L714'>
+<a name='L715'>    <b>case</b> <a href='../S/3124.html#L37' title='Defined at 37 in Python/marshal.c.'>TYPE_COMPLEX</a>:
+<a name='L716'>        <font color='red'>{</font>
+<a name='L717'>            <b>char</b> buf[256];
+<a name='L718'>            <a href='../S/514.html#L13' title='Defined at 13 in Include/complexobject.h.'>Py_complex</a> c;
+<a name='L719'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L720'>            n = <a href='../S/3124.html#L469' title='Defined at 469 in Python/marshal.c.'>r_byte</a>(p);
+<a name='L721'>            <b>if</b> (n == EOF || <a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>(buf, (<b>int</b>)n, p) != n) <font color='red'>{</font>
+<a name='L722'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L723'>                    "EOF read where object expected");
+<a name='L724'>                <b>break</b>;
+<a name='L725'>            <font color='red'>}</font>
+<a name='L726'>            buf[n] = '\0';
+<a name='L727'>            c.real = <a href='../S/3136.html#L298' title='Defined at 298 in Python/pystrtod.c.'>PyOS_string_to_double</a>(buf, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L728'>            <b>if</b> (c.real == -1.0 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L729'>                <b>break</b>;
+<a name='L730'>            n = <a href='../S/3124.html#L469' title='Defined at 469 in Python/marshal.c.'>r_byte</a>(p);
+<a name='L731'>            <b>if</b> (n == EOF || <a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>(buf, (<b>int</b>)n, p) != n) <font color='red'>{</font>
+<a name='L732'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L733'>                    "EOF read where object expected");
+<a name='L734'>                <b>break</b>;
+<a name='L735'>            <font color='red'>}</font>
+<a name='L736'>            buf[n] = '\0';
+<a name='L737'>            c.imag = <a href='../S/3136.html#L298' title='Defined at 298 in Python/pystrtod.c.'>PyOS_string_to_double</a>(buf, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L738'>            <b>if</b> (c.imag == -1.0 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L739'>                <b>break</b>;
+<a name='L740'>            retval = <a href='../S/2784.html#L212' title='Defined at 212 in Objects/complexobject.c.'>PyComplex_FromCComplex</a>(c);
+<a name='L741'>            <b>break</b>;
+<a name='L742'>        <font color='red'>}</font>
+<a name='L743'>
+<a name='L744'>    <b>case</b> <a href='../S/3124.html#L38' title='Defined at 38 in Python/marshal.c.'>TYPE_BINARY_COMPLEX</a>:
+<a name='L745'>        <font color='red'>{</font>
+<a name='L746'>            <b>unsigned</b> <b>char</b> buf[8];
+<a name='L747'>            <a href='../S/514.html#L13' title='Defined at 13 in Include/complexobject.h.'>Py_complex</a> c;
+<a name='L748'>            <b>if</b> (<a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>((<b>char</b>*)buf, 8, p) != 8) <font color='red'>{</font>
+<a name='L749'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L750'>                    "EOF read where object expected");
+<a name='L751'>                retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L752'>                <b>break</b>;
+<a name='L753'>            <font color='red'>}</font>
+<a name='L754'>            c.real = <a href='../S/2791.html#L2356' title='Defined at 2356 in Objects/floatobject.c.'>_PyFloat_Unpack8</a>(buf, 1);
+<a name='L755'>            <b>if</b> (c.real == -1.0 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L756'>                retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L757'>                <b>break</b>;
+<a name='L758'>            <font color='red'>}</font>
+<a name='L759'>            <b>if</b> (<a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>((<b>char</b>*)buf, 8, p) != 8) <font color='red'>{</font>
+<a name='L760'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L761'>                    "EOF read where object expected");
+<a name='L762'>                retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L763'>                <b>break</b>;
+<a name='L764'>            <font color='red'>}</font>
+<a name='L765'>            c.imag = <a href='../S/2791.html#L2356' title='Defined at 2356 in Objects/floatobject.c.'>_PyFloat_Unpack8</a>(buf, 1);
+<a name='L766'>            <b>if</b> (c.imag == -1.0 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L767'>                retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L768'>                <b>break</b>;
+<a name='L769'>            <font color='red'>}</font>
+<a name='L770'>            retval = <a href='../S/2784.html#L212' title='Defined at 212 in Objects/complexobject.c.'>PyComplex_FromCComplex</a>(c);
+<a name='L771'>            <b>break</b>;
+<a name='L772'>        <font color='red'>}</font>
+<a name='L773'>
+<a name='L774'>    <b>case</b> <a href='../S/3124.html#L40' title='Defined at 40 in Python/marshal.c.'>TYPE_STRING</a>:
+<a name='L775'>        n = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L776'>        <b>if</b> (n &lt; 0 || n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L777'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "bad marshal data (string size out of range)");
+<a name='L778'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L779'>            <b>break</b>;
+<a name='L780'>        <font color='red'>}</font>
+<a name='L781'>        v = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>((<b>char</b> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, n);
+<a name='L782'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L783'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L784'>            <b>break</b>;
+<a name='L785'>        <font color='red'>}</font>
+<a name='L786'>        <b>if</b> (<a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>(PyBytes_AS_STRING(v), (<b>int</b>)n, p) != n) <font color='red'>{</font>
+<a name='L787'>            Py_DECREF(v);
+<a name='L788'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L789'>                            "EOF read where object expected");
+<a name='L790'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L791'>            <b>break</b>;
+<a name='L792'>        <font color='red'>}</font>
+<a name='L793'>        retval = v;
+<a name='L794'>        <b>break</b>;
+<a name='L795'>
+<a name='L796'>    <b>case</b> <a href='../D/5217.html' title='Multiple defined in 2 places.'>TYPE_UNICODE</a>:
+<a name='L797'>        <font color='red'>{</font>
+<a name='L798'>        <b>char</b> *<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>;
+<a name='L799'>
+<a name='L800'>        n = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L801'>        <b>if</b> (n &lt; 0 || n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L802'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "bad marshal data (unicode size out of range)");
+<a name='L803'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L804'>            <b>break</b>;
+<a name='L805'>        <font color='red'>}</font>
+<a name='L806'>        <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> = PyMem_NEW(<b>char</b>, n);
+<a name='L807'>        <b>if</b> (<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L808'>            retval = <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L809'>            <b>break</b>;
+<a name='L810'>        <font color='red'>}</font>
+<a name='L811'>        <b>if</b> (<a href='../S/3124.html#L472' title='Defined at 472 in Python/marshal.c.'>r_string</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, (<b>int</b>)n, p) != n) <font color='red'>{</font>
+<a name='L812'>            PyMem_DEL(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L813'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_EOFError,
+<a name='L814'>                "EOF read where object expected");
+<a name='L815'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L816'>            <b>break</b>;
+<a name='L817'>        <font color='red'>}</font>
+<a name='L818'>        v = <a href='../D/3987.html' title='Multiple defined in 3 places.'>PyUnicode_DecodeUTF8</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, n, "surrogatepass");
+<a name='L819'>        PyMem_DEL(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L820'>        retval = v;
+<a name='L821'>        <b>break</b>;
+<a name='L822'>        <font color='red'>}</font>
+<a name='L823'>
+<a name='L824'>    <b>case</b> <a href='../S/3124.html#L41' title='Defined at 41 in Python/marshal.c.'>TYPE_TUPLE</a>:
+<a name='L825'>        n = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L826'>        <b>if</b> (n &lt; 0 || n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L827'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "bad marshal data (tuple size out of range)");
+<a name='L828'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L829'>            <b>break</b>;
+<a name='L830'>        <font color='red'>}</font>
+<a name='L831'>        v = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>((<b>int</b>)n);
+<a name='L832'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L833'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L834'>            <b>break</b>;
+<a name='L835'>        <font color='red'>}</font>
+<a name='L836'>        <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L837'>            v2 = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L838'>            <b>if</b> ( v2 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ) <font color='red'>{</font>
+<a name='L839'>                <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L840'>                    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L841'>                        "NULL object in marshal data for tuple");
+<a name='L842'>                Py_DECREF(v);
+<a name='L843'>                v = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L844'>                <b>break</b>;
+<a name='L845'>            <font color='red'>}</font>
+<a name='L846'>            PyTuple_SET_ITEM(v, (<b>int</b>)i, v2);
+<a name='L847'>        <font color='red'>}</font>
+<a name='L848'>        retval = v;
+<a name='L849'>        <b>break</b>;
+<a name='L850'>
+<a name='L851'>    <b>case</b> <a href='../S/3124.html#L42' title='Defined at 42 in Python/marshal.c.'>TYPE_LIST</a>:
+<a name='L852'>        n = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L853'>        <b>if</b> (n &lt; 0 || n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L854'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "bad marshal data (list size out of range)");
+<a name='L855'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L856'>            <b>break</b>;
+<a name='L857'>        <font color='red'>}</font>
+<a name='L858'>        v = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>((<b>int</b>)n);
+<a name='L859'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L860'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L861'>            <b>break</b>;
+<a name='L862'>        <font color='red'>}</font>
+<a name='L863'>        <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L864'>            v2 = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L865'>            <b>if</b> ( v2 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ) <font color='red'>{</font>
+<a name='L866'>                <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L867'>                    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L868'>                        "NULL object in marshal data for list");
+<a name='L869'>                Py_DECREF(v);
+<a name='L870'>                v = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L871'>                <b>break</b>;
+<a name='L872'>            <font color='red'>}</font>
+<a name='L873'>            PyList_SET_ITEM(v, (<b>int</b>)i, v2);
+<a name='L874'>        <font color='red'>}</font>
+<a name='L875'>        retval = v;
+<a name='L876'>        <b>break</b>;
+<a name='L877'>
+<a name='L878'>    <b>case</b> <a href='../S/3124.html#L43' title='Defined at 43 in Python/marshal.c.'>TYPE_DICT</a>:
+<a name='L879'>        v = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L880'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L881'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L882'>            <b>break</b>;
+<a name='L883'>        <font color='red'>}</font>
+<a name='L884'>        <b>for</b> (;;) <font color='red'>{</font>
+<a name='L885'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, *val;
+<a name='L886'>            <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L887'>            <b>if</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L888'>                <b>break</b>;
+<a name='L889'>            val = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L890'>            <b>if</b> (val != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L891'>                <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(v, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, val);
+<a name='L892'>            Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L893'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(val);
+<a name='L894'>        <font color='red'>}</font>
+<a name='L895'>        <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L896'>            Py_DECREF(v);
+<a name='L897'>            v = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L898'>        <font color='red'>}</font>
+<a name='L899'>        retval = v;
+<a name='L900'>        <b>break</b>;
+<a name='L901'>
+<a name='L902'>    <b>case</b> <a href='../S/3124.html#L47' title='Defined at 47 in Python/marshal.c.'>TYPE_SET</a>:
+<a name='L903'>    <b>case</b> <a href='../S/3124.html#L48' title='Defined at 48 in Python/marshal.c.'>TYPE_FROZENSET</a>:
+<a name='L904'>        n = <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L905'>        <b>if</b> (n &lt; 0 || n &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L906'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "bad marshal data (set size out of range)");
+<a name='L907'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L908'>            <b>break</b>;
+<a name='L909'>        <font color='red'>}</font>
+<a name='L910'>        v = (type == <a href='../S/3124.html#L47' title='Defined at 47 in Python/marshal.c.'>TYPE_SET</a>) ? <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) : <a href='../S/2806.html#L2269' title='Defined at 2269 in Objects/setobject.c.'>PyFrozenSet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L911'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L912'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L913'>            <b>break</b>;
+<a name='L914'>        <font color='red'>}</font>
+<a name='L915'>        <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L916'>            v2 = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L917'>            <b>if</b> ( v2 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ) <font color='red'>{</font>
+<a name='L918'>                <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L919'>                    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L920'>                        "NULL object in marshal data for set");
+<a name='L921'>                Py_DECREF(v);
+<a name='L922'>                v = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L923'>                <b>break</b>;
+<a name='L924'>            <font color='red'>}</font>
+<a name='L925'>            <b>if</b> (<a href='../S/2806.html#L2315' title='Defined at 2315 in Objects/setobject.c.'>PySet_Add</a>(v, v2) == -1) <font color='red'>{</font>
+<a name='L926'>                Py_DECREF(v);
+<a name='L927'>                Py_DECREF(v2);
+<a name='L928'>                v = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L929'>                <b>break</b>;
+<a name='L930'>            <font color='red'>}</font>
+<a name='L931'>            Py_DECREF(v2);
+<a name='L932'>        <font color='red'>}</font>
+<a name='L933'>        retval = v;
+<a name='L934'>        <b>break</b>;
+<a name='L935'>
+<a name='L936'>    <b>case</b> <a href='../S/3124.html#L44' title='Defined at 44 in Python/marshal.c.'>TYPE_CODE</a>:
+<a name='L937'>        <font color='red'>{</font>
+<a name='L938'>            <b>int</b> argcount;
+<a name='L939'>            <b>int</b> kwonlyargcount;
+<a name='L940'>            <b>int</b> nlocals;
+<a name='L941'>            <b>int</b> stacksize;
+<a name='L942'>            <b>int</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L943'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L944'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *consts = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L945'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *names = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L946'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *varnames = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L947'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *freevars = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L948'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *cellvars = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L949'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *filename = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L950'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L951'>            <b>int</b> firstlineno;
+<a name='L952'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *lnotab = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L953'>
+<a name='L954'>            v = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L955'>
+<a name='L956'>            <i><font color='green'>/* XXX ignore long-&gt;int overflows for now */</font></i>
+<a name='L957'>            argcount = (<b>int</b>)<a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L958'>            kwonlyargcount = (<b>int</b>)<a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L959'>            nlocals = (<b>int</b>)<a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L960'>            stacksize = (<b>int</b>)<a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L961'>            <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = (<b>int</b>)<a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L962'>            <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L963'>            <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L964'>                <b>goto</b> code_error;
+<a name='L965'>            consts = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L966'>            <b>if</b> (consts == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L967'>                <b>goto</b> code_error;
+<a name='L968'>            names = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L969'>            <b>if</b> (names == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L970'>                <b>goto</b> code_error;
+<a name='L971'>            varnames = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L972'>            <b>if</b> (varnames == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L973'>                <b>goto</b> code_error;
+<a name='L974'>            freevars = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L975'>            <b>if</b> (freevars == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L976'>                <b>goto</b> code_error;
+<a name='L977'>            cellvars = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L978'>            <b>if</b> (cellvars == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L979'>                <b>goto</b> code_error;
+<a name='L980'>            filename = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L981'>            <b>if</b> (filename == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L982'>                <b>goto</b> code_error;
+<a name='L983'>            name = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L984'>            <b>if</b> (name == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L985'>                <b>goto</b> code_error;
+<a name='L986'>            firstlineno = (<b>int</b>)<a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(p);
+<a name='L987'>            lnotab = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L988'>            <b>if</b> (lnotab == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L989'>                <b>goto</b> code_error;
+<a name='L990'>
+<a name='L991'>            v = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) <a href='../S/2783.html#L46' title='Defined at 46 in Objects/codeobject.c.'>PyCode_New</a>(
+<a name='L992'>                            argcount, kwonlyargcount,
+<a name='L993'>                            nlocals, stacksize, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>,
+<a name='L994'>                            <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>, consts, names, varnames,
+<a name='L995'>                            freevars, cellvars, filename, name,
+<a name='L996'>                            firstlineno, lnotab);
+<a name='L997'>
+<a name='L998'>          code_error:
+<a name='L999'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L1000'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(consts);
+<a name='L1001'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(names);
+<a name='L1002'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(varnames);
+<a name='L1003'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(freevars);
+<a name='L1004'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(cellvars);
+<a name='L1005'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(filename);
+<a name='L1006'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(name);
+<a name='L1007'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(lnotab);
+<a name='L1008'>        <font color='red'>}</font>
+<a name='L1009'>        retval = v;
+<a name='L1010'>        <b>break</b>;
+<a name='L1011'>
+<a name='L1012'>    <b>default</b>:
+<a name='L1013'>        <i><font color='green'>/* Bogus data got written, which isn't ideal.</font></i>
+<a name='L1014'><i><font color='green'>           This will let you keep working and recover. */</font></i>
+<a name='L1015'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "bad marshal data (unknown type code)");
+<a name='L1016'>        retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1017'>        <b>break</b>;
+<a name='L1018'>
+<a name='L1019'>    <font color='red'>}</font>
+<a name='L1020'>    p-&gt;depth--;
+<a name='L1021'>    <b>return</b> retval;
+<a name='L1022'><font color='red'>}</font>
+<a name='L1023'>
+<a name='L1024'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1025'><a href='../R/9974.html' title='Multiple refered from 2 places.'>read_object</a>(<a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> *p)
+<a name='L1026'><font color='red'>{</font>
+<a name='L1027'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L1028'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1029'>        fprintf(stderr, "XXX readobject called with exception set\n");
+<a name='L1030'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1031'>    <font color='red'>}</font>
+<a name='L1032'>    v = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(p);
+<a name='L1033'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; !<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L1034'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError, "NULL object in marshal data for object");
+<a name='L1035'>    <b>return</b> v;
+<a name='L1036'><font color='red'>}</font>
+<a name='L1037'>
+<a name='L1038'><b>int</b>
+<a name='L1039'><a href='../R/3157.html' title='Multiple refered from 9 places.'>PyMarshal_ReadShortFromFile</a>(FILE *fp)
+<a name='L1040'><font color='red'>{</font>
+<a name='L1041'>    <a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> rf;
+<a name='L1042'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(fp);
+<a name='L1043'>    rf.fp = fp;
+<a name='L1044'>    rf.strings = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1045'>    rf.end = rf.ptr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1046'>    <b>return</b> <a href='../S/3124.html#L485' title='Defined at 485 in Python/marshal.c.'>r_short</a>(&amp;rf);
+<a name='L1047'><font color='red'>}</font>
+<a name='L1048'>
+<a name='L1049'><b>long</b>
+<a name='L1050'><a href='../R/3154.html' title='Multiple refered from 12 places.'>PyMarshal_ReadLongFromFile</a>(FILE *fp)
+<a name='L1051'><font color='red'>{</font>
+<a name='L1052'>    <a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> rf;
+<a name='L1053'>    rf.fp = fp;
+<a name='L1054'>    rf.strings = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1055'>    rf.ptr = rf.end = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1056'>    <b>return</b> <a href='../S/3124.html#L496' title='Defined at 496 in Python/marshal.c.'>r_long</a>(&amp;rf);
+<a name='L1057'><font color='red'>}</font>
+<a name='L1058'>
+<a name='L1059'><font color='darkred'>#ifdef</font> <a href='../S/565.html#L375' title='Defined at 375 in Include/pyport.h.'>HAVE_FSTAT</a>
+<a name='L1060'><i><font color='green'>/* Return size of file in bytes; &lt; 0 if unknown. */</font></i>
+<a name='L1061'><b>static</b> <a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a>
+<a name='L1062'><a href='../S/3124.html#L1085' title='Refered from 1085 in Python/marshal.c.'>getfilesize</a>(FILE *fp)
+<a name='L1063'><font color='red'>{</font>
+<a name='L1064'>    <b>struct</b> stat st;
+<a name='L1065'>    <b>if</b> (fstat(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(fp), &amp;st) != 0)
+<a name='L1066'>        <b>return</b> -1;
+<a name='L1067'>    <b>else</b>
+<a name='L1068'>        <b>return</b> st.st_size;
+<a name='L1069'><font color='red'>}</font>
+<a name='L1070'><font color='darkred'>#endif</font>
+<a name='L1071'>
+<a name='L1072'><i><font color='green'>/* If we can get the size of the file up-front, and it's reasonably small,</font></i>
+<a name='L1073'><i><font color='green'> * read it in one gulp and delegate to ...FromString() instead.  Much quicker</font></i>
+<a name='L1074'><i><font color='green'> * than reading a byte at a time from file; speeds .pyc imports.</font></i>
+<a name='L1075'><i><font color='green'> * CAUTION:  since this may read the entire remainder of the file, don't</font></i>
+<a name='L1076'><i><font color='green'> * call it unless you know you're done with the file.</font></i>
+<a name='L1077'><i><font color='green'> */</font></i>
+<a name='L1078'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1079'><a href='../R/3153.html' title='Multiple refered from 2 places.'>PyMarshal_ReadLastObjectFromFile</a>(FILE *fp)
+<a name='L1080'><font color='red'>{</font>
+<a name='L1081'><i><font color='green'>/* REASONABLE_FILE_LIMIT is by defn something big enough for Tkinter.pyc. */</font></i>
+<a name='L1082'><font color='darkred'>#define</font> <a href='../S/3124.html#L1086' title='Refered from 1086 in Python/marshal.c.'>REASONABLE_FILE_LIMIT</a> (1L &lt;&lt; 18)
+<a name='L1083'><font color='darkred'>#ifdef</font> <a href='../S/565.html#L375' title='Defined at 375 in Include/pyport.h.'>HAVE_FSTAT</a>
+<a name='L1084'>    <a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a> filesize;
+<a name='L1085'>    filesize = <a href='../S/3124.html#L1062' title='Defined at 1062 in Python/marshal.c.'>getfilesize</a>(fp);
+<a name='L1086'>    <b>if</b> (filesize &gt; 0 &amp;&amp; filesize &lt;= <a href='../D/4437.html' title='Multiple defined in 2 places.'>REASONABLE_FILE_LIMIT</a>) <font color='red'>{</font>
+<a name='L1087'>        <b>char</b>* pBuf = (<b>char</b> *)PyMem_MALLOC(filesize);
+<a name='L1088'>        <b>if</b> (pBuf != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1089'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* v;
+<a name='L1090'>            <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> n;
+<a name='L1091'>            <i><font color='green'>/* filesize must fit into an int, because it</font></i>
+<a name='L1092'><i><font color='green'>               is smaller than REASONABLE_FILE_LIMIT */</font></i>
+<a name='L1093'>            n = fread(pBuf, 1, (<b>int</b>)filesize, fp);
+<a name='L1094'>            v = <a href='../S/3124.html#L1124' title='Defined at 1124 in Python/marshal.c.'>PyMarshal_ReadObjectFromString</a>(pBuf, n);
+<a name='L1095'>            PyMem_FREE(pBuf);
+<a name='L1096'>            <b>return</b> v;
+<a name='L1097'>        <font color='red'>}</font>
+<a name='L1098'>
+<a name='L1099'>    <font color='red'>}</font>
+<a name='L1100'><font color='darkred'>#endif</font>
+<a name='L1101'>    <i><font color='green'>/* We don't have fstat, or we do but the file is larger than</font></i>
+<a name='L1102'><i><font color='green'>     * REASONABLE_FILE_LIMIT or malloc failed -- read a byte at a time.</font></i>
+<a name='L1103'><i><font color='green'>     */</font></i>
+<a name='L1104'>    <b>return</b> <a href='../S/3124.html#L1110' title='Defined at 1110 in Python/marshal.c.'>PyMarshal_ReadObjectFromFile</a>(fp);
+<a name='L1105'>
+<a name='L1106'><font color='darkred'>#undef</font> <a href='../S/3124.html#L1086' title='Refered from 1086 in Python/marshal.c.'>REASONABLE_FILE_LIMIT</a>
+<a name='L1107'><font color='red'>}</font>
+<a name='L1108'>
+<a name='L1109'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1110'><a href='../S/3124.html#L1104' title='Refered from 1104 in Python/marshal.c.'>PyMarshal_ReadObjectFromFile</a>(FILE *fp)
+<a name='L1111'><font color='red'>{</font>
+<a name='L1112'>    <a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> rf;
+<a name='L1113'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1114'>    rf.fp = fp;
+<a name='L1115'>    rf.strings = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L1116'>    rf.depth = 0;
+<a name='L1117'>    rf.ptr = rf.end = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1118'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(&amp;rf);
+<a name='L1119'>    Py_DECREF(rf.strings);
+<a name='L1120'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1121'><font color='red'>}</font>
+<a name='L1122'>
+<a name='L1123'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1124'><a href='../R/3156.html' title='Multiple refered from 4 places.'>PyMarshal_ReadObjectFromString</a>(<b>char</b> *str, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len)
+<a name='L1125'><font color='red'>{</font>
+<a name='L1126'>    <a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> rf;
+<a name='L1127'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1128'>    rf.fp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1129'>    rf.ptr = str;
+<a name='L1130'>    rf.end = str + len;
+<a name='L1131'>    rf.strings = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L1132'>    rf.depth = 0;
+<a name='L1133'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/3124.html#L611' title='Defined at 611 in Python/marshal.c.'>r_object</a>(&amp;rf);
+<a name='L1134'>    Py_DECREF(rf.strings);
+<a name='L1135'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1136'><font color='red'>}</font>
+<a name='L1137'>
+<a name='L1138'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1139'><a href='../R/3160.html' title='Multiple refered from 2 places.'>PyMarshal_WriteObjectToString</a>(PyObject *x, <b>int</b> version)
+<a name='L1140'><font color='red'>{</font>
+<a name='L1141'>    <a href='../S/3124.html#L65' title='Defined at 65 in Python/marshal.c.'>WFILE</a> wf;
+<a name='L1142'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1143'>
+<a name='L1144'>    wf.fp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1145'>    wf.str = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>((<b>char</b> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 50);
+<a name='L1146'>    <b>if</b> (wf.str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1147'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1148'>    wf.ptr = PyBytes_AS_STRING((<a href='../S/507.html#L41' title='Defined at 41 in Include/bytesobject.h.'>PyBytesObject</a> *)wf.str);
+<a name='L1149'>    wf.end = wf.ptr + <a href='../S/2779.html#L506' title='Defined at 506 in Objects/bytesobject.c.'>PyBytes_Size</a>(wf.str);
+<a name='L1150'>    wf.<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = <a href='../S/3124.html#L50' title='Defined at 50 in Python/marshal.c.'>WFERR_OK</a>;
+<a name='L1151'>    wf.depth = 0;
+<a name='L1152'>    wf.version = version;
+<a name='L1153'>    wf.strings = (version &gt; 0) ? <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>() : <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1154'>    <a href='../S/3124.html#L183' title='Defined at 183 in Python/marshal.c.'>w_object</a>(x, &amp;wf);
+<a name='L1155'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(wf.strings);
+<a name='L1156'>    <b>if</b> (wf.str != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1157'>        <b>char</b> *base = PyBytes_AS_STRING((<a href='../S/507.html#L41' title='Defined at 41 in Include/bytesobject.h.'>PyBytesObject</a> *)wf.str);
+<a name='L1158'>        <b>if</b> (wf.ptr - base &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a>) <font color='red'>{</font>
+<a name='L1159'>            Py_DECREF(wf.str);
+<a name='L1160'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L1161'>                            "too much marshal data for a string");
+<a name='L1162'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1163'>        <font color='red'>}</font>
+<a name='L1164'>        <b>if</b> (<a href='../S/2779.html#L2822' title='Defined at 2822 in Objects/bytesobject.c.'>_PyBytes_Resize</a>(&amp;wf.str, (<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)(wf.ptr - base)) &lt; 0)
+<a name='L1165'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1166'>    <font color='red'>}</font>
+<a name='L1167'>    <b>if</b> (wf.<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> != <a href='../S/3124.html#L50' title='Defined at 50 in Python/marshal.c.'>WFERR_OK</a>) <font color='red'>{</font>
+<a name='L1168'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(wf.str);
+<a name='L1169'>        <b>if</b> (wf.<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> == <a href='../S/3124.html#L53' title='Defined at 53 in Python/marshal.c.'>WFERR_NOMEMORY</a>)
+<a name='L1170'>            <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1171'>        <b>else</b>
+<a name='L1172'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L1173'>              (wf.<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>==<a href='../S/3124.html#L51' title='Defined at 51 in Python/marshal.c.'>WFERR_UNMARSHALLABLE</a>)?"unmarshallable object"
+<a name='L1174'>               :"object too deeply nested to marshal");
+<a name='L1175'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1176'>    <font color='red'>}</font>
+<a name='L1177'>    <b>if</b> (wf.str != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1178'>        <i><font color='green'>/* XXX Quick hack -- need to do this differently */</font></i>
+<a name='L1179'>        res = <a href='../S/2779.html#L2560' title='Defined at 2560 in Objects/bytesobject.c.'>PyBytes_FromObject</a>(wf.str);
+<a name='L1180'>        Py_DECREF(wf.str);
+<a name='L1181'>    <font color='red'>}</font>
+<a name='L1182'>    <b>return</b> res;
+<a name='L1183'><font color='red'>}</font>
+<a name='L1184'>
+<a name='L1185'><i><font color='green'>/* And an interface for Python programs... */</font></i>
+<a name='L1186'>
+<a name='L1187'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1188'><a href='../S/3124.html#L1317' title='Refered from 1317 in Python/marshal.c.'>marshal_dump</a>(PyObject *self, PyObject *args)
+<a name='L1189'><font color='red'>{</font>
+<a name='L1190'>    <i><font color='green'>/* XXX Quick hack -- need to do this differently */</font></i>
+<a name='L1191'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *x;
+<a name='L1192'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *f;
+<a name='L1193'>    <b>int</b> version = <a href='../S/537.html#L10' title='Defined at 10 in Include/marshal.h.'>Py_MARSHAL_VERSION</a>;
+<a name='L1194'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *s;
+<a name='L1195'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L1196'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "OO|i:dump", &amp;x, &amp;f, &amp;version))
+<a name='L1197'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1198'>    s = <a href='../S/3124.html#L1139' title='Defined at 1139 in Python/marshal.c.'>PyMarshal_WriteObjectToString</a>(x, version);
+<a name='L1199'>    <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1200'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1201'>    res = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(f, "write", "O", s);
+<a name='L1202'>    Py_DECREF(s);
+<a name='L1203'>    <b>return</b> res;
+<a name='L1204'><font color='red'>}</font>
+<a name='L1205'>
+<a name='L1206'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dump_doc,
+<a name='L1207'>"dump(value, file[, version])\n\
+<a name='L1208'>\n\
+<a name='L1209'>Write the value on the open file. The value must be a supported type.\n\
+<a name='L1210'>The file must be an open file object such as sys.stdout or returned by\n\
+<a name='L1211'>open() or os.popen(). It must be opened in binary mode ('wb' or 'w+b').\n\
+<a name='L1212'>\n\
+<a name='L1213'>If the value has (or contains an object that has) an unsupported type, a\n\
+<a name='L1214'>ValueError exception is raised — but garbage data will also be written\n\
+<a name='L1215'>to the file. The object will not be properly read back by load()\n\
+<a name='L1216'>\n\
+<a name='L1217'>The version argument indicates the data format that dump should use.");
+<a name='L1218'>
+<a name='L1219'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1220'><a href='../S/3124.html#L1318' title='Refered from 1318 in Python/marshal.c.'>marshal_load</a>(PyObject *self, PyObject *f)
+<a name='L1221'><font color='red'>{</font>
+<a name='L1222'>    <i><font color='green'>/* XXX Quick hack -- need to do this differently */</font></i>
+<a name='L1223'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *data, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1224'>    <a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> rf;
+<a name='L1225'>    data = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(f, "read", "");
+<a name='L1226'>    <b>if</b> (data == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1227'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1228'>    rf.fp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1229'>    <b>if</b> (PyBytes_Check(data)) <font color='red'>{</font>
+<a name='L1230'>        rf.ptr = PyBytes_AS_STRING(data);
+<a name='L1231'>        rf.end = rf.ptr + PyBytes_GET_SIZE(data);
+<a name='L1232'>    <font color='red'>}</font>
+<a name='L1233'>    <b>else</b> <b>if</b> (PyBytes_Check(data)) <font color='red'>{</font>
+<a name='L1234'>        rf.ptr = PyBytes_AS_STRING(data);
+<a name='L1235'>        rf.end = rf.ptr + PyBytes_GET_SIZE(data);
+<a name='L1236'>    <font color='red'>}</font>
+<a name='L1237'>    <b>else</b> <font color='red'>{</font>
+<a name='L1238'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L1239'>                     "f.read() returned neither string "
+<a name='L1240'>                     "nor bytes but %.100s",
+<a name='L1241'>                     data-&gt;ob_type-&gt;tp_name);
+<a name='L1242'>        Py_DECREF(data);
+<a name='L1243'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1244'>    <font color='red'>}</font>
+<a name='L1245'>    rf.strings = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L1246'>    rf.depth = 0;
+<a name='L1247'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/3124.html#L1025' title='Defined at 1025 in Python/marshal.c.'>read_object</a>(&amp;rf);
+<a name='L1248'>    Py_DECREF(rf.strings);
+<a name='L1249'>    Py_DECREF(data);
+<a name='L1250'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1251'><font color='red'>}</font>
+<a name='L1252'>
+<a name='L1253'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(load_doc,
+<a name='L1254'>"load(file)\n\
+<a name='L1255'>\n\
+<a name='L1256'>Read one value from the open file and return it. If no valid value is\n\
+<a name='L1257'>read (e.g. because the data has a different Python version’s\n\
+<a name='L1258'>incompatible marshal format), raise EOFError, ValueError or TypeError.\n\
+<a name='L1259'>The file must be an open file object opened in binary mode ('rb' or\n\
+<a name='L1260'>'r+b').\n\
+<a name='L1261'>\n\
+<a name='L1262'>Note: If an object containing an unsupported type was marshalled with\n\
+<a name='L1263'>dump(), load() will substitute None for the unmarshallable type.");
+<a name='L1264'>
+<a name='L1265'>
+<a name='L1266'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1267'><a href='../S/3124.html#L1319' title='Refered from 1319 in Python/marshal.c.'>marshal_dumps</a>(PyObject *self, PyObject *args)
+<a name='L1268'><font color='red'>{</font>
+<a name='L1269'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *x;
+<a name='L1270'>    <b>int</b> version = <a href='../S/537.html#L10' title='Defined at 10 in Include/marshal.h.'>Py_MARSHAL_VERSION</a>;
+<a name='L1271'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O|i:dumps", &amp;x, &amp;version))
+<a name='L1272'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1273'>    <b>return</b> <a href='../S/3124.html#L1139' title='Defined at 1139 in Python/marshal.c.'>PyMarshal_WriteObjectToString</a>(x, version);
+<a name='L1274'><font color='red'>}</font>
+<a name='L1275'>
+<a name='L1276'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dumps_doc,
+<a name='L1277'>"dumps(value[, version])\n\
+<a name='L1278'>\n\
+<a name='L1279'>Return the string that would be written to a file by dump(value, file).\n\
+<a name='L1280'>The value must be a supported type. Raise a ValueError exception if\n\
+<a name='L1281'>value has (or contains an object that has) an unsupported type.\n\
+<a name='L1282'>\n\
+<a name='L1283'>The version argument indicates the data format that dumps should use.");
+<a name='L1284'>
+<a name='L1285'>
+<a name='L1286'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1287'><a href='../S/3124.html#L1320' title='Refered from 1320 in Python/marshal.c.'>marshal_loads</a>(PyObject *self, PyObject *args)
+<a name='L1288'><font color='red'>{</font>
+<a name='L1289'>    <a href='../S/3124.html#L465' title='Defined at 465 in Python/marshal.c.'>RFILE</a> rf;
+<a name='L1290'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> p;
+<a name='L1291'>    <b>char</b> *s;
+<a name='L1292'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n;
+<a name='L1293'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1294'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s*:loads", &amp;p))
+<a name='L1295'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1296'>    s = p.buf;
+<a name='L1297'>    n = p.len;
+<a name='L1298'>    rf.fp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1299'>    rf.ptr = s;
+<a name='L1300'>    rf.end = s + n;
+<a name='L1301'>    rf.strings = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L1302'>    rf.depth = 0;
+<a name='L1303'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/3124.html#L1025' title='Defined at 1025 in Python/marshal.c.'>read_object</a>(&amp;rf);
+<a name='L1304'>    Py_DECREF(rf.strings);
+<a name='L1305'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;p);
+<a name='L1306'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1307'><font color='red'>}</font>
+<a name='L1308'>
+<a name='L1309'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(loads_doc,
+<a name='L1310'>"loads(string)\n\
+<a name='L1311'>\n\
+<a name='L1312'>Convert the string to a value. If no valid value is found, raise\n\
+<a name='L1313'>EOFError, ValueError or TypeError. Extra characters in the string are\n\
+<a name='L1314'>ignored.");
+<a name='L1315'>
+<a name='L1316'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> marshal_methods[] = <font color='red'>{</font>
+<a name='L1317'>    <font color='red'>{</font>"dump",            <a href='../S/3124.html#L1188' title='Defined at 1188 in Python/marshal.c.'>marshal_dump</a>,   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,   dump_doc<font color='red'>}</font>,
+<a name='L1318'>    <font color='red'>{</font>"load",            <a href='../S/3124.html#L1220' title='Defined at 1220 in Python/marshal.c.'>marshal_load</a>,   METH_O,         load_doc<font color='red'>}</font>,
+<a name='L1319'>    <font color='red'>{</font>"dumps",           <a href='../S/3124.html#L1267' title='Defined at 1267 in Python/marshal.c.'>marshal_dumps</a>,  <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,   dumps_doc<font color='red'>}</font>,
+<a name='L1320'>    <font color='red'>{</font>"loads",           <a href='../S/3124.html#L1287' title='Defined at 1287 in Python/marshal.c.'>marshal_loads</a>,  <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,   loads_doc<font color='red'>}</font>,
+<a name='L1321'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L1322'><font color='red'>}</font>;
+<a name='L1323'>
+<a name='L1324'>
+<a name='L1325'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_doc,
+<a name='L1326'>"This module contains functions that can read and write Python values in\n\
+<a name='L1327'>a binary format. The format is specific to Python, but independent of\n\
+<a name='L1328'>machine architecture issues.\n\
+<a name='L1329'>\n\
+<a name='L1330'>Not all Python object types are supported; in general, only objects\n\
+<a name='L1331'>whose value is independent from a particular invocation of Python can be\n\
+<a name='L1332'>written and read by this module. The following types are supported:\n\
+<a name='L1333'>None, integers, floating point numbers, strings, bytes, bytearrays,\n\
+<a name='L1334'>tuples, lists, sets, dictionaries, and code objects, where it\n\
+<a name='L1335'>should be understood that tuples, lists and dictionaries are only\n\
+<a name='L1336'>supported as long as the values contained therein are themselves\n\
+<a name='L1337'>supported; and recursive lists and dictionaries should not be written\n\
+<a name='L1338'>(they will cause infinite loops).\n\
+<a name='L1339'>\n\
+<a name='L1340'>Variables:\n\
+<a name='L1341'>\n\
+<a name='L1342'>version -- indicates the format that the module uses. Version 0 is the\n\
+<a name='L1343'>    historical format, version 1 shares interned strings and version 2\n\
+<a name='L1344'>    uses a binary format for floating point numbers.\n\
+<a name='L1345'>\n\
+<a name='L1346'>Functions:\n\
+<a name='L1347'>\n\
+<a name='L1348'>dump() -- write value to a file\n\
+<a name='L1349'>load() -- read value from a file\n\
+<a name='L1350'>dumps() -- write value to a string\n\
+<a name='L1351'>loads() -- read value from a string");
+<a name='L1352'>
+<a name='L1353'>
+<a name='L1354'>
+<a name='L1355'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> marshalmodule = <font color='red'>{</font>
+<a name='L1356'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L1357'>    "marshal",
+<a name='L1358'>    module_doc,
+<a name='L1359'>    0,
+<a name='L1360'>    marshal_methods,
+<a name='L1361'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1362'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1363'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1364'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L1365'><font color='red'>}</font>;
+<a name='L1366'>
+<a name='L1367'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L1368'><a href='../R/3152.html' title='Multiple refered from 6 places.'>PyMarshal_Init</a>(<b>void</b>)
+<a name='L1369'><font color='red'>{</font>
+<a name='L1370'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *mod = PyModule_Create(&amp;marshalmodule);
+<a name='L1371'>    <b>if</b> (mod == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1372'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1373'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(mod, "version", <a href='../S/537.html#L10' title='Defined at 10 in Include/marshal.h.'>Py_MARSHAL_VERSION</a>);
+<a name='L1374'>    <b>return</b> mod;
+<a name='L1375'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L72'>[^]</a><a href='#L1368'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

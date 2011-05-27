@@ -1,0 +1,135 @@
+<html>
+<head>
+<title>PC/w9xpopen.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3393.html'>PC</a>/w9xpopen.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L27'>[^]</a>[v][top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L27' title='Defined at 27.'>main</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'> * w9xpopen.c</font></i>
+<a name='L3'><i><font color='green'> *</font></i>
+<a name='L4'><i><font color='green'> * Serves as an intermediate stub Win32 console application to</font></i>
+<a name='L5'><i><font color='green'> * avoid a hanging pipe when redirecting 16-bit console based</font></i>
+<a name='L6'><i><font color='green'> * programs (including MS-DOS console based programs and batch</font></i>
+<a name='L7'><i><font color='green'> * files) on Window 95 and Windows 98.</font></i>
+<a name='L8'><i><font color='green'> *</font></i>
+<a name='L9'><i><font color='green'> * This program is to be launched with redirected standard</font></i>
+<a name='L10'><i><font color='green'> * handles. It will launch the command line specified 16-bit</font></i>
+<a name='L11'><i><font color='green'> * console based application in the same console, forwarding</font></i>
+<a name='L12'><i><font color='green'> * its own redirected standard handles to the 16-bit child.</font></i>
+<a name='L13'><i><font color='green'></font></i>
+<a name='L14'><i><font color='green'> * AKA solution to the problem described in KB: Q150956.</font></i>
+<a name='L15'><i><font color='green'> */</font></i>    
+<a name='L16'>
+<a name='L17'><font color='darkred'>#define</font> WIN32_LEAN_AND_MEAN
+<a name='L18'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L19'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L20'><font color='darkred'>#include</font> &lt;stdlib.h&gt;  <i><font color='green'>/* for malloc and its friends */</font></i>
+<a name='L21'>
+<a name='L22'><b>const</b> <b>char</b> *<a href='../S/2686.html#L106' title='Defined at 106 in Modules/main.c.'>usage</a> =
+<a name='L23'>"This program is used by Python's os.popen function\n"
+<a name='L24'>"to work around a limitation in Windows 95/98.  It is\n"
+<a name='L25'>"not designed to be used as a stand-alone program.";
+<a name='L26'>
+<a name='L27'><b>int</b> <a href='../R/8830.html' title='Multiple refered from 2 places.'>main</a>(<b>int</b> argc, <b>char</b> *argv[])
+<a name='L28'><font color='red'>{</font>
+<a name='L29'>    <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> bRet;
+<a name='L30'>    STARTUPINFO si;
+<a name='L31'>    PROCESS_INFORMATION pi;
+<a name='L32'>    DWORD exit_code=0;
+<a name='L33'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> cmdlen = 0;
+<a name='L34'>    <b>int</b> i;
+<a name='L35'>    <b>char</b> *cmdline, *cmdlinefill;
+<a name='L36'>
+<a name='L37'>    <b>if</b> (argc &lt; 2) <font color='red'>{</font>
+<a name='L38'>        <b>if</b> (GetFileType(GetStdHandle(STD_INPUT_HANDLE))==FILE_TYPE_CHAR)
+<a name='L39'>            <i><font color='green'>/* Attached to a console, and therefore not executed by Python</font></i>
+<a name='L40'><i><font color='green'>               Display a message box for the inquisitive user</font></i>
+<a name='L41'><i><font color='green'>            */</font></i>
+<a name='L42'>            MessageBox(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2686.html#L106' title='Defined at 106 in Modules/main.c.'>usage</a>, argv[0], MB_OK);
+<a name='L43'>        <b>else</b> <font color='red'>{</font>
+<a name='L44'>            <i><font color='green'>/* Eeek - executed by Python, but args are screwed!</font></i>
+<a name='L45'><i><font color='green'>               Write an error message to stdout so there is at</font></i>
+<a name='L46'><i><font color='green'>               least some clue for the end user when it appears</font></i>
+<a name='L47'><i><font color='green'>               in their output.</font></i>
+<a name='L48'><i><font color='green'>               A message box would be hidden and blocks the app.</font></i>
+<a name='L49'><i><font color='green'>             */</font></i>
+<a name='L50'>            fprintf(stdout, "Internal popen error - no args specified\n%s\n", <a href='../S/2686.html#L106' title='Defined at 106 in Modules/main.c.'>usage</a>);
+<a name='L51'>        <font color='red'>}</font>
+<a name='L52'>        <b>return</b> 1;
+<a name='L53'>    <font color='red'>}</font>
+<a name='L54'>    <i><font color='green'>/* Build up the command-line from the args.</font></i>
+<a name='L55'><i><font color='green'>       Args with a space are quoted, existing quotes are escaped.</font></i>
+<a name='L56'><i><font color='green'>       To keep things simple calculating the buffer size, we assume</font></i>
+<a name='L57'><i><font color='green'>       every character is a quote - ie, we allocate double what we need</font></i>
+<a name='L58'><i><font color='green'>       in the worst case.  As this is only double the command line passed</font></i>
+<a name='L59'><i><font color='green'>       to us, there is a good chance this is reasonably small, so the total </font></i>
+<a name='L60'><i><font color='green'>       allocation will almost always be &lt; 512 bytes.</font></i>
+<a name='L61'><i><font color='green'>    */</font></i>
+<a name='L62'>    <b>for</b> (i=1;i&lt;argc;i++)
+<a name='L63'>        cmdlen += strlen(argv[i])*2 + 3; <i><font color='green'>/* one space, maybe 2 quotes */</font></i>
+<a name='L64'>    cmdline = cmdlinefill = (<b>char</b> *)malloc(cmdlen+1);
+<a name='L65'>    <b>if</b> (cmdline == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L66'>        <b>return</b> -1;
+<a name='L67'>    <b>for</b> (i=1;i&lt;argc;i++) <font color='red'>{</font>
+<a name='L68'>        <b>const</b> <b>char</b> *arglook;
+<a name='L69'>        <b>int</b> bQuote = strchr(argv[i], ' ') != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L70'>        <b>if</b> (bQuote)
+<a name='L71'>            *cmdlinefill++ = '"';
+<a name='L72'>        <i><font color='green'>/* escape quotes */</font></i>
+<a name='L73'>        <b>for</b> (arglook=argv[i];*arglook;arglook++) <font color='red'>{</font>
+<a name='L74'>            <b>if</b> (*arglook=='"')
+<a name='L75'>                *cmdlinefill++ = '\\';
+<a name='L76'>            *cmdlinefill++ = *arglook;
+<a name='L77'>        <font color='red'>}</font>
+<a name='L78'>        <b>if</b> (bQuote)
+<a name='L79'>            *cmdlinefill++ = '"';
+<a name='L80'>        *cmdlinefill++ = ' ';
+<a name='L81'>    <font color='red'>}</font>
+<a name='L82'>    *cmdlinefill = '\0';
+<a name='L83'>
+<a name='L84'>    <i><font color='green'>/* Make child process use this app's standard files. */</font></i>
+<a name='L85'>    ZeroMemory(&amp;si, <b>sizeof</b> si);
+<a name='L86'>    si.cb = <b>sizeof</b> si;
+<a name='L87'>    si.dwFlags = STARTF_USESTDHANDLES;
+<a name='L88'>    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+<a name='L89'>    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+<a name='L90'>    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+<a name='L91'>
+<a name='L92'>    bRet = CreateProcess(
+<a name='L93'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, cmdline,
+<a name='L94'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L95'>        <a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>, 0,
+<a name='L96'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L97'>        &amp;si, &amp;pi
+<a name='L98'>        );
+<a name='L99'>
+<a name='L100'>    free(cmdline);
+<a name='L101'>
+<a name='L102'>    <b>if</b> (bRet) <font color='red'>{</font>
+<a name='L103'>        <b>if</b> (WaitForSingleObject(pi.hProcess, INFINITE) != WAIT_FAILED) <font color='red'>{</font>
+<a name='L104'>            GetExitCodeProcess(pi.hProcess, &amp;exit_code);
+<a name='L105'>        <font color='red'>}</font>
+<a name='L106'>        CloseHandle(pi.hProcess);
+<a name='L107'>        CloseHandle(pi.hThread);
+<a name='L108'>        <b>return</b> exit_code;
+<a name='L109'>    <font color='red'>}</font>
+<a name='L110'>
+<a name='L111'>    <b>return</b> 1;
+<a name='L112'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;][^]<a href='#L27'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

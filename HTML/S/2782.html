@@ -1,0 +1,692 @@
+<html>
+<head>
+<title>Objects/classobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/classobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L18'>[^]</a><a href='#L587'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L18' title='Defined at 18.'>PyMethod_Function</a>
+<li><a href='#L28' title='Defined at 28.'>PyMethod_Self</a>
+<li><a href='#L43' title='Defined at 43.'>PyMethod_New</a>
+<li><a href='#L90' title='Defined at 90.'>method_get_doc</a>
+<li><a href='#L107' title='Defined at 107.'>method_getattro</a>
+<li><a href='#L140' title='Defined at 140.'>method_new</a>
+<li><a href='#L165' title='Defined at 165.'>method_dealloc</a>
+<li><a href='#L183' title='Defined at 183.'>method_richcompare</a>
+<li><a href='#L217' title='Defined at 217.'>method_repr</a>
+<li><a href='#L267' title='Defined at 267.'>method_hash</a>
+<li><a href='#L286' title='Defined at 286.'>method_traverse</a>
+<li><a href='#L294' title='Defined at 294.'>method_call</a>
+<li><a href='#L325' title='Defined at 325.'>method_descr_get</a>
+<li><a href='#L382' title='Defined at 382.'>PyMethod_ClearFreeList</a>
+<li><a href='#L397' title='Defined at 397.'>PyMethod_Fini</a>
+<li><a href='#L407' title='Defined at 407.'>PyInstanceMethod_New</a>
+<li><a href='#L419' title='Defined at 419.'>PyInstanceMethod_Function</a>
+<li><a href='#L437' title='Defined at 437.'>instancemethod_get_doc</a>
+<li><a href='#L454' title='Defined at 454.'>instancemethod_getattro</a>
+<li><a href='#L479' title='Defined at 479.'>instancemethod_dealloc</a>
+<li><a href='#L486' title='Defined at 486.'>instancemethod_traverse</a>
+<li><a href='#L492' title='Defined at 492.'>instancemethod_call</a>
+<li><a href='#L498' title='Defined at 498.'>instancemethod_descr_get</a>
+<li><a href='#L509' title='Defined at 509.'>instancemethod_richcompare</a>
+<li><a href='#L536' title='Defined at 536.'>instancemethod_repr</a>
+<li><a href='#L587' title='Defined at 587.'>instancemethod_new</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Class object implementation (dead now except for methods) */</font></i>
+<a name='L2'>
+<a name='L3'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L4'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L5'>
+<a name='L6'><font color='darkred'>#define</font> <a href='../R/4563.html' title='Multiple refered from 2 places.'>TP_DESCR_GET</a>(t) ((t)-&gt;tp_descr_get)
+<a name='L7'>
+<a name='L8'><i><font color='green'>/* Free list for method objects to safe malloc/free overhead</font></i>
+<a name='L9'><i><font color='green'> * The im_self element is used to chain the elements.</font></i>
+<a name='L10'><i><font color='green'> */</font></i>
+<a name='L11'><b>static</b> <a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *free_list;
+<a name='L12'><b>static</b> <b>int</b> numfree = 0;
+<a name='L13'><font color='darkred'>#ifndef</font> <a href='../S/2782.html#L14' title='Defined at 14 in Objects/classobject.c.'>PyMethod_MAXFREELIST</a>
+<a name='L14'><font color='darkred'>#define</font> <a href='../R/3185.html' title='Multiple refered from 2 places.'>PyMethod_MAXFREELIST</a> 256
+<a name='L15'><font color='darkred'>#endif</font>
+<a name='L16'>
+<a name='L17'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L18'>PyMethod_Function(PyObject *im)
+<a name='L19'><font color='red'>{</font>
+<a name='L20'>    <b>if</b> (!PyMethod_Check(im)) <font color='red'>{</font>
+<a name='L21'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L22'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L23'>    <font color='red'>}</font>
+<a name='L24'>    <b>return</b> ((<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *)im)-&gt;im_func;
+<a name='L25'><font color='red'>}</font>
+<a name='L26'>
+<a name='L27'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L28'>PyMethod_Self(PyObject *im)
+<a name='L29'><font color='red'>{</font>
+<a name='L30'>    <b>if</b> (!PyMethod_Check(im)) <font color='red'>{</font>
+<a name='L31'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L32'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L33'>    <font color='red'>}</font>
+<a name='L34'>    <b>return</b> ((<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *)im)-&gt;im_self;
+<a name='L35'><font color='red'>}</font>
+<a name='L36'>
+<a name='L37'><i><font color='green'>/* Method objects are used for bound instance methods returned by</font></i>
+<a name='L38'><i><font color='green'>   instancename.methodname. ClassName.methodname returns an ordinary</font></i>
+<a name='L39'><i><font color='green'>   function.</font></i>
+<a name='L40'><i><font color='green'>*/</font></i>
+<a name='L41'>
+<a name='L42'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L43'><a href='../R/3186.html' title='Multiple refered from 5 places.'>PyMethod_New</a>(PyObject *func, PyObject *self)
+<a name='L44'><font color='red'>{</font>
+<a name='L45'>    <b>register</b> <a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *im;
+<a name='L46'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L47'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L48'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L49'>    <font color='red'>}</font>
+<a name='L50'>    im = free_list;
+<a name='L51'>    <b>if</b> (im != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L52'>        free_list = (<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *)(im-&gt;im_self);
+<a name='L53'>        PyObject_INIT(im, &amp;PyMethod_Type);
+<a name='L54'>        numfree--;
+<a name='L55'>    <font color='red'>}</font>
+<a name='L56'>    <b>else</b> <font color='red'>{</font>
+<a name='L57'>        im = PyObject_GC_New(<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a>, &amp;PyMethod_Type);
+<a name='L58'>        <b>if</b> (im == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L59'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L60'>    <font color='red'>}</font>
+<a name='L61'>    im-&gt;im_weakreflist = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L62'>    Py_INCREF(func);
+<a name='L63'>    im-&gt;im_func = func;
+<a name='L64'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(self);
+<a name='L65'>    im-&gt;im_self = self;
+<a name='L66'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(im);
+<a name='L67'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)im;
+<a name='L68'><font color='red'>}</font>
+<a name='L69'>
+<a name='L70'><i><font color='green'>/* Descriptors for PyMethod attributes */</font></i>
+<a name='L71'>
+<a name='L72'><i><font color='green'>/* im_func and im_self are stored in the PyMethod object */</font></i>
+<a name='L73'>
+<a name='L74'><font color='darkred'>#define</font> <a href='../R/1965.html' title='Multiple refered from 2 places.'>MO_OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a>, x)
+<a name='L75'>
+<a name='L76'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> method_memberlist[] = <font color='red'>{</font>
+<a name='L77'>    <font color='red'>{</font>"__func__", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../S/2782.html#L74' title='Defined at 74 in Objects/classobject.c.'>MO_OFF</a>(im_func), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>|<a href='../S/577.html#L76' title='Defined at 76 in Include/structmember.h.'>RESTRICTED</a>,
+<a name='L78'>     "the function (or other callable) implementing a method"<font color='red'>}</font>,
+<a name='L79'>    <font color='red'>{</font>"__self__", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../S/2782.html#L74' title='Defined at 74 in Objects/classobject.c.'>MO_OFF</a>(im_self), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>|<a href='../S/577.html#L76' title='Defined at 76 in Include/structmember.h.'>RESTRICTED</a>,
+<a name='L80'>     "the instance to which a method is bound"<font color='red'>}</font>,
+<a name='L81'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>      <i><font color='green'>/* Sentinel */</font></i>
+<a name='L82'><font color='red'>}</font>;
+<a name='L83'>
+<a name='L84'><i><font color='green'>/* Christian Tismer argued convincingly that method attributes should</font></i>
+<a name='L85'><i><font color='green'>   (nearly) always override function attributes.</font></i>
+<a name='L86'><i><font color='green'>   The one exception is __doc__; there's a default __doc__ which</font></i>
+<a name='L87'><i><font color='green'>   should only be used for the class, not for instances */</font></i>
+<a name='L88'>
+<a name='L89'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L90'><a href='../R/9029.html' title='Multiple refered from 2 places.'>method_get_doc</a>(PyMethodObject *im, <b>void</b> *context)
+<a name='L91'><font color='red'>{</font>
+<a name='L92'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *docstr;
+<a name='L93'>    <b>if</b> (docstr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L94'>        docstr= <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("__doc__");
+<a name='L95'>        <b>if</b> (docstr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L96'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L97'>    <font color='red'>}</font>
+<a name='L98'>    <b>return</b> <a href='../S/2803.html#L822' title='Defined at 822 in Objects/object.c.'>PyObject_GetAttr</a>(im-&gt;im_func, docstr);
+<a name='L99'><font color='red'>}</font>
+<a name='L100'>
+<a name='L101'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> method_getset[] = <font color='red'>{</font>
+<a name='L102'>    <font color='red'>{</font>"__doc__", (getter)<a href='../D/9858.html' title='Multiple defined in 2 places.'>method_get_doc</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L103'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L104'><font color='red'>}</font>;
+<a name='L105'>
+<a name='L106'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L107'><a href='../S/2782.html#L355' title='Refered from 355 in Objects/classobject.c.'>method_getattro</a>(PyObject *obj, PyObject *name)
+<a name='L108'><font color='red'>{</font>
+<a name='L109'>    <a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *im = (<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *)obj;
+<a name='L110'>    <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *tp = obj-&gt;ob_type;
+<a name='L111'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *descr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L112'>
+<a name='L113'>    <font color='red'>{</font>
+<a name='L114'>        <b>if</b> (tp-&gt;tp_dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L115'>            <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(tp) &lt; 0)
+<a name='L116'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L117'>        <font color='red'>}</font>
+<a name='L118'>        descr = <a href='../S/2824.html#L2374' title='Defined at 2374 in Objects/typeobject.c.'>_PyType_Lookup</a>(tp, name);
+<a name='L119'>    <font color='red'>}</font>
+<a name='L120'>
+<a name='L121'>    <b>if</b> (descr != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L122'>        descrgetfunc f = <a href='../S/2782.html#L6' title='Defined at 6 in Objects/classobject.c.'>TP_DESCR_GET</a>(descr-&gt;ob_type);
+<a name='L123'>        <b>if</b> (f != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L124'>            <b>return</b> f(descr, obj, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)obj-&gt;ob_type);
+<a name='L125'>        <b>else</b> <font color='red'>{</font>
+<a name='L126'>            Py_INCREF(descr);
+<a name='L127'>            <b>return</b> descr;
+<a name='L128'>        <font color='red'>}</font>
+<a name='L129'>    <font color='red'>}</font>
+<a name='L130'>
+<a name='L131'>    <b>return</b> <a href='../S/2803.html#L822' title='Defined at 822 in Objects/object.c.'>PyObject_GetAttr</a>(im-&gt;im_func, name);
+<a name='L132'><font color='red'>}</font>
+<a name='L133'>
+<a name='L134'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(method_doc,
+<a name='L135'>"method(function, instance)\n\
+<a name='L136'>\n\
+<a name='L137'>Create a bound instance method object.");
+<a name='L138'>
+<a name='L139'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L140'><a href='../S/2782.html#L376' title='Refered from 376 in Objects/classobject.c.'>method_new</a>(PyTypeObject* type, PyObject* args, PyObject *kw)
+<a name='L141'><font color='red'>{</font>
+<a name='L142'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func;
+<a name='L143'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *self;
+<a name='L144'>
+<a name='L145'>    <b>if</b> (!<a href='../S/3112.html#L1777' title='Defined at 1777 in Python/getargs.c.'>_PyArg_NoKeywords</a>("method", kw))
+<a name='L146'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L147'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "method", 2, 2,
+<a name='L148'>                          &amp;func, &amp;self))
+<a name='L149'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L150'>    <b>if</b> (!<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(func)) <font color='red'>{</font>
+<a name='L151'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L152'>                        "first argument must be callable");
+<a name='L153'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L154'>    <font color='red'>}</font>
+<a name='L155'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || self == Py_None) <font color='red'>{</font>
+<a name='L156'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L157'>            "self must not be None");
+<a name='L158'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L159'>    <font color='red'>}</font>
+<a name='L160'>
+<a name='L161'>    <b>return</b> <a href='../S/2782.html#L43' title='Defined at 43 in Objects/classobject.c.'>PyMethod_New</a>(func, self);
+<a name='L162'><font color='red'>}</font>
+<a name='L163'>
+<a name='L164'><b>static</b> <b>void</b>
+<a name='L165'><a href='../S/2782.html#L343' title='Refered from 343 in Objects/classobject.c.'>method_dealloc</a>(<b>register</b> PyMethodObject *im)
+<a name='L166'><font color='red'>{</font>
+<a name='L167'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(im);
+<a name='L168'>    <b>if</b> (im-&gt;im_weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L169'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)im);
+<a name='L170'>    Py_DECREF(im-&gt;im_func);
+<a name='L171'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(im-&gt;im_self);
+<a name='L172'>    <b>if</b> (numfree &lt; <a href='../S/2782.html#L14' title='Defined at 14 in Objects/classobject.c.'>PyMethod_MAXFREELIST</a>) <font color='red'>{</font>
+<a name='L173'>        im-&gt;im_self = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)free_list;
+<a name='L174'>        free_list = im;
+<a name='L175'>        numfree++;
+<a name='L176'>    <font color='red'>}</font>
+<a name='L177'>    <b>else</b> <font color='red'>{</font>
+<a name='L178'>        <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(im);
+<a name='L179'>    <font color='red'>}</font>
+<a name='L180'><font color='red'>}</font>
+<a name='L181'>
+<a name='L182'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L183'><a href='../S/2782.html#L362' title='Refered from 362 in Objects/classobject.c.'>method_richcompare</a>(PyObject *self, PyObject *other, <b>int</b> op)
+<a name='L184'><font color='red'>{</font>
+<a name='L185'>    <a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *a, *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L186'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L187'>    <b>int</b> eq;
+<a name='L188'>
+<a name='L189'>    <b>if</b> ((op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a> &amp;&amp; op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>) ||
+<a name='L190'>        !PyMethod_Check(self) ||
+<a name='L191'>        !PyMethod_Check(<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>))
+<a name='L192'>    <font color='red'>{</font>
+<a name='L193'>        Py_INCREF(Py_NotImplemented);
+<a name='L194'>        <b>return</b> Py_NotImplemented;
+<a name='L195'>    <font color='red'>}</font>
+<a name='L196'>    a = (<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *)self;
+<a name='L197'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = (<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *)<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>;
+<a name='L198'>    eq = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(a-&gt;im_func, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;im_func, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L199'>    <b>if</b> (eq == 1) <font color='red'>{</font>
+<a name='L200'>        <b>if</b> (a-&gt;im_self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;im_self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L201'>            eq = a-&gt;im_self == <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;im_self;
+<a name='L202'>        <b>else</b>
+<a name='L203'>            eq = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(a-&gt;im_self, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;im_self,
+<a name='L204'>                                          <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L205'>    <font color='red'>}</font>
+<a name='L206'>    <b>if</b> (eq &lt; 0)
+<a name='L207'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L208'>    <b>if</b> (op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>)
+<a name='L209'>        res = eq ? Py_True : Py_False;
+<a name='L210'>    <b>else</b>
+<a name='L211'>        res = eq ? Py_False : Py_True;
+<a name='L212'>    Py_INCREF(res);
+<a name='L213'>    <b>return</b> res;
+<a name='L214'><font color='red'>}</font>
+<a name='L215'>
+<a name='L216'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L217'><a href='../R/9034.html' title='Multiple refered from 3 places.'>method_repr</a>(PyMethodObject *a)
+<a name='L218'><font color='red'>{</font>
+<a name='L219'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *self = a-&gt;im_self;
+<a name='L220'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func = a-&gt;im_func;
+<a name='L221'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *klass = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self);
+<a name='L222'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *funcname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ,*klassname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L223'>    <b>char</b> *defname = "?";
+<a name='L224'>
+<a name='L225'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L226'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L227'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L228'>    <font color='red'>}</font>
+<a name='L229'>
+<a name='L230'>    funcname = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(func, "__name__");
+<a name='L231'>    <b>if</b> (funcname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L232'>        <b>if</b> (!<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_AttributeError))
+<a name='L233'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L234'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L235'>    <font color='red'>}</font>
+<a name='L236'>    <b>else</b> <b>if</b> (!PyUnicode_Check(funcname)) <font color='red'>{</font>
+<a name='L237'>        Py_DECREF(funcname);
+<a name='L238'>        funcname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L239'>    <font color='red'>}</font>
+<a name='L240'>
+<a name='L241'>    <b>if</b> (klass == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L242'>        klassname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L243'>    <b>else</b> <font color='red'>{</font>
+<a name='L244'>        klassname = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(klass, "__name__");
+<a name='L245'>        <b>if</b> (klassname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L246'>            <b>if</b> (!<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_AttributeError))
+<a name='L247'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L248'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L249'>        <font color='red'>}</font>
+<a name='L250'>        <b>else</b> <b>if</b> (!PyUnicode_Check(klassname)) <font color='red'>{</font>
+<a name='L251'>            Py_DECREF(klassname);
+<a name='L252'>            klassname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L253'>        <font color='red'>}</font>
+<a name='L254'>    <font color='red'>}</font>
+<a name='L255'>
+<a name='L256'>    <i><font color='green'>/* XXX Shouldn't use repr()/%R here! */</font></i>
+<a name='L257'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;bound method %V.%V of %R&gt;",
+<a name='L258'>                                  klassname, defname,
+<a name='L259'>                                  funcname, defname, self);
+<a name='L260'>
+<a name='L261'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(funcname);
+<a name='L262'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(klassname);
+<a name='L263'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L264'><font color='red'>}</font>
+<a name='L265'>
+<a name='L266'><b>static</b> <a href='../S/565.html#L186' title='Defined at 186 in Include/pyport.h.'>Py_hash_t</a>
+<a name='L267'><a href='../S/2782.html#L352' title='Refered from 352 in Objects/classobject.c.'>method_hash</a>(PyMethodObject *a)
+<a name='L268'><font color='red'>{</font>
+<a name='L269'>    <a href='../S/565.html#L186' title='Defined at 186 in Include/pyport.h.'>Py_hash_t</a> x, y;
+<a name='L270'>    <b>if</b> (a-&gt;im_self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L271'>        x = <a href='../S/2803.html#L758' title='Defined at 758 in Objects/object.c.'>PyObject_Hash</a>(Py_None);
+<a name='L272'>    <b>else</b>
+<a name='L273'>        x = <a href='../S/2803.html#L758' title='Defined at 758 in Objects/object.c.'>PyObject_Hash</a>(a-&gt;im_self);
+<a name='L274'>    <b>if</b> (x == -1)
+<a name='L275'>        <b>return</b> -1;
+<a name='L276'>    y = <a href='../S/2803.html#L758' title='Defined at 758 in Objects/object.c.'>PyObject_Hash</a>(a-&gt;im_func);
+<a name='L277'>    <b>if</b> (y == -1)
+<a name='L278'>        <b>return</b> -1;
+<a name='L279'>    x = x ^ y;
+<a name='L280'>    <b>if</b> (x == -1)
+<a name='L281'>        x = -2;
+<a name='L282'>    <b>return</b> x;
+<a name='L283'><font color='red'>}</font>
+<a name='L284'>
+<a name='L285'><b>static</b> <b>int</b>
+<a name='L286'><a href='../S/2782.html#L360' title='Refered from 360 in Objects/classobject.c.'>method_traverse</a>(PyMethodObject *im, visitproc visit, <b>void</b> *arg)
+<a name='L287'><font color='red'>{</font>
+<a name='L288'>    Py_VISIT(im-&gt;im_func);
+<a name='L289'>    Py_VISIT(im-&gt;im_self);
+<a name='L290'>    <b>return</b> 0;
+<a name='L291'><font color='red'>}</font>
+<a name='L292'>
+<a name='L293'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L294'><a href='../S/2782.html#L353' title='Refered from 353 in Objects/classobject.c.'>method_call</a>(PyObject *func, PyObject *arg, PyObject *kw)
+<a name='L295'><font color='red'>{</font>
+<a name='L296'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *self = PyMethod_GET_SELF(func);
+<a name='L297'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L298'>
+<a name='L299'>    func = PyMethod_GET_FUNCTION(func);
+<a name='L300'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L301'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L302'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L303'>    <font color='red'>}</font>
+<a name='L304'>    <b>else</b> <font color='red'>{</font>
+<a name='L305'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> argcount = <a href='../S/2823.html#L112' title='Defined at 112 in Objects/tupleobject.c.'>PyTuple_Size</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L306'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newarg = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(argcount + 1);
+<a name='L307'>        <b>int</b> i;
+<a name='L308'>        <b>if</b> (newarg == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L309'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L310'>        Py_INCREF(self);
+<a name='L311'>        PyTuple_SET_ITEM(newarg, 0, self);
+<a name='L312'>        <b>for</b> (i = 0; i &lt; argcount; i++) <font color='red'>{</font>
+<a name='L313'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = PyTuple_GET_ITEM(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, i);
+<a name='L314'>            <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(v);
+<a name='L315'>            PyTuple_SET_ITEM(newarg, i+1, v);
+<a name='L316'>        <font color='red'>}</font>
+<a name='L317'>        <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = newarg;
+<a name='L318'>    <font color='red'>}</font>
+<a name='L319'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2775.html#L2141' title='Defined at 2141 in Objects/abstract.c.'>PyObject_Call</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)func, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, kw);
+<a name='L320'>    Py_DECREF(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L321'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L322'><font color='red'>}</font>
+<a name='L323'>
+<a name='L324'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L325'><a href='../S/2782.html#L371' title='Refered from 371 in Objects/classobject.c.'>method_descr_get</a>(PyObject *meth, PyObject *obj, PyObject *cls)
+<a name='L326'><font color='red'>{</font>
+<a name='L327'>    <i><font color='green'>/* Don't rebind an already bound method of a class that's not a base</font></i>
+<a name='L328'><i><font color='green'>       class of cls. */</font></i>
+<a name='L329'>    <b>if</b> (PyMethod_GET_SELF(meth) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L330'>        <i><font color='green'>/* Already bound */</font></i>
+<a name='L331'>        Py_INCREF(meth);
+<a name='L332'>        <b>return</b> meth;
+<a name='L333'>    <font color='red'>}</font>
+<a name='L334'>    <i><font color='green'>/* Bind it to obj */</font></i>
+<a name='L335'>    <b>return</b> <a href='../S/2782.html#L43' title='Defined at 43 in Objects/classobject.c.'>PyMethod_New</a>(PyMethod_GET_FUNCTION(meth), obj);
+<a name='L336'><font color='red'>}</font>
+<a name='L337'>
+<a name='L338'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyMethod_Type = <font color='red'>{</font>
+<a name='L339'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L340'>    "method",
+<a name='L341'>    <b>sizeof</b>(<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a>),
+<a name='L342'>    0,
+<a name='L343'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2782.html#L165' title='Defined at 165 in Objects/classobject.c.'>method_dealloc</a>,                 <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L344'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L345'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L346'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L347'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L348'>    (reprfunc)<a href='../D/9863.html' title='Multiple defined in 2 places.'>method_repr</a>,                      <i><font color='green'>/* tp_repr */</font></i>
+<a name='L349'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L350'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L351'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L352'>    (hashfunc)<a href='../S/2782.html#L267' title='Defined at 267 in Objects/classobject.c.'>method_hash</a>,                      <i><font color='green'>/* tp_hash */</font></i>
+<a name='L353'>    <a href='../S/2782.html#L294' title='Defined at 294 in Objects/classobject.c.'>method_call</a>,                                <i><font color='green'>/* tp_call */</font></i>
+<a name='L354'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L355'>    <a href='../S/2782.html#L107' title='Defined at 107 in Objects/classobject.c.'>method_getattro</a>,                            <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L356'>    <a href='../S/2803.html#L1130' title='Defined at 1130 in Objects/object.c.'>PyObject_GenericSetAttr</a>,                    <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L357'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L358'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L359'>    method_doc,                                 <i><font color='green'>/* tp_doc */</font></i>
+<a name='L360'>    (traverseproc)<a href='../S/2782.html#L286' title='Defined at 286 in Objects/classobject.c.'>method_traverse</a>,              <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L361'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L362'>    <a href='../S/2782.html#L183' title='Defined at 183 in Objects/classobject.c.'>method_richcompare</a>,                         <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L363'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a>, im_weakreflist), <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L364'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L365'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L366'>    0,                                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L367'>    method_memberlist,                          <i><font color='green'>/* tp_members */</font></i>
+<a name='L368'>    method_getset,                              <i><font color='green'>/* tp_getset */</font></i>
+<a name='L369'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L370'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L371'>    <a href='../S/2782.html#L325' title='Defined at 325 in Objects/classobject.c.'>method_descr_get</a>,                           <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L372'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L373'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L374'>    0,                                          <i><font color='green'>/* tp_init */</font></i>
+<a name='L375'>    0,                                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L376'>    <a href='../S/2782.html#L140' title='Defined at 140 in Objects/classobject.c.'>method_new</a>,                                 <i><font color='green'>/* tp_new */</font></i>
+<a name='L377'><font color='red'>}</font>;
+<a name='L378'>
+<a name='L379'><i><font color='green'>/* Clear out the free list */</font></i>
+<a name='L380'>
+<a name='L381'><b>int</b>
+<a name='L382'><a href='../R/3183.html' title='Multiple refered from 2 places.'>PyMethod_ClearFreeList</a>(<b>void</b>)
+<a name='L383'><font color='red'>{</font>
+<a name='L384'>    <b>int</b> freelist_size = numfree;
+<a name='L385'>
+<a name='L386'>    <b>while</b> (free_list) <font color='red'>{</font>
+<a name='L387'>        <a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *im = free_list;
+<a name='L388'>        free_list = (<a href='../S/510.html#L17' title='Defined at 17 in Include/classobject.h.'>PyMethodObject</a> *)(im-&gt;im_self);
+<a name='L389'>        <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(im);
+<a name='L390'>        numfree--;
+<a name='L391'>    <font color='red'>}</font>
+<a name='L392'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(numfree == 0);
+<a name='L393'>    <b>return</b> freelist_size;
+<a name='L394'><font color='red'>}</font>
+<a name='L395'>
+<a name='L396'><b>void</b>
+<a name='L397'><a href='../S/3138.html#L495' title='Refered from 495 in Python/pythonrun.c.'>PyMethod_Fini</a>(<b>void</b>)
+<a name='L398'><font color='red'>{</font>
+<a name='L399'>    (<b>void</b>)<a href='../S/2782.html#L382' title='Defined at 382 in Objects/classobject.c.'>PyMethod_ClearFreeList</a>();
+<a name='L400'><font color='red'>}</font>
+<a name='L401'>
+<a name='L402'><i><font color='green'>/* ------------------------------------------------------------------------</font></i>
+<a name='L403'><i><font color='green'> * instance method</font></i>
+<a name='L404'><i><font color='green'> */</font></i>
+<a name='L405'>
+<a name='L406'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L407'><a href='../S/2782.html#L601' title='Refered from 601 in Objects/classobject.c.'>PyInstanceMethod_New</a>(PyObject *func) <font color='red'>{</font>
+<a name='L408'>    PyInstanceMethodObject *method;
+<a name='L409'>    method = PyObject_GC_New(PyInstanceMethodObject,
+<a name='L410'>                             &amp;PyInstanceMethod_Type);
+<a name='L411'>    <b>if</b> (method == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L412'>    Py_INCREF(func);
+<a name='L413'>    method-&gt;func = func;
+<a name='L414'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(method);
+<a name='L415'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)method;
+<a name='L416'><font color='red'>}</font>
+<a name='L417'>
+<a name='L418'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L419'><a href='../S/2782.html#L538' title='Refered from 538 in Objects/classobject.c.'>PyInstanceMethod_Function</a>(PyObject *im)
+<a name='L420'><font color='red'>{</font>
+<a name='L421'>    <b>if</b> (!PyInstanceMethod_Check(im)) <font color='red'>{</font>
+<a name='L422'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L423'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L424'>    <font color='red'>}</font>
+<a name='L425'>    <b>return</b> PyInstanceMethod_GET_FUNCTION(im);
+<a name='L426'><font color='red'>}</font>
+<a name='L427'>
+<a name='L428'><font color='darkred'>#define</font> <a href='../S/2782.html#L431' title='Refered from 431 in Objects/classobject.c.'>IMO_OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(PyInstanceMethodObject, x)
+<a name='L429'>
+<a name='L430'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> instancemethod_memberlist[] = <font color='red'>{</font>
+<a name='L431'>    <font color='red'>{</font>"__func__", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../S/2782.html#L428' title='Defined at 428 in Objects/classobject.c.'>IMO_OFF</a>(func), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>|<a href='../S/577.html#L76' title='Defined at 76 in Include/structmember.h.'>RESTRICTED</a>,
+<a name='L432'>     "the function (or other callable) implementing a method"<font color='red'>}</font>,
+<a name='L433'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>      <i><font color='green'>/* Sentinel */</font></i>
+<a name='L434'><font color='red'>}</font>;
+<a name='L435'>
+<a name='L436'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L437'><a href='../S/2782.html#L449' title='Refered from 449 in Objects/classobject.c.'>instancemethod_get_doc</a>(PyObject *self, <b>void</b> *context)
+<a name='L438'><font color='red'>{</font>
+<a name='L439'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *docstr;
+<a name='L440'>    <b>if</b> (docstr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L441'>        docstr = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("__doc__");
+<a name='L442'>        <b>if</b> (docstr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L443'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L444'>    <font color='red'>}</font>
+<a name='L445'>    <b>return</b> <a href='../S/2803.html#L822' title='Defined at 822 in Objects/object.c.'>PyObject_GetAttr</a>(PyInstanceMethod_GET_FUNCTION(self), docstr);
+<a name='L446'><font color='red'>}</font>
+<a name='L447'>
+<a name='L448'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> instancemethod_getset[] = <font color='red'>{</font>
+<a name='L449'>    <font color='red'>{</font>"__doc__", (getter)<a href='../S/2782.html#L437' title='Defined at 437 in Objects/classobject.c.'>instancemethod_get_doc</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L450'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L451'><font color='red'>}</font>;
+<a name='L452'>
+<a name='L453'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L454'><a href='../S/2782.html#L621' title='Refered from 621 in Objects/classobject.c.'>instancemethod_getattro</a>(PyObject *self, PyObject *name)
+<a name='L455'><font color='red'>{</font>
+<a name='L456'>    <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *tp = self-&gt;ob_type;
+<a name='L457'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *descr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L458'>
+<a name='L459'>    <b>if</b> (tp-&gt;tp_dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L460'>        <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(tp) &lt; 0)
+<a name='L461'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L462'>    <font color='red'>}</font>
+<a name='L463'>    descr = <a href='../S/2824.html#L2374' title='Defined at 2374 in Objects/typeobject.c.'>_PyType_Lookup</a>(tp, name);
+<a name='L464'>
+<a name='L465'>    <b>if</b> (descr != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L466'>        descrgetfunc f = <a href='../S/2782.html#L6' title='Defined at 6 in Objects/classobject.c.'>TP_DESCR_GET</a>(descr-&gt;ob_type);
+<a name='L467'>        <b>if</b> (f != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L468'>            <b>return</b> f(descr, self, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self-&gt;ob_type);
+<a name='L469'>        <b>else</b> <font color='red'>{</font>
+<a name='L470'>            Py_INCREF(descr);
+<a name='L471'>            <b>return</b> descr;
+<a name='L472'>        <font color='red'>}</font>
+<a name='L473'>    <font color='red'>}</font>
+<a name='L474'>
+<a name='L475'>    <b>return</b> <a href='../S/2803.html#L822' title='Defined at 822 in Objects/object.c.'>PyObject_GetAttr</a>(PyInstanceMethod_GET_FUNCTION(self), name);
+<a name='L476'><font color='red'>}</font>
+<a name='L477'>
+<a name='L478'><b>static</b> <b>void</b>
+<a name='L479'><a href='../S/2782.html#L609' title='Refered from 609 in Objects/classobject.c.'>instancemethod_dealloc</a>(PyObject *self) <font color='red'>{</font>
+<a name='L480'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(self);
+<a name='L481'>    Py_DECREF(PyInstanceMethod_GET_FUNCTION(self));
+<a name='L482'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(self);
+<a name='L483'><font color='red'>}</font>
+<a name='L484'>
+<a name='L485'><b>static</b> <b>int</b>
+<a name='L486'><a href='../S/2782.html#L627' title='Refered from 627 in Objects/classobject.c.'>instancemethod_traverse</a>(PyObject *self, visitproc visit, <b>void</b> *arg) <font color='red'>{</font>
+<a name='L487'>    Py_VISIT(PyInstanceMethod_GET_FUNCTION(self));
+<a name='L488'>    <b>return</b> 0;
+<a name='L489'><font color='red'>}</font>
+<a name='L490'>
+<a name='L491'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L492'><a href='../S/2782.html#L619' title='Refered from 619 in Objects/classobject.c.'>instancemethod_call</a>(PyObject *self, PyObject *arg, PyObject *kw)
+<a name='L493'><font color='red'>{</font>
+<a name='L494'>    <b>return</b> <a href='../S/2775.html#L2141' title='Defined at 2141 in Objects/abstract.c.'>PyObject_Call</a>(PyMethod_GET_FUNCTION(self), <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, kw);
+<a name='L495'><font color='red'>}</font>
+<a name='L496'>
+<a name='L497'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L498'><a href='../S/2782.html#L638' title='Refered from 638 in Objects/classobject.c.'>instancemethod_descr_get</a>(PyObject *descr, PyObject *obj, PyObject *type) <font color='red'>{</font>
+<a name='L499'>    <b>register</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func = PyInstanceMethod_GET_FUNCTION(descr);
+<a name='L500'>    <b>if</b> (obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L501'>        Py_INCREF(func);
+<a name='L502'>        <b>return</b> func;
+<a name='L503'>    <font color='red'>}</font>
+<a name='L504'>    <b>else</b>
+<a name='L505'>        <b>return</b> <a href='../S/2782.html#L43' title='Defined at 43 in Objects/classobject.c.'>PyMethod_New</a>(func, obj);
+<a name='L506'><font color='red'>}</font>
+<a name='L507'>
+<a name='L508'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L509'><a href='../S/2782.html#L629' title='Refered from 629 in Objects/classobject.c.'>instancemethod_richcompare</a>(PyObject *self, PyObject *other, <b>int</b> op)
+<a name='L510'><font color='red'>{</font>
+<a name='L511'>    PyInstanceMethodObject *a, *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L512'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L513'>    <b>int</b> eq;
+<a name='L514'>
+<a name='L515'>    <b>if</b> ((op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a> &amp;&amp; op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>) ||
+<a name='L516'>        !PyInstanceMethod_Check(self) ||
+<a name='L517'>        !PyInstanceMethod_Check(<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>))
+<a name='L518'>    <font color='red'>{</font>
+<a name='L519'>        Py_INCREF(Py_NotImplemented);
+<a name='L520'>        <b>return</b> Py_NotImplemented;
+<a name='L521'>    <font color='red'>}</font>
+<a name='L522'>    a = (PyInstanceMethodObject *)self;
+<a name='L523'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = (PyInstanceMethodObject *)<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>;
+<a name='L524'>    eq = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(a-&gt;func, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;func, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L525'>    <b>if</b> (eq &lt; 0)
+<a name='L526'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L527'>    <b>if</b> (op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>)
+<a name='L528'>        res = eq ? Py_True : Py_False;
+<a name='L529'>    <b>else</b>
+<a name='L530'>        res = eq ? Py_False : Py_True;
+<a name='L531'>    Py_INCREF(res);
+<a name='L532'>    <b>return</b> res;
+<a name='L533'><font color='red'>}</font>
+<a name='L534'>
+<a name='L535'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L536'><a href='../S/2782.html#L614' title='Refered from 614 in Objects/classobject.c.'>instancemethod_repr</a>(PyObject *self)
+<a name='L537'><font color='red'>{</font>
+<a name='L538'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func = <a href='../S/2782.html#L419' title='Defined at 419 in Objects/classobject.c.'>PyInstanceMethod_Function</a>(self);
+<a name='L539'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *funcname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> , *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L540'>    <b>char</b> *defname = "?";
+<a name='L541'>
+<a name='L542'>    <b>if</b> (func == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L543'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L544'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L545'>    <font color='red'>}</font>
+<a name='L546'>
+<a name='L547'>    funcname = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(func, "__name__");
+<a name='L548'>    <b>if</b> (funcname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L549'>        <b>if</b> (!<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_AttributeError))
+<a name='L550'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L551'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L552'>    <font color='red'>}</font>
+<a name='L553'>    <b>else</b> <b>if</b> (!PyUnicode_Check(funcname)) <font color='red'>{</font>
+<a name='L554'>        Py_DECREF(funcname);
+<a name='L555'>        funcname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L556'>    <font color='red'>}</font>
+<a name='L557'>
+<a name='L558'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;instancemethod %V at %p&gt;",
+<a name='L559'>                                  funcname, defname, self);
+<a name='L560'>
+<a name='L561'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(funcname);
+<a name='L562'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L563'><font color='red'>}</font>
+<a name='L564'>
+<a name='L565'><i><font color='green'>/*</font></i>
+<a name='L566'><i><font color='green'>static long</font></i>
+<a name='L567'><i><font color='green'>instancemethod_hash(PyObject *self)</font></i>
+<a name='L568'><i><font color='green'>{</font></i>
+<a name='L569'><i><font color='green'>    long x, y;</font></i>
+<a name='L570'><i><font color='green'>    x = (long)self;</font></i>
+<a name='L571'><i><font color='green'>    y = PyObject_Hash(PyInstanceMethod_GET_FUNCTION(self));</font></i>
+<a name='L572'><i><font color='green'>    if (y == -1)</font></i>
+<a name='L573'><i><font color='green'>        return -1;</font></i>
+<a name='L574'><i><font color='green'>    x = x ^ y;</font></i>
+<a name='L575'><i><font color='green'>    if (x == -1)</font></i>
+<a name='L576'><i><font color='green'>        x = -2;</font></i>
+<a name='L577'><i><font color='green'>    return x;</font></i>
+<a name='L578'><i><font color='green'>}</font></i>
+<a name='L579'><i><font color='green'>*/</font></i>
+<a name='L580'>
+<a name='L581'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(instancemethod_doc,
+<a name='L582'>"instancemethod(function)\n\
+<a name='L583'>\n\
+<a name='L584'>Bind a function to a class.");
+<a name='L585'>
+<a name='L586'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L587'><a href='../S/2782.html#L643' title='Refered from 643 in Objects/classobject.c.'>instancemethod_new</a>(PyTypeObject* type, PyObject* args, PyObject *kw)
+<a name='L588'><font color='red'>{</font>
+<a name='L589'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func;
+<a name='L590'>
+<a name='L591'>    <b>if</b> (!<a href='../S/3112.html#L1777' title='Defined at 1777 in Python/getargs.c.'>_PyArg_NoKeywords</a>("instancemethod", kw))
+<a name='L592'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L593'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "instancemethod", 1, 1, &amp;func))
+<a name='L594'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L595'>    <b>if</b> (!<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(func)) <font color='red'>{</font>
+<a name='L596'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L597'>                        "first argument must be callable");
+<a name='L598'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L599'>    <font color='red'>}</font>
+<a name='L600'>
+<a name='L601'>    <b>return</b> <a href='../S/2782.html#L407' title='Defined at 407 in Objects/classobject.c.'>PyInstanceMethod_New</a>(func);
+<a name='L602'><font color='red'>}</font>
+<a name='L603'>
+<a name='L604'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyInstanceMethod_Type = <font color='red'>{</font>
+<a name='L605'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L606'>    "instancemethod",                           <i><font color='green'>/* tp_name */</font></i>
+<a name='L607'>    <b>sizeof</b>(PyInstanceMethodObject),             <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L608'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L609'>    <a href='../S/2782.html#L479' title='Defined at 479 in Objects/classobject.c.'>instancemethod_dealloc</a>,                     <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L610'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L611'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L612'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L613'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L614'>    (reprfunc)<a href='../S/2782.html#L536' title='Defined at 536 in Objects/classobject.c.'>instancemethod_repr</a>,              <i><font color='green'>/* tp_repr */</font></i>
+<a name='L615'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L616'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L617'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L618'>    0, <i><font color='green'>/*(hashfunc)instancemethod_hash,         tp_hash  */</font></i>
+<a name='L619'>    <a href='../S/2782.html#L492' title='Defined at 492 in Objects/classobject.c.'>instancemethod_call</a>,                        <i><font color='green'>/* tp_call */</font></i>
+<a name='L620'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L621'>    <a href='../S/2782.html#L454' title='Defined at 454 in Objects/classobject.c.'>instancemethod_getattro</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L622'>    <a href='../S/2803.html#L1130' title='Defined at 1130 in Objects/object.c.'>PyObject_GenericSetAttr</a>,                    <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L623'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L624'>    Py_TPFLAGS_DEFAULT
+<a name='L625'>        | Py_TPFLAGS_HAVE_GC,                   <i><font color='green'>/* tp_flags */</font></i>
+<a name='L626'>    instancemethod_doc,                         <i><font color='green'>/* tp_doc */</font></i>
+<a name='L627'>    <a href='../S/2782.html#L486' title='Defined at 486 in Objects/classobject.c.'>instancemethod_traverse</a>,                    <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L628'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L629'>    <a href='../S/2782.html#L509' title='Defined at 509 in Objects/classobject.c.'>instancemethod_richcompare</a>,                 <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L630'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L631'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L632'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L633'>    0,                                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L634'>    instancemethod_memberlist,                  <i><font color='green'>/* tp_members */</font></i>
+<a name='L635'>    instancemethod_getset,                      <i><font color='green'>/* tp_getset */</font></i>
+<a name='L636'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L637'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L638'>    <a href='../S/2782.html#L498' title='Defined at 498 in Objects/classobject.c.'>instancemethod_descr_get</a>,                   <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L639'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L640'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L641'>    0,                                          <i><font color='green'>/* tp_init */</font></i>
+<a name='L642'>    0,                                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L643'>    <a href='../S/2782.html#L587' title='Defined at 587 in Objects/classobject.c.'>instancemethod_new</a>,                         <i><font color='green'>/* tp_new */</font></i>
+<a name='L644'><font color='red'>}</font>;
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L18'>[^]</a><a href='#L587'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

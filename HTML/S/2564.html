@@ -1,0 +1,631 @@
+<html>
+<head>
+<title>Modules/_gdbmmodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/_gdbmmodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L59'>[^]</a><a href='#L576'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L59' title='Defined at 59.'>newdbmobject</a>
+<li><a href='#L82' title='Defined at 82.'>dbm_dealloc</a>
+<li><a href='#L90' title='Defined at 90.'>dbm_length</a>
+<li><a href='#L115' title='Defined at 115.'>dbm_subscript</a>
+<li><a href='#L144' title='Defined at 144.'>dbm_get</a>
+<li><a href='#L161' title='Defined at 161.'>dbm_ass_sub</a>
+<li><a href='#L207' title='Defined at 207.'>dbm_setdefault</a>
+<li><a href='#L235' title='Defined at 235.'>dbm_close</a>
+<li><a href='#L250' title='Defined at 250.'>dbm_keys</a>
+<li><a href='#L289' title='Defined at 289.'>dbm_contains</a>
+<li><a href='#L331' title='Defined at 331.'>dbm_firstkey</a>
+<li><a href='#L361' title='Defined at 361.'>dbm_nextkey</a>
+<li><a href='#L390' title='Defined at 390.'>dbm_reorganize</a>
+<li><a href='#L411' title='Defined at 411.'>dbm_sync</a>
+<li><a href='#L489' title='Defined at 489.'>dbmopen</a>
+<li><a href='#L576' title='Defined at 576.'>PyInit__gdbm</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* DBM module using dictionary interface */</font></i>
+<a name='L3'><i><font color='green'>/* Author: Anthony Baxter, after dbmmodule.c */</font></i>
+<a name='L4'><i><font color='green'>/* Doc strings: Mitch Chapman */</font></i>
+<a name='L5'>
+<a name='L6'>
+<a name='L7'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L8'>
+<a name='L9'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L10'><font color='darkred'>#include</font> &lt;sys/stat.h&gt;
+<a name='L11'><font color='darkred'>#include</font> &lt;fcntl.h&gt;
+<a name='L12'><font color='darkred'>#include</font> "gdbm.h"
+<a name='L13'>
+<a name='L14'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/5523.html' title='Multiple defined in 3 places.'>WIN32</a>) &amp;&amp; !<b>defined</b>(__CYGWIN__)
+<a name='L15'><font color='darkred'>#include</font> "gdbmerrno.h"
+<a name='L16'><b>extern</b> <b>const</b> <b>char</b> * gdbm_strerror(gdbm_error);
+<a name='L17'><font color='darkred'>#endif</font>
+<a name='L18'>
+<a name='L19'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(gdbmmodule__doc__,
+<a name='L20'>"This module provides an interface to the GNU DBM (GDBM) library.\n\
+<a name='L21'>\n\
+<a name='L22'>This module is quite similar to the dbm module, but uses GDBM instead to\n\
+<a name='L23'>provide some additional functionality. Please note that the file formats\n\
+<a name='L24'>created by GDBM and dbm are incompatible. \n\
+<a name='L25'>\n\
+<a name='L26'>GDBM objects behave like mappings (dictionaries), except that keys and\n\
+<a name='L27'>values are always strings. Printing a GDBM object doesn't print the\n\
+<a name='L28'>keys and values, and the items() and values() methods are not\n\
+<a name='L29'>supported.");
+<a name='L30'>
+<a name='L31'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L32'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L33'>    <b>int</b> di_size;        <i><font color='green'>/* -1 means recompute */</font></i>
+<a name='L34'>    GDBM_FILE di_dbm;
+<a name='L35'><font color='red'>}</font> <a href='../R/7183.html' title='Multiple refered from 8 places.'>dbmobject</a>;
+<a name='L36'>
+<a name='L37'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Dbmtype;
+<a name='L38'>
+<a name='L39'><font color='darkred'>#define</font> <a href='../S/2564.html#L256' title='Refered from 256 in Modules/_gdbmmodule.c.'>is_dbmobject</a>(v) (<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(v) == &amp;Dbmtype)
+<a name='L40'><font color='darkred'>#define</font> <a href='../R/6626.html' title='Multiple refered from 9 places.'>check_dbmobject_open</a>(v) <b>if</b> ((v)-&gt;di_dbm == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) \
+<a name='L41'>    <font color='red'>{</font> <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError, "GDBM object has already been closed"); \
+<a name='L42'>      <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <font color='red'>}</font>
+<a name='L43'>
+<a name='L44'>
+<a name='L45'>
+<a name='L46'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *DbmError;
+<a name='L47'>
+<a name='L48'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(gdbm_object__doc__,
+<a name='L49'>"This object represents a GDBM database.\n\
+<a name='L50'>GDBM objects behave like mappings (dictionaries), except that keys and\n\
+<a name='L51'>values are always strings. Printing a GDBM object doesn't print the\n\
+<a name='L52'>keys and values, and the items() and values() methods are not\n\
+<a name='L53'>supported.\n\
+<a name='L54'>\n\
+<a name='L55'>GDBM objects also support additional operations such as firstkey,\n\
+<a name='L56'>nextkey, reorganize, and sync.");
+<a name='L57'>
+<a name='L58'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L59'><a href='../R/9218.html' title='Multiple refered from 2 places.'>newdbmobject</a>(<b>char</b> *file, <b>int</b> flags, <b>int</b> mode)
+<a name='L60'><font color='red'>{</font>
+<a name='L61'>    <a href='../D/7962.html' title='Multiple defined in 2 places.'>dbmobject</a> *dp;
+<a name='L62'>
+<a name='L63'>    dp = PyObject_New(<a href='../D/7962.html' title='Multiple defined in 2 places.'>dbmobject</a>, &amp;Dbmtype);
+<a name='L64'>    <b>if</b> (dp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L65'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L66'>    dp-&gt;di_size = -1;
+<a name='L67'>    errno = 0;
+<a name='L68'>    <b>if</b> ((dp-&gt;di_dbm = gdbm_open(file, 0, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, mode, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)) == 0) <font color='red'>{</font>
+<a name='L69'>        <b>if</b> (errno != 0)
+<a name='L70'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(DbmError);
+<a name='L71'>        <b>else</b>
+<a name='L72'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError, gdbm_strerror(gdbm_errno));
+<a name='L73'>        Py_DECREF(dp);
+<a name='L74'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L75'>    <font color='red'>}</font>
+<a name='L76'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)dp;
+<a name='L77'><font color='red'>}</font>
+<a name='L78'>
+<a name='L79'><i><font color='green'>/* Methods */</font></i>
+<a name='L80'>
+<a name='L81'><b>static</b> <b>void</b>
+<a name='L82'><a href='../R/7173.html' title='Multiple refered from 2 places.'>dbm_dealloc</a>(<b>register</b> dbmobject *dp)
+<a name='L83'><font color='red'>{</font>
+<a name='L84'>    <b>if</b> (dp-&gt;di_dbm)
+<a name='L85'>        gdbm_close(dp-&gt;di_dbm);
+<a name='L86'>    PyObject_Del(dp);
+<a name='L87'><font color='red'>}</font>
+<a name='L88'>
+<a name='L89'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L90'><a href='../R/7177.html' title='Multiple refered from 2 places.'>dbm_length</a>(dbmobject *dp)
+<a name='L91'><font color='red'>{</font>
+<a name='L92'>    <b>if</b> (dp-&gt;di_dbm == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L93'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError, "GDBM object has already been closed");
+<a name='L94'>        <b>return</b> -1;
+<a name='L95'>    <font color='red'>}</font>
+<a name='L96'>    <b>if</b> (dp-&gt;di_size &lt; 0) <font color='red'>{</font>
+<a name='L97'>        datum <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>,okey;
+<a name='L98'>        <b>int</b> size;
+<a name='L99'>        okey.dsize=0;
+<a name='L100'>        okey.dptr=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L101'>
+<a name='L102'>        size = 0;
+<a name='L103'>        <b>for</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>=gdbm_firstkey(dp-&gt;di_dbm); <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr;
+<a name='L104'>             <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = gdbm_nextkey(dp-&gt;di_dbm,okey)) <font color='red'>{</font>
+<a name='L105'>            size++;
+<a name='L106'>            <b>if</b>(okey.dsize) free(okey.dptr);
+<a name='L107'>            okey=<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L108'>        <font color='red'>}</font>
+<a name='L109'>        dp-&gt;di_size = size;
+<a name='L110'>    <font color='red'>}</font>
+<a name='L111'>    <b>return</b> dp-&gt;di_size;
+<a name='L112'><font color='red'>}</font>
+<a name='L113'>
+<a name='L114'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L115'><a href='../R/7181.html' title='Multiple refered from 5 places.'>dbm_subscript</a>(dbmobject *dp, <b>register</b> PyObject *key)
+<a name='L116'><font color='red'>{</font>
+<a name='L117'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L118'>    datum drec, krec;
+<a name='L119'>
+<a name='L120'>    <b>if</b> (!<a href='../S/541.html#L15' title='Defined at 15 in Include/modsupport.h.'>PyArg_Parse</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, "s#", &amp;krec.dptr, &amp;krec.dsize) )
+<a name='L121'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L122'>
+<a name='L123'>    <b>if</b> (dp-&gt;di_dbm == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L124'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError,
+<a name='L125'>                        "GDBM object has already been closed");
+<a name='L126'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L127'>    <font color='red'>}</font>
+<a name='L128'>    drec = gdbm_fetch(dp-&gt;di_dbm, krec);
+<a name='L129'>    <b>if</b> (drec.dptr == 0) <font color='red'>{</font>
+<a name='L130'>        <a href='../S/3106.html#L53' title='Defined at 53 in Python/errors.c.'>PyErr_SetObject</a>(PyExc_KeyError, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L131'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L132'>    <font color='red'>}</font>
+<a name='L133'>    v = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(drec.dptr, drec.dsize);
+<a name='L134'>    free(drec.dptr);
+<a name='L135'>    <b>return</b> v;
+<a name='L136'><font color='red'>}</font>
+<a name='L137'>
+<a name='L138'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_get__doc__,
+<a name='L139'>"get(key[, default]) -&gt; value\n\
+<a name='L140'>Get the value for key, or default if not present; if not given,\n\
+<a name='L141'>default is None.");
+<a name='L142'>
+<a name='L143'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L144'><a href='../R/7175.html' title='Multiple refered from 2 places.'>dbm_get</a>(dbmobject *dp, PyObject *args)
+<a name='L145'><font color='red'>{</font>
+<a name='L146'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v, *res;
+<a name='L147'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *def = Py_None;
+<a name='L148'>
+<a name='L149'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "get", 1, 2, &amp;v, &amp;def))
+<a name='L150'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L151'>    res = <a href='../D/7960.html' title='Multiple defined in 2 places.'>dbm_subscript</a>(dp, v);
+<a name='L152'>    <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; <a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_KeyError)) <font color='red'>{</font>
+<a name='L153'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L154'>        Py_INCREF(def);
+<a name='L155'>        <b>return</b> def;
+<a name='L156'>    <font color='red'>}</font>
+<a name='L157'>    <b>return</b> res;
+<a name='L158'><font color='red'>}</font>
+<a name='L159'>
+<a name='L160'><b>static</b> <b>int</b>
+<a name='L161'><a href='../R/7170.html' title='Multiple refered from 3 places.'>dbm_ass_sub</a>(dbmobject *dp, PyObject *v, PyObject *w)
+<a name='L162'><font color='red'>{</font>
+<a name='L163'>    datum krec, drec;
+<a name='L164'>
+<a name='L165'>    <b>if</b> (!<a href='../S/541.html#L15' title='Defined at 15 in Include/modsupport.h.'>PyArg_Parse</a>(v, "s#", &amp;krec.dptr, &amp;krec.dsize) ) <font color='red'>{</font>
+<a name='L166'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L167'>                        "gdbm mappings have bytes or string indices only");
+<a name='L168'>        <b>return</b> -1;
+<a name='L169'>    <font color='red'>}</font>
+<a name='L170'>    <b>if</b> (dp-&gt;di_dbm == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L171'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError,
+<a name='L172'>                        "GDBM object has already been closed");
+<a name='L173'>        <b>return</b> -1;
+<a name='L174'>    <font color='red'>}</font>
+<a name='L175'>    dp-&gt;di_size = -1;
+<a name='L176'>    <b>if</b> (w == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L177'>        <b>if</b> (gdbm_delete(dp-&gt;di_dbm, krec) &lt; 0) <font color='red'>{</font>
+<a name='L178'>            <a href='../S/3106.html#L53' title='Defined at 53 in Python/errors.c.'>PyErr_SetObject</a>(PyExc_KeyError, v);
+<a name='L179'>            <b>return</b> -1;
+<a name='L180'>        <font color='red'>}</font>
+<a name='L181'>    <font color='red'>}</font>
+<a name='L182'>    <b>else</b> <font color='red'>{</font>
+<a name='L183'>        <b>if</b> (!<a href='../S/541.html#L15' title='Defined at 15 in Include/modsupport.h.'>PyArg_Parse</a>(w, "s#", &amp;drec.dptr, &amp;drec.dsize)) <font color='red'>{</font>
+<a name='L184'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L185'>                            "gdbm mappings have byte or string elements only");
+<a name='L186'>            <b>return</b> -1;
+<a name='L187'>        <font color='red'>}</font>
+<a name='L188'>        errno = 0;
+<a name='L189'>        <b>if</b> (gdbm_store(dp-&gt;di_dbm, krec, drec, GDBM_REPLACE) &lt; 0) <font color='red'>{</font>
+<a name='L190'>            <b>if</b> (errno != 0)
+<a name='L191'>                <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(DbmError);
+<a name='L192'>            <b>else</b>
+<a name='L193'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError,
+<a name='L194'>                                gdbm_strerror(gdbm_errno));
+<a name='L195'>            <b>return</b> -1;
+<a name='L196'>        <font color='red'>}</font>
+<a name='L197'>    <font color='red'>}</font>
+<a name='L198'>    <b>return</b> 0;
+<a name='L199'><font color='red'>}</font>
+<a name='L200'>
+<a name='L201'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_setdefault__doc__,
+<a name='L202'>"setdefault(key[, default]) -&gt; value\n\
+<a name='L203'>Get value for key, or set it to default and return default if not present;\n\
+<a name='L204'>if not given, default is None.");
+<a name='L205'>
+<a name='L206'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L207'><a href='../R/7180.html' title='Multiple refered from 2 places.'>dbm_setdefault</a>(dbmobject *dp, PyObject *args)
+<a name='L208'><font color='red'>{</font>
+<a name='L209'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v, *res;
+<a name='L210'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *def = Py_None;
+<a name='L211'>
+<a name='L212'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "setdefault", 1, 2, &amp;v, &amp;def))
+<a name='L213'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L214'>    res = <a href='../D/7960.html' title='Multiple defined in 2 places.'>dbm_subscript</a>(dp, v);
+<a name='L215'>    <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; <a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_KeyError)) <font color='red'>{</font>
+<a name='L216'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L217'>        <b>if</b> (<a href='../D/7949.html' title='Multiple defined in 2 places.'>dbm_ass_sub</a>(dp, v, def) &lt; 0)
+<a name='L218'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L219'>        <b>return</b> <a href='../D/7960.html' title='Multiple defined in 2 places.'>dbm_subscript</a>(dp, v);
+<a name='L220'>    <font color='red'>}</font>
+<a name='L221'>    <b>return</b> res;
+<a name='L222'><font color='red'>}</font>
+<a name='L223'>
+<a name='L224'><b>static</b> <a href='../S/544.html#L267' title='Defined at 267 in Include/object.h.'>PyMappingMethods</a> dbm_as_mapping = <font color='red'>{</font>
+<a name='L225'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../D/7956.html' title='Multiple defined in 2 places.'>dbm_length</a>,                <i><font color='green'>/*mp_length*/</font></i>
+<a name='L226'>    (binaryfunc)<a href='../D/7960.html' title='Multiple defined in 2 places.'>dbm_subscript</a>,          <i><font color='green'>/*mp_subscript*/</font></i>
+<a name='L227'>    (objobjargproc)<a href='../D/7949.html' title='Multiple defined in 2 places.'>dbm_ass_sub</a>,         <i><font color='green'>/*mp_ass_subscript*/</font></i>
+<a name='L228'><font color='red'>}</font>;
+<a name='L229'>
+<a name='L230'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_close__doc__,
+<a name='L231'>"close() -&gt; None\n\
+<a name='L232'>Closes the database.");
+<a name='L233'>
+<a name='L234'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L235'><a href='../R/7171.html' title='Multiple refered from 3 places.'>dbm_close</a>(<b>register</b> dbmobject *dp, PyObject *unused)
+<a name='L236'><font color='red'>{</font>
+<a name='L237'>    <b>if</b> (dp-&gt;di_dbm)
+<a name='L238'>        gdbm_close(dp-&gt;di_dbm);
+<a name='L239'>    dp-&gt;di_dbm = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L240'>    Py_INCREF(Py_None);
+<a name='L241'>    <b>return</b> Py_None;
+<a name='L242'><font color='red'>}</font>
+<a name='L243'>
+<a name='L244'><i><font color='green'>/* XXX Should return a set or a set view */</font></i>
+<a name='L245'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_keys__doc__,
+<a name='L246'>"keys() -&gt; list_of_keys\n\
+<a name='L247'>Get a list of all keys in the database.");
+<a name='L248'>
+<a name='L249'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L250'><a href='../R/7176.html' title='Multiple refered from 2 places.'>dbm_keys</a>(<b>register</b> dbmobject *dp, PyObject *unused)
+<a name='L251'><font color='red'>{</font>
+<a name='L252'>    <b>register</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v, *item;
+<a name='L253'>    datum <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, nextkey;
+<a name='L254'>    <b>int</b> err;
+<a name='L255'>
+<a name='L256'>    <b>if</b> (dp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !<a href='../D/9306.html' title='Multiple defined in 2 places.'>is_dbmobject</a>(dp)) <font color='red'>{</font>
+<a name='L257'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L258'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L259'>    <font color='red'>}</font>
+<a name='L260'>    <a href='../D/7398.html' title='Multiple defined in 2 places.'>check_dbmobject_open</a>(dp);
+<a name='L261'>
+<a name='L262'>    v = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L263'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L264'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L265'>
+<a name='L266'>    <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = gdbm_firstkey(dp-&gt;di_dbm);
+<a name='L267'>    <b>while</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr) <font color='red'>{</font>
+<a name='L268'>        item = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dsize);
+<a name='L269'>        <b>if</b> (item == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L270'>            free(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr);
+<a name='L271'>            Py_DECREF(v);
+<a name='L272'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L273'>        <font color='red'>}</font>
+<a name='L274'>        err = <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(v, item);
+<a name='L275'>        Py_DECREF(item);
+<a name='L276'>        <b>if</b> (err != 0) <font color='red'>{</font>
+<a name='L277'>            free(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr);
+<a name='L278'>            Py_DECREF(v);
+<a name='L279'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L280'>        <font color='red'>}</font>
+<a name='L281'>        nextkey = gdbm_nextkey(dp-&gt;di_dbm, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L282'>        free(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr);
+<a name='L283'>        <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = nextkey;
+<a name='L284'>    <font color='red'>}</font>
+<a name='L285'>    <b>return</b> v;
+<a name='L286'><font color='red'>}</font>
+<a name='L287'>
+<a name='L288'><b>static</b> <b>int</b>
+<a name='L289'><a href='../R/7172.html' title='Multiple refered from 2 places.'>dbm_contains</a>(PyObject *self, PyObject *arg)
+<a name='L290'><font color='red'>{</font>
+<a name='L291'>    <a href='../D/7962.html' title='Multiple defined in 2 places.'>dbmobject</a> *dp = (<a href='../D/7962.html' title='Multiple defined in 2 places.'>dbmobject</a> *)self;
+<a name='L292'>    datum <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L293'>
+<a name='L294'>    <b>if</b> ((dp)-&gt;di_dbm == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L295'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError,
+<a name='L296'>                        "GDBM object has already been closed");
+<a name='L297'>        <b>return</b> -1;
+<a name='L298'>    <font color='red'>}</font>
+<a name='L299'>    <b>if</b> (!PyBytes_Check(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)) <font color='red'>{</font>
+<a name='L300'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L301'>                     "gdbm key must be bytes, not %.100s",
+<a name='L302'>                     <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;ob_type-&gt;tp_name);
+<a name='L303'>        <b>return</b> -1;
+<a name='L304'>    <font color='red'>}</font>
+<a name='L305'>    <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr = PyBytes_AS_STRING(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L306'>    <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dsize = PyBytes_GET_SIZE(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L307'>    <b>return</b> gdbm_exists(dp-&gt;di_dbm, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L308'><font color='red'>}</font>
+<a name='L309'>
+<a name='L310'><b>static</b> <a href='../S/544.html#L261' title='Defined at 261 in Include/object.h.'>PySequenceMethods</a> dbm_as_sequence = <font color='red'>{</font>
+<a name='L311'>        0,                      <i><font color='green'>/* sq_length */</font></i>
+<a name='L312'>        0,                      <i><font color='green'>/* sq_concat */</font></i>
+<a name='L313'>        0,                      <i><font color='green'>/* sq_repeat */</font></i>
+<a name='L314'>        0,                      <i><font color='green'>/* sq_item */</font></i>
+<a name='L315'>        0,                      <i><font color='green'>/* sq_slice */</font></i>
+<a name='L316'>        0,                      <i><font color='green'>/* sq_ass_item */</font></i>
+<a name='L317'>        0,                      <i><font color='green'>/* sq_ass_slice */</font></i>
+<a name='L318'>        <a href='../D/7951.html' title='Multiple defined in 2 places.'>dbm_contains</a>,           <i><font color='green'>/* sq_contains */</font></i>
+<a name='L319'>        0,                      <i><font color='green'>/* sq_inplace_concat */</font></i>
+<a name='L320'>        0,                      <i><font color='green'>/* sq_inplace_repeat */</font></i>
+<a name='L321'><font color='red'>}</font>;
+<a name='L322'>
+<a name='L323'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_firstkey__doc__,
+<a name='L324'>"firstkey() -&gt; key\n\
+<a name='L325'>It's possible to loop over every key in the database using this method\n\
+<a name='L326'>and the nextkey() method. The traversal is ordered by GDBM's internal\n\
+<a name='L327'>hash values, and won't be sorted by the key values. This method\n\
+<a name='L328'>returns the starting key.");
+<a name='L329'>
+<a name='L330'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L331'><a href='../R/7174.html' title='Multiple refered from 3 places.'>dbm_firstkey</a>(<b>register</b> dbmobject *dp, PyObject *unused)
+<a name='L332'><font color='red'>{</font>
+<a name='L333'>    <b>register</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L334'>    datum <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L335'>
+<a name='L336'>    <a href='../D/7398.html' title='Multiple defined in 2 places.'>check_dbmobject_open</a>(dp);
+<a name='L337'>    <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = gdbm_firstkey(dp-&gt;di_dbm);
+<a name='L338'>    <b>if</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr) <font color='red'>{</font>
+<a name='L339'>        v = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dsize);
+<a name='L340'>        free(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr);
+<a name='L341'>        <b>return</b> v;
+<a name='L342'>    <font color='red'>}</font>
+<a name='L343'>    <b>else</b> <font color='red'>{</font>
+<a name='L344'>        Py_INCREF(Py_None);
+<a name='L345'>        <b>return</b> Py_None;
+<a name='L346'>    <font color='red'>}</font>
+<a name='L347'><font color='red'>}</font>
+<a name='L348'>
+<a name='L349'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_nextkey__doc__,
+<a name='L350'>"nextkey(key) -&gt; next_key\n\
+<a name='L351'>Returns the key that follows key in the traversal.\n\
+<a name='L352'>The following code prints every key in the database db, without having\n\
+<a name='L353'>to create a list in memory that contains them all:\n\
+<a name='L354'>\n\
+<a name='L355'>      k = db.firstkey()\n\
+<a name='L356'>      while k != None:\n\
+<a name='L357'>          print k\n\
+<a name='L358'>          k = db.nextkey(k)");
+<a name='L359'>
+<a name='L360'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L361'><a href='../R/7178.html' title='Multiple refered from 3 places.'>dbm_nextkey</a>(<b>register</b> dbmobject *dp, PyObject *args)
+<a name='L362'><font color='red'>{</font>
+<a name='L363'>    <b>register</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L364'>    datum <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, nextkey;
+<a name='L365'>
+<a name='L366'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s#:nextkey", &amp;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dptr, &amp;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>.dsize))
+<a name='L367'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L368'>    <a href='../D/7398.html' title='Multiple defined in 2 places.'>check_dbmobject_open</a>(dp);
+<a name='L369'>    nextkey = gdbm_nextkey(dp-&gt;di_dbm, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L370'>    <b>if</b> (nextkey.dptr) <font color='red'>{</font>
+<a name='L371'>        v = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(nextkey.dptr, nextkey.dsize);
+<a name='L372'>        free(nextkey.dptr);
+<a name='L373'>        <b>return</b> v;
+<a name='L374'>    <font color='red'>}</font>
+<a name='L375'>    <b>else</b> <font color='red'>{</font>
+<a name='L376'>        Py_INCREF(Py_None);
+<a name='L377'>        <b>return</b> Py_None;
+<a name='L378'>    <font color='red'>}</font>
+<a name='L379'><font color='red'>}</font>
+<a name='L380'>
+<a name='L381'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_reorganize__doc__,
+<a name='L382'>"reorganize() -&gt; None\n\
+<a name='L383'>If you have carried out a lot of deletions and would like to shrink\n\
+<a name='L384'>the space used by the GDBM file, this routine will reorganize the\n\
+<a name='L385'>database. GDBM will not shorten the length of a database file except\n\
+<a name='L386'>by using this reorganization; otherwise, deleted file space will be\n\
+<a name='L387'>kept and reused as new (key,value) pairs are added.");
+<a name='L388'>
+<a name='L389'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L390'><a href='../S/2564.html#L424' title='Refered from 424 in Modules/_gdbmmodule.c.'>dbm_reorganize</a>(<b>register</b> dbmobject *dp, PyObject *unused)
+<a name='L391'><font color='red'>{</font>
+<a name='L392'>    <a href='../D/7398.html' title='Multiple defined in 2 places.'>check_dbmobject_open</a>(dp);
+<a name='L393'>    errno = 0;
+<a name='L394'>    <b>if</b> (gdbm_reorganize(dp-&gt;di_dbm) &lt; 0) <font color='red'>{</font>
+<a name='L395'>        <b>if</b> (errno != 0)
+<a name='L396'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(DbmError);
+<a name='L397'>        <b>else</b>
+<a name='L398'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError, gdbm_strerror(gdbm_errno));
+<a name='L399'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L400'>    <font color='red'>}</font>
+<a name='L401'>    Py_INCREF(Py_None);
+<a name='L402'>    <b>return</b> Py_None;
+<a name='L403'><font color='red'>}</font>
+<a name='L404'>
+<a name='L405'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbm_sync__doc__,
+<a name='L406'>"sync() -&gt; None\n\
+<a name='L407'>When the database has been opened in fast mode, this method forces\n\
+<a name='L408'>any unwritten data to be written to the disk.");
+<a name='L409'>
+<a name='L410'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L411'><a href='../S/2564.html#L425' title='Refered from 425 in Modules/_gdbmmodule.c.'>dbm_sync</a>(<b>register</b> dbmobject *dp, PyObject *unused)
+<a name='L412'><font color='red'>{</font>
+<a name='L413'>    <a href='../D/7398.html' title='Multiple defined in 2 places.'>check_dbmobject_open</a>(dp);
+<a name='L414'>    gdbm_sync(dp-&gt;di_dbm);
+<a name='L415'>    Py_INCREF(Py_None);
+<a name='L416'>    <b>return</b> Py_None;
+<a name='L417'><font color='red'>}</font>
+<a name='L418'>
+<a name='L419'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> dbm_methods[] = <font color='red'>{</font>
+<a name='L420'>    <font color='red'>{</font>"close",     (PyCFunction)<a href='../S/2564.html#L235' title='Defined at 235 in Modules/_gdbmmodule.c.'>dbm_close</a>,   <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, dbm_close__doc__<font color='red'>}</font>,
+<a name='L421'>    <font color='red'>{</font>"keys",      (PyCFunction)<a href='../D/7955.html' title='Multiple defined in 2 places.'>dbm_keys</a>,    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, dbm_keys__doc__<font color='red'>}</font>,
+<a name='L422'>    <font color='red'>{</font>"firstkey",  (PyCFunction)<a href='../S/2564.html#L331' title='Defined at 331 in Modules/_gdbmmodule.c.'>dbm_firstkey</a>,<a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, dbm_firstkey__doc__<font color='red'>}</font>,
+<a name='L423'>    <font color='red'>{</font>"nextkey",   (PyCFunction)<a href='../S/2564.html#L361' title='Defined at 361 in Modules/_gdbmmodule.c.'>dbm_nextkey</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, dbm_nextkey__doc__<font color='red'>}</font>,
+<a name='L424'>    <font color='red'>{</font>"reorganize",(PyCFunction)<a href='../S/2564.html#L390' title='Defined at 390 in Modules/_gdbmmodule.c.'>dbm_reorganize</a>,<a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, dbm_reorganize__doc__<font color='red'>}</font>,
+<a name='L425'>    <font color='red'>{</font>"sync",      (PyCFunction)<a href='../S/2564.html#L411' title='Defined at 411 in Modules/_gdbmmodule.c.'>dbm_sync</a>,    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, dbm_sync__doc__<font color='red'>}</font>,
+<a name='L426'>    <font color='red'>{</font>"get",       (PyCFunction)<a href='../D/7954.html' title='Multiple defined in 2 places.'>dbm_get</a>,     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, dbm_get__doc__<font color='red'>}</font>,
+<a name='L427'>    <font color='red'>{</font>"setdefault",(PyCFunction)<a href='../D/7959.html' title='Multiple defined in 2 places.'>dbm_setdefault</a>,<a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, dbm_setdefault__doc__<font color='red'>}</font>,
+<a name='L428'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L429'><font color='red'>}</font>;
+<a name='L430'>
+<a name='L431'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Dbmtype = <font color='red'>{</font>
+<a name='L432'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(0, 0)
+<a name='L433'>    "_gdbm.gdbm",
+<a name='L434'>    <b>sizeof</b>(<a href='../D/7962.html' title='Multiple defined in 2 places.'>dbmobject</a>),
+<a name='L435'>    0,
+<a name='L436'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../D/7952.html' title='Multiple defined in 2 places.'>dbm_dealloc</a>,            <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L437'>    0,                                  <i><font color='green'>/*tp_print*/</font></i>
+<a name='L438'>    0,                                  <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L439'>    0,                                  <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L440'>    0,                                  <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L441'>    0,                                  <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L442'>    0,                                  <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L443'>    &amp;dbm_as_sequence,                   <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L444'>    &amp;dbm_as_mapping,                    <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L445'>    0,                                  <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L446'>    0,                                  <i><font color='green'>/*tp_call*/</font></i>
+<a name='L447'>    0,                                  <i><font color='green'>/*tp_str*/</font></i>
+<a name='L448'>    0,                                  <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L449'>    0,                                  <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L450'>    0,                                  <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L451'>    Py_TPFLAGS_DEFAULT,                 <i><font color='green'>/*tp_xxx4*/</font></i>
+<a name='L452'>    gdbm_object__doc__,                 <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L453'>    0,                                  <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L454'>    0,                                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L455'>    0,                                  <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L456'>    0,                                  <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L457'>    0,                                  <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L458'>    0,                                  <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L459'>    dbm_methods,                        <i><font color='green'>/*tp_methods*/</font></i>
+<a name='L460'><font color='red'>}</font>;
+<a name='L461'>
+<a name='L462'><i><font color='green'>/* ----------------------------------------------------------------- */</font></i>
+<a name='L463'>
+<a name='L464'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dbmopen__doc__,
+<a name='L465'>"open(filename, [flags, [mode]])  -&gt; dbm_object\n\
+<a name='L466'>Open a dbm database and return a dbm object. The filename argument is\n\
+<a name='L467'>the name of the database file.\n\
+<a name='L468'>\n\
+<a name='L469'>The optional flags argument can be 'r' (to open an existing database\n\
+<a name='L470'>for reading only -- default), 'w' (to open an existing database for\n\
+<a name='L471'>reading and writing), 'c' (which creates the database if it doesn't\n\
+<a name='L472'>exist), or 'n' (which always creates a new empty database).\n\
+<a name='L473'>\n\
+<a name='L474'>Some versions of gdbm support additional flags which must be\n\
+<a name='L475'>appended to one of the flags described above. The module constant\n\
+<a name='L476'>'open_flags' is a string of valid additional flags. The 'f' flag\n\
+<a name='L477'>opens the database in fast mode; altered data will not automatically\n\
+<a name='L478'>be written to the disk after every change. This results in faster\n\
+<a name='L479'>writes to the database, but may result in an inconsistent database\n\
+<a name='L480'>if the program crashes while the database is still open. Use the\n\
+<a name='L481'>sync() method to force any unwritten data to be written to the disk.\n\
+<a name='L482'>The 's' flag causes all database operations to be synchronized to\n\
+<a name='L483'>disk. The 'u' flag disables locking of the database file.\n\
+<a name='L484'>\n\
+<a name='L485'>The optional mode argument is the Unix mode of the file, used only\n\
+<a name='L486'>when the database has to be created. It defaults to octal 0666. ");
+<a name='L487'>
+<a name='L488'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L489'><a href='../R/7184.html' title='Multiple refered from 2 places.'>dbmopen</a>(PyObject *self, PyObject *args)
+<a name='L490'><font color='red'>{</font>
+<a name='L491'>    <b>char</b> *name;
+<a name='L492'>    <b>char</b> *<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = "r";
+<a name='L493'>    <b>int</b> iflags;
+<a name='L494'>    <b>int</b> mode = 0666;
+<a name='L495'>
+<a name='L496'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s|si:open", &amp;name, &amp;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, &amp;mode))
+<a name='L497'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L498'>    <b>switch</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>[0]) <font color='red'>{</font>
+<a name='L499'>    <b>case</b> 'r':
+<a name='L500'>        iflags = GDBM_READER;
+<a name='L501'>        <b>break</b>;
+<a name='L502'>    <b>case</b> 'w':
+<a name='L503'>        iflags = GDBM_WRITER;
+<a name='L504'>        <b>break</b>;
+<a name='L505'>    <b>case</b> 'c':
+<a name='L506'>        iflags = GDBM_WRCREAT;
+<a name='L507'>        <b>break</b>;
+<a name='L508'>    <b>case</b> 'n':
+<a name='L509'>        iflags = GDBM_NEWDB;
+<a name='L510'>        <b>break</b>;
+<a name='L511'>    <b>default</b>:
+<a name='L512'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError,
+<a name='L513'>                        "First flag must be one of 'r', 'w', 'c' or 'n'");
+<a name='L514'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L515'>    <font color='red'>}</font>
+<a name='L516'>    <b>for</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>++; *<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> != '\0'; <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>++) <font color='red'>{</font>
+<a name='L517'>        <b>char</b> buf[40];
+<a name='L518'>        <b>switch</b> (*<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>) <font color='red'>{</font>
+<a name='L519'><font color='darkred'>#ifdef</font> GDBM_FAST
+<a name='L520'>            <b>case</b> 'f':
+<a name='L521'>                iflags |= GDBM_FAST;
+<a name='L522'>                <b>break</b>;
+<a name='L523'><font color='darkred'>#endif</font>
+<a name='L524'><font color='darkred'>#ifdef</font> GDBM_SYNC
+<a name='L525'>            <b>case</b> 's':
+<a name='L526'>                iflags |= GDBM_SYNC;
+<a name='L527'>                <b>break</b>;
+<a name='L528'><font color='darkred'>#endif</font>
+<a name='L529'><font color='darkred'>#ifdef</font> GDBM_NOLOCK
+<a name='L530'>            <b>case</b> 'u':
+<a name='L531'>                iflags |= GDBM_NOLOCK;
+<a name='L532'>                <b>break</b>;
+<a name='L533'><font color='darkred'>#endif</font>
+<a name='L534'>            <b>default</b>:
+<a name='L535'>                <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf), "Flag '%c' is not supported.",
+<a name='L536'>                              *<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L537'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(DbmError, buf);
+<a name='L538'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L539'>        <font color='red'>}</font>
+<a name='L540'>    <font color='red'>}</font>
+<a name='L541'>
+<a name='L542'>    <b>return</b> <a href='../D/10048.html' title='Multiple defined in 2 places.'>newdbmobject</a>(name, iflags, mode);
+<a name='L543'><font color='red'>}</font>
+<a name='L544'>
+<a name='L545'><b>static</b> <b>char</b> dbmmodule_open_flags[] = "rwcn"
+<a name='L546'><font color='darkred'>#ifdef</font> GDBM_FAST
+<a name='L547'>                                     "f"
+<a name='L548'><font color='darkred'>#endif</font>
+<a name='L549'><font color='darkred'>#ifdef</font> GDBM_SYNC
+<a name='L550'>                                     "s"
+<a name='L551'><font color='darkred'>#endif</font>
+<a name='L552'><font color='darkred'>#ifdef</font> GDBM_NOLOCK
+<a name='L553'>                                     "u"
+<a name='L554'><font color='darkred'>#endif</font>
+<a name='L555'>                                     ;
+<a name='L556'>
+<a name='L557'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> dbmmodule_methods[] = <font color='red'>{</font>
+<a name='L558'>    <font color='red'>{</font> "open", (PyCFunction)<a href='../D/7963.html' title='Multiple defined in 2 places.'>dbmopen</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, dbmopen__doc__<font color='red'>}</font>,
+<a name='L559'>    <font color='red'>{</font> 0, 0 <font color='red'>}</font>,
+<a name='L560'><font color='red'>}</font>;
+<a name='L561'>
+<a name='L562'>
+<a name='L563'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _gdbmmodule = <font color='red'>{</font>
+<a name='L564'>        <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L565'>        "_gdbm",
+<a name='L566'>        gdbmmodule__doc__,
+<a name='L567'>        -1,
+<a name='L568'>        dbmmodule_methods,
+<a name='L569'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L570'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L571'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L572'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L573'><font color='red'>}</font>;
+<a name='L574'>
+<a name='L575'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L576'>PyInit__gdbm(<b>void</b>) <font color='red'>{</font>
+<a name='L577'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m, *d, *s;
+<a name='L578'>
+<a name='L579'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;Dbmtype) &lt; 0)
+<a name='L580'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L581'>    m = PyModule_Create(&amp;_gdbmmodule);
+<a name='L582'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L583'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L584'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(m);
+<a name='L585'>    DbmError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("_gdbm.error", PyExc_IOError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L586'>    <b>if</b> (DbmError != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L587'>        <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "error", DbmError);
+<a name='L588'>        s = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(dbmmodule_open_flags);
+<a name='L589'>        <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "open_flags", s);
+<a name='L590'>        Py_DECREF(s);
+<a name='L591'>    <font color='red'>}</font>
+<a name='L592'>    <b>return</b> m;
+<a name='L593'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L59'>[^]</a><a href='#L576'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

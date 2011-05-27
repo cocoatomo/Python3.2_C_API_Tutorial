@@ -1,0 +1,371 @@
+<html>
+<head>
+<title>Modules/resource.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/resource.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L61'>[^]</a><a href='#L239'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L61' title='Defined at 61.'>resource_getrusage</a>
+<li><a href='#L113' title='Defined at 113.'>resource_getrlimit</a>
+<li><a href='#L143' title='Defined at 143.'>resource_setrlimit</a>
+<li><a href='#L194' title='Defined at 194.'>resource_getpagesize</a>
+<li><a href='#L239' title='Defined at 239.'>PyInit_resource</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L3'><font color='darkred'>#include</font> &lt;<a href='2861.html'>sys/resource.h</a>&gt;
+<a name='L4'><font color='darkred'>#include</font> &lt;sys/time.h&gt;
+<a name='L5'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L6'><font color='darkred'>#include</font> &lt;errno.h&gt;
+<a name='L7'><i><font color='green'>/* for sysconf */</font></i>
+<a name='L8'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/1601.html' title='Multiple defined in 3 places.'>HAVE_UNISTD_H</a>)
+<a name='L9'><font color='darkred'>#include</font> &lt;unistd.h&gt;
+<a name='L10'><font color='darkred'>#endif</font>
+<a name='L11'>
+<a name='L12'><i><font color='green'>/* On some systems, these aren't in any header file.</font></i>
+<a name='L13'><i><font color='green'>   On others they are, with inconsistent prototypes.</font></i>
+<a name='L14'><i><font color='green'>   We declare the (default) return type, to shut up gcc -Wall;</font></i>
+<a name='L15'><i><font color='green'>   but we can't declare the prototype, to avoid errors</font></i>
+<a name='L16'><i><font color='green'>   when the header files declare it different.</font></i>
+<a name='L17'><i><font color='green'>   Worse, on some Linuxes, getpagesize() returns a size_t... */</font></i>
+<a name='L18'>
+<a name='L19'><font color='darkred'>#define</font> <a href='../R/7469.html' title='Multiple refered from 5 places.'>doubletime</a>(TV) ((<b>double</b>)(TV).tv_sec + (TV).tv_usec * 0.000001)
+<a name='L20'>
+<a name='L21'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ResourceError;
+<a name='L22'>
+<a name='L23'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(struct_rusage__doc__,
+<a name='L24'>"struct_rusage: Result from getrusage.\n\n"
+<a name='L25'>"This object may be accessed either as a tuple of\n"
+<a name='L26'>"    (utime,stime,maxrss,ixrss,idrss,isrss,minflt,majflt,\n"
+<a name='L27'>"    nswap,inblock,oublock,msgsnd,msgrcv,nsignals,nvcsw,nivcsw)\n"
+<a name='L28'>"or via the attributes ru_utime, ru_stime, ru_maxrss, and so on.");
+<a name='L29'>
+<a name='L30'><b>static</b> <a href='../D/3794.html' title='Multiple defined in 2 places.'>PyStructSequence_Field</a> struct_rusage_fields[] = <font color='red'>{</font>
+<a name='L31'>    <font color='red'>{</font>"ru_utime",        "user time used"<font color='red'>}</font>,
+<a name='L32'>    <font color='red'>{</font>"ru_stime",        "system time used"<font color='red'>}</font>,
+<a name='L33'>    <font color='red'>{</font>"ru_maxrss",       "max. resident set size"<font color='red'>}</font>,
+<a name='L34'>    <font color='red'>{</font>"ru_ixrss",        "shared memory size"<font color='red'>}</font>,
+<a name='L35'>    <font color='red'>{</font>"ru_idrss",        "unshared data size"<font color='red'>}</font>,
+<a name='L36'>    <font color='red'>{</font>"ru_isrss",        "unshared stack size"<font color='red'>}</font>,
+<a name='L37'>    <font color='red'>{</font>"ru_minflt",       "page faults not requiring I/O"<font color='red'>}</font>,
+<a name='L38'>    <font color='red'>{</font>"ru_majflt",       "page faults requiring I/O"<font color='red'>}</font>,
+<a name='L39'>    <font color='red'>{</font>"ru_nswap",        "number of swap outs"<font color='red'>}</font>,
+<a name='L40'>    <font color='red'>{</font>"ru_inblock",      "block input operations"<font color='red'>}</font>,
+<a name='L41'>    <font color='red'>{</font>"ru_oublock",      "block output operations"<font color='red'>}</font>,
+<a name='L42'>    <font color='red'>{</font>"ru_msgsnd",       "IPC messages sent"<font color='red'>}</font>,
+<a name='L43'>    <font color='red'>{</font>"ru_msgrcv",       "IPC messages received"<font color='red'>}</font>,
+<a name='L44'>    <font color='red'>{</font>"ru_nsignals",     "signals received"<font color='red'>}</font>,
+<a name='L45'>    <font color='red'>{</font>"ru_nvcsw",        "voluntary context switches"<font color='red'>}</font>,
+<a name='L46'>    <font color='red'>{</font>"ru_nivcsw",       "involuntary context switches"<font color='red'>}</font>,
+<a name='L47'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L48'><font color='red'>}</font>;
+<a name='L49'>
+<a name='L50'><b>static</b> <a href='../D/3793.html' title='Multiple defined in 2 places.'>PyStructSequence_Desc</a> struct_rusage_desc = <font color='red'>{</font>
+<a name='L51'>    "resource.struct_rusage",           <i><font color='green'>/* name */</font></i>
+<a name='L52'>    struct_rusage__doc__,       <i><font color='green'>/* doc */</font></i>
+<a name='L53'>    struct_rusage_fields,       <i><font color='green'>/* fields */</font></i>
+<a name='L54'>    16          <i><font color='green'>/* n_in_sequence */</font></i>
+<a name='L55'><font color='red'>}</font>;
+<a name='L56'>
+<a name='L57'><b>static</b> <b>int</b> initialized;
+<a name='L58'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> StructRUsageType;
+<a name='L59'>
+<a name='L60'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L61'><a href='../S/2701.html#L215' title='Refered from 215 in Modules/resource.c.'>resource_getrusage</a>(PyObject *self, PyObject *args)
+<a name='L62'><font color='red'>{</font>
+<a name='L63'>    <b>int</b> who;
+<a name='L64'>    <b>struct</b> rusage ru;
+<a name='L65'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L66'>
+<a name='L67'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:getrusage", &amp;who))
+<a name='L68'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L69'>
+<a name='L70'>    <b>if</b> (getrusage(who, &amp;ru) == -1) <font color='red'>{</font>
+<a name='L71'>        <b>if</b> (errno == EINVAL) <font color='red'>{</font>
+<a name='L72'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L73'>                            "invalid who parameter");
+<a name='L74'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L75'>        <font color='red'>}</font>
+<a name='L76'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(ResourceError);
+<a name='L77'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L78'>    <font color='red'>}</font>
+<a name='L79'>
+<a name='L80'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2822.html#L29' title='Defined at 29 in Objects/structseq.c.'>PyStructSequence_New</a>(&amp;StructRUsageType);
+<a name='L81'>    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)
+<a name='L82'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L83'>
+<a name='L84'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 0,
+<a name='L85'>                    <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(<a href='../D/8254.html' title='Multiple defined in 2 places.'>doubletime</a>(ru.ru_utime)));
+<a name='L86'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 1,
+<a name='L87'>                    <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(<a href='../D/8254.html' title='Multiple defined in 2 places.'>doubletime</a>(ru.ru_stime)));
+<a name='L88'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 2, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_maxrss));
+<a name='L89'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 3, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_ixrss));
+<a name='L90'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 4, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_idrss));
+<a name='L91'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 5, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_isrss));
+<a name='L92'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 6, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_minflt));
+<a name='L93'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 7, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_majflt));
+<a name='L94'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 8, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_nswap));
+<a name='L95'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 9, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_inblock));
+<a name='L96'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 10, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_oublock));
+<a name='L97'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 11, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_msgsnd));
+<a name='L98'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 12, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_msgrcv));
+<a name='L99'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 13, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_nsignals));
+<a name='L100'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 14, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_nvcsw));
+<a name='L101'>    PyStructSequence_SET_ITEM(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, 15, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ru.ru_nivcsw));
+<a name='L102'>
+<a name='L103'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L104'>        Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L105'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L106'>    <font color='red'>}</font>
+<a name='L107'>
+<a name='L108'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L109'><font color='red'>}</font>
+<a name='L110'>
+<a name='L111'>
+<a name='L112'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L113'><a href='../S/2701.html#L216' title='Refered from 216 in Modules/resource.c.'>resource_getrlimit</a>(PyObject *self, PyObject *args)
+<a name='L114'><font color='red'>{</font>
+<a name='L115'>    <b>struct</b> rlimit rl;
+<a name='L116'>    <b>int</b> resource;
+<a name='L117'>
+<a name='L118'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:getrlimit", &amp;resource))
+<a name='L119'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L120'>
+<a name='L121'>    <b>if</b> (resource &lt; 0 || resource &gt;= RLIM_NLIMITS) <font color='red'>{</font>
+<a name='L122'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L123'>                        "invalid resource specified");
+<a name='L124'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L125'>    <font color='red'>}</font>
+<a name='L126'>
+<a name='L127'>    <b>if</b> (getrlimit(resource, &amp;rl) == -1) <font color='red'>{</font>
+<a name='L128'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(ResourceError);
+<a name='L129'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L130'>    <font color='red'>}</font>
+<a name='L131'>
+<a name='L132'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/1527.html' title='Multiple defined in 2 places.'>HAVE_LONG_LONG</a>)
+<a name='L133'>    <b>if</b> (<b>sizeof</b>(rl.rlim_cur) &gt; <b>sizeof</b>(<b>long</b>)) <font color='red'>{</font>
+<a name='L134'>        <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("LL",
+<a name='L135'>                             (<a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>) rl.rlim_cur,
+<a name='L136'>                             (<a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>) rl.rlim_max);
+<a name='L137'>    <font color='red'>}</font>
+<a name='L138'><font color='darkred'>#endif</font>
+<a name='L139'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("ll", (<b>long</b>) rl.rlim_cur, (<b>long</b>) rl.rlim_max);
+<a name='L140'><font color='red'>}</font>
+<a name='L141'>
+<a name='L142'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L143'><a href='../S/2701.html#L217' title='Refered from 217 in Modules/resource.c.'>resource_setrlimit</a>(PyObject *self, PyObject *args)
+<a name='L144'><font color='red'>{</font>
+<a name='L145'>    <b>struct</b> rlimit rl;
+<a name='L146'>    <b>int</b> resource;
+<a name='L147'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *curobj, *maxobj;
+<a name='L148'>
+<a name='L149'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i(OO):setrlimit",
+<a name='L150'>                          &amp;resource, &amp;curobj, &amp;maxobj))
+<a name='L151'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L152'>
+<a name='L153'>    <b>if</b> (resource &lt; 0 || resource &gt;= RLIM_NLIMITS) <font color='red'>{</font>
+<a name='L154'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L155'>                        "invalid resource specified");
+<a name='L156'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L157'>    <font color='red'>}</font>
+<a name='L158'>
+<a name='L159'><font color='darkred'>#if</font> !<b>defined</b>(<a href='../D/1522.html' title='Multiple defined in 4 places.'>HAVE_LARGEFILE_SUPPORT</a>)
+<a name='L160'>    rl.rlim_cur = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(curobj);
+<a name='L161'>    <b>if</b> (rl.rlim_cur == (rlim_t)-1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L162'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L163'>    rl.rlim_max = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(maxobj);
+<a name='L164'>    <b>if</b> (rl.rlim_max == (rlim_t)-1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L165'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L166'><font color='darkred'>#else</font>
+<a name='L167'>    <i><font color='green'>/* The limits are probably bigger than a long */</font></i>
+<a name='L168'>    rl.rlim_cur = <a href='../S/2799.html#L1137' title='Defined at 1137 in Objects/longobject.c.'>PyLong_AsLongLong</a>(curobj);
+<a name='L169'>    <b>if</b> (rl.rlim_cur == (rlim_t)-1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L170'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L171'>    rl.rlim_max = <a href='../S/2799.html#L1137' title='Defined at 1137 in Objects/longobject.c.'>PyLong_AsLongLong</a>(maxobj);
+<a name='L172'>    <b>if</b> (rl.rlim_max == (rlim_t)-1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L173'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L174'><font color='darkred'>#endif</font>
+<a name='L175'>
+<a name='L176'>    rl.rlim_cur = rl.rlim_cur &amp; RLIM_INFINITY;
+<a name='L177'>    rl.rlim_max = rl.rlim_max &amp; RLIM_INFINITY;
+<a name='L178'>    <b>if</b> (setrlimit(resource, &amp;rl) == -1) <font color='red'>{</font>
+<a name='L179'>        <b>if</b> (errno == EINVAL)
+<a name='L180'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L181'>                            "current limit exceeds maximum limit");
+<a name='L182'>        <b>else</b> <b>if</b> (errno == EPERM)
+<a name='L183'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L184'>                            "not allowed to raise maximum limit");
+<a name='L185'>        <b>else</b>
+<a name='L186'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(ResourceError);
+<a name='L187'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L188'>    <font color='red'>}</font>
+<a name='L189'>    Py_INCREF(Py_None);
+<a name='L190'>    <b>return</b> Py_None;
+<a name='L191'><font color='red'>}</font>
+<a name='L192'>
+<a name='L193'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L194'><a href='../S/2701.html#L218' title='Refered from 218 in Modules/resource.c.'>resource_getpagesize</a>(PyObject *self, PyObject *unused)
+<a name='L195'><font color='red'>{</font>
+<a name='L196'>    <b>long</b> pagesize = 0;
+<a name='L197'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2649.html#L20' title='Defined at 20 in Modules/expat/amigaconfig.h.'>HAVE_GETPAGESIZE</a>)
+<a name='L198'>    pagesize = getpagesize();
+<a name='L199'><font color='darkred'>#elif</font> <b>defined</b>(HAVE_SYSCONF)
+<a name='L200'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2317.html#L1197' title='Defined at 1197 in Modules/_ctypes/libffi/src/dlmalloc.c.'>_SC_PAGE_SIZE</a>)
+<a name='L201'>    pagesize = sysconf(<a href='../S/2317.html#L1197' title='Defined at 1197 in Modules/_ctypes/libffi/src/dlmalloc.c.'>_SC_PAGE_SIZE</a>);
+<a name='L202'><font color='darkred'>#else</font>
+<a name='L203'>    <i><font color='green'>/* Irix 5.3 has _SC_PAGESIZE, but not _SC_PAGE_SIZE */</font></i>
+<a name='L204'>    pagesize = sysconf(_SC_PAGESIZE);
+<a name='L205'><font color='darkred'>#endif</font>
+<a name='L206'><font color='darkred'>#endif</font>
+<a name='L207'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("i", pagesize);
+<a name='L208'>
+<a name='L209'><font color='red'>}</font>
+<a name='L210'>
+<a name='L211'><i><font color='green'>/* List of functions */</font></i>
+<a name='L212'>
+<a name='L213'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a>
+<a name='L214'>resource_methods[] = <font color='red'>{</font>
+<a name='L215'>    <font color='red'>{</font>"getrusage",    <a href='../S/2701.html#L61' title='Defined at 61 in Modules/resource.c.'>resource_getrusage</a>,   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L216'>    <font color='red'>{</font>"getrlimit",    <a href='../S/2701.html#L113' title='Defined at 113 in Modules/resource.c.'>resource_getrlimit</a>,   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L217'>    <font color='red'>{</font>"setrlimit",    <a href='../S/2701.html#L143' title='Defined at 143 in Modules/resource.c.'>resource_setrlimit</a>,   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L218'>    <font color='red'>{</font>"getpagesize",  <a href='../S/2701.html#L194' title='Defined at 194 in Modules/resource.c.'>resource_getpagesize</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L219'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>                             <i><font color='green'>/* sentinel */</font></i>
+<a name='L220'><font color='red'>}</font>;
+<a name='L221'>
+<a name='L222'>
+<a name='L223'><i><font color='green'>/* Module initialization */</font></i>
+<a name='L224'>
+<a name='L225'>
+<a name='L226'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> resourcemodule = <font color='red'>{</font>
+<a name='L227'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L228'>    "resource",
+<a name='L229'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L230'>    -1,
+<a name='L231'>    resource_methods,
+<a name='L232'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L233'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L234'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L235'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L236'><font color='red'>}</font>;
+<a name='L237'>
+<a name='L238'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L239'>PyInit_resource(<b>void</b>)
+<a name='L240'><font color='red'>{</font>
+<a name='L241'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m, *v;
+<a name='L242'>
+<a name='L243'>    <i><font color='green'>/* Create the module and add the functions */</font></i>
+<a name='L244'>    m = PyModule_Create(&amp;resourcemodule);
+<a name='L245'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L246'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L247'>
+<a name='L248'>    <i><font color='green'>/* Add some symbolic constants to the module */</font></i>
+<a name='L249'>    <b>if</b> (ResourceError == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L250'>        ResourceError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("resource.error",
+<a name='L251'>                                           <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L252'>    <font color='red'>}</font>
+<a name='L253'>    Py_INCREF(ResourceError);
+<a name='L254'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "error", ResourceError);
+<a name='L255'>    <b>if</b> (!initialized)
+<a name='L256'>        <a href='../S/2822.html#L318' title='Defined at 318 in Objects/structseq.c.'>PyStructSequence_InitType</a>(&amp;StructRUsageType,
+<a name='L257'>                                  &amp;struct_rusage_desc);
+<a name='L258'>    Py_INCREF(&amp;StructRUsageType);
+<a name='L259'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "struct_rusage",
+<a name='L260'>                       (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;StructRUsageType);
+<a name='L261'>
+<a name='L262'>    <i><font color='green'>/* insert constants */</font></i>
+<a name='L263'><font color='darkred'>#ifdef</font> RLIMIT_CPU
+<a name='L264'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_CPU", RLIMIT_CPU);
+<a name='L265'><font color='darkred'>#endif</font>
+<a name='L266'>
+<a name='L267'><font color='darkred'>#ifdef</font> RLIMIT_FSIZE
+<a name='L268'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_FSIZE", RLIMIT_FSIZE);
+<a name='L269'><font color='darkred'>#endif</font>
+<a name='L270'>
+<a name='L271'><font color='darkred'>#ifdef</font> RLIMIT_DATA
+<a name='L272'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_DATA", RLIMIT_DATA);
+<a name='L273'><font color='darkred'>#endif</font>
+<a name='L274'>
+<a name='L275'><font color='darkred'>#ifdef</font> RLIMIT_STACK
+<a name='L276'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_STACK", RLIMIT_STACK);
+<a name='L277'><font color='darkred'>#endif</font>
+<a name='L278'>
+<a name='L279'><font color='darkred'>#ifdef</font> RLIMIT_CORE
+<a name='L280'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_CORE", RLIMIT_CORE);
+<a name='L281'><font color='darkred'>#endif</font>
+<a name='L282'>
+<a name='L283'><font color='darkred'>#ifdef</font> RLIMIT_NOFILE
+<a name='L284'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_NOFILE", RLIMIT_NOFILE);
+<a name='L285'><font color='darkred'>#endif</font>
+<a name='L286'>
+<a name='L287'><font color='darkred'>#ifdef</font> RLIMIT_OFILE
+<a name='L288'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_OFILE", RLIMIT_OFILE);
+<a name='L289'><font color='darkred'>#endif</font>
+<a name='L290'>
+<a name='L291'><font color='darkred'>#ifdef</font> RLIMIT_VMEM
+<a name='L292'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_VMEM", RLIMIT_VMEM);
+<a name='L293'><font color='darkred'>#endif</font>
+<a name='L294'>
+<a name='L295'><font color='darkred'>#ifdef</font> RLIMIT_AS
+<a name='L296'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_AS", RLIMIT_AS);
+<a name='L297'><font color='darkred'>#endif</font>
+<a name='L298'>
+<a name='L299'><font color='darkred'>#ifdef</font> RLIMIT_RSS
+<a name='L300'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_RSS", RLIMIT_RSS);
+<a name='L301'><font color='darkred'>#endif</font>
+<a name='L302'>
+<a name='L303'><font color='darkred'>#ifdef</font> RLIMIT_NPROC
+<a name='L304'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_NPROC", RLIMIT_NPROC);
+<a name='L305'><font color='darkred'>#endif</font>
+<a name='L306'>
+<a name='L307'><font color='darkred'>#ifdef</font> RLIMIT_MEMLOCK
+<a name='L308'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_MEMLOCK", RLIMIT_MEMLOCK);
+<a name='L309'><font color='darkred'>#endif</font>
+<a name='L310'>
+<a name='L311'><font color='darkred'>#ifdef</font> RLIMIT_SBSIZE
+<a name='L312'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RLIMIT_SBSIZE", RLIMIT_SBSIZE);
+<a name='L313'><font color='darkred'>#endif</font>
+<a name='L314'>
+<a name='L315'><font color='darkred'>#ifdef</font> RUSAGE_SELF
+<a name='L316'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RUSAGE_SELF", RUSAGE_SELF);
+<a name='L317'><font color='darkred'>#endif</font>
+<a name='L318'>
+<a name='L319'><font color='darkred'>#ifdef</font> RUSAGE_CHILDREN
+<a name='L320'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RUSAGE_CHILDREN", RUSAGE_CHILDREN);
+<a name='L321'><font color='darkred'>#endif</font>
+<a name='L322'>
+<a name='L323'><font color='darkred'>#ifdef</font> RUSAGE_BOTH
+<a name='L324'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RUSAGE_BOTH", RUSAGE_BOTH);
+<a name='L325'><font color='darkred'>#endif</font>
+<a name='L326'>
+<a name='L327'><font color='darkred'>#ifdef</font> RUSAGE_THREAD
+<a name='L328'>    <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, "RUSAGE_THREAD", RUSAGE_THREAD);
+<a name='L329'><font color='darkred'>#endif</font>
+<a name='L330'>
+<a name='L331'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/1527.html' title='Multiple defined in 2 places.'>HAVE_LONG_LONG</a>)
+<a name='L332'>    <b>if</b> (<b>sizeof</b>(RLIM_INFINITY) &gt; <b>sizeof</b>(<b>long</b>)) <font color='red'>{</font>
+<a name='L333'>        v = <a href='../S/2799.html#L994' title='Defined at 994 in Objects/longobject.c.'>PyLong_FromLongLong</a>((<a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>) RLIM_INFINITY);
+<a name='L334'>    <font color='red'>}</font> <b>else</b>
+<a name='L335'><font color='darkred'>#endif</font>
+<a name='L336'>    <font color='red'>{</font>
+<a name='L337'>        v = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>) RLIM_INFINITY);
+<a name='L338'>    <font color='red'>}</font>
+<a name='L339'>    <b>if</b> (v) <font color='red'>{</font>
+<a name='L340'>        <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "RLIM_INFINITY", v);
+<a name='L341'>    <font color='red'>}</font>
+<a name='L342'>    initialized = 1;
+<a name='L343'>    <b>return</b> m;
+<a name='L344'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L61'>[^]</a><a href='#L239'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

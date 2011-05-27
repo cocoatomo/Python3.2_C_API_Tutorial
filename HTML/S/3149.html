@@ -1,0 +1,437 @@
+<html>
+<head>
+<title>Python/thread_nt.h</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/thread_nt.h</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L20'>[^]</a><a href='#L387'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2><a href='3145.html#L127' title='Included from 127 in Python/thread.c.'>INCLUDED FROM</a></h2>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L20' title='Defined at 20.'>InitializeNonRecursiveMutex</a>
+<li><a href='#L29' title='Defined at 29.'>DeleteNonRecursiveMutex</a>
+<li><a href='#L37' title='Defined at 37.'>EnterNonRecursiveMutex</a>
+<li><a href='#L59' title='Defined at 59.'>LeaveNonRecursiveMutex</a>
+<li><a href='#L69' title='Defined at 69.'>AllocNonRecursiveMutex</a>
+<li><a href='#L81' title='Defined at 81.'>FreeNonRecursiveMutex</a>
+<li><a href='#L96' title='Defined at 96.'>PyThread__init_thread</a>
+<li><a href='#L116' title='Defined at 116.'>bootstrap</a>
+<li><a href='#L127' title='Defined at 127.'>PyThread_start_new_thread</a>
+<li><a href='#L185' title='Defined at 185.'>PyThread_get_thread_ident</a>
+<li><a href='#L194' title='Defined at 194.'>PyThread_exit_thread</a>
+<li><a href='#L212' title='Defined at 212.'>PyThread_allocate_lock</a>
+<li><a href='#L228' title='Defined at 228.'>PyThread_free_lock</a>
+<li><a href='#L242' title='Defined at 242.'>PyThread_acquire_lock_timed</a>
+<li><a href='#L278' title='Defined at 278.'>PyThread_acquire_lock</a>
+<li><a href='#L284' title='Defined at 284.'>PyThread_release_lock</a>
+<li><a href='#L300' title='Defined at 300.'>_pythread_nt_set_stacksize</a>
+<li><a href='#L325' title='Defined at 325.'>PyThread_create_key</a>
+<li><a href='#L334' title='Defined at 334.'>PyThread_delete_key</a>
+<li><a href='#L343' title='Defined at 343.'>PyThread_set_key_value</a>
+<li><a href='#L360' title='Defined at 360.'>PyThread_get_key_value</a>
+<li><a href='#L375' title='Defined at 375.'>PyThread_delete_key_value</a>
+<li><a href='#L387' title='Defined at 387.'>PyThread_ReInitTLS</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* This code implemented by Dag.Gruneau@elsa.preseco.comm.se */</font></i>
+<a name='L3'><i><font color='green'>/* Fast NonRecursiveMutex support by Yakov Markovitch, markovitch@iso.ru */</font></i>
+<a name='L4'><i><font color='green'>/* Eliminated some memory leaks, gsw@agere.com */</font></i>
+<a name='L5'>
+<a name='L6'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L7'><font color='darkred'>#include</font> &lt;limits.h&gt;
+<a name='L8'><font color='darkred'>#ifdef</font> <a href='../D/1546.html' title='Multiple defined in 3 places.'>HAVE_PROCESS_H</a>
+<a name='L9'><font color='darkred'>#include</font> &lt;process.h&gt;
+<a name='L10'><font color='darkred'>#endif</font>
+<a name='L11'>
+<a name='L12'><b>typedef</b> <b>struct</b> <a href='../S/3149.html#L71' title='Refered from 71 in Python/thread_nt.h.'>NRMUTEX</a> <font color='red'>{</font>
+<a name='L13'>    <a href='../S/2588.html#L25' title='Defined at 25 in Modules/_pickle.c.'>LONG</a>   owned ;
+<a name='L14'>    DWORD  thread_id ;
+<a name='L15'>    <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> hevent ;
+<a name='L16'><font color='red'>}</font> <a href='../S/3149.html#L71' title='Refered from 71 in Python/thread_nt.h.'>NRMUTEX</a>, *<a href='../R/2261.html' title='Multiple refered from 10 places.'>PNRMUTEX</a> ;
+<a name='L17'>
+<a name='L18'>
+<a name='L19'><a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a>
+<a name='L20'><a href='../S/3149.html#L72' title='Refered from 72 in Python/thread_nt.h.'>InitializeNonRecursiveMutex</a>(<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a> mutex)
+<a name='L21'><font color='red'>{</font>
+<a name='L22'>    mutex-&gt;owned = -1 ;  <i><font color='green'>/* No threads have entered NonRecursiveMutex */</font></i>
+<a name='L23'>    mutex-&gt;thread_id = 0 ;
+<a name='L24'>    mutex-&gt;hevent = CreateEvent(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>, <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) ;
+<a name='L25'>    <b>return</b> mutex-&gt;hevent != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ;      <i><font color='green'>/* TRUE if the mutex is created */</font></i>
+<a name='L26'><font color='red'>}</font>
+<a name='L27'>
+<a name='L28'>VOID
+<a name='L29'><a href='../S/3149.html#L85' title='Refered from 85 in Python/thread_nt.h.'>DeleteNonRecursiveMutex</a>(<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a> mutex)
+<a name='L30'><font color='red'>{</font>
+<a name='L31'>    <i><font color='green'>/* No in-use check */</font></i>
+<a name='L32'>    CloseHandle(mutex-&gt;hevent) ;
+<a name='L33'>    mutex-&gt;hevent = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ; <i><font color='green'>/* Just in case */</font></i>
+<a name='L34'><font color='red'>}</font>
+<a name='L35'>
+<a name='L36'>DWORD
+<a name='L37'><a href='../S/3149.html#L264' title='Refered from 264 in Python/thread_nt.h.'>EnterNonRecursiveMutex</a>(<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a> mutex, DWORD milliseconds)
+<a name='L38'><font color='red'>{</font>
+<a name='L39'>    <i><font color='green'>/* Assume that the thread waits successfully */</font></i>
+<a name='L40'>    DWORD ret ;
+<a name='L41'>
+<a name='L42'>    <i><font color='green'>/* InterlockedIncrement(&amp;mutex-&gt;owned) == 0 means that no thread currently owns the mutex */</font></i>
+<a name='L43'>    <b>if</b> (milliseconds == 0)
+<a name='L44'>    <font color='red'>{</font>
+<a name='L45'>        <b>if</b> (InterlockedCompareExchange(&amp;mutex-&gt;owned, 0, -1) != -1)
+<a name='L46'>            <b>return</b> WAIT_TIMEOUT ;
+<a name='L47'>        ret = WAIT_OBJECT_0 ;
+<a name='L48'>    <font color='red'>}</font>
+<a name='L49'>    <b>else</b>
+<a name='L50'>        ret = InterlockedIncrement(&amp;mutex-&gt;owned) ?
+<a name='L51'>            <i><font color='green'>/* Some thread owns the mutex, let's wait... */</font></i>
+<a name='L52'>            WaitForSingleObject(mutex-&gt;hevent, milliseconds) : WAIT_OBJECT_0 ;
+<a name='L53'>
+<a name='L54'>    mutex-&gt;thread_id = GetCurrentThreadId() ; <i><font color='green'>/* We own it */</font></i>
+<a name='L55'>    <b>return</b> ret ;
+<a name='L56'><font color='red'>}</font>
+<a name='L57'>
+<a name='L58'><a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a>
+<a name='L59'><a href='../S/3149.html#L288' title='Refered from 288 in Python/thread_nt.h.'>LeaveNonRecursiveMutex</a>(<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a> mutex)
+<a name='L60'><font color='red'>{</font>
+<a name='L61'>    <i><font color='green'>/* We don't own the mutex */</font></i>
+<a name='L62'>    mutex-&gt;thread_id = 0 ;
+<a name='L63'>    <b>return</b>
+<a name='L64'>        InterlockedDecrement(&amp;mutex-&gt;owned) &lt; 0 ||
+<a name='L65'>        SetEvent(mutex-&gt;hevent) ; <i><font color='green'>/* Other threads are waiting, wake one on them up */</font></i>
+<a name='L66'><font color='red'>}</font>
+<a name='L67'>
+<a name='L68'><a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a>
+<a name='L69'><a href='../S/3149.html#L220' title='Refered from 220 in Python/thread_nt.h.'>AllocNonRecursiveMutex</a>(<b>void</b>)
+<a name='L70'><font color='red'>{</font>
+<a name='L71'>    <a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a> mutex = (<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a>)malloc(<b>sizeof</b>(<a href='../D/2336.html' title='Multiple defined in 2 places.'>NRMUTEX</a>)) ;
+<a name='L72'>    <b>if</b> (mutex &amp;&amp; !<a href='../S/3149.html#L20' title='Defined at 20 in Python/thread_nt.h.'>InitializeNonRecursiveMutex</a>(mutex))
+<a name='L73'>    <font color='red'>{</font>
+<a name='L74'>        free(mutex) ;
+<a name='L75'>        mutex = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ;
+<a name='L76'>    <font color='red'>}</font>
+<a name='L77'>    <b>return</b> mutex ;
+<a name='L78'><font color='red'>}</font>
+<a name='L79'>
+<a name='L80'><b>void</b>
+<a name='L81'><a href='../S/3149.html#L232' title='Refered from 232 in Python/thread_nt.h.'>FreeNonRecursiveMutex</a>(<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a> mutex)
+<a name='L82'><font color='red'>{</font>
+<a name='L83'>    <b>if</b> (mutex)
+<a name='L84'>    <font color='red'>{</font>
+<a name='L85'>        <a href='../S/3149.html#L29' title='Defined at 29 in Python/thread_nt.h.'>DeleteNonRecursiveMutex</a>(mutex) ;
+<a name='L86'>        free(mutex) ;
+<a name='L87'>    <font color='red'>}</font>
+<a name='L88'><font color='red'>}</font>
+<a name='L89'>
+<a name='L90'><b>long</b> <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(<b>void</b>);
+<a name='L91'>
+<a name='L92'><i><font color='green'>/*</font></i>
+<a name='L93'><i><font color='green'> * Initialization of the C package, should not be needed.</font></i>
+<a name='L94'><i><font color='green'> */</font></i>
+<a name='L95'><b>static</b> <b>void</b>
+<a name='L96'><a href='../R/3449.html' title='Multiple refered from 2 places.'>PyThread__init_thread</a>(<b>void</b>)
+<a name='L97'><font color='red'>{</font>
+<a name='L98'><font color='red'>}</font>
+<a name='L99'>
+<a name='L100'><i><font color='green'>/*</font></i>
+<a name='L101'><i><font color='green'> * Thread support.</font></i>
+<a name='L102'><i><font color='green'> */</font></i>
+<a name='L103'>
+<a name='L104'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L105'>    <b>void</b> (*func)(<b>void</b>*);
+<a name='L106'>    <b>void</b> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L107'><font color='red'>}</font> <a href='../R/6575.html' title='Multiple refered from 3 places.'>callobj</a>;
+<a name='L108'>
+<a name='L109'><i><font color='green'>/* thunker to call adapt between the function type used by the system's</font></i>
+<a name='L110'><i><font color='green'>thread start function and the internally used one. */</font></i>
+<a name='L111'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L34' title='Defined at 34 in PC/pyconfig.h.'>MS_WINCE</a>)
+<a name='L112'><b>static</b> DWORD WINAPI
+<a name='L113'><font color='darkred'>#else</font>
+<a name='L114'><b>static</b> <b>unsigned</b> <a href='../S/2247.html#L182' title='Defined at 182 in Modules/_ctypes/_ctypes_test.c.'>__stdcall</a>
+<a name='L115'><font color='darkred'>#endif</font>
+<a name='L116'><a href='../R/6262.html' title='Multiple refered from 9 places.'>bootstrap</a>(<b>void</b> *call)
+<a name='L117'><font color='red'>{</font>
+<a name='L118'>    <a href='../S/3149.html#L107' title='Defined at 107 in Python/thread_nt.h.'>callobj</a> *obj = (<a href='../S/3149.html#L107' title='Defined at 107 in Python/thread_nt.h.'>callobj</a>*)<a href='../S/2611.html#L1950' title='Defined at 1950 in Modules/_sre.c.'>call</a>;
+<a name='L119'>    <b>void</b> (*func)(<b>void</b>*) = obj-&gt;func;
+<a name='L120'>    <b>void</b> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = obj-&gt;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L121'>    HeapFree(GetProcessHeap(), 0, obj);
+<a name='L122'>    func(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L123'>    <b>return</b> 0;
+<a name='L124'><font color='red'>}</font>
+<a name='L125'>
+<a name='L126'><b>long</b>
+<a name='L127'><a href='../R/3465.html' title='Multiple refered from 3 places.'>PyThread_start_new_thread</a>(<b>void</b> (*func)(<b>void</b> *), <b>void</b> *arg)
+<a name='L128'><font color='red'>{</font>
+<a name='L129'>    <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> hThread;
+<a name='L130'>    <b>unsigned</b> threadID;
+<a name='L131'>    <a href='../S/3149.html#L107' title='Defined at 107 in Python/thread_nt.h.'>callobj</a> *obj;
+<a name='L132'>
+<a name='L133'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_start_new_thread called\n",
+<a name='L134'>             <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>()));
+<a name='L135'>    <b>if</b> (!initialized)
+<a name='L136'>        <a href='../S/3145.html#L73' title='Defined at 73 in Python/thread.c.'>PyThread_init_thread</a>();
+<a name='L137'>
+<a name='L138'>    obj = (<a href='../S/3149.html#L107' title='Defined at 107 in Python/thread_nt.h.'>callobj</a>*)HeapAlloc(GetProcessHeap(), 0, <b>sizeof</b>(*obj));
+<a name='L139'>    <b>if</b> (!obj)
+<a name='L140'>        <b>return</b> -1;
+<a name='L141'>    obj-&gt;func = func;
+<a name='L142'>    obj-&gt;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L143'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L34' title='Defined at 34 in PC/pyconfig.h.'>MS_WINCE</a>)
+<a name='L144'>    hThread = CreateThread(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L145'>                           <a href='../D/4230.html' title='Multiple defined in 2 places.'>Py_SAFE_DOWNCAST</a>(_pythread_stacksize, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>, SIZE_T),
+<a name='L146'>                           <a href='../S/3149.html#L116' title='Defined at 116 in Python/thread_nt.h.'>bootstrap</a>, obj, 0, &amp;threadID);
+<a name='L147'><font color='darkred'>#else</font>
+<a name='L148'>    hThread = (<a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a>)_beginthreadex(0,
+<a name='L149'>                      <a href='../D/4230.html' title='Multiple defined in 2 places.'>Py_SAFE_DOWNCAST</a>(_pythread_stacksize,
+<a name='L150'>                                       <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>, <b>unsigned</b> <b>int</b>),
+<a name='L151'>                      <a href='../S/3149.html#L116' title='Defined at 116 in Python/thread_nt.h.'>bootstrap</a>, obj,
+<a name='L152'>                      0, &amp;threadID);
+<a name='L153'><font color='darkred'>#endif</font>
+<a name='L154'>    <b>if</b> (hThread == 0) <font color='red'>{</font>
+<a name='L155'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L34' title='Defined at 34 in PC/pyconfig.h.'>MS_WINCE</a>)
+<a name='L156'>        <i><font color='green'>/* Save error in variable, to prevent PyThread_get_thread_ident</font></i>
+<a name='L157'><i><font color='green'>           from clobbering it. */</font></i>
+<a name='L158'>        <b>unsigned</b> e = GetLastError();
+<a name='L159'>        <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_start_new_thread failed, win32 error code %u\n",
+<a name='L160'>                 <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(), e));
+<a name='L161'><font color='darkred'>#else</font>
+<a name='L162'>        <i><font color='green'>/* I've seen errno == EAGAIN here, which means "there are</font></i>
+<a name='L163'><i><font color='green'>         * too many threads".</font></i>
+<a name='L164'><i><font color='green'>         */</font></i>
+<a name='L165'>        <b>int</b> e = errno;
+<a name='L166'>        <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_start_new_thread failed, errno %d\n",
+<a name='L167'>                 <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(), e));
+<a name='L168'><font color='darkred'>#endif</font>
+<a name='L169'>        threadID = (<b>unsigned</b>)-1;
+<a name='L170'>        HeapFree(GetProcessHeap(), 0, obj);
+<a name='L171'>    <font color='red'>}</font>
+<a name='L172'>    <b>else</b> <font color='red'>{</font>
+<a name='L173'>        <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_start_new_thread succeeded: %p\n",
+<a name='L174'>                 <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(), (<b>void</b>*)hThread));
+<a name='L175'>        CloseHandle(hThread);
+<a name='L176'>    <font color='red'>}</font>
+<a name='L177'>    <b>return</b> (<b>long</b>) threadID;
+<a name='L178'><font color='red'>}</font>
+<a name='L179'>
+<a name='L180'><i><font color='green'>/*</font></i>
+<a name='L181'><i><font color='green'> * Return the thread Id instead of an handle. The Id is said to uniquely identify the</font></i>
+<a name='L182'><i><font color='green'> * thread in the system</font></i>
+<a name='L183'><i><font color='green'> */</font></i>
+<a name='L184'><b>long</b>
+<a name='L185'><a href='../R/3460.html' title='Multiple refered from 64 places.'>PyThread_get_thread_ident</a>(<b>void</b>)
+<a name='L186'><font color='red'>{</font>
+<a name='L187'>    <b>if</b> (!initialized)
+<a name='L188'>        <a href='../S/3145.html#L73' title='Defined at 73 in Python/thread.c.'>PyThread_init_thread</a>();
+<a name='L189'>
+<a name='L190'>    <b>return</b> GetCurrentThreadId();
+<a name='L191'><font color='red'>}</font>
+<a name='L192'>
+<a name='L193'><b>void</b>
+<a name='L194'><a href='../S/2615.html#L1017' title='Refered from 1017 in Modules/_threadmodule.c.'>PyThread_exit_thread</a>(<b>void</b>)
+<a name='L195'><font color='red'>{</font>
+<a name='L196'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_exit_thread called\n", <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>()));
+<a name='L197'>    <b>if</b> (!initialized)
+<a name='L198'>        exit(0);
+<a name='L199'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L34' title='Defined at 34 in PC/pyconfig.h.'>MS_WINCE</a>)
+<a name='L200'>    ExitThread(0);
+<a name='L201'><font color='darkred'>#else</font>
+<a name='L202'>    _endthreadex(0);
+<a name='L203'><font color='darkred'>#endif</font>
+<a name='L204'><font color='red'>}</font>
+<a name='L205'>
+<a name='L206'><i><font color='green'>/*</font></i>
+<a name='L207'><i><font color='green'> * Lock support. It has too be implemented as semaphores.</font></i>
+<a name='L208'><i><font color='green'> * I [Dag] tried to implement it with mutex but I could find a way to</font></i>
+<a name='L209'><i><font color='green'> * tell whether a thread already own the lock or not.</font></i>
+<a name='L210'><i><font color='green'> */</font></i>
+<a name='L211'><a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a>
+<a name='L212'><a href='../R/3452.html' title='Multiple refered from 21 places.'>PyThread_allocate_lock</a>(<b>void</b>)
+<a name='L213'><font color='red'>{</font>
+<a name='L214'>    <a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a> aLock;
+<a name='L215'>
+<a name='L216'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_allocate_lock called\n"));
+<a name='L217'>    <b>if</b> (!initialized)
+<a name='L218'>        <a href='../S/3145.html#L73' title='Defined at 73 in Python/thread.c.'>PyThread_init_thread</a>();
+<a name='L219'>
+<a name='L220'>    aLock = <a href='../S/3149.html#L69' title='Defined at 69 in Python/thread_nt.h.'>AllocNonRecursiveMutex</a>() ;
+<a name='L221'>
+<a name='L222'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_allocate_lock() -&gt; %p\n", <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(), aLock));
+<a name='L223'>
+<a name='L224'>    <b>return</b> (<a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a>) aLock;
+<a name='L225'><font color='red'>}</font>
+<a name='L226'>
+<a name='L227'><b>void</b>
+<a name='L228'><a href='../R/3457.html' title='Multiple refered from 15 places.'>PyThread_free_lock</a>(PyThread_type_lock aLock)
+<a name='L229'><font color='red'>{</font>
+<a name='L230'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_free_lock(%p) called\n", <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(),aLock));
+<a name='L231'>
+<a name='L232'>    <a href='../S/3149.html#L81' title='Defined at 81 in Python/thread_nt.h.'>FreeNonRecursiveMutex</a>(aLock) ;
+<a name='L233'><font color='red'>}</font>
+<a name='L234'>
+<a name='L235'><i><font color='green'>/*</font></i>
+<a name='L236'><i><font color='green'> * Return 1 on success if the lock was acquired</font></i>
+<a name='L237'><i><font color='green'> *</font></i>
+<a name='L238'><i><font color='green'> * and 0 if the lock was not acquired. This means a 0 is returned</font></i>
+<a name='L239'><i><font color='green'> * if the lock has already been acquired by this thread!</font></i>
+<a name='L240'><i><font color='green'> */</font></i>
+<a name='L241'><a href='../D/3446.html' title='Multiple defined in 2 places.'>PyLockStatus</a>
+<a name='L242'><a href='../R/3451.html' title='Multiple refered from 3 places.'>PyThread_acquire_lock_timed</a>(PyThread_type_lock aLock,
+<a name='L243'>                            PY_TIMEOUT_T microseconds, <b>int</b> intr_flag)
+<a name='L244'><font color='red'>{</font>
+<a name='L245'>    <i><font color='green'>/* Fow now, intr_flag does nothing on Windows, and lock acquires are</font></i>
+<a name='L246'><i><font color='green'>     * uninterruptible.  */</font></i>
+<a name='L247'>    <a href='../D/3446.html' title='Multiple defined in 2 places.'>PyLockStatus</a> success;
+<a name='L248'>    PY_TIMEOUT_T milliseconds;
+<a name='L249'>
+<a name='L250'>    <b>if</b> (microseconds &gt;= 0) <font color='red'>{</font>
+<a name='L251'>        milliseconds = microseconds / 1000;
+<a name='L252'>        <b>if</b> (microseconds % 1000 &gt; 0)
+<a name='L253'>            ++milliseconds;
+<a name='L254'>        <b>if</b> ((DWORD) milliseconds != milliseconds)
+<a name='L255'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("Timeout too large for a DWORD, "
+<a name='L256'>                           "please check PY_TIMEOUT_MAX");
+<a name='L257'>    <font color='red'>}</font>
+<a name='L258'>    <b>else</b>
+<a name='L259'>        milliseconds = INFINITE;
+<a name='L260'>
+<a name='L261'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_acquire_lock_timed(%p, %lld) called\n",
+<a name='L262'>             <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(), aLock, microseconds));
+<a name='L263'>
+<a name='L264'>    <b>if</b> (aLock &amp;&amp; <a href='../S/3149.html#L37' title='Defined at 37 in Python/thread_nt.h.'>EnterNonRecursiveMutex</a>((<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a>)aLock,
+<a name='L265'>                                        (DWORD)milliseconds) == WAIT_OBJECT_0) <font color='red'>{</font>
+<a name='L266'>        success = <a href='../S/572.html#L16' title='Defined at 16 in Include/pythread.h.'>PY_LOCK_ACQUIRED</a>;
+<a name='L267'>    <font color='red'>}</font>
+<a name='L268'>    <b>else</b> <font color='red'>{</font>
+<a name='L269'>        success = <a href='../S/572.html#L15' title='Defined at 15 in Include/pythread.h.'>PY_LOCK_FAILURE</a>;
+<a name='L270'>    <font color='red'>}</font>
+<a name='L271'>
+<a name='L272'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_acquire_lock(%p, %lld) -&gt; %d\n",
+<a name='L273'>             <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(), aLock, microseconds, success));
+<a name='L274'>
+<a name='L275'>    <b>return</b> success;
+<a name='L276'><font color='red'>}</font>
+<a name='L277'><b>int</b>
+<a name='L278'><a href='../R/3450.html' title='Multiple refered from 35 places.'>PyThread_acquire_lock</a>(PyThread_type_lock aLock, <b>int</b> waitflag)
+<a name='L279'><font color='red'>{</font>
+<a name='L280'>    <b>return</b> <a href='../D/3847.html' title='Multiple defined in 3 places.'>PyThread_acquire_lock_timed</a>(aLock, waitflag ? -1 : 0, 0);
+<a name='L281'><font color='red'>}</font>
+<a name='L282'>
+<a name='L283'><b>void</b>
+<a name='L284'><a href='../R/3462.html' title='Multiple refered from 31 places.'>PyThread_release_lock</a>(PyThread_type_lock aLock)
+<a name='L285'><font color='red'>{</font>
+<a name='L286'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: PyThread_release_lock(%p) called\n", <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(),aLock));
+<a name='L287'>
+<a name='L288'>    <b>if</b> (!(aLock &amp;&amp; <a href='../S/3149.html#L59' title='Defined at 59 in Python/thread_nt.h.'>LeaveNonRecursiveMutex</a>((<a href='../S/3149.html#L16' title='Defined at 16 in Python/thread_nt.h.'>PNRMUTEX</a>) aLock)))
+<a name='L289'>        <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("%ld: Could not PyThread_release_lock(%p) error: %ld\n", <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>(), aLock, GetLastError()));
+<a name='L290'><font color='red'>}</font>
+<a name='L291'>
+<a name='L292'><i><font color='green'>/* minimum/maximum thread stack sizes supported */</font></i>
+<a name='L293'><font color='darkred'>#define</font> <a href='../R/4534.html' title='Multiple refered from 2 places.'>THREAD_MIN_STACKSIZE</a>    0x8000          <i><font color='green'>/* 32kB */</font></i>
+<a name='L294'><font color='darkred'>#define</font> <a href='../R/4533.html' title='Multiple refered from 2 places.'>THREAD_MAX_STACKSIZE</a>    0x10000000      <i><font color='green'>/* 256MB */</font></i>
+<a name='L295'>
+<a name='L296'><i><font color='green'>/* set the thread stack size.</font></i>
+<a name='L297'><i><font color='green'> * Return 0 if size is valid, -1 otherwise.</font></i>
+<a name='L298'><i><font color='green'> */</font></i>
+<a name='L299'><b>static</b> <b>int</b>
+<a name='L300'><a href='../S/3149.html#L317' title='Refered from 317 in Python/thread_nt.h.'>_pythread_nt_set_stacksize</a>(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size)
+<a name='L301'><font color='red'>{</font>
+<a name='L302'>    <i><font color='green'>/* set to default */</font></i>
+<a name='L303'>    <b>if</b> (size == 0) <font color='red'>{</font>
+<a name='L304'>        _pythread_stacksize = 0;
+<a name='L305'>        <b>return</b> 0;
+<a name='L306'>    <font color='red'>}</font>
+<a name='L307'>
+<a name='L308'>    <i><font color='green'>/* valid range? */</font></i>
+<a name='L309'>    <b>if</b> (size &gt;= <a href='../D/5143.html' title='Multiple defined in 2 places.'>THREAD_MIN_STACKSIZE</a> &amp;&amp; size &lt; <a href='../D/5142.html' title='Multiple defined in 2 places.'>THREAD_MAX_STACKSIZE</a>) <font color='red'>{</font>
+<a name='L310'>        _pythread_stacksize = size;
+<a name='L311'>        <b>return</b> 0;
+<a name='L312'>    <font color='red'>}</font>
+<a name='L313'>
+<a name='L314'>    <b>return</b> -1;
+<a name='L315'><font color='red'>}</font>
+<a name='L316'>
+<a name='L317'><font color='darkred'>#define</font> <a href='../R/4535.html' title='Multiple refered from 2 places.'>THREAD_SET_STACKSIZE</a>(x) <a href='../S/3149.html#L300' title='Defined at 300 in Python/thread_nt.h.'>_pythread_nt_set_stacksize</a>(x)
+<a name='L318'>
+<a name='L319'>
+<a name='L320'><i><font color='green'>/* use native Windows TLS functions */</font></i>
+<a name='L321'><font color='darkred'>#define</font> <a href='../R/3714.html' title='Multiple refered from 2 places.'>Py_HAVE_NATIVE_TLS</a>
+<a name='L322'>
+<a name='L323'><font color='darkred'>#ifdef</font> <a href='../D/4151.html' title='Multiple defined in 2 places.'>Py_HAVE_NATIVE_TLS</a>
+<a name='L324'><b>int</b>
+<a name='L325'><a href='../S/3134.html#L571' title='Refered from 571 in Python/pystate.c.'>PyThread_create_key</a>(<b>void</b>)
+<a name='L326'><font color='red'>{</font>
+<a name='L327'>    DWORD <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>= TlsAlloc();
+<a name='L328'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == TLS_OUT_OF_INDEXES)
+<a name='L329'>        <b>return</b> -1;
+<a name='L330'>    <b>return</b> (<b>int</b>)<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L331'><font color='red'>}</font>
+<a name='L332'>
+<a name='L333'><b>void</b>
+<a name='L334'><a href='../S/3134.html#L584' title='Refered from 584 in Python/pystate.c.'>PyThread_delete_key</a>(<b>int</b> key)
+<a name='L335'><font color='red'>{</font>
+<a name='L336'>    TlsFree(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L337'><font color='red'>}</font>
+<a name='L338'>
+<a name='L339'><i><font color='green'>/* We must be careful to emulate the strange semantics implemented in thread.c,</font></i>
+<a name='L340'><i><font color='green'> * where the value is only set if it hasn't been set before.</font></i>
+<a name='L341'><i><font color='green'> */</font></i>
+<a name='L342'><b>int</b>
+<a name='L343'><a href='../S/3134.html#L616' title='Refered from 616 in Python/pystate.c.'>PyThread_set_key_value</a>(<b>int</b> key, <b>void</b> *value)
+<a name='L344'><font color='red'>{</font>
+<a name='L345'>    <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> ok;
+<a name='L346'>    <b>void</b> *oldvalue;
+<a name='L347'>
+<a name='L348'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L349'>    oldvalue = TlsGetValue(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L350'>    <b>if</b> (oldvalue != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L351'>        <i><font color='green'>/* ignore value if already set */</font></i>
+<a name='L352'>        <b>return</b> 0;
+<a name='L353'>    ok = TlsSetValue(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L354'>    <b>if</b> (!ok)
+<a name='L355'>        <b>return</b> -1;
+<a name='L356'>    <b>return</b> 0;
+<a name='L357'><font color='red'>}</font>
+<a name='L358'>
+<a name='L359'><b>void</b> *
+<a name='L360'><a href='../R/3458.html' title='Multiple refered from 6 places.'>PyThread_get_key_value</a>(<b>int</b> key)
+<a name='L361'><font color='red'>{</font>
+<a name='L362'>    <i><font color='green'>/* because TLS is used in the Py_END_ALLOW_THREAD macro,</font></i>
+<a name='L363'><i><font color='green'>     * it is necessary to preserve the windows error state, because</font></i>
+<a name='L364'><i><font color='green'>     * it is assumed to be preserved across the call to the macro.</font></i>
+<a name='L365'><i><font color='green'>     * Ideally, the macro should be fixed, but it is simpler to</font></i>
+<a name='L366'><i><font color='green'>     * do it here.</font></i>
+<a name='L367'><i><font color='green'>     */</font></i>
+<a name='L368'>    DWORD <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = GetLastError();
+<a name='L369'>    <b>void</b> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = TlsGetValue(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L370'>    SetLastError(<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>);
+<a name='L371'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L372'><font color='red'>}</font>
+<a name='L373'>
+<a name='L374'><b>void</b>
+<a name='L375'><a href='../R/3455.html' title='Multiple refered from 2 places.'>PyThread_delete_key_value</a>(<b>int</b> key)
+<a name='L376'><font color='red'>{</font>
+<a name='L377'>    <i><font color='green'>/* NULL is used as "key missing", and it is also the default</font></i>
+<a name='L378'><i><font color='green'>     * given by TlsGetValue() if nothing has been set yet.</font></i>
+<a name='L379'><i><font color='green'>     */</font></i>
+<a name='L380'>    TlsSetValue(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L381'><font color='red'>}</font>
+<a name='L382'>
+<a name='L383'><i><font color='green'>/* reinitialization of TLS is not necessary after fork when using</font></i>
+<a name='L384'><i><font color='green'> * the native TLS functions.  And forking isn't supported on Windows either.</font></i>
+<a name='L385'><i><font color='green'> */</font></i>
+<a name='L386'><b>void</b>
+<a name='L387'><a href='../R/3448.html' title='Multiple refered from 2 places.'>PyThread_ReInitTLS</a>(<b>void</b>)
+<a name='L388'><font color='red'>{</font><font color='red'>}</font>
+<a name='L389'>
+<a name='L390'><font color='darkred'>#endif</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L20'>[^]</a><a href='#L387'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

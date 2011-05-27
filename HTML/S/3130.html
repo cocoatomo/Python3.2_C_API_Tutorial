@@ -1,0 +1,248 @@
+<html>
+<head>
+<title>Python/pyarena.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/pyarena.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L78'>[^]</a><a href='#L212'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L78' title='Defined at 78.'>block_new</a>
+<li><a href='#L94' title='Defined at 94.'>block_free</a>
+<li><a href='#L103' title='Defined at 103.'>block_alloc</a>
+<li><a href='#L130' title='Defined at 130.'>PyArena_New</a>
+<li><a href='#L159' title='Defined at 159.'>PyArena_Free</a>
+<li><a href='#L189' title='Defined at 189.'>PyArena_Malloc</a>
+<li><a href='#L212' title='Defined at 212.'>PyArena_AddPyObject</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L2'>
+<a name='L3'><i><font color='green'>/* A simple arena block structure.</font></i>
+<a name='L4'><i><font color='green'></font></i>
+<a name='L5'><i><font color='green'>   Measurements with standard library modules suggest the average</font></i>
+<a name='L6'><i><font color='green'>   allocation is about 20 bytes and that most compiles use a single</font></i>
+<a name='L7'><i><font color='green'>   block.</font></i>
+<a name='L8'><i><font color='green'></font></i>
+<a name='L9'><i><font color='green'>   TODO(jhylton): Think about a realloc API, maybe just for the last</font></i>
+<a name='L10'><i><font color='green'>   allocation?</font></i>
+<a name='L11'><i><font color='green'>*/</font></i>
+<a name='L12'>
+<a name='L13'><font color='darkred'>#define</font> <a href='../R/700.html' title='Multiple refered from 8 places.'>DEFAULT_BLOCK_SIZE</a> 8192
+<a name='L14'><font color='darkred'>#define</font> <a href='../R/47.html' title='Multiple refered from 3 places.'>ALIGNMENT</a>               8
+<a name='L15'><font color='darkred'>#define</font> <a href='../R/48.html' title='Multiple refered from 2 places.'>ALIGNMENT_MASK</a>          (<a href='../D/57.html' title='Multiple defined in 2 places.'>ALIGNMENT</a> - 1)
+<a name='L16'><font color='darkred'>#define</font> <a href='../R/3981.html' title='Multiple refered from 3 places.'>ROUNDUP</a>(x)              (((x) + <a href='../D/58.html' title='Multiple defined in 2 places.'>ALIGNMENT_MASK</a>) &amp; ~<a href='../D/58.html' title='Multiple defined in 2 places.'>ALIGNMENT_MASK</a>)
+<a name='L17'>
+<a name='L18'><b>typedef</b> <b>struct</b> <a href='../S/3130.html#L34' title='Refered from 34 in Python/pyarena.c.'>_block</a> <font color='red'>{</font>
+<a name='L19'>    <i><font color='green'>/* Total number of bytes owned by this block available to pass out.</font></i>
+<a name='L20'><i><font color='green'>     * Read-only after initialization.  The first such byte starts at</font></i>
+<a name='L21'><i><font color='green'>     * ab_mem.</font></i>
+<a name='L22'><i><font color='green'>     */</font></i>
+<a name='L23'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> ab_size;
+<a name='L24'>
+<a name='L25'>    <i><font color='green'>/* Total number of bytes already passed out.  The next byte available</font></i>
+<a name='L26'><i><font color='green'>     * to pass out starts at ab_mem + ab_offset.</font></i>
+<a name='L27'><i><font color='green'>     */</font></i>
+<a name='L28'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> ab_offset;
+<a name='L29'>
+<a name='L30'>    <i><font color='green'>/* An arena maintains a singly-linked, NULL-terminated list of</font></i>
+<a name='L31'><i><font color='green'>     * all blocks owned by the arena.  These are linked via the</font></i>
+<a name='L32'><i><font color='green'>     * ab_next member.</font></i>
+<a name='L33'><i><font color='green'>     */</font></i>
+<a name='L34'>    <b>struct</b> <a href='../S/3130.html#L18' title='Defined at 18 in Python/pyarena.c.'>_block</a> *ab_next;
+<a name='L35'>
+<a name='L36'>    <i><font color='green'>/* Pointer to the first allocatable byte owned by this block.  Read-</font></i>
+<a name='L37'><i><font color='green'>     * only after initialization.</font></i>
+<a name='L38'><i><font color='green'>     */</font></i>
+<a name='L39'>    <b>void</b> *ab_mem;
+<a name='L40'><font color='red'>}</font> <a href='../R/6245.html' title='Multiple refered from 103 places.'>block</a>;
+<a name='L41'>
+<a name='L42'><i><font color='green'>/* The arena manages two kinds of memory, blocks of raw memory</font></i>
+<a name='L43'><i><font color='green'>   and a list of PyObject* pointers.  PyObjects are decrefed</font></i>
+<a name='L44'><i><font color='green'>   when the arena is freed.</font></i>
+<a name='L45'><i><font color='green'>*/</font></i>
+<a name='L46'>
+<a name='L47'><b>struct</b> <a href='../S/553.html#L12' title='Refered from 12 in Include/pyarena.h.'>_arena</a> <font color='red'>{</font>
+<a name='L48'>    <i><font color='green'>/* Pointer to the first block allocated for the arena, never NULL.</font></i>
+<a name='L49'><i><font color='green'>       It is used only to find the first block when the arena is</font></i>
+<a name='L50'><i><font color='green'>       being freed.</font></i>
+<a name='L51'><i><font color='green'>     */</font></i>
+<a name='L52'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *a_head;
+<a name='L53'>
+<a name='L54'>    <i><font color='green'>/* Pointer to the block currently used for allocation.  It's</font></i>
+<a name='L55'><i><font color='green'>       ab_next field should be NULL.  If it is not-null after a</font></i>
+<a name='L56'><i><font color='green'>       call to block_alloc(), it means a new block has been allocated</font></i>
+<a name='L57'><i><font color='green'>       and a_cur should be reset to point it.</font></i>
+<a name='L58'><i><font color='green'>     */</font></i>
+<a name='L59'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *a_cur;
+<a name='L60'>
+<a name='L61'>    <i><font color='green'>/* A Python list object containing references to all the PyObject</font></i>
+<a name='L62'><i><font color='green'>       pointers associated with this area.  They will be DECREFed</font></i>
+<a name='L63'><i><font color='green'>       when the arena is freed.</font></i>
+<a name='L64'><i><font color='green'>    */</font></i>
+<a name='L65'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *a_objects;
+<a name='L66'>
+<a name='L67'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>)
+<a name='L68'>    <i><font color='green'>/* Debug output */</font></i>
+<a name='L69'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total_allocs;
+<a name='L70'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total_size;
+<a name='L71'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total_blocks;
+<a name='L72'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total_block_size;
+<a name='L73'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total_big_blocks;
+<a name='L74'><font color='darkred'>#endif</font>
+<a name='L75'><font color='red'>}</font>;
+<a name='L76'>
+<a name='L77'><b>static</b> <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *
+<a name='L78'><a href='../R/6249.html' title='Multiple refered from 2 places.'>block_new</a>(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size)
+<a name='L79'><font color='red'>{</font>
+<a name='L80'>    <i><font color='green'>/* Allocate header and block as one unit.</font></i>
+<a name='L81'><i><font color='green'>       ab_mem points just past header. */</font></i>
+<a name='L82'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *)malloc(<b>sizeof</b>(<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>) + size);
+<a name='L83'>    <b>if</b> (!<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>)
+<a name='L84'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L85'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_size = size;
+<a name='L86'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_mem = (<b>void</b> *)(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> + 1);
+<a name='L87'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_next = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L88'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_offset = <a href='../D/4513.html' title='Multiple defined in 3 places.'>ROUNDUP</a>((<a href='../D/4394.html' title='Multiple defined in 4 places.'>Py_uintptr_t</a>)(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_mem)) -
+<a name='L89'>      (<a href='../D/4394.html' title='Multiple defined in 4 places.'>Py_uintptr_t</a>)(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_mem);
+<a name='L90'>    <b>return</b> <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L91'><font color='red'>}</font>
+<a name='L92'>
+<a name='L93'><b>static</b> <b>void</b>
+<a name='L94'><a href='../R/6248.html' title='Multiple refered from 2 places.'>block_free</a>(block *b) <font color='red'>{</font>
+<a name='L95'>    <b>while</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>) <font color='red'>{</font>
+<a name='L96'>        <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *next = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_next;
+<a name='L97'>        free(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L98'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = next;
+<a name='L99'>    <font color='red'>}</font>
+<a name='L100'><font color='red'>}</font>
+<a name='L101'>
+<a name='L102'><b>static</b> <b>void</b> *
+<a name='L103'><a href='../S/3130.html#L191' title='Refered from 191 in Python/pyarena.c.'>block_alloc</a>(block *b, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size)
+<a name='L104'><font color='red'>{</font>
+<a name='L105'>    <b>void</b> *p;
+<a name='L106'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L107'>    size = <a href='../D/4513.html' title='Multiple defined in 3 places.'>ROUNDUP</a>(size);
+<a name='L108'>    <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_offset + size &gt; <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_size) <font color='red'>{</font>
+<a name='L109'>        <i><font color='green'>/* If we need to allocate more memory than will fit in</font></i>
+<a name='L110'><i><font color='green'>           the default block, allocate a one-off block that is</font></i>
+<a name='L111'><i><font color='green'>           exactly the right size. */</font></i>
+<a name='L112'>        <i><font color='green'>/* TODO(jhylton): Think about space waste at end of block */</font></i>
+<a name='L113'>        <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *newbl = <a href='../S/3130.html#L78' title='Defined at 78 in Python/pyarena.c.'>block_new</a>(
+<a name='L114'>                        size &lt; <a href='../D/752.html' title='Multiple defined in 2 places.'>DEFAULT_BLOCK_SIZE</a> ?
+<a name='L115'>                        <a href='../D/752.html' title='Multiple defined in 2 places.'>DEFAULT_BLOCK_SIZE</a> : size);
+<a name='L116'>        <b>if</b> (!newbl)
+<a name='L117'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L118'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(!<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_next);
+<a name='L119'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_next = newbl;
+<a name='L120'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = newbl;
+<a name='L121'>    <font color='red'>}</font>
+<a name='L122'>
+<a name='L123'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_offset + size &lt;= <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_size);
+<a name='L124'>    p = (<b>void</b> *)(((<b>char</b> *)<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_mem) + <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_offset);
+<a name='L125'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ab_offset += size;
+<a name='L126'>    <b>return</b> p;
+<a name='L127'><font color='red'>}</font>
+<a name='L128'>
+<a name='L129'><a href='../S/553.html#L12' title='Defined at 12 in Include/pyarena.h.'>PyArena</a> *
+<a name='L130'><a href='../R/2488.html' title='Multiple refered from 9 places.'>PyArena_New</a>()
+<a name='L131'><font color='red'>{</font>
+<a name='L132'>    <a href='../S/553.html#L12' title='Defined at 12 in Include/pyarena.h.'>PyArena</a>* arena = (<a href='../S/553.html#L12' title='Defined at 12 in Include/pyarena.h.'>PyArena</a> *)malloc(<b>sizeof</b>(<a href='../S/553.html#L12' title='Defined at 12 in Include/pyarena.h.'>PyArena</a>));
+<a name='L133'>    <b>if</b> (!arena)
+<a name='L134'>        <b>return</b> (<a href='../S/553.html#L12' title='Defined at 12 in Include/pyarena.h.'>PyArena</a>*)<a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L135'>
+<a name='L136'>    arena-&gt;a_head = <a href='../S/3130.html#L78' title='Defined at 78 in Python/pyarena.c.'>block_new</a>(<a href='../D/752.html' title='Multiple defined in 2 places.'>DEFAULT_BLOCK_SIZE</a>);
+<a name='L137'>    arena-&gt;a_cur = arena-&gt;a_head;
+<a name='L138'>    <b>if</b> (!arena-&gt;a_head) <font color='red'>{</font>
+<a name='L139'>        free((<b>void</b> *)arena);
+<a name='L140'>        <b>return</b> (<a href='../S/553.html#L12' title='Defined at 12 in Include/pyarena.h.'>PyArena</a>*)<a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L141'>    <font color='red'>}</font>
+<a name='L142'>    arena-&gt;a_objects = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L143'>    <b>if</b> (!arena-&gt;a_objects) <font color='red'>{</font>
+<a name='L144'>        <a href='../S/3130.html#L94' title='Defined at 94 in Python/pyarena.c.'>block_free</a>(arena-&gt;a_head);
+<a name='L145'>        free((<b>void</b> *)arena);
+<a name='L146'>        <b>return</b> (<a href='../S/553.html#L12' title='Defined at 12 in Include/pyarena.h.'>PyArena</a>*)<a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L147'>    <font color='red'>}</font>
+<a name='L148'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>)
+<a name='L149'>    arena-&gt;total_allocs = 0;
+<a name='L150'>    arena-&gt;total_size = 0;
+<a name='L151'>    arena-&gt;total_blocks = 1;
+<a name='L152'>    arena-&gt;total_block_size = <a href='../D/752.html' title='Multiple defined in 2 places.'>DEFAULT_BLOCK_SIZE</a>;
+<a name='L153'>    arena-&gt;total_big_blocks = 0;
+<a name='L154'><font color='darkred'>#endif</font>
+<a name='L155'>    <b>return</b> arena;
+<a name='L156'><font color='red'>}</font>
+<a name='L157'>
+<a name='L158'><b>void</b>
+<a name='L159'><a href='../R/2486.html' title='Multiple refered from 16 places.'>PyArena_Free</a>(PyArena *arena)
+<a name='L160'><font color='red'>{</font>
+<a name='L161'>    <b>int</b> r;
+<a name='L162'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(arena);
+<a name='L163'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>)
+<a name='L164'>    <i><font color='green'>/*</font></i>
+<a name='L165'><i><font color='green'>    fprintf(stderr,</font></i>
+<a name='L166'><i><font color='green'>        "alloc=%d size=%d blocks=%d block_size=%d big=%d objects=%d\n",</font></i>
+<a name='L167'><i><font color='green'>        arena-&gt;total_allocs, arena-&gt;total_size, arena-&gt;total_blocks,</font></i>
+<a name='L168'><i><font color='green'>        arena-&gt;total_block_size, arena-&gt;total_big_blocks,</font></i>
+<a name='L169'><i><font color='green'>        PyList_Size(arena-&gt;a_objects));</font></i>
+<a name='L170'><i><font color='green'>    */</font></i>
+<a name='L171'><font color='darkred'>#endif</font>
+<a name='L172'>    <a href='../S/3130.html#L94' title='Defined at 94 in Python/pyarena.c.'>block_free</a>(arena-&gt;a_head);
+<a name='L173'>    <i><font color='green'>/* This property normally holds, except when the code being compiled</font></i>
+<a name='L174'><i><font color='green'>       is sys.getobjects(0), in which case there will be two references.</font></i>
+<a name='L175'><i><font color='green'>    assert(arena-&gt;a_objects-&gt;ob_refcnt == 1);</font></i>
+<a name='L176'><i><font color='green'>    */</font></i>
+<a name='L177'>
+<a name='L178'>    <i><font color='green'>/* Clear all the elements from the list.  This is necessary</font></i>
+<a name='L179'><i><font color='green'>       to guarantee that they will be DECREFed. */</font></i>
+<a name='L180'>    r = <a href='../S/2796.html#L671' title='Defined at 671 in Objects/listobject.c.'>PyList_SetSlice</a>(arena-&gt;a_objects,
+<a name='L181'>                        0, <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(arena-&gt;a_objects), <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L182'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(r == 0);
+<a name='L183'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(arena-&gt;a_objects) == 0);
+<a name='L184'>    Py_DECREF(arena-&gt;a_objects);
+<a name='L185'>    free(arena);
+<a name='L186'><font color='red'>}</font>
+<a name='L187'>
+<a name='L188'><b>void</b> *
+<a name='L189'><a href='../R/2487.html' title='Multiple refered from 61 places.'>PyArena_Malloc</a>(PyArena *arena, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size)
+<a name='L190'><font color='red'>{</font>
+<a name='L191'>    <b>void</b> *p = <a href='../S/3130.html#L103' title='Defined at 103 in Python/pyarena.c.'>block_alloc</a>(arena-&gt;a_cur, size);
+<a name='L192'>    <b>if</b> (!p)
+<a name='L193'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L194'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>)
+<a name='L195'>    arena-&gt;total_allocs++;
+<a name='L196'>    arena-&gt;total_size += size;
+<a name='L197'><font color='darkred'>#endif</font>
+<a name='L198'>    <i><font color='green'>/* Reset cur if we allocated a new block. */</font></i>
+<a name='L199'>    <b>if</b> (arena-&gt;a_cur-&gt;ab_next) <font color='red'>{</font>
+<a name='L200'>        arena-&gt;a_cur = arena-&gt;a_cur-&gt;ab_next;
+<a name='L201'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>)
+<a name='L202'>        arena-&gt;total_blocks++;
+<a name='L203'>        arena-&gt;total_block_size += arena-&gt;a_cur-&gt;ab_size;
+<a name='L204'>        <b>if</b> (arena-&gt;a_cur-&gt;ab_size &gt; <a href='../D/752.html' title='Multiple defined in 2 places.'>DEFAULT_BLOCK_SIZE</a>)
+<a name='L205'>            ++arena-&gt;total_big_blocks;
+<a name='L206'><font color='darkred'>#endif</font>
+<a name='L207'>    <font color='red'>}</font>
+<a name='L208'>    <b>return</b> p;
+<a name='L209'><font color='red'>}</font>
+<a name='L210'>
+<a name='L211'><b>int</b>
+<a name='L212'><a href='../R/2485.html' title='Multiple refered from 6 places.'>PyArena_AddPyObject</a>(PyArena *arena, PyObject *obj)
+<a name='L213'><font color='red'>{</font>
+<a name='L214'>    <b>int</b> r = <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(arena-&gt;a_objects, obj);
+<a name='L215'>    <b>if</b> (r &gt;= 0) <font color='red'>{</font>
+<a name='L216'>        Py_DECREF(obj);
+<a name='L217'>    <font color='red'>}</font>
+<a name='L218'>    <b>return</b> r;
+<a name='L219'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L78'>[^]</a><a href='#L212'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

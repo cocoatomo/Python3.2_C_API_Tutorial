@@ -1,0 +1,203 @@
+<html>
+<head>
+<title>Mac/Tools/pythonw.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3350.html'>Mac</a>/<a href='../files/3352.html'>Tools</a>/pythonw.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L57'>[^]</a><a href='#L151'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L57' title='Defined at 57.'>get_python_path</a>
+<li><a href='#L91' title='Defined at 91.'>setup_spawnattr</a>
+<li><a href='#L151' title='Defined at 151.'>main</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'> * This wrapper program executes a python executable hidden inside an</font></i>
+<a name='L3'><i><font color='green'> * application bundle inside the Python framework. This is needed to run</font></i>
+<a name='L4'><i><font color='green'> * GUI code: some GUI API's don't work unless the program is inside an</font></i>
+<a name='L5'><i><font color='green'> * application bundle.</font></i>
+<a name='L6'><i><font color='green'> *</font></i>
+<a name='L7'><i><font color='green'> * This program uses posix_spawn rather than plain execv because we need</font></i>
+<a name='L8'><i><font color='green'> * slightly more control over how the "real" interpreter is executed.</font></i>
+<a name='L9'><i><font color='green'> *</font></i>
+<a name='L10'><i><font color='green'> * On OSX 10.4 (and earlier) this falls back to using exec because the</font></i>
+<a name='L11'><i><font color='green'> * posix_spawnv functions aren't available there.</font></i>
+<a name='L12'><i><font color='green'> */</font></i>
+<a name='L13'>
+<a name='L14'><font color='darkred'>#pragma</font> weak_import posix_spawnattr_init
+<a name='L15'><font color='darkred'>#pragma</font> weak_import posix_spawnattr_setbinpref_np
+<a name='L16'><font color='darkred'>#pragma</font> weak_import posix_spawnattr_setflags
+<a name='L17'><font color='darkred'>#pragma</font> weak_import posix_spawn
+<a name='L18'>
+<a name='L19'><font color='darkred'>#include</font> &lt;<a href='570.html'>Python.h</a>&gt;
+<a name='L20'><font color='darkred'>#include</font> &lt;unistd.h&gt;
+<a name='L21'><font color='darkred'>#ifdef</font> HAVE_SPAWN_H
+<a name='L22'><font color='darkred'>#include</font> &lt;spawn.h&gt;
+<a name='L23'><font color='darkred'>#endif</font>
+<a name='L24'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L25'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L26'><font color='darkred'>#include</font> &lt;errno.h&gt;
+<a name='L27'><font color='darkred'>#include</font> &lt;err.h&gt;
+<a name='L28'><font color='darkred'>#include</font> &lt;<a href='../I/117.html'>dlfcn.h</a>&gt;
+<a name='L29'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L30'><font color='darkred'>#include</font> &lt;<a href='570.html'>Python.h</a>&gt;
+<a name='L31'>
+<a name='L32'>
+<a name='L33'><b>extern</b> <b>char</b>** <a href='../S/2906.html#L100' title='Defined at 100 in PC/pyconfig.h.'>environ</a>;
+<a name='L34'>
+<a name='L35'><i><font color='green'>/*</font></i>
+<a name='L36'><i><font color='green'> * Locate the python framework by looking for the</font></i>
+<a name='L37'><i><font color='green'> * library that contains Py_Initialize.</font></i>
+<a name='L38'><i><font color='green'> *</font></i>
+<a name='L39'><i><font color='green'> * In a regular framework the structure is:</font></i>
+<a name='L40'><i><font color='green'> *</font></i>
+<a name='L41'><i><font color='green'> *    Python.framework/Versions/2.7</font></i>
+<a name='L42'><i><font color='green'> *              /Python</font></i>
+<a name='L43'><i><font color='green'> *              /Resources/Python.app/Contents/MacOS/Python</font></i>
+<a name='L44'><i><font color='green'> *</font></i>
+<a name='L45'><i><font color='green'> * In a virtualenv style structure the expected</font></i>
+<a name='L46'><i><font color='green'> * structure is:</font></i>
+<a name='L47'><i><font color='green'> *</font></i>
+<a name='L48'><i><font color='green'> *    ROOT</font></i>
+<a name='L49'><i><font color='green'> *       /bin/pythonw</font></i>
+<a name='L50'><i><font color='green'> *       /.Python   &lt;- the dylib</font></i>
+<a name='L51'><i><font color='green'> *       /.Resources/Python.app/Contents/MacOS/Python</font></i>
+<a name='L52'><i><font color='green'> *</font></i>
+<a name='L53'><i><font color='green'> * NOTE: virtualenv's are not an officially supported</font></i>
+<a name='L54'><i><font color='green'> * feature, support for that structure is provided as</font></i>
+<a name='L55'><i><font color='green'> * a convenience.</font></i>
+<a name='L56'><i><font color='green'> */</font></i>
+<a name='L57'><b>static</b> <b>char</b>* <a href='../S/2213.html#L152' title='Refered from 152 in Mac/Tools/pythonw.c.'>get_python_path</a>(<b>void</b>)
+<a name='L58'><font color='red'>{</font>
+<a name='L59'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> len;
+<a name='L60'>    <a href='../S/2254.html#L50' title='Defined at 50 in Modules/_ctypes/darwin/dlfcn.h.'>Dl_info</a> info;
+<a name='L61'>    <b>char</b>* end;
+<a name='L62'>    <b>char</b>* g_path;
+<a name='L63'>
+<a name='L64'>    <b>if</b> (<a href='../S/2255.html#L65' title='Defined at 65 in Modules/_ctypes/darwin/dlfcn_simple.c.'>dladdr</a>(<a href='../S/3138.html#L319' title='Defined at 319 in Python/pythonrun.c.'>Py_Initialize</a>, &amp;info) == 0) <font color='red'>{</font>
+<a name='L65'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L66'>    <font color='red'>}</font>
+<a name='L67'>
+<a name='L68'>    len = strlen(info.dli_fname);
+<a name='L69'>
+<a name='L70'>    g_path = malloc(len+60);
+<a name='L71'>    <b>if</b> (g_path == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L72'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L73'>    <font color='red'>}</font>
+<a name='L74'>
+<a name='L75'>    strcpy(g_path, info.dli_fname);
+<a name='L76'>    end = g_path + len - 1;
+<a name='L77'>    <b>while</b> (end != g_path &amp;&amp; *end != '/') <font color='red'>{</font>
+<a name='L78'>        end --;
+<a name='L79'>    <font color='red'>}</font>
+<a name='L80'>    end++;
+<a name='L81'>    <b>if</b> (*end == '.') <font color='red'>{</font>
+<a name='L82'>        end++;
+<a name='L83'>    <font color='red'>}</font>
+<a name='L84'>    strcpy(end, "Resources/Python.app/Contents/MacOS/" PYTHONFRAMEWORK);
+<a name='L85'>
+<a name='L86'>    <b>return</b> g_path;
+<a name='L87'><font color='red'>}</font>
+<a name='L88'>
+<a name='L89'><font color='darkred'>#ifdef</font> HAVE_SPAWN_H
+<a name='L90'><b>static</b> <b>void</b>
+<a name='L91'><a href='../S/2213.html#L169' title='Refered from 169 in Mac/Tools/pythonw.c.'>setup_spawnattr</a>(posix_spawnattr_t* spawnattr)
+<a name='L92'><font color='red'>{</font>
+<a name='L93'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> ocount;
+<a name='L94'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> count;
+<a name='L95'>    cpu_type_t cpu_types[1];
+<a name='L96'>    <b>short</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = 0;
+<a name='L97'><font color='darkred'>#ifdef</font> __LP64__
+<a name='L98'>    <b>int</b>   ch;
+<a name='L99'><font color='darkred'>#endif</font>
+<a name='L100'>
+<a name='L101'>    <b>if</b> ((errno = posix_spawnattr_init(spawnattr)) != 0) <font color='red'>{</font>
+<a name='L102'>        err(2, "posix_spawnattr_int");
+<a name='L103'>        <i><font color='green'>/* NOTREACHTED */</font></i>
+<a name='L104'>    <font color='red'>}</font>
+<a name='L105'>
+<a name='L106'>    count = 1;
+<a name='L107'>
+<a name='L108'>    <i><font color='green'>/* Run the real python executable using the same architure as this</font></i>
+<a name='L109'><i><font color='green'>     * executable, this allows users to controle the architecture using</font></i>
+<a name='L110'><i><font color='green'>     * "arch -ppc python"</font></i>
+<a name='L111'><i><font color='green'>     */</font></i>
+<a name='L112'>
+<a name='L113'><font color='darkred'>#if</font> <b>defined</b>(__ppc64__)
+<a name='L114'>    cpu_types[0] = CPU_TYPE_POWERPC64;
+<a name='L115'>
+<a name='L116'><font color='darkred'>#elif</font> <b>defined</b>(__x86_64__)
+<a name='L117'>    cpu_types[0] = CPU_TYPE_X86_64;
+<a name='L118'>
+<a name='L119'><font color='darkred'>#elif</font> <b>defined</b>(__ppc__)
+<a name='L120'>    cpu_types[0] = CPU_TYPE_POWERPC;
+<a name='L121'><font color='darkred'>#elif</font> <b>defined</b>(__i386__)
+<a name='L122'>    cpu_types[0] = CPU_TYPE_X86;
+<a name='L123'><font color='darkred'>#else</font>
+<a name='L124'><font color='darkred'>#       error</font> "Unknown CPU"
+<a name='L125'><font color='darkred'>#endif</font>
+<a name='L126'>
+<a name='L127'>    <b>if</b> (posix_spawnattr_setbinpref_np(spawnattr, count,
+<a name='L128'>                            cpu_types, &amp;ocount) == -1) <font color='red'>{</font>
+<a name='L129'>        err(1, "posix_spawnattr_setbinpref");
+<a name='L130'>        <i><font color='green'>/* NOTREACHTED */</font></i>
+<a name='L131'>    <font color='red'>}</font>
+<a name='L132'>    <b>if</b> (count != ocount) <font color='red'>{</font>
+<a name='L133'>        fprintf(stderr, "posix_spawnattr_setbinpref failed to copy\n");
+<a name='L134'>        exit(1);
+<a name='L135'>        <i><font color='green'>/* NOTREACHTED */</font></i>
+<a name='L136'>    <font color='red'>}</font>
+<a name='L137'>
+<a name='L138'>
+<a name='L139'>    <i><font color='green'>/*</font></i>
+<a name='L140'><i><font color='green'>     * Set flag that causes posix_spawn to behave like execv</font></i>
+<a name='L141'><i><font color='green'>     */</font></i>
+<a name='L142'>    <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= POSIX_SPAWN_SETEXEC;
+<a name='L143'>    <b>if</b> ((errno = posix_spawnattr_setflags(spawnattr, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>)) != 0) <font color='red'>{</font>
+<a name='L144'>        err(1, "posix_spawnattr_setflags");
+<a name='L145'>        <i><font color='green'>/* NOTREACHTED */</font></i>
+<a name='L146'>    <font color='red'>}</font>
+<a name='L147'><font color='red'>}</font>
+<a name='L148'><font color='darkred'>#endif</font>
+<a name='L149'>
+<a name='L150'><b>int</b>
+<a name='L151'><a href='../R/8830.html' title='Multiple refered from 2 places.'>main</a>(<b>int</b> argc, <b>char</b> **argv) <font color='red'>{</font>
+<a name='L152'>    <b>char</b>* exec_path = <a href='../S/2213.html#L57' title='Defined at 57 in Mac/Tools/pythonw.c.'>get_python_path</a>();
+<a name='L153'>
+<a name='L154'>    <i><font color='green'>/*</font></i>
+<a name='L155'><i><font color='green'>     * Let argv[0] refer to the new interpreter. This is needed to</font></i>
+<a name='L156'><i><font color='green'>     * get the effect we want on OSX 10.5 or earlier. That is, without</font></i>
+<a name='L157'><i><font color='green'>     * changing argv[0] the real interpreter won't have access to</font></i>
+<a name='L158'><i><font color='green'>     * the Window Server.</font></i>
+<a name='L159'><i><font color='green'>     */</font></i>
+<a name='L160'>    argv[0] = exec_path;
+<a name='L161'>
+<a name='L162'><font color='darkred'>#ifdef</font> HAVE_SPAWN_H
+<a name='L163'>    <i><font color='green'>/* We're weak-linking to posix-spawnv to ensure that</font></i>
+<a name='L164'><i><font color='green'>     * an executable build on 10.5 can work on 10.4.</font></i>
+<a name='L165'><i><font color='green'>     */</font></i>
+<a name='L166'>    <b>if</b> (posix_spawn != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L167'>        posix_spawnattr_t spawnattr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L168'>
+<a name='L169'>        <a href='../S/2213.html#L91' title='Defined at 91 in Mac/Tools/pythonw.c.'>setup_spawnattr</a>(&amp;spawnattr);
+<a name='L170'>        posix_spawn(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, exec_path, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L171'>            &amp;spawnattr, argv, <a href='../S/2906.html#L100' title='Defined at 100 in PC/pyconfig.h.'>environ</a>);
+<a name='L172'>        err(1, "posix_spawn: %s", exec_path);
+<a name='L173'>    <font color='red'>}</font>
+<a name='L174'><font color='darkred'>#endif</font>
+<a name='L175'>    execve(exec_path, argv, <a href='../S/2906.html#L100' title='Defined at 100 in PC/pyconfig.h.'>environ</a>);
+<a name='L176'>    err(1, "execve: %s", argv[0]);
+<a name='L177'>    <i><font color='green'>/* NOTREACHED */</font></i>
+<a name='L178'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L57'>[^]</a><a href='#L151'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

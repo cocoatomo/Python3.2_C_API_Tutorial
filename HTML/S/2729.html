@@ -1,0 +1,1357 @@
+<html>
+<head>
+<title>Modules/zipimport.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/zipimport.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L64'>[^]</a><a href='#L1259'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L64' title='Defined at 64.'>zipimporter_init</a>
+<li><a href='#L174' title='Defined at 174.'>zipimporter_traverse</a>
+<li><a href='#L182' title='Defined at 182.'>zipimporter_dealloc</a>
+<li><a href='#L192' title='Defined at 192.'>zipimporter_repr</a>
+<li><a href='#L206' title='Defined at 206.'>get_subname</a>
+<li><a href='#L220' title='Defined at 220.'>make_filename</a>
+<li><a href='#L259' title='Defined at 259.'>get_module_info</a>
+<li><a href='#L286' title='Defined at 286.'>zipimporter_find_module</a>
+<li><a href='#L310' title='Defined at 310.'>zipimporter_load_module</a>
+<li><a href='#L380' title='Defined at 380.'>zipimporter_get_filename</a>
+<li><a href='#L404' title='Defined at 404.'>zipimporter_is_package</a>
+<li><a href='#L425' title='Defined at 425.'>zipimporter_get_data</a>
+<li><a href='#L477' title='Defined at 477.'>zipimporter_get_code</a>
+<li><a href='#L489' title='Defined at 489.'>zipimporter_get_source</a>
+<li><a href='#L675' title='Defined at 675.'>get_long</a>
+<li><a href='#L711' title='Defined at 711.'>read_directory</a>
+<li><a href='#L862' title='Defined at 862.'>get_decompress_func</a>
+<li><a href='#L894' title='Defined at 894.'>get_data</a>
+<li><a href='#L987' title='Defined at 987.'>eq_mtime</a>
+<li><a href='#L1002' title='Defined at 1002.'>unmarshal_code</a>
+<li><a href='#L1049' title='Defined at 1049.'>normalize_line_endings</a>
+<li><a href='#L1088' title='Defined at 1088.'>compile_source</a>
+<li><a href='#L1105' title='Defined at 1105.'>parse_dostime</a>
+<li><a href='#L1126' title='Defined at 1126.'>get_mtime_of_source</a>
+<li><a href='#L1150' title='Defined at 1150.'>get_code_from_data</a>
+<li><a href='#L1178' title='Defined at 1178.'>get_module_code</a>
+<li><a href='#L1259' title='Defined at 1259.'>PyInit_zipimport</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L2'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L3'><font color='darkred'>#include</font> "<a href='547.html'>osdefs.h</a>"
+<a name='L4'><font color='darkred'>#include</font> "<a href='537.html'>marshal.h</a>"
+<a name='L5'><font color='darkred'>#include</font> &lt;time.h&gt;
+<a name='L6'>
+<a name='L7'>
+<a name='L8'><font color='darkred'>#define</font> <a href='../R/1605.html' title='Multiple refered from 2 places.'>IS_SOURCE</a>   0x0
+<a name='L9'><font color='darkred'>#define</font> <a href='../R/1588.html' title='Multiple refered from 5 places.'>IS_BYTECODE</a> 0x1
+<a name='L10'><font color='darkred'>#define</font> <a href='../R/1601.html' title='Multiple refered from 5 places.'>IS_PACKAGE</a>  0x2
+<a name='L11'>
+<a name='L12'><b>struct</b> <a href='../R/10490.html' title='Multiple refered from 4 places.'>st_zip_searchorder</a> <font color='red'>{</font>
+<a name='L13'>    <b>char</b> suffix[14];
+<a name='L14'>    <b>int</b> type;
+<a name='L15'><font color='red'>}</font>;
+<a name='L16'>
+<a name='L17'><i><font color='green'>/* zip_searchorder defines how we search for a module in the Zip</font></i>
+<a name='L18'><i><font color='green'>   archive: we first search for a package __init__, then for</font></i>
+<a name='L19'><i><font color='green'>   non-package .pyc, .pyo and .py entries. The .pyc and .pyo entries</font></i>
+<a name='L20'><i><font color='green'>   are swapped by initzipimport() if we run in optimized mode. Also,</font></i>
+<a name='L21'><i><font color='green'>   '/' is replaced by SEP there. */</font></i>
+<a name='L22'><b>static</b> <b>struct</b> <a href='../S/2729.html#L12' title='Defined at 12 in Modules/zipimport.c.'>st_zip_searchorder</a> zip_searchorder[] = <font color='red'>{</font>
+<a name='L23'>    <font color='red'>{</font>"/__init__.pyc", <a href='../S/2729.html#L10' title='Defined at 10 in Modules/zipimport.c.'>IS_PACKAGE</a> | <a href='../S/2729.html#L9' title='Defined at 9 in Modules/zipimport.c.'>IS_BYTECODE</a><font color='red'>}</font>,
+<a name='L24'>    <font color='red'>{</font>"/__init__.pyo", <a href='../S/2729.html#L10' title='Defined at 10 in Modules/zipimport.c.'>IS_PACKAGE</a> | <a href='../S/2729.html#L9' title='Defined at 9 in Modules/zipimport.c.'>IS_BYTECODE</a><font color='red'>}</font>,
+<a name='L25'>    <font color='red'>{</font>"/__init__.py", <a href='../S/2729.html#L10' title='Defined at 10 in Modules/zipimport.c.'>IS_PACKAGE</a> | <a href='../S/2729.html#L8' title='Defined at 8 in Modules/zipimport.c.'>IS_SOURCE</a><font color='red'>}</font>,
+<a name='L26'>    <font color='red'>{</font>".pyc", <a href='../S/2729.html#L9' title='Defined at 9 in Modules/zipimport.c.'>IS_BYTECODE</a><font color='red'>}</font>,
+<a name='L27'>    <font color='red'>{</font>".pyo", <a href='../S/2729.html#L9' title='Defined at 9 in Modules/zipimport.c.'>IS_BYTECODE</a><font color='red'>}</font>,
+<a name='L28'>    <font color='red'>{</font>".py", <a href='../S/2729.html#L8' title='Defined at 8 in Modules/zipimport.c.'>IS_SOURCE</a><font color='red'>}</font>,
+<a name='L29'>    <font color='red'>{</font>"", 0<font color='red'>}</font>
+<a name='L30'><font color='red'>}</font>;
+<a name='L31'>
+<a name='L32'><i><font color='green'>/* zipimporter object definition and support */</font></i>
+<a name='L33'>
+<a name='L34'><b>typedef</b> <b>struct</b> <a href='../S/2729.html#L36' title='Defined at 36 in Modules/zipimport.c.'>_zipimporter</a> <a href='../R/5303.html' title='Multiple refered from 12 places.'>ZipImporter</a>;
+<a name='L35'>
+<a name='L36'><b>struct</b> <a href='../S/2729.html#L34' title='Refered from 34 in Modules/zipimport.c.'>_zipimporter</a> <font color='red'>{</font>
+<a name='L37'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L38'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *archive;  <i><font color='green'>/* pathname of the Zip archive,</font></i>
+<a name='L39'><i><font color='green'>                           decoded from the filesystem encoding */</font></i>
+<a name='L40'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>;   <i><font color='green'>/* file prefix: "a/sub/directory/",</font></i>
+<a name='L41'><i><font color='green'>                           encoded to the filesystem encoding */</font></i>
+<a name='L42'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *files;    <i><font color='green'>/* dict with file info {path: toc_entry} */</font></i>
+<a name='L43'><font color='red'>}</font>;
+<a name='L44'>
+<a name='L45'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ZipImportError;
+<a name='L46'><i><font color='green'>/* read_directory() cache */</font></i>
+<a name='L47'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *zip_directory_cache = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L48'>
+<a name='L49'><i><font color='green'>/* forward decls */</font></i>
+<a name='L50'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2729.html#L711' title='Defined at 711 in Modules/zipimport.c.'>read_directory</a>(PyObject *archive);
+<a name='L51'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2729.html#L894' title='Defined at 894 in Modules/zipimport.c.'>get_data</a>(PyObject *archive, PyObject *toc_entry);
+<a name='L52'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2729.html#L1178' title='Defined at 1178 in Modules/zipimport.c.'>get_module_code</a>(ZipImporter *self, <b>char</b> *fullname,
+<a name='L53'>                                 <b>int</b> *p_ispackage, PyObject **p_modpath);
+<a name='L54'>
+<a name='L55'>
+<a name='L56'><font color='darkred'>#define</font> ZipImporter_Check(op) PyObject_TypeCheck(op, &amp;ZipImporter_Type)
+<a name='L57'>
+<a name='L58'>
+<a name='L59'><i><font color='green'>/* zipimporter.__init__</font></i>
+<a name='L60'><i><font color='green'>   Split the "subdirectory" from the Zip archive path, lookup a matching</font></i>
+<a name='L61'><i><font color='green'>   entry in sys.path_importer_cache, fetch the file directory from there</font></i>
+<a name='L62'><i><font color='green'>   if found, or else read it from the archive. */</font></i>
+<a name='L63'><b>static</b> <b>int</b>
+<a name='L64'><a href='../S/2729.html#L662' title='Refered from 662 in Modules/zipimport.c.'>zipimporter_init</a>(ZipImporter *self, PyObject *args, PyObject *kwds)
+<a name='L65'><font color='red'>{</font>
+<a name='L66'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *pathobj, *files;
+<a name='L67'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *path, *p, *<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, buf[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>+2];
+<a name='L68'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L69'>
+<a name='L70'>    <b>if</b> (!<a href='../S/3112.html#L1777' title='Defined at 1777 in Python/getargs.c.'>_PyArg_NoKeywords</a>("zipimporter()", kwds))
+<a name='L71'>        <b>return</b> -1;
+<a name='L72'>
+<a name='L73'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;:zipimporter",
+<a name='L74'>                          <a href='../D/4004.html' title='Multiple defined in 3 places.'>PyUnicode_FSDecoder</a>, &amp;pathobj))
+<a name='L75'>        <b>return</b> -1;
+<a name='L76'>
+<a name='L77'>    <i><font color='green'>/* copy path to buf */</font></i>
+<a name='L78'>    len = <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(pathobj);
+<a name='L79'>    <b>if</b> (len == 0) <font color='red'>{</font>
+<a name='L80'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ZipImportError, "archive path is empty");
+<a name='L81'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L82'>    <font color='red'>}</font>
+<a name='L83'>    <b>if</b> (len &gt;= <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>) <font color='red'>{</font>
+<a name='L84'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ZipImportError,
+<a name='L85'>                        "archive path too long");
+<a name='L86'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L87'>    <font color='red'>}</font>
+<a name='L88'>    <a href='../S/2828.html#L10248' title='Defined at 10248 in Objects/unicodeobject.c.'>Py_UNICODE_strcpy</a>(buf, <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(pathobj));
+<a name='L89'>
+<a name='L90'><font color='darkred'>#ifdef</font> <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>
+<a name='L91'>    <b>for</b> (p = buf; *p; p++) <font color='red'>{</font>
+<a name='L92'>        <b>if</b> (*p == <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>)
+<a name='L93'>            *p = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L94'>    <font color='red'>}</font>
+<a name='L95'><font color='darkred'>#endif</font>
+<a name='L96'>
+<a name='L97'>    path = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L98'>    <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L99'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L100'>        <b>struct</b> stat statbuf;
+<a name='L101'>        <b>int</b> rv;
+<a name='L102'>
+<a name='L103'>        <b>if</b> (pathobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L104'>            pathobj = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(buf, len);
+<a name='L105'>            <b>if</b> (pathobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L106'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L107'>        <font color='red'>}</font>
+<a name='L108'>        rv = <a href='../S/3107.html#L242' title='Defined at 242 in Python/fileutils.c.'>_Py_stat</a>(pathobj, &amp;statbuf);
+<a name='L109'>        <b>if</b> (rv == 0) <font color='red'>{</font>
+<a name='L110'>            <i><font color='green'>/* it exists */</font></i>
+<a name='L111'>            <b>if</b> (<a href='../S/565.html#L393' title='Defined at 393 in Include/pyport.h.'>S_ISREG</a>(statbuf.st_mode))
+<a name='L112'>                <i><font color='green'>/* it's a file */</font></i>
+<a name='L113'>                path = buf;
+<a name='L114'>            <b>break</b>;
+<a name='L115'>        <font color='red'>}</font>
+<a name='L116'>        <b>else</b> <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L117'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L118'>        <i><font color='green'>/* back up one path element */</font></i>
+<a name='L119'>        p = <a href='../S/2828.html#L10316' title='Defined at 10316 in Objects/unicodeobject.c.'>Py_UNICODE_strrchr</a>(buf, <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>);
+<a name='L120'>        <b>if</b> (<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L121'>            *<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L122'>        <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L123'>            <b>break</b>;
+<a name='L124'>        *p = '\0';
+<a name='L125'>        len = p - buf;
+<a name='L126'>        <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> = p;
+<a name='L127'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(pathobj);
+<a name='L128'>    <font color='red'>}</font>
+<a name='L129'>    <b>if</b> (path == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L130'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ZipImportError, "not a Zip file");
+<a name='L131'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L132'>    <font color='red'>}</font>
+<a name='L133'>
+<a name='L134'>    files = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(zip_directory_cache, pathobj);
+<a name='L135'>    <b>if</b> (files == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L136'>        files = <a href='../S/2729.html#L711' title='Defined at 711 in Modules/zipimport.c.'>read_directory</a>(pathobj);
+<a name='L137'>        <b>if</b> (files == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L138'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L139'>        <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(zip_directory_cache, pathobj, files) != 0)
+<a name='L140'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L141'>    <font color='red'>}</font>
+<a name='L142'>    <b>else</b>
+<a name='L143'>        Py_INCREF(files);
+<a name='L144'>    self-&gt;files = files;
+<a name='L145'>
+<a name='L146'>    self-&gt;archive = pathobj;
+<a name='L147'>    pathobj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L148'>
+<a name='L149'>    <b>if</b> (<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L150'>        <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>++;
+<a name='L151'>        len = <a href='../S/2828.html#L10239' title='Defined at 10239 in Objects/unicodeobject.c.'>Py_UNICODE_strlen</a>(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L152'>        <b>if</b> (<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>[len-1] != <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>) <font color='red'>{</font>
+<a name='L153'>            <i><font color='green'>/* add trailing SEP */</font></i>
+<a name='L154'>            <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>[len] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L155'>            <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>[len + 1] = '\0';
+<a name='L156'>            len++;
+<a name='L157'>        <font color='red'>}</font>
+<a name='L158'>    <font color='red'>}</font>
+<a name='L159'>    <b>else</b>
+<a name='L160'>        len = 0;
+<a name='L161'>    self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, len);
+<a name='L162'>    <b>if</b> (self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L163'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L164'>
+<a name='L165'>    <b>return</b> 0;
+<a name='L166'>
+<a name='L167'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L168'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(pathobj);
+<a name='L169'>    <b>return</b> -1;
+<a name='L170'><font color='red'>}</font>
+<a name='L171'>
+<a name='L172'><i><font color='green'>/* GC support. */</font></i>
+<a name='L173'><b>static</b> <b>int</b>
+<a name='L174'><a href='../S/2729.html#L648' title='Refered from 648 in Modules/zipimport.c.'>zipimporter_traverse</a>(PyObject *obj, visitproc visit, <b>void</b> *arg)
+<a name='L175'><font color='red'>{</font>
+<a name='L176'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L177'>    Py_VISIT(self-&gt;files);
+<a name='L178'>    <b>return</b> 0;
+<a name='L179'><font color='red'>}</font>
+<a name='L180'>
+<a name='L181'><b>static</b> <b>void</b>
+<a name='L182'><a href='../S/2729.html#L630' title='Refered from 630 in Modules/zipimport.c.'>zipimporter_dealloc</a>(ZipImporter *self)
+<a name='L183'><font color='red'>{</font>
+<a name='L184'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(self);
+<a name='L185'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;archive);
+<a name='L186'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L187'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;files);
+<a name='L188'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self);
+<a name='L189'><font color='red'>}</font>
+<a name='L190'>
+<a name='L191'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L192'><a href='../S/2729.html#L635' title='Refered from 635 in Modules/zipimport.c.'>zipimporter_repr</a>(ZipImporter *self)
+<a name='L193'><font color='red'>{</font>
+<a name='L194'>    <b>if</b> (self-&gt;archive == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L195'>        <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("&lt;zipimporter object \"???\"&gt;");
+<a name='L196'>    <b>else</b> <b>if</b> (self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>) != 0)
+<a name='L197'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;zipimporter object \"%U%c%U\"&gt;",
+<a name='L198'>                                    self-&gt;archive, <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>, self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L199'>    <b>else</b>
+<a name='L200'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;zipimporter object \"%U\"&gt;",
+<a name='L201'>                                    self-&gt;archive);
+<a name='L202'><font color='red'>}</font>
+<a name='L203'>
+<a name='L204'><i><font color='green'>/* return fullname.split(".")[-1] */</font></i>
+<a name='L205'><b>static</b> <b>char</b> *
+<a name='L206'><a href='../R/8097.html' title='Multiple refered from 4 places.'>get_subname</a>(<b>char</b> *fullname)
+<a name='L207'><font color='red'>{</font>
+<a name='L208'>    <b>char</b> *subname = strrchr(fullname, '.');
+<a name='L209'>    <b>if</b> (subname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L210'>        subname = fullname;
+<a name='L211'>    <b>else</b>
+<a name='L212'>        subname++;
+<a name='L213'>    <b>return</b> subname;
+<a name='L214'><font color='red'>}</font>
+<a name='L215'>
+<a name='L216'><i><font color='green'>/* Given a (sub)modulename, write the potential file path in the</font></i>
+<a name='L217'><i><font color='green'>   archive (without extension) to the path buffer. Return the</font></i>
+<a name='L218'><i><font color='green'>   length of the resulting string. */</font></i>
+<a name='L219'><b>static</b> <b>int</b>
+<a name='L220'><a href='../R/8839.html' title='Multiple refered from 3 places.'>make_filename</a>(PyObject *prefix_obj, <b>char</b> *name, <b>char</b> *path, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> pathsize)
+<a name='L221'><font color='red'>{</font>
+<a name='L222'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> len;
+<a name='L223'>    <b>char</b> *p;
+<a name='L224'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>;
+<a name='L225'>
+<a name='L226'>    <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> = <a href='../S/2828.html#L1585' title='Defined at 1585 in Objects/unicodeobject.c.'>PyUnicode_EncodeFSDefault</a>(prefix_obj);
+<a name='L227'>    <b>if</b> (<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L228'>        <b>return</b> -1;
+<a name='L229'>    len = PyBytes_GET_SIZE(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L230'>
+<a name='L231'>    <i><font color='green'>/* self.prefix + name [+ SEP + "__init__"] + ".py[co]" */</font></i>
+<a name='L232'>    <b>if</b> (len + strlen(name) + 13 &gt;= pathsize - 1) <font color='red'>{</font>
+<a name='L233'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ZipImportError, "path too long");
+<a name='L234'>        Py_DECREF(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L235'>        <b>return</b> -1;
+<a name='L236'>    <font color='red'>}</font>
+<a name='L237'>
+<a name='L238'>    strcpy(path, PyBytes_AS_STRING(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>));
+<a name='L239'>    Py_DECREF(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L240'>    strcpy(path + len, name);
+<a name='L241'>    <b>for</b> (p = path + len; *p; p++) <font color='red'>{</font>
+<a name='L242'>        <b>if</b> (*p == '.')
+<a name='L243'>            *p = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L244'>    <font color='red'>}</font>
+<a name='L245'>    len += strlen(name);
+<a name='L246'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(len &lt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>);
+<a name='L247'>    <b>return</b> (<b>int</b>)len;
+<a name='L248'><font color='red'>}</font>
+<a name='L249'>
+<a name='L250'><b>enum</b> <a href='../R/11534.html' title='Multiple refered from 4 places.'>zi_module_info</a> <font color='red'>{</font>
+<a name='L251'>    <a href='../R/1941.html' title='Multiple refered from 4 places.'>MI_ERROR</a>,
+<a name='L252'>    <a href='../R/1943.html' title='Multiple refered from 4 places.'>MI_NOT_FOUND</a>,
+<a name='L253'>    <a href='../S/2729.html#L277' title='Refered from 277 in Modules/zipimport.c.'>MI_MODULE</a>,
+<a name='L254'>    <a href='../R/1944.html' title='Multiple refered from 3 places.'>MI_PACKAGE</a>
+<a name='L255'><font color='red'>}</font>;
+<a name='L256'>
+<a name='L257'><i><font color='green'>/* Return some information about a module. */</font></i>
+<a name='L258'><b>static</b> <b>enum</b> <a href='../S/2729.html#L250' title='Defined at 250 in Modules/zipimport.c.'>zi_module_info</a>
+<a name='L259'><a href='../R/8073.html' title='Multiple refered from 3 places.'>get_module_info</a>(ZipImporter *self, <b>char</b> *fullname)
+<a name='L260'><font color='red'>{</font>
+<a name='L261'>    <b>char</b> *subname, path[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> + 1];
+<a name='L262'>    <b>int</b> len;
+<a name='L263'>    <b>struct</b> <a href='../S/2729.html#L12' title='Defined at 12 in Modules/zipimport.c.'>st_zip_searchorder</a> *zso;
+<a name='L264'>
+<a name='L265'>    subname = <a href='../S/2729.html#L206' title='Defined at 206 in Modules/zipimport.c.'>get_subname</a>(fullname);
+<a name='L266'>
+<a name='L267'>    len = <a href='../S/2729.html#L220' title='Defined at 220 in Modules/zipimport.c.'>make_filename</a>(self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, subname, path, <b>sizeof</b>(path));
+<a name='L268'>    <b>if</b> (len &lt; 0)
+<a name='L269'>        <b>return</b> <a href='../S/2729.html#L251' title='Defined at 251 in Modules/zipimport.c.'>MI_ERROR</a>;
+<a name='L270'>
+<a name='L271'>    <b>for</b> (zso = zip_searchorder; *zso-&gt;suffix; zso++) <font color='red'>{</font>
+<a name='L272'>        strcpy(path + len, zso-&gt;suffix);
+<a name='L273'>        <b>if</b> (<a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(self-&gt;files, path) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L274'>            <b>if</b> (zso-&gt;type &amp; <a href='../S/2729.html#L10' title='Defined at 10 in Modules/zipimport.c.'>IS_PACKAGE</a>)
+<a name='L275'>                <b>return</b> <a href='../S/2729.html#L254' title='Defined at 254 in Modules/zipimport.c.'>MI_PACKAGE</a>;
+<a name='L276'>            <b>else</b>
+<a name='L277'>                <b>return</b> <a href='../S/2729.html#L253' title='Defined at 253 in Modules/zipimport.c.'>MI_MODULE</a>;
+<a name='L278'>        <font color='red'>}</font>
+<a name='L279'>    <font color='red'>}</font>
+<a name='L280'>    <b>return</b> <a href='../S/2729.html#L252' title='Defined at 252 in Modules/zipimport.c.'>MI_NOT_FOUND</a>;
+<a name='L281'><font color='red'>}</font>
+<a name='L282'>
+<a name='L283'><i><font color='green'>/* Check whether we can satisfy the import of the module named by</font></i>
+<a name='L284'><i><font color='green'>   'fullname'. Return self if we can, None if we can't. */</font></i>
+<a name='L285'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L286'><a href='../S/2729.html#L585' title='Refered from 585 in Modules/zipimport.c.'>zipimporter_find_module</a>(PyObject *obj, PyObject *args)
+<a name='L287'><font color='red'>{</font>
+<a name='L288'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L289'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *path = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L290'>    <b>char</b> *fullname;
+<a name='L291'>    <b>enum</b> <a href='../S/2729.html#L250' title='Defined at 250 in Modules/zipimport.c.'>zi_module_info</a> mi;
+<a name='L292'>
+<a name='L293'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s|O:zipimporter.find_module",
+<a name='L294'>                          &amp;fullname, &amp;path))
+<a name='L295'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L296'>
+<a name='L297'>    mi = <a href='../S/2729.html#L259' title='Defined at 259 in Modules/zipimport.c.'>get_module_info</a>(self, fullname);
+<a name='L298'>    <b>if</b> (mi == <a href='../S/2729.html#L251' title='Defined at 251 in Modules/zipimport.c.'>MI_ERROR</a>)
+<a name='L299'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L300'>    <b>if</b> (mi == <a href='../S/2729.html#L252' title='Defined at 252 in Modules/zipimport.c.'>MI_NOT_FOUND</a>) <font color='red'>{</font>
+<a name='L301'>        Py_INCREF(Py_None);
+<a name='L302'>        <b>return</b> Py_None;
+<a name='L303'>    <font color='red'>}</font>
+<a name='L304'>    Py_INCREF(self);
+<a name='L305'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L306'><font color='red'>}</font>
+<a name='L307'>
+<a name='L308'><i><font color='green'>/* Load and return the module named by 'fullname'. */</font></i>
+<a name='L309'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L310'><a href='../S/2729.html#L587' title='Refered from 587 in Modules/zipimport.c.'>zipimporter_load_module</a>(PyObject *obj, PyObject *args)
+<a name='L311'><font color='red'>{</font>
+<a name='L312'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L313'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *mod, *dict;
+<a name='L314'>    <b>char</b> *fullname;
+<a name='L315'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *modpath = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *modpath_bytes;
+<a name='L316'>    <b>int</b> ispackage;
+<a name='L317'>
+<a name='L318'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:zipimporter.load_module",
+<a name='L319'>                          &amp;fullname))
+<a name='L320'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L321'>
+<a name='L322'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2729.html#L1178' title='Defined at 1178 in Modules/zipimport.c.'>get_module_code</a>(self, fullname, &amp;ispackage, &amp;modpath);
+<a name='L323'>    <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L324'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L325'>
+<a name='L326'>    mod = <a href='../S/3120.html#L701' title='Defined at 701 in Python/import.c.'>PyImport_AddModule</a>(fullname);
+<a name='L327'>    <b>if</b> (mod == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L328'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L329'>    dict = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(mod);
+<a name='L330'>
+<a name='L331'>    <i><font color='green'>/* mod.__loader__ = self */</font></i>
+<a name='L332'>    <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "__loader__", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self) != 0)
+<a name='L333'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L334'>
+<a name='L335'>    <b>if</b> (ispackage) <font color='red'>{</font>
+<a name='L336'>        <i><font color='green'>/* add __path__ to the module *before* the code gets</font></i>
+<a name='L337'><i><font color='green'>           executed */</font></i>
+<a name='L338'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *pkgpath, *fullpath;
+<a name='L339'>        <b>char</b> *subname = <a href='../S/2729.html#L206' title='Defined at 206 in Modules/zipimport.c.'>get_subname</a>(fullname);
+<a name='L340'>        <b>int</b> err;
+<a name='L341'>
+<a name='L342'>        fullpath = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("%U%c%U%s",
+<a name='L343'>                                self-&gt;archive, <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>,
+<a name='L344'>                                self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, subname);
+<a name='L345'>        <b>if</b> (fullpath == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L346'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L347'>
+<a name='L348'>        pkgpath = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("[O]", fullpath);
+<a name='L349'>        Py_DECREF(fullpath);
+<a name='L350'>        <b>if</b> (pkgpath == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L351'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L352'>        err = <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "__path__", pkgpath);
+<a name='L353'>        Py_DECREF(pkgpath);
+<a name='L354'>        <b>if</b> (err != 0)
+<a name='L355'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L356'>    <font color='red'>}</font>
+<a name='L357'>    modpath_bytes = <a href='../S/2828.html#L1585' title='Defined at 1585 in Objects/unicodeobject.c.'>PyUnicode_EncodeFSDefault</a>(modpath);
+<a name='L358'>    <b>if</b> (modpath_bytes == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L359'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L360'>    mod = <a href='../S/3120.html#L756' title='Defined at 756 in Python/import.c.'>PyImport_ExecCodeModuleEx</a>(fullname, <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>,
+<a name='L361'>                                    PyBytes_AS_STRING(modpath_bytes));
+<a name='L362'>    Py_DECREF(modpath_bytes);
+<a name='L363'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L364'>    <b>if</b> (mod == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L365'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L366'>
+<a name='L367'>    <b>if</b> (Py_VerboseFlag)
+<a name='L368'>        <a href='../S/3144.html#L2081' title='Defined at 2081 in Python/sysmodule.c.'>PySys_FormatStderr</a>("import %s # loaded from Zip %U\n",
+<a name='L369'>                           fullname, modpath);
+<a name='L370'>    Py_DECREF(modpath);
+<a name='L371'>    <b>return</b> mod;
+<a name='L372'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L373'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L374'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(modpath);
+<a name='L375'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L376'><font color='red'>}</font>
+<a name='L377'>
+<a name='L378'><i><font color='green'>/* Return a string matching __file__ for the named module */</font></i>
+<a name='L379'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L380'><a href='../S/2729.html#L595' title='Refered from 595 in Modules/zipimport.c.'>zipimporter_get_filename</a>(PyObject *obj, PyObject *args)
+<a name='L381'><font color='red'>{</font>
+<a name='L382'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L383'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L384'>    <b>char</b> *fullname;
+<a name='L385'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *modpath;
+<a name='L386'>    <b>int</b> ispackage;
+<a name='L387'>
+<a name='L388'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:zipimporter.get_filename",
+<a name='L389'>                          &amp;fullname))
+<a name='L390'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L391'>
+<a name='L392'>    <i><font color='green'>/* Deciding the filename requires working out where the code</font></i>
+<a name='L393'><i><font color='green'>       would come from if the module was actually loaded */</font></i>
+<a name='L394'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2729.html#L1178' title='Defined at 1178 in Modules/zipimport.c.'>get_module_code</a>(self, fullname, &amp;ispackage, &amp;modpath);
+<a name='L395'>    <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L396'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L397'>    Py_DECREF(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>); <i><font color='green'>/* Only need the path info */</font></i>
+<a name='L398'>
+<a name='L399'>    <b>return</b> modpath;
+<a name='L400'><font color='red'>}</font>
+<a name='L401'>
+<a name='L402'><i><font color='green'>/* Return a bool signifying whether the module is a package or not. */</font></i>
+<a name='L403'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L404'><a href='../S/2729.html#L597' title='Refered from 597 in Modules/zipimport.c.'>zipimporter_is_package</a>(PyObject *obj, PyObject *args)
+<a name='L405'><font color='red'>{</font>
+<a name='L406'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L407'>    <b>char</b> *fullname;
+<a name='L408'>    <b>enum</b> <a href='../S/2729.html#L250' title='Defined at 250 in Modules/zipimport.c.'>zi_module_info</a> mi;
+<a name='L409'>
+<a name='L410'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:zipimporter.is_package",
+<a name='L411'>                          &amp;fullname))
+<a name='L412'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L413'>
+<a name='L414'>    mi = <a href='../S/2729.html#L259' title='Defined at 259 in Modules/zipimport.c.'>get_module_info</a>(self, fullname);
+<a name='L415'>    <b>if</b> (mi == <a href='../S/2729.html#L251' title='Defined at 251 in Modules/zipimport.c.'>MI_ERROR</a>)
+<a name='L416'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L417'>    <b>if</b> (mi == <a href='../S/2729.html#L252' title='Defined at 252 in Modules/zipimport.c.'>MI_NOT_FOUND</a>) <font color='red'>{</font>
+<a name='L418'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(ZipImportError, "can't find module '%s'", fullname);
+<a name='L419'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L420'>    <font color='red'>}</font>
+<a name='L421'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(mi == <a href='../S/2729.html#L254' title='Defined at 254 in Modules/zipimport.c.'>MI_PACKAGE</a>);
+<a name='L422'><font color='red'>}</font>
+<a name='L423'>
+<a name='L424'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L425'><a href='../S/2729.html#L589' title='Refered from 589 in Modules/zipimport.c.'>zipimporter_get_data</a>(PyObject *obj, PyObject *args)
+<a name='L426'><font color='red'>{</font>
+<a name='L427'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L428'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *pathobj, *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L429'>    <b>const</b> <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *path;
+<a name='L430'><font color='darkred'>#ifdef</font> <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>
+<a name='L431'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *p, buf[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> + 1];
+<a name='L432'><font color='darkred'>#endif</font>
+<a name='L433'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *archive;
+<a name='L434'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *toc_entry;
+<a name='L435'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> path_len, len;
+<a name='L436'>
+<a name='L437'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "U:zipimporter.get_data", &amp;pathobj))
+<a name='L438'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L439'>
+<a name='L440'>    path_len = <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(pathobj);
+<a name='L441'>    path = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(pathobj);
+<a name='L442'><font color='darkred'>#ifdef</font> <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>
+<a name='L443'>    <b>if</b> (path_len &gt;= <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>) <font color='red'>{</font>
+<a name='L444'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ZipImportError, "path too long");
+<a name='L445'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L446'>    <font color='red'>}</font>
+<a name='L447'>    <a href='../S/2828.html#L10248' title='Defined at 10248 in Objects/unicodeobject.c.'>Py_UNICODE_strcpy</a>(buf, path);
+<a name='L448'>    <b>for</b> (p = buf; *p; p++) <font color='red'>{</font>
+<a name='L449'>        <b>if</b> (*p == <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>)
+<a name='L450'>            *p = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L451'>    <font color='red'>}</font>
+<a name='L452'>    path = buf;
+<a name='L453'><font color='darkred'>#endif</font>
+<a name='L454'>    archive = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(self-&gt;archive);
+<a name='L455'>    len = <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(self-&gt;archive);
+<a name='L456'>    <b>if</b> ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)len &lt; <a href='../S/2828.html#L10239' title='Defined at 10239 in Objects/unicodeobject.c.'>Py_UNICODE_strlen</a>(path) &amp;&amp;
+<a name='L457'>        <a href='../S/2828.html#L10289' title='Defined at 10289 in Objects/unicodeobject.c.'>Py_UNICODE_strncmp</a>(path, archive, len) == 0 &amp;&amp;
+<a name='L458'>        path[len] == <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>) <font color='red'>{</font>
+<a name='L459'>        path += len + 1;
+<a name='L460'>        path_len -= len + 1;
+<a name='L461'>    <font color='red'>}</font>
+<a name='L462'>
+<a name='L463'>    <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(path, path_len);
+<a name='L464'>    <b>if</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L465'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L466'>    toc_entry = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(self-&gt;files, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L467'>    <b>if</b> (toc_entry == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L468'>        <a href='../S/3106.html#L341' title='Defined at 341 in Python/errors.c.'>PyErr_SetFromErrnoWithFilenameObject</a>(PyExc_IOError, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L469'>        Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L470'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L471'>    <font color='red'>}</font>
+<a name='L472'>    Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L473'>    <b>return</b> <a href='../S/2729.html#L894' title='Defined at 894 in Modules/zipimport.c.'>get_data</a>(self-&gt;archive, toc_entry);
+<a name='L474'><font color='red'>}</font>
+<a name='L475'>
+<a name='L476'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L477'><a href='../S/2729.html#L591' title='Refered from 591 in Modules/zipimport.c.'>zipimporter_get_code</a>(PyObject *obj, PyObject *args)
+<a name='L478'><font color='red'>{</font>
+<a name='L479'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L480'>    <b>char</b> *fullname;
+<a name='L481'>
+<a name='L482'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:zipimporter.get_code", &amp;fullname))
+<a name='L483'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L484'>
+<a name='L485'>    <b>return</b> <a href='../S/2729.html#L1178' title='Defined at 1178 in Modules/zipimport.c.'>get_module_code</a>(self, fullname, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L486'><font color='red'>}</font>
+<a name='L487'>
+<a name='L488'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L489'><a href='../S/2729.html#L593' title='Refered from 593 in Modules/zipimport.c.'>zipimporter_get_source</a>(PyObject *obj, PyObject *args)
+<a name='L490'><font color='red'>{</font>
+<a name='L491'>    <a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *self = (<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a> *)obj;
+<a name='L492'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *toc_entry;
+<a name='L493'>    <b>char</b> *fullname, *subname, path[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>+1];
+<a name='L494'>    <b>int</b> len;
+<a name='L495'>    <b>enum</b> <a href='../S/2729.html#L250' title='Defined at 250 in Modules/zipimport.c.'>zi_module_info</a> mi;
+<a name='L496'>
+<a name='L497'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:zipimporter.get_source", &amp;fullname))
+<a name='L498'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L499'>
+<a name='L500'>    mi = <a href='../S/2729.html#L259' title='Defined at 259 in Modules/zipimport.c.'>get_module_info</a>(self, fullname);
+<a name='L501'>    <b>if</b> (mi == <a href='../S/2729.html#L251' title='Defined at 251 in Modules/zipimport.c.'>MI_ERROR</a>)
+<a name='L502'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L503'>    <b>if</b> (mi == <a href='../S/2729.html#L252' title='Defined at 252 in Modules/zipimport.c.'>MI_NOT_FOUND</a>) <font color='red'>{</font>
+<a name='L504'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(ZipImportError, "can't find module '%s'", fullname);
+<a name='L505'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L506'>    <font color='red'>}</font>
+<a name='L507'>    subname = <a href='../S/2729.html#L206' title='Defined at 206 in Modules/zipimport.c.'>get_subname</a>(fullname);
+<a name='L508'>
+<a name='L509'>    len = <a href='../S/2729.html#L220' title='Defined at 220 in Modules/zipimport.c.'>make_filename</a>(self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, subname, path, <b>sizeof</b>(path));
+<a name='L510'>    <b>if</b> (len &lt; 0)
+<a name='L511'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L512'>
+<a name='L513'>    <b>if</b> (mi == <a href='../S/2729.html#L254' title='Defined at 254 in Modules/zipimport.c.'>MI_PACKAGE</a>) <font color='red'>{</font>
+<a name='L514'>        path[len] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L515'>        strcpy(path + len + 1, "__init__.py");
+<a name='L516'>    <font color='red'>}</font>
+<a name='L517'>    <b>else</b>
+<a name='L518'>        strcpy(path + len, ".py");
+<a name='L519'>
+<a name='L520'>    toc_entry = <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(self-&gt;files, path);
+<a name='L521'>    <b>if</b> (toc_entry != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L522'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res, *<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>;
+<a name='L523'>        <a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a> = <a href='../S/2729.html#L894' title='Defined at 894 in Modules/zipimport.c.'>get_data</a>(self-&gt;archive, toc_entry);
+<a name='L524'>        <b>if</b> (<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L525'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L526'>        res = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(PyBytes_AS_STRING(<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>),
+<a name='L527'>                                          PyBytes_GET_SIZE(<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>));
+<a name='L528'>        Py_DECREF(<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>);
+<a name='L529'>        <b>return</b> res;
+<a name='L530'>    <font color='red'>}</font>
+<a name='L531'>
+<a name='L532'>    <i><font color='green'>/* we have the module, but no source */</font></i>
+<a name='L533'>    Py_INCREF(Py_None);
+<a name='L534'>    <b>return</b> Py_None;
+<a name='L535'><font color='red'>}</font>
+<a name='L536'>
+<a name='L537'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_find_module,
+<a name='L538'>"find_module(fullname, path=None) -&gt; self or None.\n\
+<a name='L539'>\n\
+<a name='L540'>Search for a module specified by 'fullname'. 'fullname' must be the\n\
+<a name='L541'>fully qualified (dotted) module name. It returns the zipimporter\n\
+<a name='L542'>instance itself if the module was found, or None if it wasn't.\n\
+<a name='L543'>The optional 'path' argument is ignored -- it's there for compatibility\n\
+<a name='L544'>with the importer protocol.");
+<a name='L545'>
+<a name='L546'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_load_module,
+<a name='L547'>"load_module(fullname) -&gt; module.\n\
+<a name='L548'>\n\
+<a name='L549'>Load the module specified by 'fullname'. 'fullname' must be the\n\
+<a name='L550'>fully qualified (dotted) module name. It returns the imported\n\
+<a name='L551'>module, or raises ZipImportError if it wasn't found.");
+<a name='L552'>
+<a name='L553'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_data,
+<a name='L554'>"get_data(pathname) -&gt; string with file data.\n\
+<a name='L555'>\n\
+<a name='L556'>Return the data associated with 'pathname'. Raise IOError if\n\
+<a name='L557'>the file wasn't found.");
+<a name='L558'>
+<a name='L559'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_is_package,
+<a name='L560'>"is_package(fullname) -&gt; bool.\n\
+<a name='L561'>\n\
+<a name='L562'>Return True if the module specified by fullname is a package.\n\
+<a name='L563'>Raise ZipImportError if the module couldn't be found.");
+<a name='L564'>
+<a name='L565'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_code,
+<a name='L566'>"get_code(fullname) -&gt; code object.\n\
+<a name='L567'>\n\
+<a name='L568'>Return the code object for the specified module. Raise ZipImportError\n\
+<a name='L569'>if the module couldn't be found.");
+<a name='L570'>
+<a name='L571'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_source,
+<a name='L572'>"get_source(fullname) -&gt; source string.\n\
+<a name='L573'>\n\
+<a name='L574'>Return the source code for the specified module. Raise ZipImportError\n\
+<a name='L575'>if the module couldn't be found, return None if the archive does\n\
+<a name='L576'>contain the module, but has no source for it.");
+<a name='L577'>
+<a name='L578'>
+<a name='L579'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_filename,
+<a name='L580'>"get_filename(fullname) -&gt; filename string.\n\
+<a name='L581'>\n\
+<a name='L582'>Return the filename for the specified module.");
+<a name='L583'>
+<a name='L584'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> zipimporter_methods[] = <font color='red'>{</font>
+<a name='L585'>    <font color='red'>{</font>"find_module", <a href='../S/2729.html#L286' title='Defined at 286 in Modules/zipimport.c.'>zipimporter_find_module</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L586'>     doc_find_module<font color='red'>}</font>,
+<a name='L587'>    <font color='red'>{</font>"load_module", <a href='../S/2729.html#L310' title='Defined at 310 in Modules/zipimport.c.'>zipimporter_load_module</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L588'>     doc_load_module<font color='red'>}</font>,
+<a name='L589'>    <font color='red'>{</font>"get_data", <a href='../S/2729.html#L425' title='Defined at 425 in Modules/zipimport.c.'>zipimporter_get_data</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L590'>     doc_get_data<font color='red'>}</font>,
+<a name='L591'>    <font color='red'>{</font>"get_code", <a href='../S/2729.html#L477' title='Defined at 477 in Modules/zipimport.c.'>zipimporter_get_code</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L592'>     doc_get_code<font color='red'>}</font>,
+<a name='L593'>    <font color='red'>{</font>"get_source", <a href='../S/2729.html#L489' title='Defined at 489 in Modules/zipimport.c.'>zipimporter_get_source</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L594'>     doc_get_source<font color='red'>}</font>,
+<a name='L595'>    <font color='red'>{</font>"get_filename", <a href='../S/2729.html#L380' title='Defined at 380 in Modules/zipimport.c.'>zipimporter_get_filename</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L596'>     doc_get_filename<font color='red'>}</font>,
+<a name='L597'>    <font color='red'>{</font>"is_package", <a href='../S/2729.html#L404' title='Defined at 404 in Modules/zipimport.c.'>zipimporter_is_package</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L598'>     doc_is_package<font color='red'>}</font>,
+<a name='L599'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>   <i><font color='green'>/* sentinel */</font></i>
+<a name='L600'><font color='red'>}</font>;
+<a name='L601'>
+<a name='L602'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> zipimporter_members[] = <font color='red'>{</font>
+<a name='L603'>    <font color='red'>{</font>"archive",  <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a>, archive),  <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L604'>    <font color='red'>{</font>"prefix",   <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a>, <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>),   <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L605'>    <font color='red'>{</font>"_files",   <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a>, files),    <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L606'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L607'><font color='red'>}</font>;
+<a name='L608'>
+<a name='L609'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(zipimporter_doc,
+<a name='L610'>"zipimporter(archivepath) -&gt; zipimporter object\n\
+<a name='L611'>\n\
+<a name='L612'>Create a new zipimporter instance. 'archivepath' must be a path to\n\
+<a name='L613'>a zipfile, or to a specific path inside a zipfile. For example, it can be\n\
+<a name='L614'>'/tmp/myimport.zip', or '/tmp/myimport.zip/mydirectory', if mydirectory is a\n\
+<a name='L615'>valid directory inside the archive.\n\
+<a name='L616'>\n\
+<a name='L617'>'ZipImportError is raised if 'archivepath' doesn't point to a valid Zip\n\
+<a name='L618'>archive.\n\
+<a name='L619'>\n\
+<a name='L620'>The 'archive' attribute of zipimporter objects contains the name of the\n\
+<a name='L621'>zipfile targeted.");
+<a name='L622'>
+<a name='L623'><font color='darkred'>#define</font> <a href='../R/709.html' title='Multiple refered from 7 places.'>DEFERRED_ADDRESS</a>(ADDR) 0
+<a name='L624'>
+<a name='L625'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> ZipImporter_Type = <font color='red'>{</font>
+<a name='L626'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../D/761.html' title='Multiple defined in 3 places.'>DEFERRED_ADDRESS</a>(&amp;PyType_Type), 0)
+<a name='L627'>    "zipimport.zipimporter",
+<a name='L628'>    <b>sizeof</b>(<a href='../S/2729.html#L34' title='Defined at 34 in Modules/zipimport.c.'>ZipImporter</a>),
+<a name='L629'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L630'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2729.html#L182' title='Defined at 182 in Modules/zipimport.c.'>zipimporter_dealloc</a>,            <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L631'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L632'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L633'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L634'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L635'>    (reprfunc)<a href='../S/2729.html#L192' title='Defined at 192 in Modules/zipimport.c.'>zipimporter_repr</a>,                 <i><font color='green'>/* tp_repr */</font></i>
+<a name='L636'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L637'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L638'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L639'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L640'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L641'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L642'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L643'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L644'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L645'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+<a name='L646'>        Py_TPFLAGS_HAVE_GC,                     <i><font color='green'>/* tp_flags */</font></i>
+<a name='L647'>    zipimporter_doc,                            <i><font color='green'>/* tp_doc */</font></i>
+<a name='L648'>    <a href='../S/2729.html#L174' title='Defined at 174 in Modules/zipimport.c.'>zipimporter_traverse</a>,                       <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L649'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L650'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L651'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L652'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L653'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L654'>    zipimporter_methods,                        <i><font color='green'>/* tp_methods */</font></i>
+<a name='L655'>    zipimporter_members,                        <i><font color='green'>/* tp_members */</font></i>
+<a name='L656'>    0,                                          <i><font color='green'>/* tp_getset */</font></i>
+<a name='L657'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L658'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L659'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L660'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L661'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L662'>    (initproc)<a href='../S/2729.html#L64' title='Defined at 64 in Modules/zipimport.c.'>zipimporter_init</a>,                 <i><font color='green'>/* tp_init */</font></i>
+<a name='L663'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,                        <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L664'>    <a href='../S/2824.html#L730' title='Defined at 730 in Objects/typeobject.c.'>PyType_GenericNew</a>,                          <i><font color='green'>/* tp_new */</font></i>
+<a name='L665'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>,                            <i><font color='green'>/* tp_free */</font></i>
+<a name='L666'><font color='red'>}</font>;
+<a name='L667'>
+<a name='L668'>
+<a name='L669'><i><font color='green'>/* implementation */</font></i>
+<a name='L670'>
+<a name='L671'><i><font color='green'>/* Given a buffer, return the long that is represented by the first</font></i>
+<a name='L672'><i><font color='green'>   4 bytes, encoded as little endian. This partially reimplements</font></i>
+<a name='L673'><i><font color='green'>   marshal.c:r_long() */</font></i>
+<a name='L674'><b>static</b> <b>long</b>
+<a name='L675'><a href='../R/8069.html' title='Multiple refered from 20 places.'>get_long</a>(<b>unsigned</b> <b>char</b> *buf) <font color='red'>{</font>
+<a name='L676'>    <b>long</b> x;
+<a name='L677'>    x =  buf[0];
+<a name='L678'>    x |= (<b>long</b>)buf[1] &lt;&lt;  8;
+<a name='L679'>    x |= (<b>long</b>)buf[2] &lt;&lt; 16;
+<a name='L680'>    x |= (<b>long</b>)buf[3] &lt;&lt; 24;
+<a name='L681'><font color='darkred'>#if</font> <a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a> &gt; 4
+<a name='L682'>    <i><font color='green'>/* Sign extension for 64-bit machines */</font></i>
+<a name='L683'>    x |= -(x &amp; 0x80000000L);
+<a name='L684'><font color='darkred'>#endif</font>
+<a name='L685'>    <b>return</b> x;
+<a name='L686'><font color='red'>}</font>
+<a name='L687'>
+<a name='L688'><i><font color='green'>/*</font></i>
+<a name='L689'><i><font color='green'>   read_directory(archive) -&gt; files dict (new reference)</font></i>
+<a name='L690'><i><font color='green'></font></i>
+<a name='L691'><i><font color='green'>   Given a path to a Zip archive, build a dict, mapping file names</font></i>
+<a name='L692'><i><font color='green'>   (local to the archive, using SEP as a separator) to toc entries.</font></i>
+<a name='L693'><i><font color='green'></font></i>
+<a name='L694'><i><font color='green'>   A toc_entry is a tuple:</font></i>
+<a name='L695'><i><font color='green'></font></i>
+<a name='L696'><i><font color='green'>   (__file__,      # value to use for __file__, available for all files,</font></i>
+<a name='L697'><i><font color='green'>                   # encoded to the filesystem encoding</font></i>
+<a name='L698'><i><font color='green'>    compress,      # compression kind; 0 for uncompressed</font></i>
+<a name='L699'><i><font color='green'>    data_size,     # size of compressed data on disk</font></i>
+<a name='L700'><i><font color='green'>    file_size,     # size of decompressed data</font></i>
+<a name='L701'><i><font color='green'>    file_offset,   # offset of file header from start of archive</font></i>
+<a name='L702'><i><font color='green'>    time,          # mod time of file (in dos format)</font></i>
+<a name='L703'><i><font color='green'>    date,          # mod data of file (in dos format)</font></i>
+<a name='L704'><i><font color='green'>    crc,           # crc checksum of the data</font></i>
+<a name='L705'><i><font color='green'>   )</font></i>
+<a name='L706'><i><font color='green'></font></i>
+<a name='L707'><i><font color='green'>   Directories can be recognized by the trailing SEP in the name,</font></i>
+<a name='L708'><i><font color='green'>   data_size and file_offset are 0.</font></i>
+<a name='L709'><i><font color='green'>*/</font></i>
+<a name='L710'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L711'><a href='../R/9971.html' title='Multiple refered from 2 places.'>read_directory</a>(PyObject *archive_obj)
+<a name='L712'><font color='red'>{</font>
+<a name='L713'>    <i><font color='green'>/* FIXME: work on Py_UNICODE* instead of char* */</font></i>
+<a name='L714'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *files = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L715'>    FILE *fp;
+<a name='L716'>    <b>unsigned</b> <b>short</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L717'>    <b>long</b> <a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a>, crc, data_size, file_size, file_offset, date, time;
+<a name='L718'>    <b>long</b> header_offset, name_size, header_size, header_position;
+<a name='L719'>    <b>long</b> i, l, count;
+<a name='L720'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> length;
+<a name='L721'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> path[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> + 5];
+<a name='L722'>    <b>char</b> name[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> + 5];
+<a name='L723'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *nameobj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L724'>    <b>char</b> *p, endof_central_dir[22];
+<a name='L725'>    <b>long</b> arc_offset; <i><font color='green'>/* offset from beginning of file to start of zip-archive */</font></i>
+<a name='L726'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *pathobj;
+<a name='L727'>    <b>const</b> <b>char</b> *charset;
+<a name='L728'>    <b>int</b> <a href='../S/3149.html#L116' title='Defined at 116 in Python/thread_nt.h.'>bootstrap</a>;
+<a name='L729'>
+<a name='L730'>    <b>if</b> (<a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(archive_obj) &gt; <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>) <font color='red'>{</font>
+<a name='L731'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L732'>                        "Zip path name is too long");
+<a name='L733'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L734'>    <font color='red'>}</font>
+<a name='L735'>    <a href='../S/2828.html#L10248' title='Defined at 10248 in Objects/unicodeobject.c.'>Py_UNICODE_strcpy</a>(path, <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(archive_obj));
+<a name='L736'>
+<a name='L737'>    fp = <a href='../S/3107.html#L297' title='Defined at 297 in Python/fileutils.c.'>_Py_fopen</a>(archive_obj, "rb");
+<a name='L738'>    <b>if</b> (fp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L739'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(ZipImportError, "can't open Zip file: '%U'", archive_obj);
+<a name='L740'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L741'>    <font color='red'>}</font>
+<a name='L742'>    fseek(fp, -22, <a href='../D/4575.html' title='Multiple defined in 2 places.'>SEEK_END</a>);
+<a name='L743'>    header_position = ftell(fp);
+<a name='L744'>    <b>if</b> (fread(endof_central_dir, 1, 22, fp) != 22) <font color='red'>{</font>
+<a name='L745'>        fclose(fp);
+<a name='L746'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(ZipImportError, "can't read Zip file: '%U'", archive_obj);
+<a name='L747'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L748'>    <font color='red'>}</font>
+<a name='L749'>    <b>if</b> (<a href='../D/8871.html' title='Multiple defined in 3 places.'>get_long</a>((<b>unsigned</b> <b>char</b> *)endof_central_dir) != 0x06054B50) <font color='red'>{</font>
+<a name='L750'>        <i><font color='green'>/* Bad: End of Central Dir signature */</font></i>
+<a name='L751'>        fclose(fp);
+<a name='L752'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(ZipImportError, "not a Zip file: '%U'", archive_obj);
+<a name='L753'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L754'>    <font color='red'>}</font>
+<a name='L755'>
+<a name='L756'>    header_size = <a href='../D/8871.html' title='Multiple defined in 3 places.'>get_long</a>((<b>unsigned</b> <b>char</b> *)endof_central_dir + 12);
+<a name='L757'>    header_offset = <a href='../D/8871.html' title='Multiple defined in 3 places.'>get_long</a>((<b>unsigned</b> <b>char</b> *)endof_central_dir + 16);
+<a name='L758'>    arc_offset = header_position - header_offset - header_size;
+<a name='L759'>    header_offset += arc_offset;
+<a name='L760'>
+<a name='L761'>    files = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L762'>    <b>if</b> (files == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L763'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L764'>
+<a name='L765'>    length = <a href='../S/2828.html#L10239' title='Defined at 10239 in Objects/unicodeobject.c.'>Py_UNICODE_strlen</a>(path);
+<a name='L766'>    path[length] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L767'>
+<a name='L768'>    <i><font color='green'>/* Start of Central Directory */</font></i>
+<a name='L769'>    count = 0;
+<a name='L770'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L771'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *t;
+<a name='L772'>        <b>int</b> err;
+<a name='L773'>
+<a name='L774'>        fseek(fp, header_offset, 0);  <i><font color='green'>/* Start of file header */</font></i>
+<a name='L775'>        l = <a href='../S/3124.html#L1050' title='Defined at 1050 in Python/marshal.c.'>PyMarshal_ReadLongFromFile</a>(fp);
+<a name='L776'>        <b>if</b> (l != 0x02014B50)
+<a name='L777'>            <b>break</b>;              <i><font color='green'>/* Bad: Central Dir File Header */</font></i>
+<a name='L778'>        fseek(fp, header_offset + 8, 0);
+<a name='L779'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = (<b>unsigned</b> <b>short</b>)<a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp);
+<a name='L780'>        <a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a> = <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp);
+<a name='L781'>        time = <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp);
+<a name='L782'>        date = <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp);
+<a name='L783'>        crc = <a href='../S/3124.html#L1050' title='Defined at 1050 in Python/marshal.c.'>PyMarshal_ReadLongFromFile</a>(fp);
+<a name='L784'>        data_size = <a href='../S/3124.html#L1050' title='Defined at 1050 in Python/marshal.c.'>PyMarshal_ReadLongFromFile</a>(fp);
+<a name='L785'>        file_size = <a href='../S/3124.html#L1050' title='Defined at 1050 in Python/marshal.c.'>PyMarshal_ReadLongFromFile</a>(fp);
+<a name='L786'>        name_size = <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp);
+<a name='L787'>        header_size = 46 + name_size +
+<a name='L788'>           <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp) +
+<a name='L789'>           <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp);
+<a name='L790'>        fseek(fp, header_offset + 42, 0);
+<a name='L791'>        file_offset = <a href='../S/3124.html#L1050' title='Defined at 1050 in Python/marshal.c.'>PyMarshal_ReadLongFromFile</a>(fp) + arc_offset;
+<a name='L792'>        <b>if</b> (name_size &gt; <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>)
+<a name='L793'>            name_size = <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>;
+<a name='L794'>
+<a name='L795'>        p = name;
+<a name='L796'>        <b>for</b> (i = 0; i &lt; name_size; i++) <font color='red'>{</font>
+<a name='L797'>            *p = (<b>char</b>)getc(fp);
+<a name='L798'>            <b>if</b> (*p == '/')
+<a name='L799'>                *p = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L800'>            p++;
+<a name='L801'>        <font color='red'>}</font>
+<a name='L802'>        *p = 0;         <i><font color='green'>/* Add terminating null byte */</font></i>
+<a name='L803'>        header_offset += header_size;
+<a name='L804'>
+<a name='L805'>        <a href='../S/3149.html#L116' title='Defined at 116 in Python/thread_nt.h.'>bootstrap</a> = 0;
+<a name='L806'>        <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0800)
+<a name='L807'>            charset = "utf-8";
+<a name='L808'>        <b>else</b> <b>if</b> (!<a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>()-&gt;interp-&gt;codecs_initialized) <font color='red'>{</font>
+<a name='L809'>            <i><font color='green'>/* During bootstrap, we may need to load the encodings</font></i>
+<a name='L810'><i><font color='green'>               package from a ZIP file. But the cp437 encoding is implemented</font></i>
+<a name='L811'><i><font color='green'>               in Python in the encodings package.</font></i>
+<a name='L812'><i><font color='green'></font></i>
+<a name='L813'><i><font color='green'>               Break out of this dependency by assuming that the path to</font></i>
+<a name='L814'><i><font color='green'>               the encodings module is ASCII-only. */</font></i>
+<a name='L815'>            charset = "ascii";
+<a name='L816'>            <a href='../S/3149.html#L116' title='Defined at 116 in Python/thread_nt.h.'>bootstrap</a> = 1;
+<a name='L817'>        <font color='red'>}</font>
+<a name='L818'>        <b>else</b>
+<a name='L819'>            charset = "cp437";
+<a name='L820'>        nameobj = <a href='../D/3972.html' title='Multiple defined in 3 places.'>PyUnicode_Decode</a>(name, name_size, charset, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L821'>        <b>if</b> (nameobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L822'>            <b>if</b> (<a href='../S/3149.html#L116' title='Defined at 116 in Python/thread_nt.h.'>bootstrap</a>)
+<a name='L823'>                <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_NotImplementedError,
+<a name='L824'>                    "bootstrap issue: python%i%i.zip contains non-ASCII "
+<a name='L825'>                    "filenames without the unicode flag",
+<a name='L826'>                    <a href='../S/549.html#L19' title='Defined at 19 in Include/patchlevel.h.'>PY_MAJOR_VERSION</a>, <a href='../S/549.html#L20' title='Defined at 20 in Include/patchlevel.h.'>PY_MINOR_VERSION</a>);
+<a name='L827'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L828'>        <font color='red'>}</font>
+<a name='L829'>        <a href='../S/2828.html#L10256' title='Defined at 10256 in Objects/unicodeobject.c.'>Py_UNICODE_strncpy</a>(path + length + 1, <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(nameobj), <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> - length - 1);
+<a name='L830'>
+<a name='L831'>        pathobj = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(path, <a href='../S/2828.html#L10239' title='Defined at 10239 in Objects/unicodeobject.c.'>Py_UNICODE_strlen</a>(path));
+<a name='L832'>        <b>if</b> (pathobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L833'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L834'>        t = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("Niiiiiii", pathobj, <a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a>, data_size,
+<a name='L835'>                          file_size, file_offset, time, date, crc);
+<a name='L836'>        <b>if</b> (t == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L837'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L838'>        err = <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(files, nameobj, t);
+<a name='L839'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(nameobj);
+<a name='L840'>        Py_DECREF(t);
+<a name='L841'>        <b>if</b> (err != 0)
+<a name='L842'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L843'>        count++;
+<a name='L844'>    <font color='red'>}</font>
+<a name='L845'>    fclose(fp);
+<a name='L846'>    <b>if</b> (Py_VerboseFlag)
+<a name='L847'>        <a href='../S/3144.html#L2081' title='Defined at 2081 in Python/sysmodule.c.'>PySys_FormatStderr</a>("# zipimport: found %ld names in %U\n",
+<a name='L848'>            count, archive_obj);
+<a name='L849'>    <b>return</b> files;
+<a name='L850'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L851'>    fclose(fp);
+<a name='L852'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(files);
+<a name='L853'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(nameobj);
+<a name='L854'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L855'><font color='red'>}</font>
+<a name='L856'>
+<a name='L857'><i><font color='green'>/* Return the zlib.decompress function object, or NULL if zlib couldn't</font></i>
+<a name='L858'><i><font color='green'>   be imported. The function is cached when found, so subsequent calls</font></i>
+<a name='L859'><i><font color='green'>   don't import zlib again. Returns a *borrowed* reference.</font></i>
+<a name='L860'><i><font color='green'>   XXX This makes zlib.decompress immortal. */</font></i>
+<a name='L861'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L862'><a href='../S/2729.html#L970' title='Refered from 970 in Modules/zipimport.c.'>get_decompress_func</a>(<b>void</b>)
+<a name='L863'><font color='red'>{</font>
+<a name='L864'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *decompress = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L865'>
+<a name='L866'>    <b>if</b> (decompress == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L867'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *zlib;
+<a name='L868'>        <b>static</b> <b>int</b> importing_zlib = 0;
+<a name='L869'>
+<a name='L870'>        <b>if</b> (importing_zlib != 0)
+<a name='L871'>            <i><font color='green'>/* Someone has a zlib.py[co] in their Zip file;</font></i>
+<a name='L872'><i><font color='green'>               let's avoid a stack overflow. */</font></i>
+<a name='L873'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L874'>        importing_zlib = 1;
+<a name='L875'>        zlib = <a href='../S/3120.html#L2348' title='Defined at 2348 in Python/import.c.'>PyImport_ImportModuleNoBlock</a>("zlib");
+<a name='L876'>        importing_zlib = 0;
+<a name='L877'>        <b>if</b> (zlib != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L878'>            decompress = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(zlib,
+<a name='L879'>                                                "decompress");
+<a name='L880'>            Py_DECREF(zlib);
+<a name='L881'>        <font color='red'>}</font>
+<a name='L882'>        <b>else</b>
+<a name='L883'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L884'>        <b>if</b> (Py_VerboseFlag)
+<a name='L885'>            <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("# zipimport: zlib %s\n",
+<a name='L886'>                zlib != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ? "available": "UNAVAILABLE");
+<a name='L887'>    <font color='red'>}</font>
+<a name='L888'>    <b>return</b> decompress;
+<a name='L889'><font color='red'>}</font>
+<a name='L890'>
+<a name='L891'><i><font color='green'>/* Given a path to a Zip file and a toc_entry, return the (uncompressed)</font></i>
+<a name='L892'><i><font color='green'>   data as a new reference. */</font></i>
+<a name='L893'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L894'><a href='../R/8044.html' title='Multiple refered from 4 places.'>get_data</a>(PyObject *archive, PyObject *toc_entry)
+<a name='L895'><font color='red'>{</font>
+<a name='L896'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *raw_data, *data = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *decompress;
+<a name='L897'>    <b>char</b> *buf;
+<a name='L898'>    FILE *fp;
+<a name='L899'>    <b>int</b> err;
+<a name='L900'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> bytes_read = 0;
+<a name='L901'>    <b>long</b> l;
+<a name='L902'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *datapath;
+<a name='L903'>    <b>long</b> <a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a>, data_size, file_size, file_offset, bytes_size;
+<a name='L904'>    <b>long</b> time, date, crc;
+<a name='L905'>
+<a name='L906'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(toc_entry, "Olllllll", &amp;datapath, &amp;<a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a>,
+<a name='L907'>                          &amp;data_size, &amp;file_size, &amp;file_offset, &amp;time,
+<a name='L908'>                          &amp;date, &amp;crc)) <font color='red'>{</font>
+<a name='L909'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L910'>    <font color='red'>}</font>
+<a name='L911'>
+<a name='L912'>    fp = <a href='../S/3107.html#L297' title='Defined at 297 in Python/fileutils.c.'>_Py_fopen</a>(archive, "rb");
+<a name='L913'>    <b>if</b> (!fp) <font color='red'>{</font>
+<a name='L914'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_IOError,
+<a name='L915'>           "zipimport: can not open file %U", archive);
+<a name='L916'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L917'>    <font color='red'>}</font>
+<a name='L918'>
+<a name='L919'>    <i><font color='green'>/* Check to make sure the local file header is correct */</font></i>
+<a name='L920'>    fseek(fp, file_offset, 0);
+<a name='L921'>    l = <a href='../S/3124.html#L1050' title='Defined at 1050 in Python/marshal.c.'>PyMarshal_ReadLongFromFile</a>(fp);
+<a name='L922'>    <b>if</b> (l != 0x04034B50) <font color='red'>{</font>
+<a name='L923'>        <i><font color='green'>/* Bad: Local File Header */</font></i>
+<a name='L924'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(ZipImportError,
+<a name='L925'>                     "bad local file header in %U",
+<a name='L926'>                     archive);
+<a name='L927'>        fclose(fp);
+<a name='L928'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L929'>    <font color='red'>}</font>
+<a name='L930'>    fseek(fp, file_offset + 26, 0);
+<a name='L931'>    l = 30 + <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp) +
+<a name='L932'>        <a href='../S/3124.html#L1039' title='Defined at 1039 in Python/marshal.c.'>PyMarshal_ReadShortFromFile</a>(fp);        <i><font color='green'>/* local header size */</font></i>
+<a name='L933'>    file_offset += l;           <i><font color='green'>/* Start of file data */</font></i>
+<a name='L934'>
+<a name='L935'>    bytes_size = <a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a> == 0 ? data_size : data_size + 1;
+<a name='L936'>    <b>if</b> (bytes_size == 0)
+<a name='L937'>        bytes_size++;
+<a name='L938'>    raw_data = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>((<b>char</b> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, bytes_size);
+<a name='L939'>
+<a name='L940'>    <b>if</b> (raw_data == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L941'>        fclose(fp);
+<a name='L942'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L943'>    <font color='red'>}</font>
+<a name='L944'>    buf = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(raw_data);
+<a name='L945'>
+<a name='L946'>    err = fseek(fp, file_offset, 0);
+<a name='L947'>    <b>if</b> (err == 0)
+<a name='L948'>        bytes_read = fread(buf, 1, data_size, fp);
+<a name='L949'>    fclose(fp);
+<a name='L950'>    <b>if</b> (err || bytes_read != data_size) <font color='red'>{</font>
+<a name='L951'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IOError,
+<a name='L952'>                        "zipimport: can't read data");
+<a name='L953'>        Py_DECREF(raw_data);
+<a name='L954'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L955'>    <font color='red'>}</font>
+<a name='L956'>
+<a name='L957'>    <b>if</b> (<a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a> != 0) <font color='red'>{</font>
+<a name='L958'>        buf[data_size] = 'Z';  <i><font color='green'>/* saw this in zipfile.py */</font></i>
+<a name='L959'>        data_size++;
+<a name='L960'>    <font color='red'>}</font>
+<a name='L961'>    buf[data_size] = '\0';
+<a name='L962'>
+<a name='L963'>    <b>if</b> (<a href='../D/7719.html' title='Multiple defined in 3 places.'>compress</a> == 0) <font color='red'>{</font>  <i><font color='green'>/* data is not compressed */</font></i>
+<a name='L964'>        data = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(buf, data_size);
+<a name='L965'>        Py_DECREF(raw_data);
+<a name='L966'>        <b>return</b> data;
+<a name='L967'>    <font color='red'>}</font>
+<a name='L968'>
+<a name='L969'>    <i><font color='green'>/* Decompress with zlib */</font></i>
+<a name='L970'>    decompress = <a href='../S/2729.html#L862' title='Defined at 862 in Modules/zipimport.c.'>get_decompress_func</a>();
+<a name='L971'>    <b>if</b> (decompress == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L972'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ZipImportError,
+<a name='L973'>                        "can't decompress data; "
+<a name='L974'>                        "zlib not available");
+<a name='L975'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L976'>    <font color='red'>}</font>
+<a name='L977'>    data = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(decompress, "Oi", raw_data, -15);
+<a name='L978'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L979'>    Py_DECREF(raw_data);
+<a name='L980'>    <b>return</b> data;
+<a name='L981'><font color='red'>}</font>
+<a name='L982'>
+<a name='L983'><i><font color='green'>/* Lenient date/time comparison function. The precision of the mtime</font></i>
+<a name='L984'><i><font color='green'>   in the archive is lower than the mtime stored in a .pyc: we</font></i>
+<a name='L985'><i><font color='green'>   must allow a difference of at most one second. */</font></i>
+<a name='L986'><b>static</b> <b>int</b>
+<a name='L987'><a href='../S/2729.html#L1022' title='Refered from 1022 in Modules/zipimport.c.'>eq_mtime</a>(time_t t1, time_t t2)
+<a name='L988'><font color='red'>{</font>
+<a name='L989'>    time_t d = <a href='../S/2333.html#L123' title='Defined at 123 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t1</a> - <a href='../S/2333.html#L124' title='Defined at 124 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t2</a>;
+<a name='L990'>    <b>if</b> (d &lt; 0)
+<a name='L991'>        d = -d;
+<a name='L992'>    <i><font color='green'>/* dostime only stores even seconds, so be lenient */</font></i>
+<a name='L993'>    <b>return</b> d &lt;= 1;
+<a name='L994'><font color='red'>}</font>
+<a name='L995'>
+<a name='L996'><i><font color='green'>/* Given the contents of a .py[co] file in a buffer, unmarshal the data</font></i>
+<a name='L997'><i><font color='green'>   and return the code object. Return None if it the magic word doesn't</font></i>
+<a name='L998'><i><font color='green'>   match (we do this instead of raising an exception as we fall back</font></i>
+<a name='L999'><i><font color='green'>   to .py if available and we don't want to mask other errors).</font></i>
+<a name='L1000'><i><font color='green'>   Returns a new reference. */</font></i>
+<a name='L1001'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1002'><a href='../S/2729.html#L1167' title='Refered from 1167 in Modules/zipimport.c.'>unmarshal_code</a>(<b>char</b> *pathname, PyObject *data, time_t mtime)
+<a name='L1003'><font color='red'>{</font>
+<a name='L1004'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L1005'>    <b>char</b> *buf = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(data);
+<a name='L1006'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size = <a href='../S/2779.html#L506' title='Defined at 506 in Objects/bytesobject.c.'>PyBytes_Size</a>(data);
+<a name='L1007'>
+<a name='L1008'>    <b>if</b> (size &lt;= 9) <font color='red'>{</font>
+<a name='L1009'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ZipImportError,
+<a name='L1010'>                        "bad pyc data");
+<a name='L1011'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1012'>    <font color='red'>}</font>
+<a name='L1013'>
+<a name='L1014'>    <b>if</b> (<a href='../D/8871.html' title='Multiple defined in 3 places.'>get_long</a>((<b>unsigned</b> <b>char</b> *)buf) != <a href='../S/3120.html#L552' title='Defined at 552 in Python/import.c.'>PyImport_GetMagicNumber</a>()) <font color='red'>{</font>
+<a name='L1015'>        <b>if</b> (Py_VerboseFlag)
+<a name='L1016'>            <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("# %s has bad magic\n",
+<a name='L1017'>                              pathname);
+<a name='L1018'>        Py_INCREF(Py_None);
+<a name='L1019'>        <b>return</b> Py_None;  <i><font color='green'>/* signal caller to try alternative */</font></i>
+<a name='L1020'>    <font color='red'>}</font>
+<a name='L1021'>
+<a name='L1022'>    <b>if</b> (mtime != 0 &amp;&amp; !<a href='../S/2729.html#L987' title='Defined at 987 in Modules/zipimport.c.'>eq_mtime</a>(<a href='../D/8871.html' title='Multiple defined in 3 places.'>get_long</a>((<b>unsigned</b> <b>char</b> *)buf + 4),
+<a name='L1023'>                                mtime)) <font color='red'>{</font>
+<a name='L1024'>        <b>if</b> (Py_VerboseFlag)
+<a name='L1025'>            <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("# %s has bad mtime\n",
+<a name='L1026'>                              pathname);
+<a name='L1027'>        Py_INCREF(Py_None);
+<a name='L1028'>        <b>return</b> Py_None;  <i><font color='green'>/* signal caller to try alternative */</font></i>
+<a name='L1029'>    <font color='red'>}</font>
+<a name='L1030'>
+<a name='L1031'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/3124.html#L1124' title='Defined at 1124 in Python/marshal.c.'>PyMarshal_ReadObjectFromString</a>(buf + 8, size - 8);
+<a name='L1032'>    <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1033'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1034'>    <b>if</b> (!PyCode_Check(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>)) <font color='red'>{</font>
+<a name='L1035'>        Py_DECREF(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L1036'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L1037'>             "compiled module %s is not a code object",
+<a name='L1038'>             pathname);
+<a name='L1039'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1040'>    <font color='red'>}</font>
+<a name='L1041'>    <b>return</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L1042'><font color='red'>}</font>
+<a name='L1043'>
+<a name='L1044'><i><font color='green'>/* Replace any occurances of "\r\n?" in the input string with "\n".</font></i>
+<a name='L1045'><i><font color='green'>   This converts DOS and Mac line endings to Unix line endings.</font></i>
+<a name='L1046'><i><font color='green'>   Also append a trailing "\n" to be compatible with</font></i>
+<a name='L1047'><i><font color='green'>   PyParser_SimpleParseFile(). Returns a new reference. */</font></i>
+<a name='L1048'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1049'><a href='../S/2729.html#L1092' title='Refered from 1092 in Modules/zipimport.c.'>normalize_line_endings</a>(PyObject *source)
+<a name='L1050'><font color='red'>{</font>
+<a name='L1051'>    <b>char</b> *buf, *q, *p = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(source);
+<a name='L1052'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *fixed_source;
+<a name='L1053'>    <b>int</b> len = 0;
+<a name='L1054'>
+<a name='L1055'>    <b>if</b> (!p) <font color='red'>{</font>
+<a name='L1056'>        <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>("\n\0", 2);
+<a name='L1057'>    <font color='red'>}</font>
+<a name='L1058'>
+<a name='L1059'>    <i><font color='green'>/* one char extra for trailing \n and one for terminating \0 */</font></i>
+<a name='L1060'>    buf = (<b>char</b> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(<a href='../S/2779.html#L506' title='Defined at 506 in Objects/bytesobject.c.'>PyBytes_Size</a>(source) + 2);
+<a name='L1061'>    <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1062'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_MemoryError,
+<a name='L1063'>                        "zipimport: no memory to allocate "
+<a name='L1064'>                        "source buffer");
+<a name='L1065'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1066'>    <font color='red'>}</font>
+<a name='L1067'>    <i><font color='green'>/* replace "\r\n?" by "\n" */</font></i>
+<a name='L1068'>    <b>for</b> (q = buf; *p != '\0'; p++) <font color='red'>{</font>
+<a name='L1069'>        <b>if</b> (*p == '\r') <font color='red'>{</font>
+<a name='L1070'>            *q++ = '\n';
+<a name='L1071'>            <b>if</b> (*(p + 1) == '\n')
+<a name='L1072'>                p++;
+<a name='L1073'>        <font color='red'>}</font>
+<a name='L1074'>        <b>else</b>
+<a name='L1075'>            *q++ = *p;
+<a name='L1076'>        len++;
+<a name='L1077'>    <font color='red'>}</font>
+<a name='L1078'>    *q++ = '\n';  <i><font color='green'>/* add trailing \n */</font></i>
+<a name='L1079'>    *q = '\0';
+<a name='L1080'>    fixed_source = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(buf, len + 2);
+<a name='L1081'>    <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(buf);
+<a name='L1082'>    <b>return</b> fixed_source;
+<a name='L1083'><font color='red'>}</font>
+<a name='L1084'>
+<a name='L1085'><i><font color='green'>/* Given a string buffer containing Python source code, compile it</font></i>
+<a name='L1086'><i><font color='green'>   return and return a code object as a new reference. */</font></i>
+<a name='L1087'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1088'><a href='../S/2729.html#L1169' title='Refered from 1169 in Modules/zipimport.c.'>compile_source</a>(<b>char</b> *pathname, PyObject *source)
+<a name='L1089'><font color='red'>{</font>
+<a name='L1090'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>, *fixed_source;
+<a name='L1091'>
+<a name='L1092'>    fixed_source = <a href='../S/2729.html#L1049' title='Defined at 1049 in Modules/zipimport.c.'>normalize_line_endings</a>(source);
+<a name='L1093'>    <b>if</b> (fixed_source == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1094'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1095'>
+<a name='L1096'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../D/4102.html' title='Multiple defined in 2 places.'>Py_CompileString</a>(<a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(fixed_source), pathname,
+<a name='L1097'>                            <a href='../S/570.html#L151' title='Defined at 151 in Include/Python.h.'>Py_file_input</a>);
+<a name='L1098'>    Py_DECREF(fixed_source);
+<a name='L1099'>    <b>return</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L1100'><font color='red'>}</font>
+<a name='L1101'>
+<a name='L1102'><i><font color='green'>/* Convert the date/time values found in the Zip archive to a value</font></i>
+<a name='L1103'><i><font color='green'>   that's compatible with the time stamp stored in .pyc files. */</font></i>
+<a name='L1104'><b>static</b> time_t
+<a name='L1105'><a href='../S/2729.html#L1141' title='Refered from 1141 in Modules/zipimport.c.'>parse_dostime</a>(<b>int</b> dostime, <b>int</b> dosdate)
+<a name='L1106'><font color='red'>{</font>
+<a name='L1107'>    <b>struct</b> tm stm;
+<a name='L1108'>
+<a name='L1109'>    memset((<b>void</b> *) &amp;stm, '\0', <b>sizeof</b>(stm));
+<a name='L1110'>
+<a name='L1111'>    stm.tm_sec   =  (dostime        &amp; 0x1f) * 2;
+<a name='L1112'>    stm.tm_min   =  (dostime &gt;&gt; 5)  &amp; 0x3f;
+<a name='L1113'>    stm.tm_hour  =  (dostime &gt;&gt; 11) &amp; 0x1f;
+<a name='L1114'>    stm.tm_mday  =   dosdate        &amp; 0x1f;
+<a name='L1115'>    stm.tm_mon   = ((dosdate &gt;&gt; 5)  &amp; 0x0f) - 1;
+<a name='L1116'>    stm.tm_year  = ((dosdate &gt;&gt; 9)  &amp; 0x7f) + 80;
+<a name='L1117'>    stm.tm_isdst =   -1; <i><font color='green'>/* wday/yday is ignored */</font></i>
+<a name='L1118'>
+<a name='L1119'>    <b>return</b> mktime(&amp;stm);
+<a name='L1120'><font color='red'>}</font>
+<a name='L1121'>
+<a name='L1122'><i><font color='green'>/* Given a path to a .pyc or .pyo file in the archive, return the</font></i>
+<a name='L1123'><i><font color='green'>   modifictaion time of the matching .py file, or 0 if no source</font></i>
+<a name='L1124'><i><font color='green'>   is available. */</font></i>
+<a name='L1125'><b>static</b> time_t
+<a name='L1126'><a href='../S/2729.html#L1206' title='Refered from 1206 in Modules/zipimport.c.'>get_mtime_of_source</a>(ZipImporter *self, <b>char</b> *path)
+<a name='L1127'><font color='red'>{</font>
+<a name='L1128'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *toc_entry;
+<a name='L1129'>    time_t mtime = 0;
+<a name='L1130'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> lastchar = strlen(path) - 1;
+<a name='L1131'>    <b>char</b> savechar = path[lastchar];
+<a name='L1132'>    path[lastchar] = '\0';  <i><font color='green'>/* strip 'c' or 'o' from *.py[co] */</font></i>
+<a name='L1133'>    toc_entry = <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(self-&gt;files, path);
+<a name='L1134'>    <b>if</b> (toc_entry != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; PyTuple_Check(toc_entry) &amp;&amp;
+<a name='L1135'>        <a href='../S/2823.html#L112' title='Defined at 112 in Objects/tupleobject.c.'>PyTuple_Size</a>(toc_entry) == 8) <font color='red'>{</font>
+<a name='L1136'>        <i><font color='green'>/* fetch the time stamp of the .py file for comparison</font></i>
+<a name='L1137'><i><font color='green'>           with an embedded pyc time stamp */</font></i>
+<a name='L1138'>        <b>int</b> time, date;
+<a name='L1139'>        time = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2823.html#L123' title='Defined at 123 in Objects/tupleobject.c.'>PyTuple_GetItem</a>(toc_entry, 5));
+<a name='L1140'>        date = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2823.html#L123' title='Defined at 123 in Objects/tupleobject.c.'>PyTuple_GetItem</a>(toc_entry, 6));
+<a name='L1141'>        mtime = <a href='../S/2729.html#L1105' title='Defined at 1105 in Modules/zipimport.c.'>parse_dostime</a>(time, date);
+<a name='L1142'>    <font color='red'>}</font>
+<a name='L1143'>    path[lastchar] = savechar;
+<a name='L1144'>    <b>return</b> mtime;
+<a name='L1145'><font color='red'>}</font>
+<a name='L1146'>
+<a name='L1147'><i><font color='green'>/* Return the code object for the module named by 'fullname' from the</font></i>
+<a name='L1148'><i><font color='green'>   Zip archive as a new reference. */</font></i>
+<a name='L1149'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1150'><a href='../S/2729.html#L1209' title='Refered from 1209 in Modules/zipimport.c.'>get_code_from_data</a>(ZipImporter *self, <b>int</b> ispackage, <b>int</b> isbytecode,
+<a name='L1151'>                   time_t mtime, PyObject *toc_entry)
+<a name='L1152'><font color='red'>{</font>
+<a name='L1153'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *data, *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L1154'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *modpath;
+<a name='L1155'>
+<a name='L1156'>    data = <a href='../S/2729.html#L894' title='Defined at 894 in Modules/zipimport.c.'>get_data</a>(self-&gt;archive, toc_entry);
+<a name='L1157'>    <b>if</b> (data == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1158'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1159'>
+<a name='L1160'>    modpath = <a href='../S/2828.html#L1585' title='Defined at 1585 in Objects/unicodeobject.c.'>PyUnicode_EncodeFSDefault</a>(<a href='../S/2823.html#L123' title='Defined at 123 in Objects/tupleobject.c.'>PyTuple_GetItem</a>(toc_entry, 0));
+<a name='L1161'>    <b>if</b> (modpath == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1162'>        Py_DECREF(data);
+<a name='L1163'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1164'>    <font color='red'>}</font>
+<a name='L1165'>
+<a name='L1166'>    <b>if</b> (isbytecode)
+<a name='L1167'>        <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2729.html#L1002' title='Defined at 1002 in Modules/zipimport.c.'>unmarshal_code</a>(PyBytes_AS_STRING(modpath), data, mtime);
+<a name='L1168'>    <b>else</b>
+<a name='L1169'>        <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2729.html#L1088' title='Defined at 1088 in Modules/zipimport.c.'>compile_source</a>(PyBytes_AS_STRING(modpath), data);
+<a name='L1170'>    Py_DECREF(modpath);
+<a name='L1171'>    Py_DECREF(data);
+<a name='L1172'>    <b>return</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L1173'><font color='red'>}</font>
+<a name='L1174'>
+<a name='L1175'><i><font color='green'>/* Get the code object assoiciated with the module specified by</font></i>
+<a name='L1176'><i><font color='green'>   'fullname'. */</font></i>
+<a name='L1177'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1178'><a href='../R/8072.html' title='Multiple refered from 4 places.'>get_module_code</a>(ZipImporter *self, <b>char</b> *fullname,
+<a name='L1179'>                <b>int</b> *p_ispackage, PyObject **p_modpath)
+<a name='L1180'><font color='red'>{</font>
+<a name='L1181'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *toc_entry;
+<a name='L1182'>    <b>char</b> *subname, path[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> + 1];
+<a name='L1183'>    <b>int</b> len;
+<a name='L1184'>    <b>struct</b> <a href='../S/2729.html#L12' title='Defined at 12 in Modules/zipimport.c.'>st_zip_searchorder</a> *zso;
+<a name='L1185'>
+<a name='L1186'>    subname = <a href='../S/2729.html#L206' title='Defined at 206 in Modules/zipimport.c.'>get_subname</a>(fullname);
+<a name='L1187'>
+<a name='L1188'>    len = <a href='../S/2729.html#L220' title='Defined at 220 in Modules/zipimport.c.'>make_filename</a>(self-&gt;<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, subname, path, <b>sizeof</b>(path));
+<a name='L1189'>    <b>if</b> (len &lt; 0)
+<a name='L1190'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1191'>
+<a name='L1192'>    <b>for</b> (zso = zip_searchorder; *zso-&gt;suffix; zso++) <font color='red'>{</font>
+<a name='L1193'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1194'>
+<a name='L1195'>        strcpy(path + len, zso-&gt;suffix);
+<a name='L1196'>        <b>if</b> (Py_VerboseFlag &gt; 1)
+<a name='L1197'>            <a href='../S/3144.html#L2081' title='Defined at 2081 in Python/sysmodule.c.'>PySys_FormatStderr</a>("# trying %U%c%s\n",
+<a name='L1198'>                               self-&gt;archive, (<b>int</b>)<a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>, path);
+<a name='L1199'>        toc_entry = <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(self-&gt;files, path);
+<a name='L1200'>        <b>if</b> (toc_entry != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1201'>            time_t mtime = 0;
+<a name='L1202'>            <b>int</b> ispackage = zso-&gt;type &amp; <a href='../S/2729.html#L10' title='Defined at 10 in Modules/zipimport.c.'>IS_PACKAGE</a>;
+<a name='L1203'>            <b>int</b> isbytecode = zso-&gt;type &amp; <a href='../S/2729.html#L9' title='Defined at 9 in Modules/zipimport.c.'>IS_BYTECODE</a>;
+<a name='L1204'>
+<a name='L1205'>            <b>if</b> (isbytecode)
+<a name='L1206'>                mtime = <a href='../S/2729.html#L1126' title='Defined at 1126 in Modules/zipimport.c.'>get_mtime_of_source</a>(self, path);
+<a name='L1207'>            <b>if</b> (p_ispackage != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1208'>                *p_ispackage = ispackage;
+<a name='L1209'>            <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2729.html#L1150' title='Defined at 1150 in Modules/zipimport.c.'>get_code_from_data</a>(self, ispackage,
+<a name='L1210'>                                      isbytecode, mtime,
+<a name='L1211'>                                      toc_entry);
+<a name='L1212'>            <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> == Py_None) <font color='red'>{</font>
+<a name='L1213'>                <i><font color='green'>/* bad magic number or non-matching mtime</font></i>
+<a name='L1214'><i><font color='green'>                   in byte code, try next */</font></i>
+<a name='L1215'>                Py_DECREF(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L1216'>                <b>continue</b>;
+<a name='L1217'>            <font color='red'>}</font>
+<a name='L1218'>            <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; p_modpath != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1219'>                *p_modpath = <a href='../S/2823.html#L123' title='Defined at 123 in Objects/tupleobject.c.'>PyTuple_GetItem</a>(toc_entry, 0);
+<a name='L1220'>                Py_INCREF(*p_modpath);
+<a name='L1221'>            <font color='red'>}</font>
+<a name='L1222'>            <b>return</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L1223'>        <font color='red'>}</font>
+<a name='L1224'>    <font color='red'>}</font>
+<a name='L1225'>    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(ZipImportError, "can't find module '%s'", fullname);
+<a name='L1226'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1227'><font color='red'>}</font>
+<a name='L1228'>
+<a name='L1229'>
+<a name='L1230'><i><font color='green'>/* Module init */</font></i>
+<a name='L1231'>
+<a name='L1232'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(zipimport_doc,
+<a name='L1233'>"zipimport provides support for importing Python modules from Zip archives.\n\
+<a name='L1234'>\n\
+<a name='L1235'>This module exports three objects:\n\
+<a name='L1236'>- zipimporter: a class; its constructor takes a path to a Zip archive.\n\
+<a name='L1237'>- ZipImportError: exception raised by zipimporter objects. It's a\n\
+<a name='L1238'>  subclass of ImportError, so it can be caught as ImportError, too.\n\
+<a name='L1239'>- _zip_directory_cache: a dict, mapping archive paths to zip directory\n\
+<a name='L1240'>  info dicts, as used in zipimporter._files.\n\
+<a name='L1241'>\n\
+<a name='L1242'>It is usually not needed to use the zipimport module explicitly; it is\n\
+<a name='L1243'>used by the builtin import mechanism for sys.path items that are paths\n\
+<a name='L1244'>to Zip archives.");
+<a name='L1245'>
+<a name='L1246'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> zipimportmodule = <font color='red'>{</font>
+<a name='L1247'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L1248'>    "zipimport",
+<a name='L1249'>    zipimport_doc,
+<a name='L1250'>    -1,
+<a name='L1251'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1252'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1253'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1254'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1255'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L1256'><font color='red'>}</font>;
+<a name='L1257'>
+<a name='L1258'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L1259'><a href='../R/3066.html' title='Multiple refered from 2 places.'>PyInit_zipimport</a>(<b>void</b>)
+<a name='L1260'><font color='red'>{</font>
+<a name='L1261'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *mod;
+<a name='L1262'>
+<a name='L1263'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;ZipImporter_Type) &lt; 0)
+<a name='L1264'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1265'>
+<a name='L1266'>    <i><font color='green'>/* Correct directory separator */</font></i>
+<a name='L1267'>    zip_searchorder[0].suffix[0] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L1268'>    zip_searchorder[1].suffix[0] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L1269'>    zip_searchorder[2].suffix[0] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L1270'>    <b>if</b> (Py_OptimizeFlag) <font color='red'>{</font>
+<a name='L1271'>        <i><font color='green'>/* Reverse *.pyc and *.pyo */</font></i>
+<a name='L1272'>        <b>struct</b> <a href='../S/2729.html#L12' title='Defined at 12 in Modules/zipimport.c.'>st_zip_searchorder</a> tmp;
+<a name='L1273'>        tmp = zip_searchorder[0];
+<a name='L1274'>        zip_searchorder[0] = zip_searchorder[1];
+<a name='L1275'>        zip_searchorder[1] = tmp;
+<a name='L1276'>        tmp = zip_searchorder[3];
+<a name='L1277'>        zip_searchorder[3] = zip_searchorder[4];
+<a name='L1278'>        zip_searchorder[4] = tmp;
+<a name='L1279'>    <font color='red'>}</font>
+<a name='L1280'>
+<a name='L1281'>    mod = PyModule_Create(&amp;zipimportmodule);
+<a name='L1282'>    <b>if</b> (mod == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1283'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1284'>
+<a name='L1285'>    ZipImportError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("zipimport.ZipImportError",
+<a name='L1286'>                                        PyExc_ImportError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1287'>    <b>if</b> (ZipImportError == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1288'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1289'>
+<a name='L1290'>    Py_INCREF(ZipImportError);
+<a name='L1291'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(mod, "ZipImportError",
+<a name='L1292'>                           ZipImportError) &lt; 0)
+<a name='L1293'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1294'>
+<a name='L1295'>    Py_INCREF(&amp;ZipImporter_Type);
+<a name='L1296'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(mod, "zipimporter",
+<a name='L1297'>                           (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;ZipImporter_Type) &lt; 0)
+<a name='L1298'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1299'>
+<a name='L1300'>    zip_directory_cache = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L1301'>    <b>if</b> (zip_directory_cache == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1302'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1303'>    Py_INCREF(zip_directory_cache);
+<a name='L1304'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(mod, "_zip_directory_cache",
+<a name='L1305'>                           zip_directory_cache) &lt; 0)
+<a name='L1306'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1307'>    <b>return</b> mod;
+<a name='L1308'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L64'>[^]</a><a href='#L1259'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

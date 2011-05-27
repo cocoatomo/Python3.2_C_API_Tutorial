@@ -1,0 +1,1679 @@
+<html>
+<head>
+<title>Modules/_csv.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/_csv.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L102'>[^]</a><a href='#L1565'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L102' title='Defined at 102.'>get_dialect_from_registry</a>
+<li><a href='#L117' title='Defined at 117.'>get_string</a>
+<li><a href='#L124' title='Defined at 124.'>get_nullchar_as_None</a>
+<li><a href='#L135' title='Defined at 135.'>Dialect_get_lineterminator</a>
+<li><a href='#L141' title='Defined at 141.'>Dialect_get_delimiter</a>
+<li><a href='#L147' title='Defined at 147.'>Dialect_get_escapechar</a>
+<li><a href='#L153' title='Defined at 153.'>Dialect_get_quotechar</a>
+<li><a href='#L159' title='Defined at 159.'>Dialect_get_quoting</a>
+<li><a href='#L165' title='Defined at 165.'>_set_bool</a>
+<li><a href='#L175' title='Defined at 175.'>_set_int</a>
+<li><a href='#L202' title='Defined at 202.'>_set_char</a>
+<li><a href='#L227' title='Defined at 227.'>_set_str</a>
+<li><a href='#L249' title='Defined at 249.'>dialect_check_quoting</a>
+<li><a href='#L280' title='Defined at 280.'>Dialect_dealloc</a>
+<li><a href='#L300' title='Defined at 300.'>dialect_new</a>
+<li><a href='#L480' title='Defined at 480.'>_call_dialect</a>
+<li><a href='#L497' title='Defined at 497.'>parse_save_field</a>
+<li><a href='#L523' title='Defined at 523.'>parse_grow_buff</a>
+<li><a href='#L548' title='Defined at 548.'>parse_add_char</a>
+<li><a href='#L562' title='Defined at 562.'>parse_process_char</a>
+<li><a href='#L732' title='Defined at 732.'>parse_reset</a>
+<li><a href='#L745' title='Defined at 745.'>Reader_iternext</a>
+<li><a href='#L805' title='Defined at 805.'>Reader_dealloc</a>
+<li><a href='#L817' title='Defined at 817.'>Reader_traverse</a>
+<li><a href='#L826' title='Defined at 826.'>Reader_clear</a>
+<li><a href='#L890' title='Defined at 890.'>csv_reader</a>
+<li><a href='#L936' title='Defined at 936.'>join_reset</a>
+<li><a href='#L948' title='Defined at 948.'>join_append_data</a>
+<li><a href='#L1039' title='Defined at 1039.'>join_check_rec_size</a>
+<li><a href='#L1072' title='Defined at 1072.'>join_append</a>
+<li><a href='#L1091' title='Defined at 1091.'>join_append_lineterminator</a>
+<li><a href='#L1121' title='Defined at 1121.'>csv_writerow</a>
+<li><a href='#L1201' title='Defined at 1201.'>csv_writerows</a>
+<li><a href='#L1242' title='Defined at 1242.'>Writer_dealloc</a>
+<li><a href='#L1253' title='Defined at 1253.'>Writer_traverse</a>
+<li><a href='#L1261' title='Defined at 1261.'>Writer_clear</a>
+<li><a href='#L1311' title='Defined at 1311.'>csv_writer</a>
+<li><a href='#L1351' title='Defined at 1351.'>csv_list_dialects</a>
+<li><a href='#L1357' title='Defined at 1357.'>csv_register_dialect</a>
+<li><a href='#L1382' title='Defined at 1382.'>csv_unregister_dialect</a>
+<li><a href='#L1391' title='Defined at 1391.'>csv_get_dialect</a>
+<li><a href='#L1397' title='Defined at 1397.'>csv_field_size_limit</a>
+<li><a href='#L1565' title='Defined at 1565.'>PyInit__csv</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* csv module */</font></i>
+<a name='L2'>
+<a name='L3'><i><font color='green'>/*</font></i>
+<a name='L4'><i><font color='green'></font></i>
+<a name='L5'><i><font color='green'>This module provides the low-level underpinnings of a CSV reading/writing</font></i>
+<a name='L6'><i><font color='green'>module.  Users should not use this module directly, but import the csv.py</font></i>
+<a name='L7'><i><font color='green'>module instead.</font></i>
+<a name='L8'><i><font color='green'></font></i>
+<a name='L9'><i><font color='green'>*/</font></i>
+<a name='L10'>
+<a name='L11'><font color='darkred'>#define</font> <a href='../S/2245.html#L1586' title='Refered from 1586 in Modules/_csv.c.'>MODULE_VERSION</a> "1.0"
+<a name='L12'>
+<a name='L13'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L14'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L15'>
+<a name='L16'><font color='darkred'>#define</font> <a href='../R/1587.html' title='Multiple refered from 3 places.'>IS_BASESTRING</a>(o) \
+<a name='L17'>    PyUnicode_Check(o)
+<a name='L18'>
+<a name='L19'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *error_obj;     <i><font color='green'>/* CSV exception */</font></i>
+<a name='L20'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dialects;      <i><font color='green'>/* Dialect registry */</font></i>
+<a name='L21'><b>static</b> <b>long</b> field_limit = 128 * 1024;   <i><font color='green'>/* max parsed field size */</font></i>
+<a name='L22'>
+<a name='L23'><b>typedef</b> <b>enum</b> <font color='red'>{</font>
+<a name='L24'>    <a href='../R/4334.html' title='Multiple refered from 7 places.'>START_RECORD</a>, <a href='../R/4332.html' title='Multiple refered from 4 places.'>START_FIELD</a>, <a href='../R/897.html' title='Multiple refered from 3 places.'>ESCAPED_CHAR</a>, <a href='../R/1567.html' title='Multiple refered from 5 places.'>IN_FIELD</a>,
+<a name='L25'>    <a href='../R/1571.html' title='Multiple refered from 4 places.'>IN_QUOTED_FIELD</a>, <a href='../R/898.html' title='Multiple refered from 2 places.'>ESCAPE_IN_QUOTED_FIELD</a>, <a href='../R/3882.html' title='Multiple refered from 2 places.'>QUOTE_IN_QUOTED_FIELD</a>,
+<a name='L26'>    <a href='../R/830.html' title='Multiple refered from 5 places.'>EAT_CRNL</a>
+<a name='L27'><font color='red'>}</font> <a href='../S/2245.html#L70' title='Refered from 70 in Modules/_csv.c.'>ParserState</a>;
+<a name='L28'>
+<a name='L29'><b>typedef</b> <b>enum</b> <font color='red'>{</font>
+<a name='L30'>    <a href='../R/3883.html' title='Multiple refered from 2 places.'>QUOTE_MINIMAL</a>, <a href='../R/3881.html' title='Multiple refered from 2 places.'>QUOTE_ALL</a>, <a href='../R/3885.html' title='Multiple refered from 3 places.'>QUOTE_NONNUMERIC</a>, <a href='../R/3884.html' title='Multiple refered from 8 places.'>QUOTE_NONE</a>
+<a name='L31'><font color='red'>}</font> <a href='../S/2245.html#L34' title='Refered from 34 in Modules/_csv.c.'>QuoteStyle</a>;
+<a name='L32'>
+<a name='L33'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L34'>    <a href='../S/2245.html#L31' title='Defined at 31 in Modules/_csv.c.'>QuoteStyle</a> style;
+<a name='L35'>    <b>char</b> *name;
+<a name='L36'><font color='red'>}</font> <a href='../R/4508.html' title='Multiple refered from 3 places.'>StyleDesc</a>;
+<a name='L37'>
+<a name='L38'><b>static</b> <a href='../S/2245.html#L36' title='Defined at 36 in Modules/_csv.c.'>StyleDesc</a> quote_styles[] = <font color='red'>{</font>
+<a name='L39'>    <font color='red'>{</font> <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_MINIMAL</a>,    "QUOTE_MINIMAL" <font color='red'>}</font>,
+<a name='L40'>    <font color='red'>{</font> <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_ALL</a>,        "QUOTE_ALL" <font color='red'>}</font>,
+<a name='L41'>    <font color='red'>{</font> <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONNUMERIC</a>, "QUOTE_NONNUMERIC" <font color='red'>}</font>,
+<a name='L42'>    <font color='red'>{</font> <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a>,       "QUOTE_NONE" <font color='red'>}</font>,
+<a name='L43'>    <font color='red'>{</font> 0 <font color='red'>}</font>
+<a name='L44'><font color='red'>}</font>;
+<a name='L45'>
+<a name='L46'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L47'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L48'>
+<a name='L49'>    <b>int</b> doublequote;            <i><font color='green'>/* is " represented by ""? */</font></i>
+<a name='L50'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> delimiter;       <i><font color='green'>/* field separator */</font></i>
+<a name='L51'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> quotechar;       <i><font color='green'>/* quote character */</font></i>
+<a name='L52'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> escapechar;      <i><font color='green'>/* escape character */</font></i>
+<a name='L53'>    <b>int</b> skipinitialspace;       <i><font color='green'>/* ignore spaces following delimiter? */</font></i>
+<a name='L54'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *lineterminator; <i><font color='green'>/* string to write between records */</font></i>
+<a name='L55'>    <b>int</b> quoting;                <i><font color='green'>/* style of quoting to write */</font></i>
+<a name='L56'>
+<a name='L57'>    <b>int</b> strict;                 <i><font color='green'>/* raise exception on bad CSV */</font></i>
+<a name='L58'><font color='red'>}</font> <a href='../R/793.html' title='Multiple refered from 11 places.'>DialectObj</a>;
+<a name='L59'>
+<a name='L60'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Dialect_Type;
+<a name='L61'>
+<a name='L62'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L63'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L64'>
+<a name='L65'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *input_iter;   <i><font color='green'>/* iterate over this for input lines */</font></i>
+<a name='L66'>
+<a name='L67'>    <a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *dialect;    <i><font color='green'>/* parsing dialect */</font></i>
+<a name='L68'>
+<a name='L69'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *fields;           <i><font color='green'>/* field list for current record */</font></i>
+<a name='L70'>    <a href='../S/2245.html#L27' title='Defined at 27 in Modules/_csv.c.'>ParserState</a> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;          <i><font color='green'>/* current CSV parse state */</font></i>
+<a name='L71'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *field;          <i><font color='green'>/* build current field in here */</font></i>
+<a name='L72'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> field_size;      <i><font color='green'>/* size of allocated buffer */</font></i>
+<a name='L73'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> field_len;       <i><font color='green'>/* length of current field */</font></i>
+<a name='L74'>    <b>int</b> numeric_field;          <i><font color='green'>/* treat field as numeric */</font></i>
+<a name='L75'>    <b>unsigned</b> <b>long</b> line_num;     <i><font color='green'>/* Source-file line number */</font></i>
+<a name='L76'><font color='red'>}</font> <a href='../R/3999.html' title='Multiple refered from 3 places.'>ReaderObj</a>;
+<a name='L77'>
+<a name='L78'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Reader_Type;
+<a name='L79'>
+<a name='L80'><font color='darkred'>#define</font> ReaderObject_Check(v)   (<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(v) == &amp;Reader_Type)
+<a name='L81'>
+<a name='L82'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L83'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L84'>
+<a name='L85'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *writeline;    <i><font color='green'>/* write output lines to this file */</font></i>
+<a name='L86'>
+<a name='L87'>    <a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *dialect;    <i><font color='green'>/* parsing dialect */</font></i>
+<a name='L88'>
+<a name='L89'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *rec;            <i><font color='green'>/* buffer for parser.join */</font></i>
+<a name='L90'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> rec_size;        <i><font color='green'>/* size of allocated record */</font></i>
+<a name='L91'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> rec_len;         <i><font color='green'>/* length of record */</font></i>
+<a name='L92'>    <b>int</b> num_fields;             <i><font color='green'>/* number of fields in record */</font></i>
+<a name='L93'><font color='red'>}</font> <a href='../R/4935.html' title='Multiple refered from 3 places.'>WriterObj</a>;
+<a name='L94'>
+<a name='L95'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Writer_Type;
+<a name='L96'>
+<a name='L97'><i><font color='green'>/*</font></i>
+<a name='L98'><i><font color='green'> * DIALECT class</font></i>
+<a name='L99'><i><font color='green'> */</font></i>
+<a name='L100'>
+<a name='L101'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L102'><a href='../R/8048.html' title='Multiple refered from 2 places.'>get_dialect_from_registry</a>(PyObject * name_obj)
+<a name='L103'><font color='red'>{</font>
+<a name='L104'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dialect_obj;
+<a name='L105'>
+<a name='L106'>    dialect_obj = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(dialects, name_obj);
+<a name='L107'>    <b>if</b> (dialect_obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L108'>        <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L109'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj, "unknown dialect");
+<a name='L110'>    <font color='red'>}</font>
+<a name='L111'>    <b>else</b>
+<a name='L112'>        Py_INCREF(dialect_obj);
+<a name='L113'>    <b>return</b> dialect_obj;
+<a name='L114'><font color='red'>}</font>
+<a name='L115'>
+<a name='L116'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L117'><a href='../R/8096.html' title='Multiple refered from 4 places.'>get_string</a>(PyObject *str)
+<a name='L118'><font color='red'>{</font>
+<a name='L119'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(str);
+<a name='L120'>    <b>return</b> str;
+<a name='L121'><font color='red'>}</font>
+<a name='L122'>
+<a name='L123'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L124'><a href='../R/8078.html' title='Multiple refered from 3 places.'>get_nullchar_as_None</a>(Py_UNICODE c)
+<a name='L125'><font color='red'>{</font>
+<a name='L126'>    <b>if</b> (c == '\0') <font color='red'>{</font>
+<a name='L127'>        Py_INCREF(Py_None);
+<a name='L128'>        <b>return</b> Py_None;
+<a name='L129'>    <font color='red'>}</font>
+<a name='L130'>    <b>else</b>
+<a name='L131'>        <b>return</b> <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>((<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *)&amp;c, 1);
+<a name='L132'><font color='red'>}</font>
+<a name='L133'>
+<a name='L134'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L135'><a href='../S/2245.html#L273' title='Refered from 273 in Modules/_csv.c.'>Dialect_get_lineterminator</a>(DialectObj *self)
+<a name='L136'><font color='red'>{</font>
+<a name='L137'>    <b>return</b> <a href='../D/8898.html' title='Multiple defined in 2 places.'>get_string</a>(self-&gt;lineterminator);
+<a name='L138'><font color='red'>}</font>
+<a name='L139'>
+<a name='L140'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L141'><a href='../S/2245.html#L271' title='Refered from 271 in Modules/_csv.c.'>Dialect_get_delimiter</a>(DialectObj *self)
+<a name='L142'><font color='red'>{</font>
+<a name='L143'>    <b>return</b> <a href='../S/2245.html#L124' title='Defined at 124 in Modules/_csv.c.'>get_nullchar_as_None</a>(self-&gt;delimiter);
+<a name='L144'><font color='red'>}</font>
+<a name='L145'>
+<a name='L146'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L147'><a href='../S/2245.html#L272' title='Refered from 272 in Modules/_csv.c.'>Dialect_get_escapechar</a>(DialectObj *self)
+<a name='L148'><font color='red'>{</font>
+<a name='L149'>    <b>return</b> <a href='../S/2245.html#L124' title='Defined at 124 in Modules/_csv.c.'>get_nullchar_as_None</a>(self-&gt;escapechar);
+<a name='L150'><font color='red'>}</font>
+<a name='L151'>
+<a name='L152'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L153'><a href='../S/2245.html#L274' title='Refered from 274 in Modules/_csv.c.'>Dialect_get_quotechar</a>(DialectObj *self)
+<a name='L154'><font color='red'>{</font>
+<a name='L155'>    <b>return</b> <a href='../S/2245.html#L124' title='Defined at 124 in Modules/_csv.c.'>get_nullchar_as_None</a>(self-&gt;quotechar);
+<a name='L156'><font color='red'>}</font>
+<a name='L157'>
+<a name='L158'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L159'><a href='../S/2245.html#L275' title='Refered from 275 in Modules/_csv.c.'>Dialect_get_quoting</a>(DialectObj *self)
+<a name='L160'><font color='red'>{</font>
+<a name='L161'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(self-&gt;quoting);
+<a name='L162'><font color='red'>}</font>
+<a name='L163'>
+<a name='L164'><b>static</b> <b>int</b>
+<a name='L165'><a href='../R/5836.html' title='Multiple refered from 3 places.'>_set_bool</a>(<b>const</b> <b>char</b> *name, <b>int</b> *target, PyObject *src, <b>int</b> dflt)
+<a name='L166'><font color='red'>{</font>
+<a name='L167'>    <b>if</b> (src == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L168'>        *target = dflt;
+<a name='L169'>    <b>else</b>
+<a name='L170'>        *target = <a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(src);
+<a name='L171'>    <b>return</b> 0;
+<a name='L172'><font color='red'>}</font>
+<a name='L173'>
+<a name='L174'><b>static</b> <b>int</b>
+<a name='L175'><a href='../S/2245.html#L387' title='Refered from 387 in Modules/_csv.c.'>_set_int</a>(<b>const</b> <b>char</b> *name, <b>int</b> *target, PyObject *src, <b>int</b> dflt)
+<a name='L176'><font color='red'>{</font>
+<a name='L177'>    <b>if</b> (src == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L178'>        *target = dflt;
+<a name='L179'>    <b>else</b> <font color='red'>{</font>
+<a name='L180'>        <b>long</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L181'>        <b>if</b> (!PyLong_CheckExact(src)) <font color='red'>{</font>
+<a name='L182'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L183'>                         "\"%s\" must be an integer", name);
+<a name='L184'>            <b>return</b> -1;
+<a name='L185'>        <font color='red'>}</font>
+<a name='L186'>        <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(src);
+<a name='L187'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L188'>            <b>return</b> -1;
+<a name='L189'><font color='darkred'>#if</font> <a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a> &gt; <a href='../D/4733.html' title='Multiple defined in 3 places.'>SIZEOF_INT</a>
+<a name='L190'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a> || <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &lt; INT_MIN) <font color='red'>{</font>
+<a name='L191'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L192'>                         "integer out of range for \"%s\"", name);
+<a name='L193'>            <b>return</b> -1;
+<a name='L194'>        <font color='red'>}</font>
+<a name='L195'><font color='darkred'>#endif</font>
+<a name='L196'>        *target = (<b>int</b>)<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L197'>    <font color='red'>}</font>
+<a name='L198'>    <b>return</b> 0;
+<a name='L199'><font color='red'>}</font>
+<a name='L200'>
+<a name='L201'><b>static</b> <b>int</b>
+<a name='L202'><a href='../R/5837.html' title='Multiple refered from 3 places.'>_set_char</a>(<b>const</b> <b>char</b> *name, Py_UNICODE *target, PyObject *src, Py_UNICODE dflt)
+<a name='L203'><font color='red'>{</font>
+<a name='L204'>    <b>if</b> (src == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L205'>        *target = dflt;
+<a name='L206'>    <b>else</b> <font color='red'>{</font>
+<a name='L207'>        *target = '\0';
+<a name='L208'>        <b>if</b> (src != Py_None) <font color='red'>{</font>
+<a name='L209'>            <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *buf;
+<a name='L210'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L211'>            buf = <a href='../D/3960.html' title='Multiple defined in 3 places.'>PyUnicode_AsUnicode</a>(src);
+<a name='L212'>            len = <a href='../D/4020.html' title='Multiple defined in 3 places.'>PyUnicode_GetSize</a>(src);
+<a name='L213'>            <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || len &gt; 1) <font color='red'>{</font>
+<a name='L214'>                <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L215'>                    "\"%s\" must be an 1-character string",
+<a name='L216'>                    name);
+<a name='L217'>                <b>return</b> -1;
+<a name='L218'>            <font color='red'>}</font>
+<a name='L219'>            <b>if</b> (len &gt; 0)
+<a name='L220'>                *target = buf[0];
+<a name='L221'>        <font color='red'>}</font>
+<a name='L222'>    <font color='red'>}</font>
+<a name='L223'>    <b>return</b> 0;
+<a name='L224'><font color='red'>}</font>
+<a name='L225'>
+<a name='L226'><b>static</b> <b>int</b>
+<a name='L227'><a href='../S/2245.html#L385' title='Refered from 385 in Modules/_csv.c.'>_set_str</a>(<b>const</b> <b>char</b> *name, PyObject **target, PyObject *src, <b>const</b> <b>char</b> *dflt)
+<a name='L228'><font color='red'>{</font>
+<a name='L229'>    <b>if</b> (src == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L230'>        *target = <a href='../D/3973.html' title='Multiple defined in 3 places.'>PyUnicode_DecodeASCII</a>(dflt, strlen(dflt), <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L231'>    <b>else</b> <font color='red'>{</font>
+<a name='L232'>        <b>if</b> (src == Py_None)
+<a name='L233'>            *target = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L234'>        <b>else</b> <b>if</b> (!<a href='../S/2245.html#L16' title='Defined at 16 in Modules/_csv.c.'>IS_BASESTRING</a>(src)) <font color='red'>{</font>
+<a name='L235'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L236'>                         "\"%s\" must be a string", name);
+<a name='L237'>            <b>return</b> -1;
+<a name='L238'>        <font color='red'>}</font>
+<a name='L239'>        <b>else</b> <font color='red'>{</font>
+<a name='L240'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(*target);
+<a name='L241'>            Py_INCREF(src);
+<a name='L242'>            *target = src;
+<a name='L243'>        <font color='red'>}</font>
+<a name='L244'>    <font color='red'>}</font>
+<a name='L245'>    <b>return</b> 0;
+<a name='L246'><font color='red'>}</font>
+<a name='L247'>
+<a name='L248'><b>static</b> <b>int</b>
+<a name='L249'><a href='../S/2245.html#L392' title='Refered from 392 in Modules/_csv.c.'>dialect_check_quoting</a>(<b>int</b> quoting)
+<a name='L250'><font color='red'>{</font>
+<a name='L251'>    <a href='../S/2245.html#L36' title='Defined at 36 in Modules/_csv.c.'>StyleDesc</a> *qs;
+<a name='L252'>
+<a name='L253'>    <b>for</b> (qs = quote_styles; qs-&gt;name; qs++) <font color='red'>{</font>
+<a name='L254'>        <b>if</b> (qs-&gt;style == quoting)
+<a name='L255'>            <b>return</b> 0;
+<a name='L256'>    <font color='red'>}</font>
+<a name='L257'>    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError, "bad \"quoting\" value");
+<a name='L258'>    <b>return</b> -1;
+<a name='L259'><font color='red'>}</font>
+<a name='L260'>
+<a name='L261'><font color='darkred'>#define</font> <a href='../R/781.html' title='Multiple refered from 3 places.'>D_OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a>, x)
+<a name='L262'>
+<a name='L263'><b>static</b> <b>struct</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> Dialect_memberlist[] = <font color='red'>{</font>
+<a name='L264'>    <font color='red'>{</font> "skipinitialspace",   <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>, <a href='../S/2245.html#L261' title='Defined at 261 in Modules/_csv.c.'>D_OFF</a>(skipinitialspace), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a> <font color='red'>}</font>,
+<a name='L265'>    <font color='red'>{</font> "doublequote",        <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>, <a href='../S/2245.html#L261' title='Defined at 261 in Modules/_csv.c.'>D_OFF</a>(doublequote), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a> <font color='red'>}</font>,
+<a name='L266'>    <font color='red'>{</font> "strict",             <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>, <a href='../S/2245.html#L261' title='Defined at 261 in Modules/_csv.c.'>D_OFF</a>(strict), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a> <font color='red'>}</font>,
+<a name='L267'>    <font color='red'>{</font> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>
+<a name='L268'><font color='red'>}</font>;
+<a name='L269'>
+<a name='L270'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> Dialect_getsetlist[] = <font color='red'>{</font>
+<a name='L271'>    <font color='red'>{</font> "delimiter",          (getter)<a href='../S/2245.html#L141' title='Defined at 141 in Modules/_csv.c.'>Dialect_get_delimiter</a><font color='red'>}</font>,
+<a name='L272'>    <font color='red'>{</font> "escapechar",             (getter)<a href='../S/2245.html#L147' title='Defined at 147 in Modules/_csv.c.'>Dialect_get_escapechar</a><font color='red'>}</font>,
+<a name='L273'>    <font color='red'>{</font> "lineterminator",         (getter)<a href='../S/2245.html#L135' title='Defined at 135 in Modules/_csv.c.'>Dialect_get_lineterminator</a><font color='red'>}</font>,
+<a name='L274'>    <font color='red'>{</font> "quotechar",              (getter)<a href='../S/2245.html#L153' title='Defined at 153 in Modules/_csv.c.'>Dialect_get_quotechar</a><font color='red'>}</font>,
+<a name='L275'>    <font color='red'>{</font> "quoting",                (getter)<a href='../S/2245.html#L159' title='Defined at 159 in Modules/_csv.c.'>Dialect_get_quoting</a><font color='red'>}</font>,
+<a name='L276'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L277'><font color='red'>}</font>;
+<a name='L278'>
+<a name='L279'><b>static</b> <b>void</b>
+<a name='L280'><a href='../S/2245.html#L438' title='Refered from 438 in Modules/_csv.c.'>Dialect_dealloc</a>(DialectObj *self)
+<a name='L281'><font color='red'>{</font>
+<a name='L282'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;lineterminator);
+<a name='L283'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self);
+<a name='L284'><font color='red'>}</font>
+<a name='L285'>
+<a name='L286'><b>static</b> <b>char</b> *dialect_kws[] = <font color='red'>{</font>
+<a name='L287'>    "dialect",
+<a name='L288'>    "delimiter",
+<a name='L289'>    "doublequote",
+<a name='L290'>    "escapechar",
+<a name='L291'>    "lineterminator",
+<a name='L292'>    "quotechar",
+<a name='L293'>    "quoting",
+<a name='L294'>    "skipinitialspace",
+<a name='L295'>    "strict",
+<a name='L296'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L297'><font color='red'>}</font>;
+<a name='L298'>
+<a name='L299'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L300'><a href='../S/2245.html#L471' title='Refered from 471 in Modules/_csv.c.'>dialect_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+<a name='L301'><font color='red'>{</font>
+<a name='L302'>    <a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *self;
+<a name='L303'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ret = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L304'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dialect = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L305'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *delimiter = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L306'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *doublequote = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L307'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *escapechar = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L308'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *lineterminator = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L309'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *quotechar = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L310'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *quoting = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L311'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *skipinitialspace = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L312'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *strict = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L313'>
+<a name='L314'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs,
+<a name='L315'>                                     "|OOOOOOOOO", dialect_kws,
+<a name='L316'>                                     &amp;dialect,
+<a name='L317'>                                     &amp;delimiter,
+<a name='L318'>                                     &amp;doublequote,
+<a name='L319'>                                     &amp;escapechar,
+<a name='L320'>                                     &amp;lineterminator,
+<a name='L321'>                                     &amp;quotechar,
+<a name='L322'>                                     &amp;quoting,
+<a name='L323'>                                     &amp;skipinitialspace,
+<a name='L324'>                                     &amp;strict))
+<a name='L325'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L326'>
+<a name='L327'>    <b>if</b> (dialect != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L328'>        <b>if</b> (<a href='../S/2245.html#L16' title='Defined at 16 in Modules/_csv.c.'>IS_BASESTRING</a>(dialect)) <font color='red'>{</font>
+<a name='L329'>            dialect = <a href='../S/2245.html#L102' title='Defined at 102 in Modules/_csv.c.'>get_dialect_from_registry</a>(dialect);
+<a name='L330'>            <b>if</b> (dialect == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L331'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L332'>        <font color='red'>}</font>
+<a name='L333'>        <b>else</b>
+<a name='L334'>            Py_INCREF(dialect);
+<a name='L335'>        <i><font color='green'>/* Can we reuse this instance? */</font></i>
+<a name='L336'>        <b>if</b> (PyObject_TypeCheck(dialect, &amp;Dialect_Type) &amp;&amp;
+<a name='L337'>            delimiter == 0 &amp;&amp;
+<a name='L338'>            doublequote == 0 &amp;&amp;
+<a name='L339'>            escapechar == 0 &amp;&amp;
+<a name='L340'>            lineterminator == 0 &amp;&amp;
+<a name='L341'>            quotechar == 0 &amp;&amp;
+<a name='L342'>            quoting == 0 &amp;&amp;
+<a name='L343'>            skipinitialspace == 0 &amp;&amp;
+<a name='L344'>            strict == 0)
+<a name='L345'>            <b>return</b> dialect;
+<a name='L346'>    <font color='red'>}</font>
+<a name='L347'>
+<a name='L348'>    self = (<a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *)type-&gt;tp_alloc(type, 0);
+<a name='L349'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L350'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dialect);
+<a name='L351'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L352'>    <font color='red'>}</font>
+<a name='L353'>    self-&gt;lineterminator = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L354'>
+<a name='L355'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(delimiter);
+<a name='L356'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(doublequote);
+<a name='L357'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(escapechar);
+<a name='L358'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(lineterminator);
+<a name='L359'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(quotechar);
+<a name='L360'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(quoting);
+<a name='L361'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(skipinitialspace);
+<a name='L362'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(strict);
+<a name='L363'>    <b>if</b> (dialect != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L364'><font color='darkred'>#define</font> <a href='../R/729.html' title='Multiple refered from 8 places.'>DIALECT_GETATTR</a>(v, n) \
+<a name='L365'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) \
+<a name='L366'>            v = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(dialect, n)
+<a name='L367'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(delimiter, "delimiter");
+<a name='L368'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(doublequote, "doublequote");
+<a name='L369'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(escapechar, "escapechar");
+<a name='L370'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(lineterminator, "lineterminator");
+<a name='L371'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(quotechar, "quotechar");
+<a name='L372'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(quoting, "quoting");
+<a name='L373'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(skipinitialspace, "skipinitialspace");
+<a name='L374'>        <a href='../S/2245.html#L364' title='Defined at 364 in Modules/_csv.c.'>DIALECT_GETATTR</a>(strict, "strict");
+<a name='L375'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L376'>    <font color='red'>}</font>
+<a name='L377'>
+<a name='L378'>    <i><font color='green'>/* check types and convert to C values */</font></i>
+<a name='L379'><font color='darkred'>#define</font> <a href='../R/730.html' title='Multiple refered from 8 places.'>DIASET</a>(meth, name, target, src, dflt) \
+<a name='L380'>    <b>if</b> (meth(name, target, src, dflt)) \
+<a name='L381'>        <b>goto</b> err
+<a name='L382'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L202' title='Defined at 202 in Modules/_csv.c.'>_set_char</a>, "delimiter", &amp;self-&gt;delimiter, delimiter, ',');
+<a name='L383'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L165' title='Defined at 165 in Modules/_csv.c.'>_set_bool</a>, "doublequote", &amp;self-&gt;doublequote, doublequote, 1);
+<a name='L384'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L202' title='Defined at 202 in Modules/_csv.c.'>_set_char</a>, "escapechar", &amp;self-&gt;escapechar, escapechar, 0);
+<a name='L385'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L227' title='Defined at 227 in Modules/_csv.c.'>_set_str</a>, "lineterminator", &amp;self-&gt;lineterminator, lineterminator, "\r\n");
+<a name='L386'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L202' title='Defined at 202 in Modules/_csv.c.'>_set_char</a>, "quotechar", &amp;self-&gt;quotechar, quotechar, '"');
+<a name='L387'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L175' title='Defined at 175 in Modules/_csv.c.'>_set_int</a>, "quoting", &amp;self-&gt;quoting, quoting, <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_MINIMAL</a>);
+<a name='L388'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L165' title='Defined at 165 in Modules/_csv.c.'>_set_bool</a>, "skipinitialspace", &amp;self-&gt;skipinitialspace, skipinitialspace, 0);
+<a name='L389'>    <a href='../S/2245.html#L379' title='Defined at 379 in Modules/_csv.c.'>DIASET</a>(<a href='../S/2245.html#L165' title='Defined at 165 in Modules/_csv.c.'>_set_bool</a>, "strict", &amp;self-&gt;strict, strict, 0);
+<a name='L390'>
+<a name='L391'>    <i><font color='green'>/* validate options */</font></i>
+<a name='L392'>    <b>if</b> (<a href='../S/2245.html#L249' title='Defined at 249 in Modules/_csv.c.'>dialect_check_quoting</a>(self-&gt;quoting))
+<a name='L393'>        <b>goto</b> err;
+<a name='L394'>    <b>if</b> (self-&gt;delimiter == 0) <font color='red'>{</font>
+<a name='L395'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError, "delimiter must be set");
+<a name='L396'>        <b>goto</b> err;
+<a name='L397'>    <font color='red'>}</font>
+<a name='L398'>    <b>if</b> (quotechar == Py_None &amp;&amp; quoting == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L399'>        self-&gt;quoting = <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a>;
+<a name='L400'>    <b>if</b> (self-&gt;quoting != <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a> &amp;&amp; self-&gt;quotechar == 0) <font color='red'>{</font>
+<a name='L401'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L402'>                        "quotechar must be set if quoting enabled");
+<a name='L403'>        <b>goto</b> err;
+<a name='L404'>    <font color='red'>}</font>
+<a name='L405'>    <b>if</b> (self-&gt;lineterminator == 0) <font color='red'>{</font>
+<a name='L406'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError, "lineterminator must be set");
+<a name='L407'>        <b>goto</b> err;
+<a name='L408'>    <font color='red'>}</font>
+<a name='L409'>
+<a name='L410'>    ret = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L411'>    Py_INCREF(self);
+<a name='L412'>err:
+<a name='L413'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self);
+<a name='L414'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dialect);
+<a name='L415'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(delimiter);
+<a name='L416'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(doublequote);
+<a name='L417'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(escapechar);
+<a name='L418'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(lineterminator);
+<a name='L419'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(quotechar);
+<a name='L420'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(quoting);
+<a name='L421'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(skipinitialspace);
+<a name='L422'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(strict);
+<a name='L423'>    <b>return</b> ret;
+<a name='L424'><font color='red'>}</font>
+<a name='L425'>
+<a name='L426'>
+<a name='L427'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(Dialect_Type_doc,
+<a name='L428'>"CSV dialect\n"
+<a name='L429'>"\n"
+<a name='L430'>"The Dialect type records CSV parsing and generation options.\n");
+<a name='L431'>
+<a name='L432'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Dialect_Type = <font color='red'>{</font>
+<a name='L433'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L434'>    "_csv.Dialect",                         <i><font color='green'>/* tp_name */</font></i>
+<a name='L435'>    <b>sizeof</b>(<a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a>),                     <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L436'>    0,                                      <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L437'>    <i><font color='green'>/*  methods  */</font></i>
+<a name='L438'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2245.html#L280' title='Defined at 280 in Modules/_csv.c.'>Dialect_dealloc</a>,            <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L439'>    (printfunc)0,                           <i><font color='green'>/* tp_print */</font></i>
+<a name='L440'>    (getattrfunc)0,                         <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L441'>    (setattrfunc)0,                         <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L442'>    0,                                      <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L443'>    (reprfunc)0,                            <i><font color='green'>/* tp_repr */</font></i>
+<a name='L444'>    0,                                      <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L445'>    0,                                      <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L446'>    0,                                      <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L447'>    (hashfunc)0,                            <i><font color='green'>/* tp_hash */</font></i>
+<a name='L448'>    (ternaryfunc)0,                         <i><font color='green'>/* tp_call */</font></i>
+<a name='L449'>    (reprfunc)0,                                <i><font color='green'>/* tp_str */</font></i>
+<a name='L450'>    0,                                      <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L451'>    0,                                      <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L452'>    0,                                      <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L453'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L454'>    Dialect_Type_doc,                       <i><font color='green'>/* tp_doc */</font></i>
+<a name='L455'>    0,                                      <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L456'>    0,                                      <i><font color='green'>/* tp_clear */</font></i>
+<a name='L457'>    0,                                      <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L458'>    0,                                      <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L459'>    0,                                      <i><font color='green'>/* tp_iter */</font></i>
+<a name='L460'>    0,                                      <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L461'>    0,                                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L462'>    Dialect_memberlist,                     <i><font color='green'>/* tp_members */</font></i>
+<a name='L463'>    Dialect_getsetlist,                     <i><font color='green'>/* tp_getset */</font></i>
+<a name='L464'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L465'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L466'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L467'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L468'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L469'>    0,                                          <i><font color='green'>/* tp_init */</font></i>
+<a name='L470'>    0,                                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L471'>    <a href='../S/2245.html#L300' title='Defined at 300 in Modules/_csv.c.'>dialect_new</a>,                                <i><font color='green'>/* tp_new */</font></i>
+<a name='L472'>    0,                                          <i><font color='green'>/* tp_free */</font></i>
+<a name='L473'><font color='red'>}</font>;
+<a name='L474'>
+<a name='L475'><i><font color='green'>/*</font></i>
+<a name='L476'><i><font color='green'> * Return an instance of the dialect type, given a Python instance or kwarg</font></i>
+<a name='L477'><i><font color='green'> * description of the dialect</font></i>
+<a name='L478'><i><font color='green'> */</font></i>
+<a name='L479'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L480'><a href='../R/5714.html' title='Multiple refered from 3 places.'>_call_dialect</a>(PyObject *dialect_inst, PyObject *kwargs)
+<a name='L481'><font color='red'>{</font>
+<a name='L482'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ctor_args;
+<a name='L483'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dialect;
+<a name='L484'>
+<a name='L485'>    ctor_args = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>(dialect_inst ? "(O)" : "()", dialect_inst);
+<a name='L486'>    <b>if</b> (ctor_args == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L487'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L488'>    dialect = <a href='../S/2775.html#L2141' title='Defined at 2141 in Objects/abstract.c.'>PyObject_Call</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;Dialect_Type, ctor_args, kwargs);
+<a name='L489'>    Py_DECREF(ctor_args);
+<a name='L490'>    <b>return</b> dialect;
+<a name='L491'><font color='red'>}</font>
+<a name='L492'>
+<a name='L493'><i><font color='green'>/*</font></i>
+<a name='L494'><i><font color='green'> * READER</font></i>
+<a name='L495'><i><font color='green'> */</font></i>
+<a name='L496'><b>static</b> <b>int</b>
+<a name='L497'><a href='../R/9462.html' title='Multiple refered from 6 places.'>parse_save_field</a>(ReaderObj *self)
+<a name='L498'><font color='red'>{</font>
+<a name='L499'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *field;
+<a name='L500'>
+<a name='L501'>    field = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(self-&gt;field, self-&gt;field_len);
+<a name='L502'>    <b>if</b> (field == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L503'>        <b>return</b> -1;
+<a name='L504'>    self-&gt;field_len = 0;
+<a name='L505'>    <b>if</b> (self-&gt;numeric_field) <font color='red'>{</font>
+<a name='L506'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp;
+<a name='L507'>
+<a name='L508'>        self-&gt;numeric_field = 0;
+<a name='L509'>        tmp = <a href='../S/2775.html#L1393' title='Defined at 1393 in Objects/abstract.c.'>PyNumber_Float</a>(field);
+<a name='L510'>        <b>if</b> (tmp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L511'>            Py_DECREF(field);
+<a name='L512'>            <b>return</b> -1;
+<a name='L513'>        <font color='red'>}</font>
+<a name='L514'>        Py_DECREF(field);
+<a name='L515'>        field = tmp;
+<a name='L516'>    <font color='red'>}</font>
+<a name='L517'>    <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(self-&gt;fields, field);
+<a name='L518'>    Py_DECREF(field);
+<a name='L519'>    <b>return</b> 0;
+<a name='L520'><font color='red'>}</font>
+<a name='L521'>
+<a name='L522'><b>static</b> <b>int</b>
+<a name='L523'><a href='../S/2245.html#L555' title='Refered from 555 in Modules/_csv.c.'>parse_grow_buff</a>(ReaderObj *self)
+<a name='L524'><font color='red'>{</font>
+<a name='L525'>    <b>if</b> (self-&gt;field_size == 0) <font color='red'>{</font>
+<a name='L526'>        self-&gt;field_size = 4096;
+<a name='L527'>        <b>if</b> (self-&gt;field != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L528'>            <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(self-&gt;field);
+<a name='L529'>        self-&gt;field = PyMem_New(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>, self-&gt;field_size);
+<a name='L530'>    <font color='red'>}</font>
+<a name='L531'>    <b>else</b> <font color='red'>{</font>
+<a name='L532'>        <b>if</b> (self-&gt;field_size &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a> / 2) <font color='red'>{</font>
+<a name='L533'>            <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L534'>            <b>return</b> 0;
+<a name='L535'>        <font color='red'>}</font>
+<a name='L536'>        self-&gt;field_size *= 2;
+<a name='L537'>        self-&gt;field = PyMem_Resize(self-&gt;field, <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>,
+<a name='L538'>                                   self-&gt;field_size);
+<a name='L539'>    <font color='red'>}</font>
+<a name='L540'>    <b>if</b> (self-&gt;field == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L541'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L542'>        <b>return</b> 0;
+<a name='L543'>    <font color='red'>}</font>
+<a name='L544'>    <b>return</b> 1;
+<a name='L545'><font color='red'>}</font>
+<a name='L546'>
+<a name='L547'><b>static</b> <b>int</b>
+<a name='L548'><a href='../R/9451.html' title='Multiple refered from 7 places.'>parse_add_char</a>(ReaderObj *self, Py_UNICODE c)
+<a name='L549'><font color='red'>{</font>
+<a name='L550'>    <b>if</b> (self-&gt;field_len &gt;= field_limit) <font color='red'>{</font>
+<a name='L551'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj, "field larger than field limit (%ld)",
+<a name='L552'>                     field_limit);
+<a name='L553'>        <b>return</b> -1;
+<a name='L554'>    <font color='red'>}</font>
+<a name='L555'>    <b>if</b> (self-&gt;field_len == self-&gt;field_size &amp;&amp; !<a href='../S/2245.html#L523' title='Defined at 523 in Modules/_csv.c.'>parse_grow_buff</a>(self))
+<a name='L556'>        <b>return</b> -1;
+<a name='L557'>    self-&gt;field[self-&gt;field_len++] = c;
+<a name='L558'>    <b>return</b> 0;
+<a name='L559'><font color='red'>}</font>
+<a name='L560'>
+<a name='L561'><b>static</b> <b>int</b>
+<a name='L562'><a href='../R/9459.html' title='Multiple refered from 2 places.'>parse_process_char</a>(ReaderObj *self, Py_UNICODE c)
+<a name='L563'><font color='red'>{</font>
+<a name='L564'>    <a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *dialect = self-&gt;dialect;
+<a name='L565'>
+<a name='L566'>    <b>switch</b> (self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>) <font color='red'>{</font>
+<a name='L567'>    <b>case</b> <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_RECORD</a>:
+<a name='L568'>        <i><font color='green'>/* start of record */</font></i>
+<a name='L569'>        <b>if</b> (c == '\0')
+<a name='L570'>            <i><font color='green'>/* empty line - return [] */</font></i>
+<a name='L571'>            <b>break</b>;
+<a name='L572'>        <b>else</b> <b>if</b> (c == '\n' || c == '\r') <font color='red'>{</font>
+<a name='L573'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L26' title='Defined at 26 in Modules/_csv.c.'>EAT_CRNL</a>;
+<a name='L574'>            <b>break</b>;
+<a name='L575'>        <font color='red'>}</font>
+<a name='L576'>        <i><font color='green'>/* normal character - handle as START_FIELD */</font></i>
+<a name='L577'>        self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_FIELD</a>;
+<a name='L578'>        <i><font color='green'>/* fallthru */</font></i>
+<a name='L579'>    <b>case</b> <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_FIELD</a>:
+<a name='L580'>        <i><font color='green'>/* expecting field */</font></i>
+<a name='L581'>        <b>if</b> (c == '\n' || c == '\r' || c == '\0') <font color='red'>{</font>
+<a name='L582'>            <i><font color='green'>/* save empty field - return [fields] */</font></i>
+<a name='L583'>            <b>if</b> (<a href='../S/2245.html#L497' title='Defined at 497 in Modules/_csv.c.'>parse_save_field</a>(self) &lt; 0)
+<a name='L584'>                <b>return</b> -1;
+<a name='L585'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (c == '\0' ? <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_RECORD</a> : <a href='../S/2245.html#L26' title='Defined at 26 in Modules/_csv.c.'>EAT_CRNL</a>);
+<a name='L586'>        <font color='red'>}</font>
+<a name='L587'>        <b>else</b> <b>if</b> (c == dialect-&gt;quotechar &amp;&amp;
+<a name='L588'>                 dialect-&gt;quoting != <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a>) <font color='red'>{</font>
+<a name='L589'>            <i><font color='green'>/* start quoted field */</font></i>
+<a name='L590'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>IN_QUOTED_FIELD</a>;
+<a name='L591'>        <font color='red'>}</font>
+<a name='L592'>        <b>else</b> <b>if</b> (c == dialect-&gt;escapechar) <font color='red'>{</font>
+<a name='L593'>            <i><font color='green'>/* possible escaped character */</font></i>
+<a name='L594'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>ESCAPED_CHAR</a>;
+<a name='L595'>        <font color='red'>}</font>
+<a name='L596'>        <b>else</b> <b>if</b> (c == ' ' &amp;&amp; dialect-&gt;skipinitialspace)
+<a name='L597'>            <i><font color='green'>/* ignore space at start of field */</font></i>
+<a name='L598'>            ;
+<a name='L599'>        <b>else</b> <b>if</b> (c == dialect-&gt;delimiter) <font color='red'>{</font>
+<a name='L600'>            <i><font color='green'>/* save empty field */</font></i>
+<a name='L601'>            <b>if</b> (<a href='../S/2245.html#L497' title='Defined at 497 in Modules/_csv.c.'>parse_save_field</a>(self) &lt; 0)
+<a name='L602'>                <b>return</b> -1;
+<a name='L603'>        <font color='red'>}</font>
+<a name='L604'>        <b>else</b> <font color='red'>{</font>
+<a name='L605'>            <i><font color='green'>/* begin new unquoted field */</font></i>
+<a name='L606'>            <b>if</b> (dialect-&gt;quoting == <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONNUMERIC</a>)
+<a name='L607'>                self-&gt;numeric_field = 1;
+<a name='L608'>            <b>if</b> (<a href='../S/2245.html#L548' title='Defined at 548 in Modules/_csv.c.'>parse_add_char</a>(self, c) &lt; 0)
+<a name='L609'>                <b>return</b> -1;
+<a name='L610'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>IN_FIELD</a>;
+<a name='L611'>        <font color='red'>}</font>
+<a name='L612'>        <b>break</b>;
+<a name='L613'>
+<a name='L614'>    <b>case</b> <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>ESCAPED_CHAR</a>:
+<a name='L615'>        <b>if</b> (c == '\0')
+<a name='L616'>            c = '\n';
+<a name='L617'>        <b>if</b> (<a href='../S/2245.html#L548' title='Defined at 548 in Modules/_csv.c.'>parse_add_char</a>(self, c) &lt; 0)
+<a name='L618'>            <b>return</b> -1;
+<a name='L619'>        self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>IN_FIELD</a>;
+<a name='L620'>        <b>break</b>;
+<a name='L621'>
+<a name='L622'>    <b>case</b> <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>IN_FIELD</a>:
+<a name='L623'>        <i><font color='green'>/* in unquoted field */</font></i>
+<a name='L624'>        <b>if</b> (c == '\n' || c == '\r' || c == '\0') <font color='red'>{</font>
+<a name='L625'>            <i><font color='green'>/* end of line - return [fields] */</font></i>
+<a name='L626'>            <b>if</b> (<a href='../S/2245.html#L497' title='Defined at 497 in Modules/_csv.c.'>parse_save_field</a>(self) &lt; 0)
+<a name='L627'>                <b>return</b> -1;
+<a name='L628'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (c == '\0' ? <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_RECORD</a> : <a href='../S/2245.html#L26' title='Defined at 26 in Modules/_csv.c.'>EAT_CRNL</a>);
+<a name='L629'>        <font color='red'>}</font>
+<a name='L630'>        <b>else</b> <b>if</b> (c == dialect-&gt;escapechar) <font color='red'>{</font>
+<a name='L631'>            <i><font color='green'>/* possible escaped character */</font></i>
+<a name='L632'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>ESCAPED_CHAR</a>;
+<a name='L633'>        <font color='red'>}</font>
+<a name='L634'>        <b>else</b> <b>if</b> (c == dialect-&gt;delimiter) <font color='red'>{</font>
+<a name='L635'>            <i><font color='green'>/* save field - wait for new field */</font></i>
+<a name='L636'>            <b>if</b> (<a href='../S/2245.html#L497' title='Defined at 497 in Modules/_csv.c.'>parse_save_field</a>(self) &lt; 0)
+<a name='L637'>                <b>return</b> -1;
+<a name='L638'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_FIELD</a>;
+<a name='L639'>        <font color='red'>}</font>
+<a name='L640'>        <b>else</b> <font color='red'>{</font>
+<a name='L641'>            <i><font color='green'>/* normal character - save in field */</font></i>
+<a name='L642'>            <b>if</b> (<a href='../S/2245.html#L548' title='Defined at 548 in Modules/_csv.c.'>parse_add_char</a>(self, c) &lt; 0)
+<a name='L643'>                <b>return</b> -1;
+<a name='L644'>        <font color='red'>}</font>
+<a name='L645'>        <b>break</b>;
+<a name='L646'>
+<a name='L647'>    <b>case</b> <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>IN_QUOTED_FIELD</a>:
+<a name='L648'>        <i><font color='green'>/* in quoted field */</font></i>
+<a name='L649'>        <b>if</b> (c == '\0')
+<a name='L650'>            ;
+<a name='L651'>        <b>else</b> <b>if</b> (c == dialect-&gt;escapechar) <font color='red'>{</font>
+<a name='L652'>            <i><font color='green'>/* Possible escape character */</font></i>
+<a name='L653'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>ESCAPE_IN_QUOTED_FIELD</a>;
+<a name='L654'>        <font color='red'>}</font>
+<a name='L655'>        <b>else</b> <b>if</b> (c == dialect-&gt;quotechar &amp;&amp;
+<a name='L656'>                 dialect-&gt;quoting != <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a>) <font color='red'>{</font>
+<a name='L657'>            <b>if</b> (dialect-&gt;doublequote) <font color='red'>{</font>
+<a name='L658'>                <i><font color='green'>/* doublequote; " represented by "" */</font></i>
+<a name='L659'>                self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>QUOTE_IN_QUOTED_FIELD</a>;
+<a name='L660'>            <font color='red'>}</font>
+<a name='L661'>            <b>else</b> <font color='red'>{</font>
+<a name='L662'>                <i><font color='green'>/* end of quote part of field */</font></i>
+<a name='L663'>                self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>IN_FIELD</a>;
+<a name='L664'>            <font color='red'>}</font>
+<a name='L665'>        <font color='red'>}</font>
+<a name='L666'>        <b>else</b> <font color='red'>{</font>
+<a name='L667'>            <i><font color='green'>/* normal character - save in field */</font></i>
+<a name='L668'>            <b>if</b> (<a href='../S/2245.html#L548' title='Defined at 548 in Modules/_csv.c.'>parse_add_char</a>(self, c) &lt; 0)
+<a name='L669'>                <b>return</b> -1;
+<a name='L670'>        <font color='red'>}</font>
+<a name='L671'>        <b>break</b>;
+<a name='L672'>
+<a name='L673'>    <b>case</b> <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>ESCAPE_IN_QUOTED_FIELD</a>:
+<a name='L674'>        <b>if</b> (c == '\0')
+<a name='L675'>            c = '\n';
+<a name='L676'>        <b>if</b> (<a href='../S/2245.html#L548' title='Defined at 548 in Modules/_csv.c.'>parse_add_char</a>(self, c) &lt; 0)
+<a name='L677'>            <b>return</b> -1;
+<a name='L678'>        self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>IN_QUOTED_FIELD</a>;
+<a name='L679'>        <b>break</b>;
+<a name='L680'>
+<a name='L681'>    <b>case</b> <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>QUOTE_IN_QUOTED_FIELD</a>:
+<a name='L682'>        <i><font color='green'>/* doublequote - seen a quote in an quoted field */</font></i>
+<a name='L683'>        <b>if</b> (dialect-&gt;quoting != <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a> &amp;&amp;
+<a name='L684'>            c == dialect-&gt;quotechar) <font color='red'>{</font>
+<a name='L685'>            <i><font color='green'>/* save "" as " */</font></i>
+<a name='L686'>            <b>if</b> (<a href='../S/2245.html#L548' title='Defined at 548 in Modules/_csv.c.'>parse_add_char</a>(self, c) &lt; 0)
+<a name='L687'>                <b>return</b> -1;
+<a name='L688'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L25' title='Defined at 25 in Modules/_csv.c.'>IN_QUOTED_FIELD</a>;
+<a name='L689'>        <font color='red'>}</font>
+<a name='L690'>        <b>else</b> <b>if</b> (c == dialect-&gt;delimiter) <font color='red'>{</font>
+<a name='L691'>            <i><font color='green'>/* save field - wait for new field */</font></i>
+<a name='L692'>            <b>if</b> (<a href='../S/2245.html#L497' title='Defined at 497 in Modules/_csv.c.'>parse_save_field</a>(self) &lt; 0)
+<a name='L693'>                <b>return</b> -1;
+<a name='L694'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_FIELD</a>;
+<a name='L695'>        <font color='red'>}</font>
+<a name='L696'>        <b>else</b> <b>if</b> (c == '\n' || c == '\r' || c == '\0') <font color='red'>{</font>
+<a name='L697'>            <i><font color='green'>/* end of line - return [fields] */</font></i>
+<a name='L698'>            <b>if</b> (<a href='../S/2245.html#L497' title='Defined at 497 in Modules/_csv.c.'>parse_save_field</a>(self) &lt; 0)
+<a name='L699'>                <b>return</b> -1;
+<a name='L700'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (c == '\0' ? <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_RECORD</a> : <a href='../S/2245.html#L26' title='Defined at 26 in Modules/_csv.c.'>EAT_CRNL</a>);
+<a name='L701'>        <font color='red'>}</font>
+<a name='L702'>        <b>else</b> <b>if</b> (!dialect-&gt;strict) <font color='red'>{</font>
+<a name='L703'>            <b>if</b> (<a href='../S/2245.html#L548' title='Defined at 548 in Modules/_csv.c.'>parse_add_char</a>(self, c) &lt; 0)
+<a name='L704'>                <b>return</b> -1;
+<a name='L705'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>IN_FIELD</a>;
+<a name='L706'>        <font color='red'>}</font>
+<a name='L707'>        <b>else</b> <font color='red'>{</font>
+<a name='L708'>            <i><font color='green'>/* illegal */</font></i>
+<a name='L709'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj, "'%c' expected after '%c'",
+<a name='L710'>                            dialect-&gt;delimiter,
+<a name='L711'>                            dialect-&gt;quotechar);
+<a name='L712'>            <b>return</b> -1;
+<a name='L713'>        <font color='red'>}</font>
+<a name='L714'>        <b>break</b>;
+<a name='L715'>
+<a name='L716'>    <b>case</b> <a href='../S/2245.html#L26' title='Defined at 26 in Modules/_csv.c.'>EAT_CRNL</a>:
+<a name='L717'>        <b>if</b> (c == '\n' || c == '\r')
+<a name='L718'>            ;
+<a name='L719'>        <b>else</b> <b>if</b> (c == '\0')
+<a name='L720'>            self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_RECORD</a>;
+<a name='L721'>        <b>else</b> <font color='red'>{</font>
+<a name='L722'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj, "new-line character seen in unquoted field - do you need to open the file in universal-newline mode?");
+<a name='L723'>            <b>return</b> -1;
+<a name='L724'>        <font color='red'>}</font>
+<a name='L725'>        <b>break</b>;
+<a name='L726'>
+<a name='L727'>    <font color='red'>}</font>
+<a name='L728'>    <b>return</b> 0;
+<a name='L729'><font color='red'>}</font>
+<a name='L730'>
+<a name='L731'><b>static</b> <b>int</b>
+<a name='L732'><a href='../R/9461.html' title='Multiple refered from 2 places.'>parse_reset</a>(ReaderObj *self)
+<a name='L733'><font color='red'>{</font>
+<a name='L734'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;fields);
+<a name='L735'>    self-&gt;fields = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L736'>    <b>if</b> (self-&gt;fields == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L737'>        <b>return</b> -1;
+<a name='L738'>    self-&gt;field_len = 0;
+<a name='L739'>    self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_RECORD</a>;
+<a name='L740'>    self-&gt;numeric_field = 0;
+<a name='L741'>    <b>return</b> 0;
+<a name='L742'><font color='red'>}</font>
+<a name='L743'>
+<a name='L744'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L745'><a href='../S/2245.html#L882' title='Refered from 882 in Modules/_csv.c.'>Reader_iternext</a>(ReaderObj *self)
+<a name='L746'><font color='red'>{</font>
+<a name='L747'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *lineobj;
+<a name='L748'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *fields = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L749'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *line, c;
+<a name='L750'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> linelen;
+<a name='L751'>
+<a name='L752'>    <b>if</b> (<a href='../S/2245.html#L732' title='Defined at 732 in Modules/_csv.c.'>parse_reset</a>(self) &lt; 0)
+<a name='L753'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L754'>    <b>do</b> <font color='red'>{</font>
+<a name='L755'>        lineobj = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(self-&gt;input_iter);
+<a name='L756'>        <b>if</b> (lineobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L757'>            <i><font color='green'>/* End of input OR exception */</font></i>
+<a name='L758'>            <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>() &amp;&amp; self-&gt;field_len != 0)
+<a name='L759'>                <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj,
+<a name='L760'>                             "newline inside string");
+<a name='L761'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L762'>        <font color='red'>}</font>
+<a name='L763'>        <b>if</b> (!PyUnicode_Check(lineobj)) <font color='red'>{</font>
+<a name='L764'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj,
+<a name='L765'>                         "iterator should return strings, "
+<a name='L766'>                         "not %.200s "
+<a name='L767'>                         "(did you open the file in text mode?)",
+<a name='L768'>                         lineobj-&gt;ob_type-&gt;tp_name
+<a name='L769'>                );
+<a name='L770'>            Py_DECREF(lineobj);
+<a name='L771'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L772'>        <font color='red'>}</font>
+<a name='L773'>        ++self-&gt;line_num;
+<a name='L774'>        line = <a href='../D/3960.html' title='Multiple defined in 3 places.'>PyUnicode_AsUnicode</a>(lineobj);
+<a name='L775'>        linelen = <a href='../D/4020.html' title='Multiple defined in 3 places.'>PyUnicode_GetSize</a>(lineobj);
+<a name='L776'>        <b>if</b> (line == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || linelen &lt; 0) <font color='red'>{</font>
+<a name='L777'>            Py_DECREF(lineobj);
+<a name='L778'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L779'>        <font color='red'>}</font>
+<a name='L780'>        <b>while</b> (linelen--) <font color='red'>{</font>
+<a name='L781'>            c = *line++;
+<a name='L782'>            <b>if</b> (c == '\0') <font color='red'>{</font>
+<a name='L783'>                Py_DECREF(lineobj);
+<a name='L784'>                <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj,
+<a name='L785'>                             "line contains NULL byte");
+<a name='L786'>                <b>goto</b> err;
+<a name='L787'>            <font color='red'>}</font>
+<a name='L788'>            <b>if</b> (<a href='../S/2245.html#L562' title='Defined at 562 in Modules/_csv.c.'>parse_process_char</a>(self, c) &lt; 0) <font color='red'>{</font>
+<a name='L789'>                Py_DECREF(lineobj);
+<a name='L790'>                <b>goto</b> err;
+<a name='L791'>            <font color='red'>}</font>
+<a name='L792'>        <font color='red'>}</font>
+<a name='L793'>        Py_DECREF(lineobj);
+<a name='L794'>        <b>if</b> (<a href='../S/2245.html#L562' title='Defined at 562 in Modules/_csv.c.'>parse_process_char</a>(self, 0) &lt; 0)
+<a name='L795'>            <b>goto</b> err;
+<a name='L796'>    <font color='red'>}</font> <b>while</b> (self-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> != <a href='../S/2245.html#L24' title='Defined at 24 in Modules/_csv.c.'>START_RECORD</a>);
+<a name='L797'>
+<a name='L798'>    fields = self-&gt;fields;
+<a name='L799'>    self-&gt;fields = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L800'>err:
+<a name='L801'>    <b>return</b> fields;
+<a name='L802'><font color='red'>}</font>
+<a name='L803'>
+<a name='L804'><b>static</b> <b>void</b>
+<a name='L805'><a href='../S/2245.html#L859' title='Refered from 859 in Modules/_csv.c.'>Reader_dealloc</a>(ReaderObj *self)
+<a name='L806'><font color='red'>{</font>
+<a name='L807'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(self);
+<a name='L808'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;dialect);
+<a name='L809'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;input_iter);
+<a name='L810'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;fields);
+<a name='L811'>    <b>if</b> (self-&gt;field != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L812'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(self-&gt;field);
+<a name='L813'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(self);
+<a name='L814'><font color='red'>}</font>
+<a name='L815'>
+<a name='L816'><b>static</b> <b>int</b>
+<a name='L817'><a href='../S/2245.html#L877' title='Refered from 877 in Modules/_csv.c.'>Reader_traverse</a>(ReaderObj *self, visitproc visit, <b>void</b> *arg)
+<a name='L818'><font color='red'>{</font>
+<a name='L819'>    Py_VISIT(self-&gt;dialect);
+<a name='L820'>    Py_VISIT(self-&gt;input_iter);
+<a name='L821'>    Py_VISIT(self-&gt;fields);
+<a name='L822'>    <b>return</b> 0;
+<a name='L823'><font color='red'>}</font>
+<a name='L824'>
+<a name='L825'><b>static</b> <b>int</b>
+<a name='L826'><a href='../S/2245.html#L878' title='Refered from 878 in Modules/_csv.c.'>Reader_clear</a>(ReaderObj *self)
+<a name='L827'><font color='red'>{</font>
+<a name='L828'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;dialect);
+<a name='L829'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;input_iter);
+<a name='L830'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;fields);
+<a name='L831'>    <b>return</b> 0;
+<a name='L832'><font color='red'>}</font>
+<a name='L833'>
+<a name='L834'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(Reader_Type_doc,
+<a name='L835'>"CSV reader\n"
+<a name='L836'>"\n"
+<a name='L837'>"Reader objects are responsible for reading and parsing tabular data\n"
+<a name='L838'>"in CSV format.\n"
+<a name='L839'>);
+<a name='L840'>
+<a name='L841'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> Reader_methods[] = <font color='red'>{</font>
+<a name='L842'>    <font color='red'>{</font> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>
+<a name='L843'><font color='red'>}</font>;
+<a name='L844'><font color='darkred'>#define</font> <a href='../R/3994.html' title='Multiple refered from 2 places.'>R_OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2245.html#L76' title='Defined at 76 in Modules/_csv.c.'>ReaderObj</a>, x)
+<a name='L845'>
+<a name='L846'><b>static</b> <b>struct</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> Reader_memberlist[] = <font color='red'>{</font>
+<a name='L847'>    <font color='red'>{</font> "dialect", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../S/2245.html#L844' title='Defined at 844 in Modules/_csv.c.'>R_OFF</a>(dialect), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a> <font color='red'>}</font>,
+<a name='L848'>    <font color='red'>{</font> "line_num", <a href='../S/577.html#L52' title='Defined at 52 in Include/structmember.h.'>T_ULONG</a>, <a href='../S/2245.html#L844' title='Defined at 844 in Modules/_csv.c.'>R_OFF</a>(line_num), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a> <font color='red'>}</font>,
+<a name='L849'>    <font color='red'>{</font> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>
+<a name='L850'><font color='red'>}</font>;
+<a name='L851'>
+<a name='L852'>
+<a name='L853'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Reader_Type = <font color='red'>{</font>
+<a name='L854'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L855'>    "_csv.reader",                          <i><font color='green'>/*tp_name*/</font></i>
+<a name='L856'>    <b>sizeof</b>(<a href='../S/2245.html#L76' title='Defined at 76 in Modules/_csv.c.'>ReaderObj</a>),                      <i><font color='green'>/*tp_basicsize*/</font></i>
+<a name='L857'>    0,                                      <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L858'>    <i><font color='green'>/* methods */</font></i>
+<a name='L859'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2245.html#L805' title='Defined at 805 in Modules/_csv.c.'>Reader_dealloc</a>,             <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L860'>    (printfunc)0,                           <i><font color='green'>/*tp_print*/</font></i>
+<a name='L861'>    (getattrfunc)0,                         <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L862'>    (setattrfunc)0,                         <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L863'>    0,                                     <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L864'>    (reprfunc)0,                            <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L865'>    0,                                      <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L866'>    0,                                      <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L867'>    0,                                      <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L868'>    (hashfunc)0,                            <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L869'>    (ternaryfunc)0,                         <i><font color='green'>/*tp_call*/</font></i>
+<a name='L870'>    (reprfunc)0,                                <i><font color='green'>/*tp_str*/</font></i>
+<a name='L871'>    0,                                      <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L872'>    0,                                      <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L873'>    0,                                      <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L874'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+<a name='L875'>        Py_TPFLAGS_HAVE_GC,                     <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L876'>    Reader_Type_doc,                        <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L877'>    (traverseproc)<a href='../S/2245.html#L817' title='Defined at 817 in Modules/_csv.c.'>Reader_traverse</a>,          <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L878'>    (inquiry)<a href='../S/2245.html#L826' title='Defined at 826 in Modules/_csv.c.'>Reader_clear</a>,                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L879'>    0,                                      <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L880'>    0,                                      <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L881'>    <a href='../S/2803.html#L933' title='Defined at 933 in Objects/object.c.'>PyObject_SelfIter</a>,                          <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L882'>    (getiterfunc)<a href='../S/2245.html#L745' title='Defined at 745 in Modules/_csv.c.'>Reader_iternext</a>,           <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L883'>    Reader_methods,                         <i><font color='green'>/*tp_methods*/</font></i>
+<a name='L884'>    Reader_memberlist,                      <i><font color='green'>/*tp_members*/</font></i>
+<a name='L885'>    0,                                      <i><font color='green'>/*tp_getset*/</font></i>
+<a name='L886'>
+<a name='L887'><font color='red'>}</font>;
+<a name='L888'>
+<a name='L889'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L890'><a href='../S/2245.html#L1534' title='Refered from 1534 in Modules/_csv.c.'>csv_reader</a>(PyObject *module, PyObject *args, PyObject *keyword_args)
+<a name='L891'><font color='red'>{</font>
+<a name='L892'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * iterator, * dialect = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L893'>    <a href='../S/2245.html#L76' title='Defined at 76 in Modules/_csv.c.'>ReaderObj</a> * self = PyObject_GC_New(<a href='../S/2245.html#L76' title='Defined at 76 in Modules/_csv.c.'>ReaderObj</a>, &amp;Reader_Type);
+<a name='L894'>
+<a name='L895'>    <b>if</b> (!self)
+<a name='L896'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L897'>
+<a name='L898'>    self-&gt;dialect = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L899'>    self-&gt;fields = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L900'>    self-&gt;input_iter = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L901'>    self-&gt;field = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L902'>    self-&gt;field_size = 0;
+<a name='L903'>    self-&gt;line_num = 0;
+<a name='L904'>
+<a name='L905'>    <b>if</b> (<a href='../S/2245.html#L732' title='Defined at 732 in Modules/_csv.c.'>parse_reset</a>(self) &lt; 0) <font color='red'>{</font>
+<a name='L906'>        Py_DECREF(self);
+<a name='L907'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L908'>    <font color='red'>}</font>
+<a name='L909'>
+<a name='L910'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "", 1, 2, &amp;iterator, &amp;dialect)) <font color='red'>{</font>
+<a name='L911'>        Py_DECREF(self);
+<a name='L912'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L913'>    <font color='red'>}</font>
+<a name='L914'>    self-&gt;input_iter = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(iterator);
+<a name='L915'>    <b>if</b> (self-&gt;input_iter == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L916'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L917'>                        "argument 1 must be an iterator");
+<a name='L918'>        Py_DECREF(self);
+<a name='L919'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L920'>    <font color='red'>}</font>
+<a name='L921'>    self-&gt;dialect = (<a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *)<a href='../S/2245.html#L480' title='Defined at 480 in Modules/_csv.c.'>_call_dialect</a>(dialect, keyword_args);
+<a name='L922'>    <b>if</b> (self-&gt;dialect == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L923'>        Py_DECREF(self);
+<a name='L924'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L925'>    <font color='red'>}</font>
+<a name='L926'>
+<a name='L927'>    <a href='../D/3618.html' title='Multiple defined in 2 places.'>PyObject_GC_Track</a>(self);
+<a name='L928'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L929'><font color='red'>}</font>
+<a name='L930'>
+<a name='L931'><i><font color='green'>/*</font></i>
+<a name='L932'><i><font color='green'> * WRITER</font></i>
+<a name='L933'><i><font color='green'> */</font></i>
+<a name='L934'><i><font color='green'>/* ---------------------------------------------------------------- */</font></i>
+<a name='L935'><b>static</b> <b>void</b>
+<a name='L936'><a href='../S/2245.html#L1135' title='Refered from 1135 in Modules/_csv.c.'>join_reset</a>(WriterObj *self)
+<a name='L937'><font color='red'>{</font>
+<a name='L938'>    self-&gt;rec_len = 0;
+<a name='L939'>    self-&gt;num_fields = 0;
+<a name='L940'><font color='red'>}</font>
+<a name='L941'>
+<a name='L942'><font color='darkred'>#define</font> <a href='../R/1916.html' title='Multiple refered from 3 places.'>MEM_INCR</a> 32768
+<a name='L943'>
+<a name='L944'><i><font color='green'>/* Calculate new record length or append field to record.  Return new</font></i>
+<a name='L945'><i><font color='green'> * record length.</font></i>
+<a name='L946'><i><font color='green'> */</font></i>
+<a name='L947'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L948'><a href='../R/8571.html' title='Multiple refered from 2 places.'>join_append_data</a>(WriterObj *self, Py_UNICODE *field, <b>int</b> quote_empty,
+<a name='L949'>                 <b>int</b> *quoted, <b>int</b> copy_phase)
+<a name='L950'><font color='red'>{</font>
+<a name='L951'>    <a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *dialect = self-&gt;dialect;
+<a name='L952'>    <b>int</b> i;
+<a name='L953'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> rec_len;
+<a name='L954'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *lineterm;
+<a name='L955'>
+<a name='L956'><font color='darkred'>#define</font> <a href='../R/16.html' title='Multiple refered from 6 places.'>ADDCH</a>(c) \
+<a name='L957'>    <b>do</b> <font color='red'>{</font>\
+<a name='L958'>        <b>if</b> (copy_phase) \
+<a name='L959'>            self-&gt;rec[rec_len] = c;\
+<a name='L960'>        rec_len++;\
+<a name='L961'>    <font color='red'>}</font> <b>while</b>(0)
+<a name='L962'>
+<a name='L963'>    lineterm = <a href='../D/3960.html' title='Multiple defined in 3 places.'>PyUnicode_AsUnicode</a>(dialect-&gt;lineterminator);
+<a name='L964'>    <b>if</b> (lineterm == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L965'>        <b>return</b> -1;
+<a name='L966'>
+<a name='L967'>    rec_len = self-&gt;rec_len;
+<a name='L968'>
+<a name='L969'>    <i><font color='green'>/* If this is not the first field we need a field separator */</font></i>
+<a name='L970'>    <b>if</b> (self-&gt;num_fields &gt; 0)
+<a name='L971'>        <a href='../D/25.html' title='Multiple defined in 2 places.'>ADDCH</a>(dialect-&gt;delimiter);
+<a name='L972'>
+<a name='L973'>    <i><font color='green'>/* Handle preceding quote */</font></i>
+<a name='L974'>    <b>if</b> (copy_phase &amp;&amp; *quoted)
+<a name='L975'>        <a href='../D/25.html' title='Multiple defined in 2 places.'>ADDCH</a>(dialect-&gt;quotechar);
+<a name='L976'>
+<a name='L977'>    <i><font color='green'>/* Copy/count field data */</font></i>
+<a name='L978'>    <i><font color='green'>/* If field is null just pass over */</font></i>
+<a name='L979'>    <b>for</b> (i = 0; field; i++) <font color='red'>{</font>
+<a name='L980'>        <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> c = field[i];
+<a name='L981'>        <b>int</b> want_escape = 0;
+<a name='L982'>
+<a name='L983'>        <b>if</b> (c == '\0')
+<a name='L984'>            <b>break</b>;
+<a name='L985'>
+<a name='L986'>        <b>if</b> (c == dialect-&gt;delimiter ||
+<a name='L987'>            c == dialect-&gt;escapechar ||
+<a name='L988'>            c == dialect-&gt;quotechar  ||
+<a name='L989'>            <a href='../S/2828.html#L10306' title='Defined at 10306 in Objects/unicodeobject.c.'>Py_UNICODE_strchr</a>(lineterm, c)) <font color='red'>{</font>
+<a name='L990'>            <b>if</b> (dialect-&gt;quoting == <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a>)
+<a name='L991'>                want_escape = 1;
+<a name='L992'>            <b>else</b> <font color='red'>{</font>
+<a name='L993'>                <b>if</b> (c == dialect-&gt;quotechar) <font color='red'>{</font>
+<a name='L994'>                    <b>if</b> (dialect-&gt;doublequote)
+<a name='L995'>                        <a href='../D/25.html' title='Multiple defined in 2 places.'>ADDCH</a>(dialect-&gt;quotechar);
+<a name='L996'>                    <b>else</b>
+<a name='L997'>                        want_escape = 1;
+<a name='L998'>                <font color='red'>}</font>
+<a name='L999'>                <b>if</b> (!want_escape)
+<a name='L1000'>                    *quoted = 1;
+<a name='L1001'>            <font color='red'>}</font>
+<a name='L1002'>            <b>if</b> (want_escape) <font color='red'>{</font>
+<a name='L1003'>                <b>if</b> (!dialect-&gt;escapechar) <font color='red'>{</font>
+<a name='L1004'>                    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj,
+<a name='L1005'>                                 "need to escape, but no escapechar set");
+<a name='L1006'>                    <b>return</b> -1;
+<a name='L1007'>                <font color='red'>}</font>
+<a name='L1008'>                <a href='../D/25.html' title='Multiple defined in 2 places.'>ADDCH</a>(dialect-&gt;escapechar);
+<a name='L1009'>            <font color='red'>}</font>
+<a name='L1010'>        <font color='red'>}</font>
+<a name='L1011'>        <i><font color='green'>/* Copy field character into record buffer.</font></i>
+<a name='L1012'><i><font color='green'>         */</font></i>
+<a name='L1013'>        <a href='../D/25.html' title='Multiple defined in 2 places.'>ADDCH</a>(c);
+<a name='L1014'>    <font color='red'>}</font>
+<a name='L1015'>
+<a name='L1016'>    <i><font color='green'>/* If field is empty check if it needs to be quoted.</font></i>
+<a name='L1017'><i><font color='green'>     */</font></i>
+<a name='L1018'>    <b>if</b> (i == 0 &amp;&amp; quote_empty) <font color='red'>{</font>
+<a name='L1019'>        <b>if</b> (dialect-&gt;quoting == <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONE</a>) <font color='red'>{</font>
+<a name='L1020'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj,
+<a name='L1021'>                "single empty field record must be quoted");
+<a name='L1022'>            <b>return</b> -1;
+<a name='L1023'>        <font color='red'>}</font>
+<a name='L1024'>        <b>else</b>
+<a name='L1025'>            *quoted = 1;
+<a name='L1026'>    <font color='red'>}</font>
+<a name='L1027'>
+<a name='L1028'>    <b>if</b> (*quoted) <font color='red'>{</font>
+<a name='L1029'>        <b>if</b> (copy_phase)
+<a name='L1030'>            <a href='../D/25.html' title='Multiple defined in 2 places.'>ADDCH</a>(dialect-&gt;quotechar);
+<a name='L1031'>        <b>else</b>
+<a name='L1032'>            rec_len += 2;
+<a name='L1033'>    <font color='red'>}</font>
+<a name='L1034'>    <b>return</b> rec_len;
+<a name='L1035'><font color='darkred'>#undef</font> <a href='../R/16.html' title='Multiple refered from 6 places.'>ADDCH</a>
+<a name='L1036'><font color='red'>}</font>
+<a name='L1037'>
+<a name='L1038'><b>static</b> <b>int</b>
+<a name='L1039'><a href='../R/8573.html' title='Multiple refered from 2 places.'>join_check_rec_size</a>(WriterObj *self, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> rec_len)
+<a name='L1040'><font color='red'>{</font>
+<a name='L1041'>
+<a name='L1042'>    <b>if</b> (rec_len &lt; 0 || rec_len &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a> - <a href='../S/2245.html#L942' title='Defined at 942 in Modules/_csv.c.'>MEM_INCR</a>) <font color='red'>{</font>
+<a name='L1043'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1044'>        <b>return</b> 0;
+<a name='L1045'>    <font color='red'>}</font>
+<a name='L1046'>
+<a name='L1047'>    <b>if</b> (rec_len &gt; self-&gt;rec_size) <font color='red'>{</font>
+<a name='L1048'>        <b>if</b> (self-&gt;rec_size == 0) <font color='red'>{</font>
+<a name='L1049'>            self-&gt;rec_size = (rec_len / <a href='../S/2245.html#L942' title='Defined at 942 in Modules/_csv.c.'>MEM_INCR</a> + 1) * <a href='../S/2245.html#L942' title='Defined at 942 in Modules/_csv.c.'>MEM_INCR</a>;
+<a name='L1050'>            <b>if</b> (self-&gt;rec != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1051'>                <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(self-&gt;rec);
+<a name='L1052'>            self-&gt;rec = PyMem_New(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>, self-&gt;rec_size);
+<a name='L1053'>        <font color='red'>}</font>
+<a name='L1054'>        <b>else</b> <font color='red'>{</font>
+<a name='L1055'>            <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>* old_rec = self-&gt;rec;
+<a name='L1056'>
+<a name='L1057'>            self-&gt;rec_size = (rec_len / <a href='../S/2245.html#L942' title='Defined at 942 in Modules/_csv.c.'>MEM_INCR</a> + 1) * <a href='../S/2245.html#L942' title='Defined at 942 in Modules/_csv.c.'>MEM_INCR</a>;
+<a name='L1058'>            self-&gt;rec = PyMem_Resize(self-&gt;rec, <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>,
+<a name='L1059'>                         self-&gt;rec_size);
+<a name='L1060'>            <b>if</b> (self-&gt;rec == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1061'>                <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(old_rec);
+<a name='L1062'>        <font color='red'>}</font>
+<a name='L1063'>        <b>if</b> (self-&gt;rec == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1064'>            <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1065'>            <b>return</b> 0;
+<a name='L1066'>        <font color='red'>}</font>
+<a name='L1067'>    <font color='red'>}</font>
+<a name='L1068'>    <b>return</b> 1;
+<a name='L1069'><font color='red'>}</font>
+<a name='L1070'>
+<a name='L1071'><b>static</b> <b>int</b>
+<a name='L1072'><a href='../R/8570.html' title='Multiple refered from 3 places.'>join_append</a>(WriterObj *self, Py_UNICODE *field, <b>int</b> *quoted, <b>int</b> quote_empty)
+<a name='L1073'><font color='red'>{</font>
+<a name='L1074'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> rec_len;
+<a name='L1075'>
+<a name='L1076'>    rec_len = <a href='../S/2245.html#L948' title='Defined at 948 in Modules/_csv.c.'>join_append_data</a>(self, field, quote_empty, quoted, 0);
+<a name='L1077'>    <b>if</b> (rec_len &lt; 0)
+<a name='L1078'>        <b>return</b> 0;
+<a name='L1079'>
+<a name='L1080'>    <i><font color='green'>/* grow record buffer if necessary */</font></i>
+<a name='L1081'>    <b>if</b> (!<a href='../S/2245.html#L1039' title='Defined at 1039 in Modules/_csv.c.'>join_check_rec_size</a>(self, rec_len))
+<a name='L1082'>        <b>return</b> 0;
+<a name='L1083'>
+<a name='L1084'>    self-&gt;rec_len = <a href='../S/2245.html#L948' title='Defined at 948 in Modules/_csv.c.'>join_append_data</a>(self, field, quote_empty, quoted, 1);
+<a name='L1085'>    self-&gt;num_fields++;
+<a name='L1086'>
+<a name='L1087'>    <b>return</b> 1;
+<a name='L1088'><font color='red'>}</font>
+<a name='L1089'>
+<a name='L1090'><b>static</b> <b>int</b>
+<a name='L1091'><a href='../S/2245.html#L1186' title='Refered from 1186 in Modules/_csv.c.'>join_append_lineterminator</a>(WriterObj *self)
+<a name='L1092'><font color='red'>{</font>
+<a name='L1093'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> terminator_len;
+<a name='L1094'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *terminator;
+<a name='L1095'>
+<a name='L1096'>    terminator_len = <a href='../D/4020.html' title='Multiple defined in 3 places.'>PyUnicode_GetSize</a>(self-&gt;dialect-&gt;lineterminator);
+<a name='L1097'>    <b>if</b> (terminator_len == -1)
+<a name='L1098'>        <b>return</b> 0;
+<a name='L1099'>
+<a name='L1100'>    <i><font color='green'>/* grow record buffer if necessary */</font></i>
+<a name='L1101'>    <b>if</b> (!<a href='../S/2245.html#L1039' title='Defined at 1039 in Modules/_csv.c.'>join_check_rec_size</a>(self, self-&gt;rec_len + terminator_len))
+<a name='L1102'>        <b>return</b> 0;
+<a name='L1103'>
+<a name='L1104'>    terminator = <a href='../D/3960.html' title='Multiple defined in 3 places.'>PyUnicode_AsUnicode</a>(self-&gt;dialect-&gt;lineterminator);
+<a name='L1105'>    <b>if</b> (terminator == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1106'>        <b>return</b> 0;
+<a name='L1107'>    <a href='../S/2664.html#L75' title='Defined at 75 in Modules/expat/xmlparse.c.'>memmove</a>(self-&gt;rec + self-&gt;rec_len, terminator,
+<a name='L1108'>        <b>sizeof</b>(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>)*terminator_len);
+<a name='L1109'>    self-&gt;rec_len += terminator_len;
+<a name='L1110'>
+<a name='L1111'>    <b>return</b> 1;
+<a name='L1112'><font color='red'>}</font>
+<a name='L1113'>
+<a name='L1114'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_writerow_doc,
+<a name='L1115'>"writerow(sequence)\n"
+<a name='L1116'>"\n"
+<a name='L1117'>"Construct and write a CSV record from a sequence of fields.  Non-string\n"
+<a name='L1118'>"elements will be converted to string.");
+<a name='L1119'>
+<a name='L1120'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1121'><a href='../R/7059.html' title='Multiple refered from 2 places.'>csv_writerow</a>(WriterObj *self, PyObject *seq)
+<a name='L1122'><font color='red'>{</font>
+<a name='L1123'>    <a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *dialect = self-&gt;dialect;
+<a name='L1124'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len, i;
+<a name='L1125'>
+<a name='L1126'>    <b>if</b> (!<a href='../S/2775.html#L1443' title='Defined at 1443 in Objects/abstract.c.'>PySequence_Check</a>(seq))
+<a name='L1127'>        <b>return</b> <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj, "sequence expected");
+<a name='L1128'>
+<a name='L1129'>    len = <a href='../D/3757.html' title='Multiple defined in 3 places.'>PySequence_Length</a>(seq);
+<a name='L1130'>    <b>if</b> (len &lt; 0)
+<a name='L1131'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1132'>
+<a name='L1133'>    <i><font color='green'>/* Join all fields in internal buffer.</font></i>
+<a name='L1134'><i><font color='green'>     */</font></i>
+<a name='L1135'>    <a href='../S/2245.html#L936' title='Defined at 936 in Modules/_csv.c.'>join_reset</a>(self);
+<a name='L1136'>    <b>for</b> (i = 0; i &lt; len; i++) <font color='red'>{</font>
+<a name='L1137'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *field;
+<a name='L1138'>        <b>int</b> append_ok;
+<a name='L1139'>        <b>int</b> quoted;
+<a name='L1140'>
+<a name='L1141'>        field = <a href='../S/2775.html#L1584' title='Defined at 1584 in Objects/abstract.c.'>PySequence_GetItem</a>(seq, i);
+<a name='L1142'>        <b>if</b> (field == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1143'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1144'>
+<a name='L1145'>        <b>switch</b> (dialect-&gt;quoting) <font color='red'>{</font>
+<a name='L1146'>        <b>case</b> <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_NONNUMERIC</a>:
+<a name='L1147'>            quoted = !<a href='../S/2775.html#L736' title='Defined at 736 in Objects/abstract.c.'>PyNumber_Check</a>(field);
+<a name='L1148'>            <b>break</b>;
+<a name='L1149'>        <b>case</b> <a href='../S/2245.html#L30' title='Defined at 30 in Modules/_csv.c.'>QUOTE_ALL</a>:
+<a name='L1150'>            quoted = 1;
+<a name='L1151'>            <b>break</b>;
+<a name='L1152'>        <b>default</b>:
+<a name='L1153'>            quoted = 0;
+<a name='L1154'>            <b>break</b>;
+<a name='L1155'>        <font color='red'>}</font>
+<a name='L1156'>
+<a name='L1157'>        <b>if</b> (PyUnicode_Check(field)) <font color='red'>{</font>
+<a name='L1158'>            append_ok = <a href='../S/2245.html#L1072' title='Defined at 1072 in Modules/_csv.c.'>join_append</a>(self,
+<a name='L1159'>                                    <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(field),
+<a name='L1160'>                                    &amp;quoted, len == 1);
+<a name='L1161'>            Py_DECREF(field);
+<a name='L1162'>        <font color='red'>}</font>
+<a name='L1163'>        <b>else</b> <b>if</b> (field == Py_None) <font color='red'>{</font>
+<a name='L1164'>            append_ok = <a href='../S/2245.html#L1072' title='Defined at 1072 in Modules/_csv.c.'>join_append</a>(self, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1165'>                        &amp;quoted, len == 1);
+<a name='L1166'>            Py_DECREF(field);
+<a name='L1167'>        <font color='red'>}</font>
+<a name='L1168'>        <b>else</b> <font color='red'>{</font>
+<a name='L1169'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *str;
+<a name='L1170'>
+<a name='L1171'>            str = <a href='../S/2803.html#L396' title='Defined at 396 in Objects/object.c.'>PyObject_Str</a>(field);
+<a name='L1172'>            Py_DECREF(field);
+<a name='L1173'>            <b>if</b> (str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1174'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1175'>            append_ok = <a href='../S/2245.html#L1072' title='Defined at 1072 in Modules/_csv.c.'>join_append</a>(self,
+<a name='L1176'>                                    <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(str),
+<a name='L1177'>                                    &amp;quoted, len == 1);
+<a name='L1178'>            Py_DECREF(str);
+<a name='L1179'>        <font color='red'>}</font>
+<a name='L1180'>        <b>if</b> (!append_ok)
+<a name='L1181'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1182'>    <font color='red'>}</font>
+<a name='L1183'>
+<a name='L1184'>    <i><font color='green'>/* Add line terminator.</font></i>
+<a name='L1185'><i><font color='green'>     */</font></i>
+<a name='L1186'>    <b>if</b> (!<a href='../S/2245.html#L1091' title='Defined at 1091 in Modules/_csv.c.'>join_append_lineterminator</a>(self))
+<a name='L1187'>        <b>return</b> 0;
+<a name='L1188'>
+<a name='L1189'>    <b>return</b> <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(self-&gt;writeline,
+<a name='L1190'>                                 "(u#)", self-&gt;rec,
+<a name='L1191'>                                 self-&gt;rec_len);
+<a name='L1192'><font color='red'>}</font>
+<a name='L1193'>
+<a name='L1194'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_writerows_doc,
+<a name='L1195'>"writerows(sequence of sequences)\n"
+<a name='L1196'>"\n"
+<a name='L1197'>"Construct and write a series of sequences to a csv file.  Non-string\n"
+<a name='L1198'>"elements will be converted to string.");
+<a name='L1199'>
+<a name='L1200'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1201'><a href='../S/2245.html#L1230' title='Refered from 1230 in Modules/_csv.c.'>csv_writerows</a>(WriterObj *self, PyObject *seqseq)
+<a name='L1202'><font color='red'>{</font>
+<a name='L1203'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *row_iter, *row_obj, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1204'>
+<a name='L1205'>    row_iter = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(seqseq);
+<a name='L1206'>    <b>if</b> (row_iter == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1207'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1208'>                        "writerows() argument must be iterable");
+<a name='L1209'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1210'>    <font color='red'>}</font>
+<a name='L1211'>    <b>while</b> ((row_obj = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(row_iter))) <font color='red'>{</font>
+<a name='L1212'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2245.html#L1121' title='Defined at 1121 in Modules/_csv.c.'>csv_writerow</a>(self, row_obj);
+<a name='L1213'>        Py_DECREF(row_obj);
+<a name='L1214'>        <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L1215'>            Py_DECREF(row_iter);
+<a name='L1216'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1217'>        <font color='red'>}</font>
+<a name='L1218'>        <b>else</b>
+<a name='L1219'>             Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L1220'>    <font color='red'>}</font>
+<a name='L1221'>    Py_DECREF(row_iter);
+<a name='L1222'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L1223'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1224'>    Py_INCREF(Py_None);
+<a name='L1225'>    <b>return</b> Py_None;
+<a name='L1226'><font color='red'>}</font>
+<a name='L1227'>
+<a name='L1228'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> Writer_methods[] = <font color='red'>{</font>
+<a name='L1229'>    <font color='red'>{</font> "writerow", (PyCFunction)<a href='../S/2245.html#L1121' title='Defined at 1121 in Modules/_csv.c.'>csv_writerow</a>, METH_O, csv_writerow_doc<font color='red'>}</font>,
+<a name='L1230'>    <font color='red'>{</font> "writerows", (PyCFunction)<a href='../S/2245.html#L1201' title='Defined at 1201 in Modules/_csv.c.'>csv_writerows</a>, METH_O, csv_writerows_doc<font color='red'>}</font>,
+<a name='L1231'>    <font color='red'>{</font> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>
+<a name='L1232'><font color='red'>}</font>;
+<a name='L1233'>
+<a name='L1234'><font color='darkred'>#define</font> <a href='../S/2245.html#L1237' title='Refered from 1237 in Modules/_csv.c.'>W_OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2245.html#L93' title='Defined at 93 in Modules/_csv.c.'>WriterObj</a>, x)
+<a name='L1235'>
+<a name='L1236'><b>static</b> <b>struct</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> Writer_memberlist[] = <font color='red'>{</font>
+<a name='L1237'>    <font color='red'>{</font> "dialect", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../S/2245.html#L1234' title='Defined at 1234 in Modules/_csv.c.'>W_OFF</a>(dialect), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a> <font color='red'>}</font>,
+<a name='L1238'>    <font color='red'>{</font> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>
+<a name='L1239'><font color='red'>}</font>;
+<a name='L1240'>
+<a name='L1241'><b>static</b> <b>void</b>
+<a name='L1242'><a href='../S/2245.html#L1281' title='Refered from 1281 in Modules/_csv.c.'>Writer_dealloc</a>(WriterObj *self)
+<a name='L1243'><font color='red'>{</font>
+<a name='L1244'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(self);
+<a name='L1245'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;dialect);
+<a name='L1246'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;writeline);
+<a name='L1247'>    <b>if</b> (self-&gt;rec != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1248'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(self-&gt;rec);
+<a name='L1249'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(self);
+<a name='L1250'><font color='red'>}</font>
+<a name='L1251'>
+<a name='L1252'><b>static</b> <b>int</b>
+<a name='L1253'><a href='../S/2245.html#L1299' title='Refered from 1299 in Modules/_csv.c.'>Writer_traverse</a>(WriterObj *self, visitproc visit, <b>void</b> *arg)
+<a name='L1254'><font color='red'>{</font>
+<a name='L1255'>    Py_VISIT(self-&gt;dialect);
+<a name='L1256'>    Py_VISIT(self-&gt;writeline);
+<a name='L1257'>    <b>return</b> 0;
+<a name='L1258'><font color='red'>}</font>
+<a name='L1259'>
+<a name='L1260'><b>static</b> <b>int</b>
+<a name='L1261'><a href='../S/2245.html#L1300' title='Refered from 1300 in Modules/_csv.c.'>Writer_clear</a>(WriterObj *self)
+<a name='L1262'><font color='red'>{</font>
+<a name='L1263'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;dialect);
+<a name='L1264'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;writeline);
+<a name='L1265'>    <b>return</b> 0;
+<a name='L1266'><font color='red'>}</font>
+<a name='L1267'>
+<a name='L1268'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(Writer_Type_doc,
+<a name='L1269'>"CSV writer\n"
+<a name='L1270'>"\n"
+<a name='L1271'>"Writer objects are responsible for generating tabular data\n"
+<a name='L1272'>"in CSV format from sequence input.\n"
+<a name='L1273'>);
+<a name='L1274'>
+<a name='L1275'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Writer_Type = <font color='red'>{</font>
+<a name='L1276'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L1277'>    "_csv.writer",                          <i><font color='green'>/*tp_name*/</font></i>
+<a name='L1278'>    <b>sizeof</b>(<a href='../S/2245.html#L93' title='Defined at 93 in Modules/_csv.c.'>WriterObj</a>),                      <i><font color='green'>/*tp_basicsize*/</font></i>
+<a name='L1279'>    0,                                      <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L1280'>    <i><font color='green'>/* methods */</font></i>
+<a name='L1281'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2245.html#L1242' title='Defined at 1242 in Modules/_csv.c.'>Writer_dealloc</a>,             <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L1282'>    (printfunc)0,                           <i><font color='green'>/*tp_print*/</font></i>
+<a name='L1283'>    (getattrfunc)0,                         <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L1284'>    (setattrfunc)0,                         <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L1285'>    0,                                      <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L1286'>    (reprfunc)0,                            <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L1287'>    0,                                      <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L1288'>    0,                                      <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L1289'>    0,                                      <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L1290'>    (hashfunc)0,                            <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L1291'>    (ternaryfunc)0,                         <i><font color='green'>/*tp_call*/</font></i>
+<a name='L1292'>    (reprfunc)0,                            <i><font color='green'>/*tp_str*/</font></i>
+<a name='L1293'>    0,                                      <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L1294'>    0,                                      <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L1295'>    0,                                      <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L1296'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+<a name='L1297'>        Py_TPFLAGS_HAVE_GC,                     <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L1298'>    Writer_Type_doc,
+<a name='L1299'>    (traverseproc)<a href='../S/2245.html#L1253' title='Defined at 1253 in Modules/_csv.c.'>Writer_traverse</a>,          <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L1300'>    (inquiry)<a href='../S/2245.html#L1261' title='Defined at 1261 in Modules/_csv.c.'>Writer_clear</a>,                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L1301'>    0,                                      <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L1302'>    0,                                      <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L1303'>    (getiterfunc)0,                         <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L1304'>    (getiterfunc)0,                         <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L1305'>    Writer_methods,                         <i><font color='green'>/*tp_methods*/</font></i>
+<a name='L1306'>    Writer_memberlist,                      <i><font color='green'>/*tp_members*/</font></i>
+<a name='L1307'>    0,                                      <i><font color='green'>/*tp_getset*/</font></i>
+<a name='L1308'><font color='red'>}</font>;
+<a name='L1309'>
+<a name='L1310'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1311'><a href='../S/2245.html#L1536' title='Refered from 1536 in Modules/_csv.c.'>csv_writer</a>(PyObject *module, PyObject *args, PyObject *keyword_args)
+<a name='L1312'><font color='red'>{</font>
+<a name='L1313'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * output_file, * dialect = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1314'>    <a href='../S/2245.html#L93' title='Defined at 93 in Modules/_csv.c.'>WriterObj</a> * self = PyObject_GC_New(<a href='../S/2245.html#L93' title='Defined at 93 in Modules/_csv.c.'>WriterObj</a>, &amp;Writer_Type);
+<a name='L1315'>
+<a name='L1316'>    <b>if</b> (!self)
+<a name='L1317'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1318'>
+<a name='L1319'>    self-&gt;dialect = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1320'>    self-&gt;writeline = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1321'>
+<a name='L1322'>    self-&gt;rec = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1323'>    self-&gt;rec_size = 0;
+<a name='L1324'>    self-&gt;rec_len = 0;
+<a name='L1325'>    self-&gt;num_fields = 0;
+<a name='L1326'>
+<a name='L1327'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "", 1, 2, &amp;output_file, &amp;dialect)) <font color='red'>{</font>
+<a name='L1328'>        Py_DECREF(self);
+<a name='L1329'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1330'>    <font color='red'>}</font>
+<a name='L1331'>    self-&gt;writeline = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(output_file, "write");
+<a name='L1332'>    <b>if</b> (self-&gt;writeline == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(self-&gt;writeline)) <font color='red'>{</font>
+<a name='L1333'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1334'>                        "argument 1 must have a \"write\" method");
+<a name='L1335'>        Py_DECREF(self);
+<a name='L1336'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1337'>    <font color='red'>}</font>
+<a name='L1338'>    self-&gt;dialect = (<a href='../S/2245.html#L58' title='Defined at 58 in Modules/_csv.c.'>DialectObj</a> *)<a href='../S/2245.html#L480' title='Defined at 480 in Modules/_csv.c.'>_call_dialect</a>(dialect, keyword_args);
+<a name='L1339'>    <b>if</b> (self-&gt;dialect == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1340'>        Py_DECREF(self);
+<a name='L1341'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1342'>    <font color='red'>}</font>
+<a name='L1343'>    <a href='../D/3618.html' title='Multiple defined in 2 places.'>PyObject_GC_Track</a>(self);
+<a name='L1344'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L1345'><font color='red'>}</font>
+<a name='L1346'>
+<a name='L1347'><i><font color='green'>/*</font></i>
+<a name='L1348'><i><font color='green'> * DIALECT REGISTRY</font></i>
+<a name='L1349'><i><font color='green'> */</font></i>
+<a name='L1350'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1351'><a href='../S/2245.html#L1538' title='Refered from 1538 in Modules/_csv.c.'>csv_list_dialects</a>(PyObject *module, PyObject *args)
+<a name='L1352'><font color='red'>{</font>
+<a name='L1353'>    <b>return</b> <a href='../S/2787.html#L1630' title='Defined at 1630 in Objects/dictobject.c.'>PyDict_Keys</a>(dialects);
+<a name='L1354'><font color='red'>}</font>
+<a name='L1355'>
+<a name='L1356'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1357'><a href='../S/2245.html#L1540' title='Refered from 1540 in Modules/_csv.c.'>csv_register_dialect</a>(PyObject *module, PyObject *args, PyObject *kwargs)
+<a name='L1358'><font color='red'>{</font>
+<a name='L1359'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name_obj, *dialect_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1360'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dialect;
+<a name='L1361'>
+<a name='L1362'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "", 1, 2, &amp;name_obj, &amp;dialect_obj))
+<a name='L1363'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1364'>    <b>if</b> (!<a href='../S/2245.html#L16' title='Defined at 16 in Modules/_csv.c.'>IS_BASESTRING</a>(name_obj)) <font color='red'>{</font>
+<a name='L1365'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1366'>                        "dialect name must be a string or unicode");
+<a name='L1367'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1368'>    <font color='red'>}</font>
+<a name='L1369'>    dialect = <a href='../S/2245.html#L480' title='Defined at 480 in Modules/_csv.c.'>_call_dialect</a>(dialect_obj, kwargs);
+<a name='L1370'>    <b>if</b> (dialect == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1371'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1372'>    <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(dialects, name_obj, dialect) &lt; 0) <font color='red'>{</font>
+<a name='L1373'>        Py_DECREF(dialect);
+<a name='L1374'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1375'>    <font color='red'>}</font>
+<a name='L1376'>    Py_DECREF(dialect);
+<a name='L1377'>    Py_INCREF(Py_None);
+<a name='L1378'>    <b>return</b> Py_None;
+<a name='L1379'><font color='red'>}</font>
+<a name='L1380'>
+<a name='L1381'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1382'><a href='../S/2245.html#L1542' title='Refered from 1542 in Modules/_csv.c.'>csv_unregister_dialect</a>(PyObject *module, PyObject *name_obj)
+<a name='L1383'><font color='red'>{</font>
+<a name='L1384'>    <b>if</b> (<a href='../S/2787.html#L832' title='Defined at 832 in Objects/dictobject.c.'>PyDict_DelItem</a>(dialects, name_obj) &lt; 0)
+<a name='L1385'>        <b>return</b> <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(error_obj, "unknown dialect");
+<a name='L1386'>    Py_INCREF(Py_None);
+<a name='L1387'>    <b>return</b> Py_None;
+<a name='L1388'><font color='red'>}</font>
+<a name='L1389'>
+<a name='L1390'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1391'><a href='../S/2245.html#L1544' title='Refered from 1544 in Modules/_csv.c.'>csv_get_dialect</a>(PyObject *module, PyObject *name_obj)
+<a name='L1392'><font color='red'>{</font>
+<a name='L1393'>    <b>return</b> <a href='../S/2245.html#L102' title='Defined at 102 in Modules/_csv.c.'>get_dialect_from_registry</a>(name_obj);
+<a name='L1394'><font color='red'>}</font>
+<a name='L1395'>
+<a name='L1396'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1397'><a href='../S/2245.html#L1546' title='Refered from 1546 in Modules/_csv.c.'>csv_field_size_limit</a>(PyObject *module, PyObject *args)
+<a name='L1398'><font color='red'>{</font>
+<a name='L1399'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *new_limit = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1400'>    <b>long</b> old_limit = field_limit;
+<a name='L1401'>
+<a name='L1402'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "field_size_limit", 0, 1, &amp;new_limit))
+<a name='L1403'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1404'>    <b>if</b> (new_limit != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1405'>        <b>if</b> (!PyLong_CheckExact(new_limit)) <font color='red'>{</font>
+<a name='L1406'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L1407'>                         "limit must be an integer");
+<a name='L1408'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1409'>        <font color='red'>}</font>
+<a name='L1410'>        field_limit = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(new_limit);
+<a name='L1411'>        <b>if</b> (field_limit == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L1412'>            field_limit = old_limit;
+<a name='L1413'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1414'>        <font color='red'>}</font>
+<a name='L1415'>    <font color='red'>}</font>
+<a name='L1416'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(old_limit);
+<a name='L1417'><font color='red'>}</font>
+<a name='L1418'>
+<a name='L1419'><i><font color='green'>/*</font></i>
+<a name='L1420'><i><font color='green'> * MODULE</font></i>
+<a name='L1421'><i><font color='green'> */</font></i>
+<a name='L1422'>
+<a name='L1423'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_module_doc,
+<a name='L1424'>"CSV parsing and writing.\n"
+<a name='L1425'>"\n"
+<a name='L1426'>"This module provides classes that assist in the reading and writing\n"
+<a name='L1427'>"of Comma Separated Value (CSV) files, and implements the interface\n"
+<a name='L1428'>"described by PEP 305.  Although many CSV files are simple to parse,\n"
+<a name='L1429'>"the format is not formally defined by a stable specification and\n"
+<a name='L1430'>"is subtle enough that parsing lines of a CSV file with something\n"
+<a name='L1431'>"like line.split(\",\") is bound to fail.  The module supports three\n"
+<a name='L1432'>"basic APIs: reading, writing, and registration of dialects.\n"
+<a name='L1433'>"\n"
+<a name='L1434'>"\n"
+<a name='L1435'>"DIALECT REGISTRATION:\n"
+<a name='L1436'>"\n"
+<a name='L1437'>"Readers and writers support a dialect argument, which is a convenient\n"
+<a name='L1438'>"handle on a group of settings.  When the dialect argument is a string,\n"
+<a name='L1439'>"it identifies one of the dialects previously registered with the module.\n"
+<a name='L1440'>"If it is a class or instance, the attributes of the argument are used as\n"
+<a name='L1441'>"the settings for the reader or writer:\n"
+<a name='L1442'>"\n"
+<a name='L1443'>"    class excel:\n"
+<a name='L1444'>"        delimiter = ','\n"
+<a name='L1445'>"        quotechar = '\"'\n"
+<a name='L1446'>"        escapechar = None\n"
+<a name='L1447'>"        doublequote = True\n"
+<a name='L1448'>"        skipinitialspace = False\n"
+<a name='L1449'>"        lineterminator = '\\r\\n'\n"
+<a name='L1450'>"        quoting = QUOTE_MINIMAL\n"
+<a name='L1451'>"\n"
+<a name='L1452'>"SETTINGS:\n"
+<a name='L1453'>"\n"
+<a name='L1454'>"    * quotechar - specifies a one-character string to use as the \n"
+<a name='L1455'>"        quoting character.  It defaults to '\"'.\n"
+<a name='L1456'>"    * delimiter - specifies a one-character string to use as the \n"
+<a name='L1457'>"        field separator.  It defaults to ','.\n"
+<a name='L1458'>"    * skipinitialspace - specifies how to interpret whitespace which\n"
+<a name='L1459'>"        immediately follows a delimiter.  It defaults to False, which\n"
+<a name='L1460'>"        means that whitespace immediately following a delimiter is part\n"
+<a name='L1461'>"        of the following field.\n"
+<a name='L1462'>"    * lineterminator -  specifies the character sequence which should \n"
+<a name='L1463'>"        terminate rows.\n"
+<a name='L1464'>"    * quoting - controls when quotes should be generated by the writer.\n"
+<a name='L1465'>"        It can take on any of the following module constants:\n"
+<a name='L1466'>"\n"
+<a name='L1467'>"        csv.QUOTE_MINIMAL means only when required, for example, when a\n"
+<a name='L1468'>"            field contains either the quotechar or the delimiter\n"
+<a name='L1469'>"        csv.QUOTE_ALL means that quotes are always placed around fields.\n"
+<a name='L1470'>"        csv.QUOTE_NONNUMERIC means that quotes are always placed around\n"
+<a name='L1471'>"            fields which do not parse as integers or floating point\n"
+<a name='L1472'>"            numbers.\n"
+<a name='L1473'>"        csv.QUOTE_NONE means that quotes are never placed around fields.\n"
+<a name='L1474'>"    * escapechar - specifies a one-character string used to escape \n"
+<a name='L1475'>"        the delimiter when quoting is set to QUOTE_NONE.\n"
+<a name='L1476'>"    * doublequote - controls the handling of quotes inside fields.  When\n"
+<a name='L1477'>"        True, two consecutive quotes are interpreted as one during read,\n"
+<a name='L1478'>"        and when writing, each quote character embedded in the data is\n"
+<a name='L1479'>"        written as two quotes\n");
+<a name='L1480'>
+<a name='L1481'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_reader_doc,
+<a name='L1482'>"    csv_reader = reader(iterable [, dialect='excel']\n"
+<a name='L1483'>"                        [optional keyword args])\n"
+<a name='L1484'>"    for row in csv_reader:\n"
+<a name='L1485'>"        process(row)\n"
+<a name='L1486'>"\n"
+<a name='L1487'>"The \"iterable\" argument can be any object that returns a line\n"
+<a name='L1488'>"of input for each iteration, such as a file object or a list.  The\n"
+<a name='L1489'>"optional \"dialect\" parameter is discussed below.  The function\n"
+<a name='L1490'>"also accepts optional keyword arguments which override settings\n"
+<a name='L1491'>"provided by the dialect.\n"
+<a name='L1492'>"\n"
+<a name='L1493'>"The returned object is an iterator.  Each iteration returns a row\n"
+<a name='L1494'>"of the CSV file (which can span multiple input lines):\n");
+<a name='L1495'>
+<a name='L1496'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_writer_doc,
+<a name='L1497'>"    csv_writer = csv.writer(fileobj [, dialect='excel']\n"
+<a name='L1498'>"                            [optional keyword args])\n"
+<a name='L1499'>"    for row in sequence:\n"
+<a name='L1500'>"        csv_writer.writerow(row)\n"
+<a name='L1501'>"\n"
+<a name='L1502'>"    [or]\n"
+<a name='L1503'>"\n"
+<a name='L1504'>"    csv_writer = csv.writer(fileobj [, dialect='excel']\n"
+<a name='L1505'>"                            [optional keyword args])\n"
+<a name='L1506'>"    csv_writer.writerows(rows)\n"
+<a name='L1507'>"\n"
+<a name='L1508'>"The \"fileobj\" argument can be any object that supports the file API.\n");
+<a name='L1509'>
+<a name='L1510'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_list_dialects_doc,
+<a name='L1511'>"Return a list of all know dialect names.\n"
+<a name='L1512'>"    names = csv.list_dialects()");
+<a name='L1513'>
+<a name='L1514'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_get_dialect_doc,
+<a name='L1515'>"Return the dialect instance associated with name.\n"
+<a name='L1516'>"    dialect = csv.get_dialect(name)");
+<a name='L1517'>
+<a name='L1518'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_register_dialect_doc,
+<a name='L1519'>"Create a mapping from a string name to a dialect class.\n"
+<a name='L1520'>"    dialect = csv.register_dialect(name, dialect)");
+<a name='L1521'>
+<a name='L1522'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_unregister_dialect_doc,
+<a name='L1523'>"Delete the name/dialect mapping associated with a string name.\n"
+<a name='L1524'>"    csv.unregister_dialect(name)");
+<a name='L1525'>
+<a name='L1526'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(csv_field_size_limit_doc,
+<a name='L1527'>"Sets an upper limit on parsed fields.\n"
+<a name='L1528'>"    csv.field_size_limit([limit])\n"
+<a name='L1529'>"\n"
+<a name='L1530'>"Returns old limit. If limit is not given, no new limit is set and\n"
+<a name='L1531'>"the old limit is returned");
+<a name='L1532'>
+<a name='L1533'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> csv_methods[] = <font color='red'>{</font>
+<a name='L1534'>    <font color='red'>{</font> "reader", (PyCFunction)<a href='../S/2245.html#L890' title='Defined at 890 in Modules/_csv.c.'>csv_reader</a>,
+<a name='L1535'>        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, csv_reader_doc<font color='red'>}</font>,
+<a name='L1536'>    <font color='red'>{</font> "writer", (PyCFunction)<a href='../S/2245.html#L1311' title='Defined at 1311 in Modules/_csv.c.'>csv_writer</a>,
+<a name='L1537'>        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, csv_writer_doc<font color='red'>}</font>,
+<a name='L1538'>    <font color='red'>{</font> "list_dialects", (PyCFunction)<a href='../S/2245.html#L1351' title='Defined at 1351 in Modules/_csv.c.'>csv_list_dialects</a>,
+<a name='L1539'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, csv_list_dialects_doc<font color='red'>}</font>,
+<a name='L1540'>    <font color='red'>{</font> "register_dialect", (PyCFunction)<a href='../S/2245.html#L1357' title='Defined at 1357 in Modules/_csv.c.'>csv_register_dialect</a>,
+<a name='L1541'>        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, csv_register_dialect_doc<font color='red'>}</font>,
+<a name='L1542'>    <font color='red'>{</font> "unregister_dialect", (PyCFunction)<a href='../S/2245.html#L1382' title='Defined at 1382 in Modules/_csv.c.'>csv_unregister_dialect</a>,
+<a name='L1543'>        METH_O, csv_unregister_dialect_doc<font color='red'>}</font>,
+<a name='L1544'>    <font color='red'>{</font> "get_dialect", (PyCFunction)<a href='../S/2245.html#L1391' title='Defined at 1391 in Modules/_csv.c.'>csv_get_dialect</a>,
+<a name='L1545'>        METH_O, csv_get_dialect_doc<font color='red'>}</font>,
+<a name='L1546'>    <font color='red'>{</font> "field_size_limit", (PyCFunction)<a href='../S/2245.html#L1397' title='Defined at 1397 in Modules/_csv.c.'>csv_field_size_limit</a>,
+<a name='L1547'>        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, csv_field_size_limit_doc<font color='red'>}</font>,
+<a name='L1548'>    <font color='red'>{</font> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>
+<a name='L1549'><font color='red'>}</font>;
+<a name='L1550'>
+<a name='L1551'>
+<a name='L1552'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _csvmodule = <font color='red'>{</font>
+<a name='L1553'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L1554'>    "_csv",
+<a name='L1555'>    csv_module_doc,
+<a name='L1556'>    -1,
+<a name='L1557'>    csv_methods,
+<a name='L1558'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1559'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1560'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1561'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L1562'><font color='red'>}</font>;
+<a name='L1563'>
+<a name='L1564'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L1565'><a href='../R/3023.html' title='Multiple refered from 2 places.'>PyInit__csv</a>(<b>void</b>)
+<a name='L1566'><font color='red'>{</font>
+<a name='L1567'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *module;
+<a name='L1568'>    <a href='../S/2245.html#L36' title='Defined at 36 in Modules/_csv.c.'>StyleDesc</a> *style;
+<a name='L1569'>
+<a name='L1570'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;Dialect_Type) &lt; 0)
+<a name='L1571'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1572'>
+<a name='L1573'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;Reader_Type) &lt; 0)
+<a name='L1574'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1575'>
+<a name='L1576'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;Writer_Type) &lt; 0)
+<a name='L1577'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1578'>
+<a name='L1579'>    <i><font color='green'>/* Create the module and add the functions */</font></i>
+<a name='L1580'>    module = PyModule_Create(&amp;_csvmodule);
+<a name='L1581'>    <b>if</b> (module == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1582'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1583'>
+<a name='L1584'>    <i><font color='green'>/* Add version to the module. */</font></i>
+<a name='L1585'>    <b>if</b> (<a href='../S/3125.html#L566' title='Defined at 566 in Python/modsupport.c.'>PyModule_AddStringConstant</a>(module, "__version__",
+<a name='L1586'>                                   <a href='../S/2245.html#L11' title='Defined at 11 in Modules/_csv.c.'>MODULE_VERSION</a>) == -1)
+<a name='L1587'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1588'>
+<a name='L1589'>    <i><font color='green'>/* Add _dialects dictionary */</font></i>
+<a name='L1590'>    dialects = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L1591'>    <b>if</b> (dialects == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1592'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1593'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "_dialects", dialects))
+<a name='L1594'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1595'>
+<a name='L1596'>    <i><font color='green'>/* Add quote styles into dictionary */</font></i>
+<a name='L1597'>    <b>for</b> (style = quote_styles; style-&gt;name; style++) <font color='red'>{</font>
+<a name='L1598'>        <b>if</b> (<a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(module, style-&gt;name,
+<a name='L1599'>                                    style-&gt;style) == -1)
+<a name='L1600'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1601'>    <font color='red'>}</font>
+<a name='L1602'>
+<a name='L1603'>    <i><font color='green'>/* Add the Dialect type */</font></i>
+<a name='L1604'>    Py_INCREF(&amp;Dialect_Type);
+<a name='L1605'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "Dialect", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;Dialect_Type))
+<a name='L1606'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1607'>
+<a name='L1608'>    <i><font color='green'>/* Add the CSV exception object to the module. */</font></i>
+<a name='L1609'>    error_obj = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("_csv.Error", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1610'>    <b>if</b> (error_obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1611'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1612'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "Error", error_obj);
+<a name='L1613'>    <b>return</b> module;
+<a name='L1614'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L102'>[^]</a><a href='#L1565'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

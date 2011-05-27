@@ -1,0 +1,728 @@
+<html>
+<head>
+<title>Python/peephole.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/peephole.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L333'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L36' title='Defined at 36.'>tuple_of_constants</a>
+<li><a href='#L97' title='Defined at 97.'>fold_binops_on_constants</a>
+<li><a href='#L190' title='Defined at 190.'>fold_unaryops_on_constants</a>
+<li><a href='#L244' title='Defined at 244.'>markblocks</a>
+<li><a href='#L287' title='Defined at 287.'>load_global</a>
+<li><a href='#L333' title='Defined at 333.'>PyCode_Optimize</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Peephole optimizations for bytecode compiler. */</font></i>
+<a name='L2'>
+<a name='L3'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L4'>
+<a name='L5'><font color='darkred'>#include</font> "<a href='569.html'>Python-ast.h</a>"
+<a name='L6'><font color='darkred'>#include</font> "<a href='543.html'>node.h</a>"
+<a name='L7'><font color='darkred'>#include</font> "<a href='501.html'>ast.h</a>"
+<a name='L8'><font color='darkred'>#include</font> "<a href='511.html'>code.h</a>"
+<a name='L9'><font color='darkred'>#include</font> "<a href='579.html'>symtable.h</a>"
+<a name='L10'><font color='darkred'>#include</font> "<a href='546.html'>opcode.h</a>"
+<a name='L11'>
+<a name='L12'><font color='darkred'>#define</font> <a href='../R/1232.html' title='Multiple refered from 16 places.'>GETARG</a>(arr, i) ((<b>int</b>)((arr[i+2]&lt;&lt;8) + arr[i+1]))
+<a name='L13'><font color='darkred'>#define</font> <a href='../R/4727.html' title='Multiple refered from 3 places.'>UNCONDITIONAL_JUMP</a>(op)  (op==<a href='../S/546.html#L101' title='Defined at 101 in Include/opcode.h.'>JUMP_ABSOLUTE</a> || op==<a href='../S/546.html#L98' title='Defined at 98 in Include/opcode.h.'>JUMP_FORWARD</a>)
+<a name='L14'><font color='darkred'>#define</font> <a href='../S/3129.html#L548' title='Refered from 548 in Python/peephole.c.'>CONDITIONAL_JUMP</a>(op) (op==<a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a> || op==<a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a> \
+<a name='L15'>    || op==<a href='../S/546.html#L99' title='Defined at 99 in Include/opcode.h.'>JUMP_IF_FALSE_OR_POP</a> || op==<a href='../S/546.html#L100' title='Defined at 100 in Include/opcode.h.'>JUMP_IF_TRUE_OR_POP</a>)
+<a name='L16'><font color='darkred'>#define</font> <a href='../R/5.html' title='Multiple refered from 2 places.'>ABSOLUTE_JUMP</a>(op) (op==<a href='../S/546.html#L101' title='Defined at 101 in Include/opcode.h.'>JUMP_ABSOLUTE</a> || op==<a href='../S/546.html#L107' title='Defined at 107 in Include/opcode.h.'>CONTINUE_LOOP</a> \
+<a name='L17'>    || op==<a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a> || op==<a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a> \
+<a name='L18'>    || op==<a href='../S/546.html#L99' title='Defined at 99 in Include/opcode.h.'>JUMP_IF_FALSE_OR_POP</a> || op==<a href='../S/546.html#L100' title='Defined at 100 in Include/opcode.h.'>JUMP_IF_TRUE_OR_POP</a>)
+<a name='L19'><font color='darkred'>#define</font> <a href='../R/1651.html' title='Multiple refered from 2 places.'>JUMPS_ON_TRUE</a>(op) (op==<a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a> || op==<a href='../S/546.html#L100' title='Defined at 100 in Include/opcode.h.'>JUMP_IF_TRUE_OR_POP</a>)
+<a name='L20'><font color='darkred'>#define</font> <a href='../R/1238.html' title='Multiple refered from 5 places.'>GETJUMPTGT</a>(arr, i) (<a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(arr,i) + (<a href='../S/3129.html#L16' title='Defined at 16 in Python/peephole.c.'>ABSOLUTE_JUMP</a>(arr[i]) ? 0 : i+3))
+<a name='L21'><font color='darkred'>#define</font> <a href='../R/4058.html' title='Multiple refered from 11 places.'>SETARG</a>(arr, i, val) arr[i+2] = val&gt;&gt;8; arr[i+1] = val &amp; 255
+<a name='L22'><font color='darkred'>#define</font> <a href='../R/542.html' title='Multiple refered from 4 places.'>CODESIZE</a>(op)  (<a href='../S/546.html#L154' title='Defined at 154 in Include/opcode.h.'>HAS_ARG</a>(op) ? 3 : 1)
+<a name='L23'><font color='darkred'>#define</font> <a href='../R/1577.html' title='Multiple refered from 10 places.'>ISBASICBLOCK</a>(blocks, start, bytes) \
+<a name='L24'>    (blocks[start]==blocks[start+<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>-1])
+<a name='L25'>
+<a name='L26'><i><font color='green'>/* Replace LOAD_CONST c1. LOAD_CONST c2 ... LOAD_CONST cn BUILD_TUPLE n</font></i>
+<a name='L27'><i><font color='green'>   with    LOAD_CONST (c1, c2, ... cn).</font></i>
+<a name='L28'><i><font color='green'>   The consts table must still be in list form so that the</font></i>
+<a name='L29'><i><font color='green'>   new constant (c1, c2, ... cn) can be appended.</font></i>
+<a name='L30'><i><font color='green'>   Called with codestr pointing to the first LOAD_CONST.</font></i>
+<a name='L31'><i><font color='green'>   Bails out with no change if one or more of the LOAD_CONSTs is missing.</font></i>
+<a name='L32'><i><font color='green'>   Also works for BUILD_LIST and BUILT_SET when followed by an "in" or "not in"</font></i>
+<a name='L33'><i><font color='green'>   test; for BUILD_SET it assembles a frozenset rather than a tuple.</font></i>
+<a name='L34'><i><font color='green'>*/</font></i>
+<a name='L35'><b>static</b> <b>int</b>
+<a name='L36'><a href='../S/3129.html#L471' title='Refered from 471 in Python/peephole.c.'>tuple_of_constants</a>(<b>unsigned</b> <b>char</b> *codestr, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n, PyObject *consts)
+<a name='L37'><font color='red'>{</font>
+<a name='L38'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newconst, *<a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a>;
+<a name='L39'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, len_consts;
+<a name='L40'>
+<a name='L41'>    <i><font color='green'>/* Pre-conditions */</font></i>
+<a name='L42'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyList_CheckExact(consts));
+<a name='L43'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[n*3] == <a href='../S/546.html#L89' title='Defined at 89 in Include/opcode.h.'>BUILD_TUPLE</a> || codestr[n*3] == <a href='../S/546.html#L90' title='Defined at 90 in Include/opcode.h.'>BUILD_LIST</a> || codestr[n*3] == <a href='../S/546.html#L91' title='Defined at 91 in Include/opcode.h.'>BUILD_SET</a>);
+<a name='L44'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, (n*3)) == n);
+<a name='L45'>    <b>for</b> (i=0 ; i&lt;n ; i++)
+<a name='L46'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[i*3] == <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>);
+<a name='L47'>
+<a name='L48'>    <i><font color='green'>/* Buildup new tuple of constants */</font></i>
+<a name='L49'>    newconst = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(n);
+<a name='L50'>    <b>if</b> (newconst == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L51'>        <b>return</b> 0;
+<a name='L52'>    len_consts = <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(consts);
+<a name='L53'>    <b>for</b> (i=0 ; i&lt;n ; i++) <font color='red'>{</font>
+<a name='L54'>        <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, (i*3));
+<a name='L55'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> &lt; len_consts);
+<a name='L56'>        <a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a> = PyList_GET_ITEM(consts, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L57'>        Py_INCREF(<a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a>);
+<a name='L58'>        PyTuple_SET_ITEM(newconst, i, <a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a>);
+<a name='L59'>    <font color='red'>}</font>
+<a name='L60'>
+<a name='L61'>    <i><font color='green'>/* If it's a BUILD_SET, use the PyTuple we just built to create a</font></i>
+<a name='L62'><i><font color='green'>      PyFrozenSet, and use that as the constant instead: */</font></i>
+<a name='L63'>    <b>if</b> (codestr[n*3] == <a href='../S/546.html#L91' title='Defined at 91 in Include/opcode.h.'>BUILD_SET</a>) <font color='red'>{</font>
+<a name='L64'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tuple = newconst;
+<a name='L65'>        newconst = <a href='../S/2806.html#L2269' title='Defined at 2269 in Objects/setobject.c.'>PyFrozenSet_New</a>(tuple);
+<a name='L66'>        Py_DECREF(tuple);
+<a name='L67'>        <b>if</b> (newconst == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L68'>            <b>return</b> 0;
+<a name='L69'>    <font color='red'>}</font>
+<a name='L70'>
+<a name='L71'>    <i><font color='green'>/* Append folded constant onto consts */</font></i>
+<a name='L72'>    <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(consts, newconst)) <font color='red'>{</font>
+<a name='L73'>        Py_DECREF(newconst);
+<a name='L74'>        <b>return</b> 0;
+<a name='L75'>    <font color='red'>}</font>
+<a name='L76'>    Py_DECREF(newconst);
+<a name='L77'>
+<a name='L78'>    <i><font color='green'>/* Write NOPs over old LOAD_CONSTS and</font></i>
+<a name='L79'><i><font color='green'>       add a new LOAD_CONST newconst on top of the BUILD_TUPLE n */</font></i>
+<a name='L80'>    memset(codestr, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, n*3);
+<a name='L81'>    codestr[n*3] = <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>;
+<a name='L82'>    <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, (n*3), len_consts);
+<a name='L83'>    <b>return</b> 1;
+<a name='L84'><font color='red'>}</font>
+<a name='L85'>
+<a name='L86'><i><font color='green'>/* Replace LOAD_CONST c1. LOAD_CONST c2 BINOP</font></i>
+<a name='L87'><i><font color='green'>   with    LOAD_CONST binop(c1,c2)</font></i>
+<a name='L88'><i><font color='green'>   The consts table must still be in list form so that the</font></i>
+<a name='L89'><i><font color='green'>   new constant can be appended.</font></i>
+<a name='L90'><i><font color='green'>   Called with codestr pointing to the first LOAD_CONST.</font></i>
+<a name='L91'><i><font color='green'>   Abandons the transformation if the folding fails (i.e.  1+'a').</font></i>
+<a name='L92'><i><font color='green'>   If the new constant is a sequence, only folds when the size</font></i>
+<a name='L93'><i><font color='green'>   is below a threshold value.  That keeps pyc files from</font></i>
+<a name='L94'><i><font color='green'>   becoming large in the presence of code like:  (None,)*1000.</font></i>
+<a name='L95'><i><font color='green'>*/</font></i>
+<a name='L96'><b>static</b> <b>int</b>
+<a name='L97'><a href='../S/3129.html#L509' title='Refered from 509 in Python/peephole.c.'>fold_binops_on_constants</a>(<b>unsigned</b> <b>char</b> *codestr, PyObject *consts)
+<a name='L98'><font color='red'>{</font>
+<a name='L99'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newconst, *v, *w;
+<a name='L100'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len_consts, size;
+<a name='L101'>    <b>int</b> <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>;
+<a name='L102'>
+<a name='L103'>    <i><font color='green'>/* Pre-conditions */</font></i>
+<a name='L104'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyList_CheckExact(consts));
+<a name='L105'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[0] == <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>);
+<a name='L106'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[3] == <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>);
+<a name='L107'>
+<a name='L108'>    <i><font color='green'>/* Create new constant */</font></i>
+<a name='L109'>    v = PyList_GET_ITEM(consts, <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, 0));
+<a name='L110'>    w = PyList_GET_ITEM(consts, <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, 3));
+<a name='L111'>    <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> = codestr[6];
+<a name='L112'>    <b>switch</b> (<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>) <font color='red'>{</font>
+<a name='L113'>        <b>case</b> <a href='../S/546.html#L24' title='Defined at 24 in Include/opcode.h.'>BINARY_POWER</a>:
+<a name='L114'>            newconst = <a href='../S/2775.html#L986' title='Defined at 986 in Objects/abstract.c.'>PyNumber_Power</a>(v, w, Py_None);
+<a name='L115'>            <b>break</b>;
+<a name='L116'>        <b>case</b> <a href='../S/546.html#L26' title='Defined at 26 in Include/opcode.h.'>BINARY_MULTIPLY</a>:
+<a name='L117'>            newconst = <a href='../S/2775.html#L949' title='Defined at 949 in Objects/abstract.c.'>PyNumber_Multiply</a>(v, w);
+<a name='L118'>            <b>break</b>;
+<a name='L119'>        <b>case</b> <a href='../S/546.html#L33' title='Defined at 33 in Include/opcode.h.'>BINARY_TRUE_DIVIDE</a>:
+<a name='L120'>            newconst = <a href='../S/2775.html#L974' title='Defined at 974 in Objects/abstract.c.'>PyNumber_TrueDivide</a>(v, w);
+<a name='L121'>            <b>break</b>;
+<a name='L122'>        <b>case</b> <a href='../S/546.html#L32' title='Defined at 32 in Include/opcode.h.'>BINARY_FLOOR_DIVIDE</a>:
+<a name='L123'>            newconst = <a href='../S/2775.html#L968' title='Defined at 968 in Objects/abstract.c.'>PyNumber_FloorDivide</a>(v, w);
+<a name='L124'>            <b>break</b>;
+<a name='L125'>        <b>case</b> <a href='../S/546.html#L28' title='Defined at 28 in Include/opcode.h.'>BINARY_MODULO</a>:
+<a name='L126'>            newconst = <a href='../S/2775.html#L980' title='Defined at 980 in Objects/abstract.c.'>PyNumber_Remainder</a>(v, w);
+<a name='L127'>            <b>break</b>;
+<a name='L128'>        <b>case</b> <a href='../S/546.html#L29' title='Defined at 29 in Include/opcode.h.'>BINARY_ADD</a>:
+<a name='L129'>            newconst = PyNumber_Add(v, w);
+<a name='L130'>            <b>break</b>;
+<a name='L131'>        <b>case</b> <a href='../S/546.html#L30' title='Defined at 30 in Include/opcode.h.'>BINARY_SUBTRACT</a>:
+<a name='L132'>            newconst = PyNumber_Subtract(v, w);
+<a name='L133'>            <b>break</b>;
+<a name='L134'>        <b>case</b> <a href='../S/546.html#L31' title='Defined at 31 in Include/opcode.h.'>BINARY_SUBSCR</a>:
+<a name='L135'>            newconst = <a href='../S/2775.html#L113' title='Defined at 113 in Objects/abstract.c.'>PyObject_GetItem</a>(v, w);
+<a name='L136'>            <b>break</b>;
+<a name='L137'>        <b>case</b> <a href='../S/546.html#L46' title='Defined at 46 in Include/opcode.h.'>BINARY_LSHIFT</a>:
+<a name='L138'>            newconst = PyNumber_Lshift(v, w);
+<a name='L139'>            <b>break</b>;
+<a name='L140'>        <b>case</b> <a href='../S/546.html#L47' title='Defined at 47 in Include/opcode.h.'>BINARY_RSHIFT</a>:
+<a name='L141'>            newconst = PyNumber_Rshift(v, w);
+<a name='L142'>            <b>break</b>;
+<a name='L143'>        <b>case</b> <a href='../S/546.html#L48' title='Defined at 48 in Include/opcode.h.'>BINARY_AND</a>:
+<a name='L144'>            newconst = PyNumber_And(v, w);
+<a name='L145'>            <b>break</b>;
+<a name='L146'>        <b>case</b> <a href='../S/546.html#L49' title='Defined at 49 in Include/opcode.h.'>BINARY_XOR</a>:
+<a name='L147'>            newconst = PyNumber_Xor(v, w);
+<a name='L148'>            <b>break</b>;
+<a name='L149'>        <b>case</b> <a href='../S/546.html#L50' title='Defined at 50 in Include/opcode.h.'>BINARY_OR</a>:
+<a name='L150'>            newconst = PyNumber_Or(v, w);
+<a name='L151'>            <b>break</b>;
+<a name='L152'>        <b>default</b>:
+<a name='L153'>            <i><font color='green'>/* Called with an unknown opcode */</font></i>
+<a name='L154'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SystemError,
+<a name='L155'>                 "unexpected binary operation %d on a constant",
+<a name='L156'>                     <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>);
+<a name='L157'>            <b>return</b> 0;
+<a name='L158'>    <font color='red'>}</font>
+<a name='L159'>    <b>if</b> (newconst == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L160'>        <b>if</b>(!<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_KeyboardInterrupt))
+<a name='L161'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L162'>        <b>return</b> 0;
+<a name='L163'>    <font color='red'>}</font>
+<a name='L164'>    size = <a href='../S/2775.html#L43' title='Defined at 43 in Objects/abstract.c.'>PyObject_Size</a>(newconst);
+<a name='L165'>    <b>if</b> (size == -1) <font color='red'>{</font>
+<a name='L166'>        <b>if</b> (<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_KeyboardInterrupt))
+<a name='L167'>            <b>return</b> 0;
+<a name='L168'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L169'>    <font color='red'>}</font> <b>else</b> <b>if</b> (size &gt; 20) <font color='red'>{</font>
+<a name='L170'>        Py_DECREF(newconst);
+<a name='L171'>        <b>return</b> 0;
+<a name='L172'>    <font color='red'>}</font>
+<a name='L173'>
+<a name='L174'>    <i><font color='green'>/* Append folded constant into consts table */</font></i>
+<a name='L175'>    len_consts = <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(consts);
+<a name='L176'>    <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(consts, newconst)) <font color='red'>{</font>
+<a name='L177'>        Py_DECREF(newconst);
+<a name='L178'>        <b>return</b> 0;
+<a name='L179'>    <font color='red'>}</font>
+<a name='L180'>    Py_DECREF(newconst);
+<a name='L181'>
+<a name='L182'>    <i><font color='green'>/* Write NOP NOP NOP NOP LOAD_CONST newconst */</font></i>
+<a name='L183'>    memset(codestr, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 4);
+<a name='L184'>    codestr[4] = <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>;
+<a name='L185'>    <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, 4, len_consts);
+<a name='L186'>    <b>return</b> 1;
+<a name='L187'><font color='red'>}</font>
+<a name='L188'>
+<a name='L189'><b>static</b> <b>int</b>
+<a name='L190'><a href='../S/3129.html#L523' title='Refered from 523 in Python/peephole.c.'>fold_unaryops_on_constants</a>(<b>unsigned</b> <b>char</b> *codestr, PyObject *consts)
+<a name='L191'><font color='red'>{</font>
+<a name='L192'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newconst=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *v;
+<a name='L193'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len_consts;
+<a name='L194'>    <b>int</b> <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>;
+<a name='L195'>
+<a name='L196'>    <i><font color='green'>/* Pre-conditions */</font></i>
+<a name='L197'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyList_CheckExact(consts));
+<a name='L198'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[0] == <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>);
+<a name='L199'>
+<a name='L200'>    <i><font color='green'>/* Create new constant */</font></i>
+<a name='L201'>    v = PyList_GET_ITEM(consts, <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, 0));
+<a name='L202'>    <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> = codestr[3];
+<a name='L203'>    <b>switch</b> (<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>) <font color='red'>{</font>
+<a name='L204'>        <b>case</b> <a href='../S/546.html#L19' title='Defined at 19 in Include/opcode.h.'>UNARY_NEGATIVE</a>:
+<a name='L205'>            <i><font color='green'>/* Preserve the sign of -0.0 */</font></i>
+<a name='L206'>            <b>if</b> (<a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(v) == 1)
+<a name='L207'>                newconst = <a href='../S/2775.html#L1136' title='Defined at 1136 in Objects/abstract.c.'>PyNumber_Negative</a>(v);
+<a name='L208'>            <b>break</b>;
+<a name='L209'>        <b>case</b> <a href='../S/546.html#L22' title='Defined at 22 in Include/opcode.h.'>UNARY_INVERT</a>:
+<a name='L210'>            newconst = <a href='../S/2775.html#L1164' title='Defined at 1164 in Objects/abstract.c.'>PyNumber_Invert</a>(v);
+<a name='L211'>            <b>break</b>;
+<a name='L212'>        <b>case</b> <a href='../S/546.html#L18' title='Defined at 18 in Include/opcode.h.'>UNARY_POSITIVE</a>:
+<a name='L213'>            newconst = <a href='../S/2775.html#L1150' title='Defined at 1150 in Objects/abstract.c.'>PyNumber_Positive</a>(v);
+<a name='L214'>            <b>break</b>;
+<a name='L215'>        <b>default</b>:
+<a name='L216'>            <i><font color='green'>/* Called with an unknown opcode */</font></i>
+<a name='L217'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SystemError,
+<a name='L218'>                 "unexpected unary operation %d on a constant",
+<a name='L219'>                     <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>);
+<a name='L220'>            <b>return</b> 0;
+<a name='L221'>    <font color='red'>}</font>
+<a name='L222'>    <b>if</b> (newconst == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L223'>        <b>if</b>(!<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_KeyboardInterrupt))
+<a name='L224'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L225'>        <b>return</b> 0;
+<a name='L226'>    <font color='red'>}</font>
+<a name='L227'>
+<a name='L228'>    <i><font color='green'>/* Append folded constant into consts table */</font></i>
+<a name='L229'>    len_consts = <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(consts);
+<a name='L230'>    <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(consts, newconst)) <font color='red'>{</font>
+<a name='L231'>        Py_DECREF(newconst);
+<a name='L232'>        <b>return</b> 0;
+<a name='L233'>    <font color='red'>}</font>
+<a name='L234'>    Py_DECREF(newconst);
+<a name='L235'>
+<a name='L236'>    <i><font color='green'>/* Write NOP LOAD_CONST newconst */</font></i>
+<a name='L237'>    codestr[0] = <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>;
+<a name='L238'>    codestr[1] = <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>;
+<a name='L239'>    <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, 1, len_consts);
+<a name='L240'>    <b>return</b> 1;
+<a name='L241'><font color='red'>}</font>
+<a name='L242'>
+<a name='L243'><b>static</b> <b>unsigned</b> <b>int</b> *
+<a name='L244'><a href='../S/3129.html#L384' title='Refered from 384 in Python/peephole.c.'>markblocks</a>(<b>unsigned</b> <b>char</b> *code, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len)
+<a name='L245'><font color='red'>{</font>
+<a name='L246'>    <b>unsigned</b> <b>int</b> *blocks = (<b>unsigned</b> <b>int</b> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(len*<b>sizeof</b>(<b>int</b>));
+<a name='L247'>    <b>int</b> i,j, <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>, blockcnt = 0;
+<a name='L248'>
+<a name='L249'>    <b>if</b> (blocks == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L250'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L251'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L252'>    <font color='red'>}</font>
+<a name='L253'>    memset(blocks, 0, len*<b>sizeof</b>(<b>int</b>));
+<a name='L254'>
+<a name='L255'>    <i><font color='green'>/* Mark labels in the first pass */</font></i>
+<a name='L256'>    <b>for</b> (i=0 ; i&lt;len ; i+=<a href='../S/3129.html#L22' title='Defined at 22 in Python/peephole.c.'>CODESIZE</a>(<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>)) <font color='red'>{</font>
+<a name='L257'>        <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>[i];
+<a name='L258'>        <b>switch</b> (<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>) <font color='red'>{</font>
+<a name='L259'>            <b>case</b> <a href='../S/546.html#L78' title='Defined at 78 in Include/opcode.h.'>FOR_ITER</a>:
+<a name='L260'>            <b>case</b> <a href='../S/546.html#L98' title='Defined at 98 in Include/opcode.h.'>JUMP_FORWARD</a>:
+<a name='L261'>            <b>case</b> <a href='../S/546.html#L99' title='Defined at 99 in Include/opcode.h.'>JUMP_IF_FALSE_OR_POP</a>:
+<a name='L262'>            <b>case</b> <a href='../S/546.html#L100' title='Defined at 100 in Include/opcode.h.'>JUMP_IF_TRUE_OR_POP</a>:
+<a name='L263'>            <b>case</b> <a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a>:
+<a name='L264'>            <b>case</b> <a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a>:
+<a name='L265'>            <b>case</b> <a href='../S/546.html#L101' title='Defined at 101 in Include/opcode.h.'>JUMP_ABSOLUTE</a>:
+<a name='L266'>            <b>case</b> <a href='../S/546.html#L107' title='Defined at 107 in Include/opcode.h.'>CONTINUE_LOOP</a>:
+<a name='L267'>            <b>case</b> <a href='../S/546.html#L108' title='Defined at 108 in Include/opcode.h.'>SETUP_LOOP</a>:
+<a name='L268'>            <b>case</b> <a href='../S/546.html#L109' title='Defined at 109 in Include/opcode.h.'>SETUP_EXCEPT</a>:
+<a name='L269'>            <b>case</b> <a href='../S/546.html#L110' title='Defined at 110 in Include/opcode.h.'>SETUP_FINALLY</a>:
+<a name='L270'>            <b>case</b> <a href='../S/546.html#L134' title='Defined at 134 in Include/opcode.h.'>SETUP_WITH</a>:
+<a name='L271'>                j = <a href='../S/3129.html#L20' title='Defined at 20 in Python/peephole.c.'>GETJUMPTGT</a>(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>, i);
+<a name='L272'>                blocks[j] = 1;
+<a name='L273'>                <b>break</b>;
+<a name='L274'>        <font color='red'>}</font>
+<a name='L275'>    <font color='red'>}</font>
+<a name='L276'>    <i><font color='green'>/* Build block numbers in the second pass */</font></i>
+<a name='L277'>    <b>for</b> (i=0 ; i&lt;len ; i++) <font color='red'>{</font>
+<a name='L278'>        blockcnt += blocks[i];          <i><font color='green'>/* increment blockcnt over labels */</font></i>
+<a name='L279'>        blocks[i] = blockcnt;
+<a name='L280'>    <font color='red'>}</font>
+<a name='L281'>    <b>return</b> blocks;
+<a name='L282'><font color='red'>}</font>
+<a name='L283'>
+<a name='L284'><i><font color='green'>/* Helper to replace LOAD_NAME None/True/False with LOAD_CONST</font></i>
+<a name='L285'><i><font color='green'>   Returns: 0 if no change, 1 if change, -1 if error */</font></i>
+<a name='L286'><b>static</b> <b>int</b>
+<a name='L287'><a href='../R/8707.html' title='Multiple refered from 2 places.'>load_global</a>(<b>unsigned</b> <b>char</b> *codestr, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, <b>char</b> *name, PyObject *consts)
+<a name='L288'><font color='red'>{</font>
+<a name='L289'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> j;
+<a name='L290'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L291'>    <b>if</b> (name == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L292'>        <b>return</b> 0;
+<a name='L293'>    <b>if</b> (strcmp(name, "None") == 0)
+<a name='L294'>        obj = Py_None;
+<a name='L295'>    <b>else</b> <b>if</b> (strcmp(name, "True") == 0)
+<a name='L296'>        obj = Py_True;
+<a name='L297'>    <b>else</b> <b>if</b> (strcmp(name, "False") == 0)
+<a name='L298'>        obj = Py_False;
+<a name='L299'>    <b>else</b>
+<a name='L300'>        <b>return</b> 0;
+<a name='L301'>    <b>for</b> (j = 0; j &lt; <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(consts); j++) <font color='red'>{</font>
+<a name='L302'>        <b>if</b> (PyList_GET_ITEM(consts, j) == obj)
+<a name='L303'>            <b>break</b>;
+<a name='L304'>    <font color='red'>}</font>
+<a name='L305'>    <b>if</b> (j == <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(consts)) <font color='red'>{</font>
+<a name='L306'>        <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(consts, obj) &lt; 0)
+<a name='L307'>            <b>return</b> -1;
+<a name='L308'>    <font color='red'>}</font>
+<a name='L309'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyList_GET_ITEM(consts, j) == obj);
+<a name='L310'>    codestr[i] = <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>;
+<a name='L311'>    <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, j);
+<a name='L312'>    <b>return</b> 1;
+<a name='L313'><font color='red'>}</font>
+<a name='L314'>
+<a name='L315'><i><font color='green'>/* Perform basic peephole optimizations to components of a code object.</font></i>
+<a name='L316'><i><font color='green'>   The consts object should still be in list form to allow new constants</font></i>
+<a name='L317'><i><font color='green'>   to be appended.</font></i>
+<a name='L318'><i><font color='green'></font></i>
+<a name='L319'><i><font color='green'>   To keep the optimizer simple, it bails out (does nothing) for code that</font></i>
+<a name='L320'><i><font color='green'>   has a length over 32,700, and does not calculate extended arguments.</font></i>
+<a name='L321'><i><font color='green'>   That allows us to avoid overflow and sign issues. Likewise, it bails when</font></i>
+<a name='L322'><i><font color='green'>   the lineno table has complex encoding for gaps &gt;= 255. EXTENDED_ARG can</font></i>
+<a name='L323'><i><font color='green'>   appear before MAKE_FUNCTION; in this case both opcodes are skipped.</font></i>
+<a name='L324'><i><font color='green'>   EXTENDED_ARG preceding any other opcode causes the optimizer to bail.</font></i>
+<a name='L325'><i><font color='green'></font></i>
+<a name='L326'><i><font color='green'>   Optimizations are restricted to simple transformations occuring within a</font></i>
+<a name='L327'><i><font color='green'>   single basic block.  All transformations keep the code size the same or</font></i>
+<a name='L328'><i><font color='green'>   smaller.  For those that reduce size, the gaps are initially filled with</font></i>
+<a name='L329'><i><font color='green'>   NOPs.  Later those NOPs are removed and the jump addresses retargeted in</font></i>
+<a name='L330'><i><font color='green'>   a single pass.  Line numbering is adjusted accordingly. */</font></i>
+<a name='L331'>
+<a name='L332'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L333'><a href='../S/3094.html#L3963' title='Refered from 3963 in Python/compile.c.'>PyCode_Optimize</a>(PyObject *code, PyObject* consts, PyObject *names,
+<a name='L334'>                PyObject *lineno_obj)
+<a name='L335'><font color='red'>{</font>
+<a name='L336'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, j, codelen;
+<a name='L337'>    <b>int</b> nops, h, adj;
+<a name='L338'>    <b>int</b> tgt, tgttgt, <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>;
+<a name='L339'>    <b>unsigned</b> <b>char</b> *codestr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L340'>    <b>unsigned</b> <b>char</b> *lineno;
+<a name='L341'>    <b>int</b> *addrmap = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L342'>    <b>int</b> new_line, cum_orig_line, last_line, tabsiz;
+<a name='L343'>    <b>int</b> cumlc=0, lastlc=0;      <i><font color='green'>/* Count runs of consecutive LOAD_CONSTs */</font></i>
+<a name='L344'>    <b>unsigned</b> <b>int</b> *blocks = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L345'>    <b>char</b> *name;
+<a name='L346'>
+<a name='L347'>    <i><font color='green'>/* Bail out if an exception is set */</font></i>
+<a name='L348'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L349'>        <b>goto</b> exitError;
+<a name='L350'>
+<a name='L351'>    <i><font color='green'>/* Bypass optimization when the lineno table is too complex */</font></i>
+<a name='L352'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyBytes_Check(lineno_obj));
+<a name='L353'>    lineno = (<b>unsigned</b> <b>char</b>*)PyBytes_AS_STRING(lineno_obj);
+<a name='L354'>    tabsiz = PyBytes_GET_SIZE(lineno_obj);
+<a name='L355'>    <b>if</b> (memchr(lineno, 255, tabsiz) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L356'>        <b>goto</b> exitUnchanged;
+<a name='L357'>
+<a name='L358'>    <i><font color='green'>/* Avoid situations where jump retargeting could overflow */</font></i>
+<a name='L359'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyBytes_Check(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>));
+<a name='L360'>    codelen = PyBytes_GET_SIZE(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L361'>    <b>if</b> (codelen &gt; 32700)
+<a name='L362'>        <b>goto</b> exitUnchanged;
+<a name='L363'>
+<a name='L364'>    <i><font color='green'>/* Make a modifiable copy of the code string */</font></i>
+<a name='L365'>    codestr = (<b>unsigned</b> <b>char</b> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(codelen);
+<a name='L366'>    <b>if</b> (codestr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L367'>        <b>goto</b> exitError;
+<a name='L368'>    codestr = (<b>unsigned</b> <b>char</b> *)<a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(codestr,
+<a name='L369'>                                      PyBytes_AS_STRING(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>), codelen);
+<a name='L370'>
+<a name='L371'>    <i><font color='green'>/* Verify that RETURN_VALUE terminates the codestring.      This allows</font></i>
+<a name='L372'><i><font color='green'>       the various transformation patterns to look ahead several</font></i>
+<a name='L373'><i><font color='green'>       instructions without additional checks to make sure they are not</font></i>
+<a name='L374'><i><font color='green'>       looking beyond the end of the code string.</font></i>
+<a name='L375'><i><font color='green'>    */</font></i>
+<a name='L376'>    <b>if</b> (codestr[codelen-1] != <a href='../S/546.html#L65' title='Defined at 65 in Include/opcode.h.'>RETURN_VALUE</a>)
+<a name='L377'>        <b>goto</b> exitUnchanged;
+<a name='L378'>
+<a name='L379'>    <i><font color='green'>/* Mapping to new jump targets after NOPs are removed */</font></i>
+<a name='L380'>    addrmap = (<b>int</b> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(codelen * <b>sizeof</b>(<b>int</b>));
+<a name='L381'>    <b>if</b> (addrmap == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L382'>        <b>goto</b> exitError;
+<a name='L383'>
+<a name='L384'>    blocks = <a href='../S/3129.html#L244' title='Defined at 244 in Python/peephole.c.'>markblocks</a>(codestr, codelen);
+<a name='L385'>    <b>if</b> (blocks == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L386'>        <b>goto</b> exitError;
+<a name='L387'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyList_Check(consts));
+<a name='L388'>
+<a name='L389'>    <b>for</b> (i=0 ; i&lt;codelen ; i += <a href='../S/3129.html#L22' title='Defined at 22 in Python/peephole.c.'>CODESIZE</a>(codestr[i])) <font color='red'>{</font>
+<a name='L390'>      reoptimize_current:
+<a name='L391'>        <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> = codestr[i];
+<a name='L392'>
+<a name='L393'>        lastlc = cumlc;
+<a name='L394'>        cumlc = 0;
+<a name='L395'>
+<a name='L396'>        <b>switch</b> (<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>) <font color='red'>{</font>
+<a name='L397'>            <i><font color='green'>/* Replace UNARY_NOT POP_JUMP_IF_FALSE</font></i>
+<a name='L398'><i><font color='green'>               with    POP_JUMP_IF_TRUE */</font></i>
+<a name='L399'>            <b>case</b> <a href='../S/546.html#L20' title='Defined at 20 in Include/opcode.h.'>UNARY_NOT</a>:
+<a name='L400'>                <b>if</b> (codestr[i+1] != <a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a>
+<a name='L401'>                    || !<a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks,i,4))
+<a name='L402'>                    <b>continue</b>;
+<a name='L403'>                j = <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i+1);
+<a name='L404'>                codestr[i] = <a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a>;
+<a name='L405'>                <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, j);
+<a name='L406'>                codestr[i+3] = <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>;
+<a name='L407'>                <b>goto</b> reoptimize_current;
+<a name='L408'>
+<a name='L409'>                <i><font color='green'>/* not a is b --&gt;  a is not b</font></i>
+<a name='L410'><i><font color='green'>                   not a in b --&gt;  a not in b</font></i>
+<a name='L411'><i><font color='green'>                   not a is not b --&gt;  a is b</font></i>
+<a name='L412'><i><font color='green'>                   not a not in b --&gt;  a in b</font></i>
+<a name='L413'><i><font color='green'>                */</font></i>
+<a name='L414'>            <b>case</b> <a href='../S/546.html#L94' title='Defined at 94 in Include/opcode.h.'>COMPARE_OP</a>:
+<a name='L415'>                j = <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i);
+<a name='L416'>                <b>if</b> (j &lt; 6  ||  j &gt; 9  ||
+<a name='L417'>                    codestr[i+3] != <a href='../S/546.html#L20' title='Defined at 20 in Include/opcode.h.'>UNARY_NOT</a>  ||
+<a name='L418'>                    !<a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks,i,4))
+<a name='L419'>                    <b>continue</b>;
+<a name='L420'>                <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, (j^1));
+<a name='L421'>                codestr[i+3] = <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>;
+<a name='L422'>                <b>break</b>;
+<a name='L423'>
+<a name='L424'>                <i><font color='green'>/* Replace LOAD_GLOBAL/LOAD_NAME None/True/False</font></i>
+<a name='L425'><i><font color='green'>                   with LOAD_CONST None/True/False */</font></i>
+<a name='L426'>            <b>case</b> <a href='../S/546.html#L88' title='Defined at 88 in Include/opcode.h.'>LOAD_NAME</a>:
+<a name='L427'>            <b>case</b> <a href='../S/546.html#L105' title='Defined at 105 in Include/opcode.h.'>LOAD_GLOBAL</a>:
+<a name='L428'>                j = <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i);
+<a name='L429'>                name = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(PyTuple_GET_ITEM(names, j));
+<a name='L430'>                h = <a href='../D/9528.html' title='Multiple defined in 2 places.'>load_global</a>(codestr, i, name, consts);
+<a name='L431'>                <b>if</b> (h &lt; 0)
+<a name='L432'>                    <b>goto</b> exitError;
+<a name='L433'>                <b>else</b> <b>if</b> (h == 0)
+<a name='L434'>                    <b>continue</b>;
+<a name='L435'>                cumlc = lastlc + 1;
+<a name='L436'>                <b>break</b>;
+<a name='L437'>
+<a name='L438'>                <i><font color='green'>/* Skip over LOAD_CONST trueconst</font></i>
+<a name='L439'><i><font color='green'>                   POP_JUMP_IF_FALSE xx. This improves</font></i>
+<a name='L440'><i><font color='green'>                   "while 1" performance. */</font></i>
+<a name='L441'>            <b>case</b> <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>:
+<a name='L442'>                cumlc = lastlc + 1;
+<a name='L443'>                j = <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i);
+<a name='L444'>                <b>if</b> (codestr[i+3] != <a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a>  ||
+<a name='L445'>                    !<a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks,i,6)  ||
+<a name='L446'>                    !<a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(PyList_GET_ITEM(consts, j)))
+<a name='L447'>                    <b>continue</b>;
+<a name='L448'>                memset(codestr+i, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 6);
+<a name='L449'>                cumlc = 0;
+<a name='L450'>                <b>break</b>;
+<a name='L451'>
+<a name='L452'>                <i><font color='green'>/* Try to fold tuples of constants (includes a case for lists and sets</font></i>
+<a name='L453'><i><font color='green'>                   which are only used for "in" and "not in" tests).</font></i>
+<a name='L454'><i><font color='green'>                   Skip over BUILD_SEQN 1 UNPACK_SEQN 1.</font></i>
+<a name='L455'><i><font color='green'>                   Replace BUILD_SEQN 2 UNPACK_SEQN 2 with ROT2.</font></i>
+<a name='L456'><i><font color='green'>                   Replace BUILD_SEQN 3 UNPACK_SEQN 3 with ROT3 ROT2. */</font></i>
+<a name='L457'>            <b>case</b> <a href='../S/546.html#L89' title='Defined at 89 in Include/opcode.h.'>BUILD_TUPLE</a>:
+<a name='L458'>            <b>case</b> <a href='../S/546.html#L90' title='Defined at 90 in Include/opcode.h.'>BUILD_LIST</a>:
+<a name='L459'>            <b>case</b> <a href='../S/546.html#L91' title='Defined at 91 in Include/opcode.h.'>BUILD_SET</a>:
+<a name='L460'>                j = <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i);
+<a name='L461'>                h = i - 3 * j;
+<a name='L462'>                <b>if</b> (h &gt;= 0  &amp;&amp;
+<a name='L463'>                    j &lt;= lastlc                  &amp;&amp;
+<a name='L464'>                    ((<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> == <a href='../S/546.html#L89' title='Defined at 89 in Include/opcode.h.'>BUILD_TUPLE</a> &amp;&amp;
+<a name='L465'>                      <a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks, h, 3*(j+1))) ||
+<a name='L466'>                     ((<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> == <a href='../S/546.html#L90' title='Defined at 90 in Include/opcode.h.'>BUILD_LIST</a> || <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> == <a href='../S/546.html#L91' title='Defined at 91 in Include/opcode.h.'>BUILD_SET</a>) &amp;&amp;
+<a name='L467'>                      codestr[i+3]==<a href='../S/546.html#L94' title='Defined at 94 in Include/opcode.h.'>COMPARE_OP</a> &amp;&amp;
+<a name='L468'>                      <a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks, h, 3*(j+2)) &amp;&amp;
+<a name='L469'>                      (<a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr,i+3)==6 ||
+<a name='L470'>                       <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr,i+3)==7))) &amp;&amp;
+<a name='L471'>                    <a href='../S/3129.html#L36' title='Defined at 36 in Python/peephole.c.'>tuple_of_constants</a>(&amp;codestr[h], j, consts)) <font color='red'>{</font>
+<a name='L472'>                    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[i] == <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>);
+<a name='L473'>                    cumlc = 1;
+<a name='L474'>                    <b>break</b>;
+<a name='L475'>                <font color='red'>}</font>
+<a name='L476'>                <b>if</b> (codestr[i+3] != <a href='../S/546.html#L77' title='Defined at 77 in Include/opcode.h.'>UNPACK_SEQUENCE</a>  ||
+<a name='L477'>                    !<a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks,i,6) ||
+<a name='L478'>                    j != <a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i+3))
+<a name='L479'>                    <b>continue</b>;
+<a name='L480'>                <b>if</b> (j == 1) <font color='red'>{</font>
+<a name='L481'>                    memset(codestr+i, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 6);
+<a name='L482'>                <font color='red'>}</font> <b>else</b> <b>if</b> (j == 2) <font color='red'>{</font>
+<a name='L483'>                    codestr[i] = <a href='../S/546.html#L12' title='Defined at 12 in Include/opcode.h.'>ROT_TWO</a>;
+<a name='L484'>                    memset(codestr+i+1, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 5);
+<a name='L485'>                <font color='red'>}</font> <b>else</b> <b>if</b> (j == 3) <font color='red'>{</font>
+<a name='L486'>                    codestr[i] = <a href='../S/546.html#L13' title='Defined at 13 in Include/opcode.h.'>ROT_THREE</a>;
+<a name='L487'>                    codestr[i+1] = <a href='../S/546.html#L12' title='Defined at 12 in Include/opcode.h.'>ROT_TWO</a>;
+<a name='L488'>                    memset(codestr+i+2, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 4);
+<a name='L489'>                <font color='red'>}</font>
+<a name='L490'>                <b>break</b>;
+<a name='L491'>
+<a name='L492'>                <i><font color='green'>/* Fold binary ops on constants.</font></i>
+<a name='L493'><i><font color='green'>                   LOAD_CONST c1 LOAD_CONST c2 BINOP --&gt;  LOAD_CONST binop(c1,c2) */</font></i>
+<a name='L494'>            <b>case</b> <a href='../S/546.html#L24' title='Defined at 24 in Include/opcode.h.'>BINARY_POWER</a>:
+<a name='L495'>            <b>case</b> <a href='../S/546.html#L26' title='Defined at 26 in Include/opcode.h.'>BINARY_MULTIPLY</a>:
+<a name='L496'>            <b>case</b> <a href='../S/546.html#L33' title='Defined at 33 in Include/opcode.h.'>BINARY_TRUE_DIVIDE</a>:
+<a name='L497'>            <b>case</b> <a href='../S/546.html#L32' title='Defined at 32 in Include/opcode.h.'>BINARY_FLOOR_DIVIDE</a>:
+<a name='L498'>            <b>case</b> <a href='../S/546.html#L28' title='Defined at 28 in Include/opcode.h.'>BINARY_MODULO</a>:
+<a name='L499'>            <b>case</b> <a href='../S/546.html#L29' title='Defined at 29 in Include/opcode.h.'>BINARY_ADD</a>:
+<a name='L500'>            <b>case</b> <a href='../S/546.html#L30' title='Defined at 30 in Include/opcode.h.'>BINARY_SUBTRACT</a>:
+<a name='L501'>            <b>case</b> <a href='../S/546.html#L31' title='Defined at 31 in Include/opcode.h.'>BINARY_SUBSCR</a>:
+<a name='L502'>            <b>case</b> <a href='../S/546.html#L46' title='Defined at 46 in Include/opcode.h.'>BINARY_LSHIFT</a>:
+<a name='L503'>            <b>case</b> <a href='../S/546.html#L47' title='Defined at 47 in Include/opcode.h.'>BINARY_RSHIFT</a>:
+<a name='L504'>            <b>case</b> <a href='../S/546.html#L48' title='Defined at 48 in Include/opcode.h.'>BINARY_AND</a>:
+<a name='L505'>            <b>case</b> <a href='../S/546.html#L49' title='Defined at 49 in Include/opcode.h.'>BINARY_XOR</a>:
+<a name='L506'>            <b>case</b> <a href='../S/546.html#L50' title='Defined at 50 in Include/opcode.h.'>BINARY_OR</a>:
+<a name='L507'>                <b>if</b> (lastlc &gt;= 2                  &amp;&amp;
+<a name='L508'>                    <a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks, i-6, 7)  &amp;&amp;
+<a name='L509'>                    <a href='../S/3129.html#L97' title='Defined at 97 in Python/peephole.c.'>fold_binops_on_constants</a>(&amp;codestr[i-6], consts)) <font color='red'>{</font>
+<a name='L510'>                    i -= 2;
+<a name='L511'>                    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[i] == <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>);
+<a name='L512'>                    cumlc = 1;
+<a name='L513'>                <font color='red'>}</font>
+<a name='L514'>                <b>break</b>;
+<a name='L515'>
+<a name='L516'>                <i><font color='green'>/* Fold unary ops on constants.</font></i>
+<a name='L517'><i><font color='green'>                   LOAD_CONST c1  UNARY_OP --&gt;                  LOAD_CONST unary_op(c) */</font></i>
+<a name='L518'>            <b>case</b> <a href='../S/546.html#L19' title='Defined at 19 in Include/opcode.h.'>UNARY_NEGATIVE</a>:
+<a name='L519'>            <b>case</b> <a href='../S/546.html#L22' title='Defined at 22 in Include/opcode.h.'>UNARY_INVERT</a>:
+<a name='L520'>            <b>case</b> <a href='../S/546.html#L18' title='Defined at 18 in Include/opcode.h.'>UNARY_POSITIVE</a>:
+<a name='L521'>                <b>if</b> (lastlc &gt;= 1                  &amp;&amp;
+<a name='L522'>                    <a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks, i-3, 4)  &amp;&amp;
+<a name='L523'>                    <a href='../S/3129.html#L190' title='Defined at 190 in Python/peephole.c.'>fold_unaryops_on_constants</a>(&amp;codestr[i-3], consts))                  <font color='red'>{</font>
+<a name='L524'>                    i -= 2;
+<a name='L525'>                    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(codestr[i] == <a href='../S/546.html#L87' title='Defined at 87 in Include/opcode.h.'>LOAD_CONST</a>);
+<a name='L526'>                    cumlc = 1;
+<a name='L527'>                <font color='red'>}</font>
+<a name='L528'>                <b>break</b>;
+<a name='L529'>
+<a name='L530'>                <i><font color='green'>/* Simplify conditional jump to conditional jump where the</font></i>
+<a name='L531'><i><font color='green'>                   result of the first test implies the success of a similar</font></i>
+<a name='L532'><i><font color='green'>                   test or the failure of the opposite test.</font></i>
+<a name='L533'><i><font color='green'>                   Arises in code like:</font></i>
+<a name='L534'><i><font color='green'>                   "if a and b:"</font></i>
+<a name='L535'><i><font color='green'>                   "if a or b:"</font></i>
+<a name='L536'><i><font color='green'>                   "a and b or c"</font></i>
+<a name='L537'><i><font color='green'>                   "(a and b) and c"</font></i>
+<a name='L538'><i><font color='green'>                   x:JUMP_IF_FALSE_OR_POP y   y:JUMP_IF_FALSE_OR_POP z</font></i>
+<a name='L539'><i><font color='green'>                      --&gt;  x:JUMP_IF_FALSE_OR_POP z</font></i>
+<a name='L540'><i><font color='green'>                   x:JUMP_IF_FALSE_OR_POP y   y:JUMP_IF_TRUE_OR_POP z</font></i>
+<a name='L541'><i><font color='green'>                      --&gt;  x:POP_JUMP_IF_FALSE y+3</font></i>
+<a name='L542'><i><font color='green'>                   where y+3 is the instruction following the second test.</font></i>
+<a name='L543'><i><font color='green'>                */</font></i>
+<a name='L544'>            <b>case</b> <a href='../S/546.html#L99' title='Defined at 99 in Include/opcode.h.'>JUMP_IF_FALSE_OR_POP</a>:
+<a name='L545'>            <b>case</b> <a href='../S/546.html#L100' title='Defined at 100 in Include/opcode.h.'>JUMP_IF_TRUE_OR_POP</a>:
+<a name='L546'>                tgt = <a href='../S/3129.html#L20' title='Defined at 20 in Python/peephole.c.'>GETJUMPTGT</a>(codestr, i);
+<a name='L547'>                j = codestr[tgt];
+<a name='L548'>                <b>if</b> (<a href='../S/3129.html#L14' title='Defined at 14 in Python/peephole.c.'>CONDITIONAL_JUMP</a>(j)) <font color='red'>{</font>
+<a name='L549'>                    <i><font color='green'>/* NOTE: all possible jumps here are</font></i>
+<a name='L550'><i><font color='green'>                       absolute! */</font></i>
+<a name='L551'>                    <b>if</b> (<a href='../S/3129.html#L19' title='Defined at 19 in Python/peephole.c.'>JUMPS_ON_TRUE</a>(j) == <a href='../S/3129.html#L19' title='Defined at 19 in Python/peephole.c.'>JUMPS_ON_TRUE</a>(<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>)) <font color='red'>{</font>
+<a name='L552'>                        <i><font color='green'>/* The second jump will be</font></i>
+<a name='L553'><i><font color='green'>                           taken iff the first is. */</font></i>
+<a name='L554'>                        tgttgt = <a href='../S/3129.html#L20' title='Defined at 20 in Python/peephole.c.'>GETJUMPTGT</a>(codestr, tgt);
+<a name='L555'>                        <i><font color='green'>/* The current opcode inherits</font></i>
+<a name='L556'><i><font color='green'>                           its target's stack behaviour */</font></i>
+<a name='L557'>                        codestr[i] = j;
+<a name='L558'>                        <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, tgttgt);
+<a name='L559'>                        <b>goto</b> reoptimize_current;
+<a name='L560'>                    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L561'>                        <i><font color='green'>/* The second jump is not taken</font></i>
+<a name='L562'><i><font color='green'>                           if the first is (so jump past</font></i>
+<a name='L563'><i><font color='green'>                           it), and all conditional</font></i>
+<a name='L564'><i><font color='green'>                           jumps pop their argument when</font></i>
+<a name='L565'><i><font color='green'>                           they're not taken (so change</font></i>
+<a name='L566'><i><font color='green'>                           the first jump to pop its</font></i>
+<a name='L567'><i><font color='green'>                           argument when it's taken). */</font></i>
+<a name='L568'>                        <b>if</b> (<a href='../S/3129.html#L19' title='Defined at 19 in Python/peephole.c.'>JUMPS_ON_TRUE</a>(<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>))
+<a name='L569'>                            codestr[i] = <a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a>;
+<a name='L570'>                        <b>else</b>
+<a name='L571'>                            codestr[i] = <a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a>;
+<a name='L572'>                        <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, (tgt + 3));
+<a name='L573'>                        <b>goto</b> reoptimize_current;
+<a name='L574'>                    <font color='red'>}</font>
+<a name='L575'>                <font color='red'>}</font>
+<a name='L576'>                <i><font color='green'>/* Intentional fallthrough */</font></i>
+<a name='L577'>
+<a name='L578'>                <i><font color='green'>/* Replace jumps to unconditional jumps */</font></i>
+<a name='L579'>            <b>case</b> <a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a>:
+<a name='L580'>            <b>case</b> <a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a>:
+<a name='L581'>            <b>case</b> <a href='../S/546.html#L78' title='Defined at 78 in Include/opcode.h.'>FOR_ITER</a>:
+<a name='L582'>            <b>case</b> <a href='../S/546.html#L98' title='Defined at 98 in Include/opcode.h.'>JUMP_FORWARD</a>:
+<a name='L583'>            <b>case</b> <a href='../S/546.html#L101' title='Defined at 101 in Include/opcode.h.'>JUMP_ABSOLUTE</a>:
+<a name='L584'>            <b>case</b> <a href='../S/546.html#L107' title='Defined at 107 in Include/opcode.h.'>CONTINUE_LOOP</a>:
+<a name='L585'>            <b>case</b> <a href='../S/546.html#L108' title='Defined at 108 in Include/opcode.h.'>SETUP_LOOP</a>:
+<a name='L586'>            <b>case</b> <a href='../S/546.html#L109' title='Defined at 109 in Include/opcode.h.'>SETUP_EXCEPT</a>:
+<a name='L587'>            <b>case</b> <a href='../S/546.html#L110' title='Defined at 110 in Include/opcode.h.'>SETUP_FINALLY</a>:
+<a name='L588'>            <b>case</b> <a href='../S/546.html#L134' title='Defined at 134 in Include/opcode.h.'>SETUP_WITH</a>:
+<a name='L589'>                tgt = <a href='../S/3129.html#L20' title='Defined at 20 in Python/peephole.c.'>GETJUMPTGT</a>(codestr, i);
+<a name='L590'>                <i><font color='green'>/* Replace JUMP_* to a RETURN into just a RETURN */</font></i>
+<a name='L591'>                <b>if</b> (<a href='../S/3129.html#L13' title='Defined at 13 in Python/peephole.c.'>UNCONDITIONAL_JUMP</a>(<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>) &amp;&amp;
+<a name='L592'>                    codestr[tgt] == <a href='../S/546.html#L65' title='Defined at 65 in Include/opcode.h.'>RETURN_VALUE</a>) <font color='red'>{</font>
+<a name='L593'>                    codestr[i] = <a href='../S/546.html#L65' title='Defined at 65 in Include/opcode.h.'>RETURN_VALUE</a>;
+<a name='L594'>                    memset(codestr+i+1, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 2);
+<a name='L595'>                    <b>continue</b>;
+<a name='L596'>                <font color='red'>}</font>
+<a name='L597'>                <b>if</b> (!<a href='../S/3129.html#L13' title='Defined at 13 in Python/peephole.c.'>UNCONDITIONAL_JUMP</a>(codestr[tgt]))
+<a name='L598'>                    <b>continue</b>;
+<a name='L599'>                tgttgt = <a href='../S/3129.html#L20' title='Defined at 20 in Python/peephole.c.'>GETJUMPTGT</a>(codestr, tgt);
+<a name='L600'>                <b>if</b> (<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> == <a href='../S/546.html#L98' title='Defined at 98 in Include/opcode.h.'>JUMP_FORWARD</a>) <i><font color='green'>/* JMP_ABS can go backwards */</font></i>
+<a name='L601'>                    <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> = <a href='../S/546.html#L101' title='Defined at 101 in Include/opcode.h.'>JUMP_ABSOLUTE</a>;
+<a name='L602'>                <b>if</b> (!<a href='../S/3129.html#L16' title='Defined at 16 in Python/peephole.c.'>ABSOLUTE_JUMP</a>(<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>))
+<a name='L603'>                    tgttgt -= i + 3;     <i><font color='green'>/* Calc relative jump addr */</font></i>
+<a name='L604'>                <b>if</b> (tgttgt &lt; 0)                           <i><font color='green'>/* No backward relative jumps */</font></i>
+<a name='L605'>                    <b>continue</b>;
+<a name='L606'>                codestr[i] = <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>;
+<a name='L607'>                <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, tgttgt);
+<a name='L608'>                <b>break</b>;
+<a name='L609'>
+<a name='L610'>            <b>case</b> <a href='../S/546.html#L137' title='Defined at 137 in Include/opcode.h.'>EXTENDED_ARG</a>:
+<a name='L611'>                <b>if</b> (codestr[i+3] != <a href='../S/546.html#L119' title='Defined at 119 in Include/opcode.h.'>MAKE_FUNCTION</a>)
+<a name='L612'>                    <b>goto</b> exitUnchanged;
+<a name='L613'>                <i><font color='green'>/* don't visit MAKE_FUNCTION as GETARG will be wrong */</font></i>
+<a name='L614'>                i += 3;
+<a name='L615'>                <b>break</b>;
+<a name='L616'>
+<a name='L617'>                <i><font color='green'>/* Replace RETURN LOAD_CONST None RETURN with just RETURN */</font></i>
+<a name='L618'>                <i><font color='green'>/* Remove unreachable JUMPs after RETURN */</font></i>
+<a name='L619'>            <b>case</b> <a href='../S/546.html#L65' title='Defined at 65 in Include/opcode.h.'>RETURN_VALUE</a>:
+<a name='L620'>                <b>if</b> (i+4 &gt;= codelen)
+<a name='L621'>                    <b>continue</b>;
+<a name='L622'>                <b>if</b> (codestr[i+4] == <a href='../S/546.html#L65' title='Defined at 65 in Include/opcode.h.'>RETURN_VALUE</a> &amp;&amp;
+<a name='L623'>                    <a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks,i,5))
+<a name='L624'>                    memset(codestr+i+1, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 4);
+<a name='L625'>                <b>else</b> <b>if</b> (<a href='../S/3129.html#L13' title='Defined at 13 in Python/peephole.c.'>UNCONDITIONAL_JUMP</a>(codestr[i+1]) &amp;&amp;
+<a name='L626'>                         <a href='../S/3129.html#L23' title='Defined at 23 in Python/peephole.c.'>ISBASICBLOCK</a>(blocks,i,4))
+<a name='L627'>                    memset(codestr+i+1, <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>, 3);
+<a name='L628'>                <b>break</b>;
+<a name='L629'>        <font color='red'>}</font>
+<a name='L630'>    <font color='red'>}</font>
+<a name='L631'>
+<a name='L632'>    <i><font color='green'>/* Fixup linenotab */</font></i>
+<a name='L633'>    <b>for</b> (i=0, nops=0 ; i&lt;codelen ; i += <a href='../S/3129.html#L22' title='Defined at 22 in Python/peephole.c.'>CODESIZE</a>(codestr[i])) <font color='red'>{</font>
+<a name='L634'>        addrmap[i] = i - nops;
+<a name='L635'>        <b>if</b> (codestr[i] == <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>)
+<a name='L636'>            nops++;
+<a name='L637'>    <font color='red'>}</font>
+<a name='L638'>    cum_orig_line = 0;
+<a name='L639'>    last_line = 0;
+<a name='L640'>    <b>for</b> (i=0 ; i &lt; tabsiz ; i+=2) <font color='red'>{</font>
+<a name='L641'>        cum_orig_line += lineno[i];
+<a name='L642'>        new_line = addrmap[cum_orig_line];
+<a name='L643'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (new_line - last_line &lt; 255);
+<a name='L644'>        lineno[i] =((<b>unsigned</b> <b>char</b>)(new_line - last_line));
+<a name='L645'>        last_line = new_line;
+<a name='L646'>    <font color='red'>}</font>
+<a name='L647'>
+<a name='L648'>    <i><font color='green'>/* Remove NOPs and fixup jump targets */</font></i>
+<a name='L649'>    <b>for</b> (i=0, h=0 ; i&lt;codelen ; ) <font color='red'>{</font>
+<a name='L650'>        <a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a> = codestr[i];
+<a name='L651'>        <b>switch</b> (<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>) <font color='red'>{</font>
+<a name='L652'>            <b>case</b> <a href='../S/546.html#L16' title='Defined at 16 in Include/opcode.h.'>NOP</a>:
+<a name='L653'>                i++;
+<a name='L654'>                <b>continue</b>;
+<a name='L655'>
+<a name='L656'>            <b>case</b> <a href='../S/546.html#L101' title='Defined at 101 in Include/opcode.h.'>JUMP_ABSOLUTE</a>:
+<a name='L657'>            <b>case</b> <a href='../S/546.html#L107' title='Defined at 107 in Include/opcode.h.'>CONTINUE_LOOP</a>:
+<a name='L658'>            <b>case</b> <a href='../S/546.html#L102' title='Defined at 102 in Include/opcode.h.'>POP_JUMP_IF_FALSE</a>:
+<a name='L659'>            <b>case</b> <a href='../S/546.html#L103' title='Defined at 103 in Include/opcode.h.'>POP_JUMP_IF_TRUE</a>:
+<a name='L660'>            <b>case</b> <a href='../S/546.html#L99' title='Defined at 99 in Include/opcode.h.'>JUMP_IF_FALSE_OR_POP</a>:
+<a name='L661'>            <b>case</b> <a href='../S/546.html#L100' title='Defined at 100 in Include/opcode.h.'>JUMP_IF_TRUE_OR_POP</a>:
+<a name='L662'>                j = addrmap[<a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i)];
+<a name='L663'>                <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, j);
+<a name='L664'>                <b>break</b>;
+<a name='L665'>
+<a name='L666'>            <b>case</b> <a href='../S/546.html#L78' title='Defined at 78 in Include/opcode.h.'>FOR_ITER</a>:
+<a name='L667'>            <b>case</b> <a href='../S/546.html#L98' title='Defined at 98 in Include/opcode.h.'>JUMP_FORWARD</a>:
+<a name='L668'>            <b>case</b> <a href='../S/546.html#L108' title='Defined at 108 in Include/opcode.h.'>SETUP_LOOP</a>:
+<a name='L669'>            <b>case</b> <a href='../S/546.html#L109' title='Defined at 109 in Include/opcode.h.'>SETUP_EXCEPT</a>:
+<a name='L670'>            <b>case</b> <a href='../S/546.html#L110' title='Defined at 110 in Include/opcode.h.'>SETUP_FINALLY</a>:
+<a name='L671'>            <b>case</b> <a href='../S/546.html#L134' title='Defined at 134 in Include/opcode.h.'>SETUP_WITH</a>:
+<a name='L672'>                j = addrmap[<a href='../S/3129.html#L12' title='Defined at 12 in Python/peephole.c.'>GETARG</a>(codestr, i) + i + 3] - addrmap[i] - 3;
+<a name='L673'>                <a href='../S/3129.html#L21' title='Defined at 21 in Python/peephole.c.'>SETARG</a>(codestr, i, j);
+<a name='L674'>                <b>break</b>;
+<a name='L675'>        <font color='red'>}</font>
+<a name='L676'>        adj = <a href='../S/3129.html#L22' title='Defined at 22 in Python/peephole.c.'>CODESIZE</a>(<a href='../S/2588.html#L15' title='Defined at 15 in Modules/_pickle.c.'>opcode</a>);
+<a name='L677'>        <b>while</b> (adj--)
+<a name='L678'>            codestr[h++] = codestr[i++];
+<a name='L679'>    <font color='red'>}</font>
+<a name='L680'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(h + nops == codelen);
+<a name='L681'>
+<a name='L682'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>((<b>char</b> *)codestr, h);
+<a name='L683'>    <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(addrmap);
+<a name='L684'>    <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(codestr);
+<a name='L685'>    <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(blocks);
+<a name='L686'>    <b>return</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L687'>
+<a name='L688'> exitError:
+<a name='L689'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L690'>
+<a name='L691'> exitUnchanged:
+<a name='L692'>    <b>if</b> (blocks != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L693'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(blocks);
+<a name='L694'>    <b>if</b> (addrmap != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L695'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(addrmap);
+<a name='L696'>    <b>if</b> (codestr != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L697'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(codestr);
+<a name='L698'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L699'>    <b>return</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L700'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L333'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

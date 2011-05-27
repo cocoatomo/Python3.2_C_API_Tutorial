@@ -1,0 +1,1523 @@
+<html>
+<head>
+<title>Modules/mmapmodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/mmapmodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L31'>[^]</a><a href='#L1409'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L31' title='Defined at 31.'>my_getpagesize</a>
+<li><a href='#L39' title='Defined at 39.'>my_getallocationgranularity</a>
+<li><a href='#L55' title='Defined at 55.'>my_getpagesize</a>
+<li><a href='#L111' title='Defined at 111.'>mmap_object_dealloc</a>
+<li><a href='#L136' title='Defined at 136.'>mmap_close_method</a>
+<li><a href='#L200' title='Defined at 200.'>mmap_read_byte_method</a>
+<li><a href='#L215' title='Defined at 215.'>mmap_read_line_method</a>
+<li><a href='#L237' title='Defined at 237.'>mmap_read_method</a>
+<li><a href='#L267' title='Defined at 267.'>mmap_gfind</a>
+<li><a href='#L315' title='Defined at 315.'>mmap_find_method</a>
+<li><a href='#L322' title='Defined at 322.'>mmap_rfind_method</a>
+<li><a href='#L329' title='Defined at 329.'>is_writable</a>
+<li><a href='#L338' title='Defined at 338.'>is_resizeable</a>
+<li><a href='#L354' title='Defined at 354.'>mmap_write_method</a>
+<li><a href='#L378' title='Defined at 378.'>mmap_write_byte_method</a>
+<li><a href='#L403' title='Defined at 403.'>mmap_size_method</a>
+<li><a href='#L451' title='Defined at 451.'>mmap_resize_method</a>
+<li><a href='#L554' title='Defined at 554.'>mmap_tell_method</a>
+<li><a href='#L561' title='Defined at 561.'>mmap_flush_method</a>
+<li><a href='#L593' title='Defined at 593.'>mmap_seek_method</a>
+<li><a href='#L635' title='Defined at 635.'>mmap_move_method</a>
+<li><a href='#L658' title='Defined at 658.'>mmap_closed_get</a>
+<li><a href='#L668' title='Defined at 668.'>mmap__enter__method</a>
+<li><a href='#L677' title='Defined at 677.'>mmap__exit__method</a>
+<li><a href='#L711' title='Defined at 711.'>mmap_buffer_getbuf</a>
+<li><a href='#L722' title='Defined at 722.'>mmap_buffer_releasebuf</a>
+<li><a href='#L728' title='Defined at 728.'>mmap_length</a>
+<li><a href='#L735' title='Defined at 735.'>mmap_item</a>
+<li><a href='#L746' title='Defined at 746.'>mmap_subscript</a>
+<li><a href='#L800' title='Defined at 800.'>mmap_concat</a>
+<li><a href='#L809' title='Defined at 809.'>mmap_repeat</a>
+<li><a href='#L818' title='Defined at 818.'>mmap_ass_item</a>
+<li><a href='#L845' title='Defined at 845.'>mmap_ass_subscript</a>
+<li><a href='#L1032' title='Defined at 1032.'>_GetMapSize</a>
+<li><a href='#L1055' title='Defined at 1055.'>new_mmap_object</a>
+<li><a href='#L1187' title='Defined at 1187.'>new_mmap_object</a>
+<li><a href='#L1387' title='Defined at 1387.'>setint</a>
+<li><a href='#L1409' title='Defined at 1409.'>PyInit_mmap</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'> /  Author: Sam Rushing &lt;rushing@nightmare.com&gt;</font></i>
+<a name='L3'><i><font color='green'> /  Hacked for Unix by AMK</font></i>
+<a name='L4'><i><font color='green'> /  $Id: mmapmodule.c 88131 2011-01-20 21:07:24Z antoine.pitrou $</font></i>
+<a name='L5'><i><font color='green'></font></i>
+<a name='L6'><i><font color='green'> / Modified to support mmap with offset - to map a 'window' of a file</font></i>
+<a name='L7'><i><font color='green'> /   Author:  Yotam Medini  yotamm@mellanox.co.il</font></i>
+<a name='L8'><i><font color='green'> /</font></i>
+<a name='L9'><i><font color='green'> / mmapmodule.cpp -- map a view of a file into memory</font></i>
+<a name='L10'><i><font color='green'> /</font></i>
+<a name='L11'><i><font color='green'> / todo: need permission flags, perhaps a 'chsize' analog</font></i>
+<a name='L12'><i><font color='green'> /   not all functions check range yet!!!</font></i>
+<a name='L13'><i><font color='green'> /</font></i>
+<a name='L14'><i><font color='green'> /</font></i>
+<a name='L15'><i><font color='green'> / This version of mmapmodule.c has been changed significantly</font></i>
+<a name='L16'><i><font color='green'> / from the original mmapfile.c on which it was based.</font></i>
+<a name='L17'><i><font color='green'> / The original version of mmapfile is maintained by Sam at</font></i>
+<a name='L18'><i><font color='green'> / ftp://squirl.nightmare.com/pub/python/python-ext.</font></i>
+<a name='L19'><i><font color='green'>*/</font></i>
+<a name='L20'>
+<a name='L21'><font color='darkred'>#define</font> <a href='../R/2388.html' title='Multiple refered from 2 places.'>PY_SSIZE_T_CLEAN</a>
+<a name='L22'><font color='darkred'>#include</font> &lt;<a href='570.html'>Python.h</a>&gt;
+<a name='L23'>
+<a name='L24'><font color='darkred'>#ifndef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L25'><font color='darkred'>#define</font> <a href='../R/4733.html' title='Multiple refered from 10 places.'>UNIX</a>
+<a name='L26'><font color='darkred'>#endif</font>
+<a name='L27'>
+<a name='L28'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L29'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L30'><b>static</b> <b>int</b>
+<a name='L31'><a href='../R/9169.html' title='Multiple refered from 2 places.'>my_getpagesize</a>(<b>void</b>)
+<a name='L32'><font color='red'>{</font>
+<a name='L33'>    SYSTEM_INFO si;
+<a name='L34'>    GetSystemInfo(&amp;si);
+<a name='L35'>    <b>return</b> si.dwPageSize;
+<a name='L36'><font color='red'>}</font>
+<a name='L37'>
+<a name='L38'><b>static</b> <b>int</b>
+<a name='L39'><a href='../S/2691.html#L1457' title='Refered from 1457 in Modules/mmapmodule.c.'>my_getallocationgranularity</a> (<b>void</b>)
+<a name='L40'><font color='red'>{</font>
+<a name='L41'>
+<a name='L42'>    SYSTEM_INFO si;
+<a name='L43'>    GetSystemInfo(&amp;si);
+<a name='L44'>    <b>return</b> si.dwAllocationGranularity;
+<a name='L45'><font color='red'>}</font>
+<a name='L46'>
+<a name='L47'><font color='darkred'>#endif</font>
+<a name='L48'>
+<a name='L49'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L50'><font color='darkred'>#include</font> &lt;sys/mman.h&gt;
+<a name='L51'><font color='darkred'>#include</font> &lt;sys/stat.h&gt;
+<a name='L52'>
+<a name='L53'><font color='darkred'>#if</font> <b>defined</b>(HAVE_SYSCONF) &amp;&amp; <b>defined</b>(_SC_PAGESIZE)
+<a name='L54'><b>static</b> <b>int</b>
+<a name='L55'><a href='../R/9169.html' title='Multiple refered from 2 places.'>my_getpagesize</a>(<b>void</b>)
+<a name='L56'><font color='red'>{</font>
+<a name='L57'>    <b>return</b> sysconf(_SC_PAGESIZE);
+<a name='L58'><font color='red'>}</font>
+<a name='L59'>
+<a name='L60'><font color='darkred'>#define</font> <a href='../S/2691.html#L1457' title='Refered from 1457 in Modules/mmapmodule.c.'>my_getallocationgranularity</a> <a href='../D/9999.html' title='Multiple defined in 3 places.'>my_getpagesize</a>
+<a name='L61'><font color='darkred'>#else</font>
+<a name='L62'><font color='darkred'>#define</font> <a href='../R/9169.html' title='Multiple refered from 2 places.'>my_getpagesize</a> getpagesize
+<a name='L63'><font color='darkred'>#endif</font>
+<a name='L64'>
+<a name='L65'><font color='darkred'>#endif</font> <i><font color='green'>/* UNIX */</font></i>
+<a name='L66'>
+<a name='L67'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L68'>
+<a name='L69'><font color='darkred'>#ifdef</font> <a href='../D/1582.html' title='Multiple defined in 4 places.'>HAVE_SYS_TYPES_H</a>
+<a name='L70'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L71'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_SYS_TYPES_H */</font></i>
+<a name='L72'>
+<a name='L73'><i><font color='green'>/* Prefer MAP_ANONYMOUS since MAP_ANON is deprecated according to man page. */</font></i>
+<a name='L74'><font color='darkred'>#if</font> !<b>defined</b>(<a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>) &amp;&amp; <b>defined</b>(MAP_ANON)
+<a name='L75'><font color='darkred'>#  define</font> <a href='../R/1822.html' title='Multiple refered from 17 places.'>MAP_ANONYMOUS</a> MAP_ANON
+<a name='L76'><font color='darkred'>#endif</font>
+<a name='L77'>
+<a name='L78'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *mmap_module_error;
+<a name='L79'>
+<a name='L80'><b>typedef</b> <b>enum</b>
+<a name='L81'><font color='red'>{</font>
+<a name='L82'>    <a href='../R/7.html' title='Multiple refered from 6 places.'>ACCESS_DEFAULT</a>,
+<a name='L83'>    <a href='../R/8.html' title='Multiple refered from 7 places.'>ACCESS_READ</a>,
+<a name='L84'>    <a href='../R/9.html' title='Multiple refered from 4 places.'>ACCESS_WRITE</a>,
+<a name='L85'>    <a href='../R/6.html' title='Multiple refered from 4 places.'>ACCESS_COPY</a>
+<a name='L86'><font color='red'>}</font> <a href='../R/5902.html' title='Multiple refered from 6 places.'>access_mode</a>;
+<a name='L87'>
+<a name='L88'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L89'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L90'>    <b>char</b> *      data;
+<a name='L91'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>      size;
+<a name='L92'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>      pos;    <i><font color='green'>/* relative to offset */</font></i>
+<a name='L93'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>      offset;
+<a name='L94'>    <b>int</b>     exports;
+<a name='L95'>
+<a name='L96'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L97'>    <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a>      map_handle;
+<a name='L98'>    <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a>      file_handle;
+<a name='L99'>    <b>char</b> *      tagname;
+<a name='L100'><font color='darkred'>#endif</font>
+<a name='L101'>
+<a name='L102'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L103'>    <b>int</b> fd;
+<a name='L104'><font color='darkred'>#endif</font>
+<a name='L105'>
+<a name='L106'>    <a href='../S/2691.html#L86' title='Defined at 86 in Modules/mmapmodule.c.'>access_mode</a> access;
+<a name='L107'><font color='red'>}</font> <a href='../R/9072.html' title='Multiple refered from 5 places.'>mmap_object</a>;
+<a name='L108'>
+<a name='L109'>
+<a name='L110'><b>static</b> <b>void</b>
+<a name='L111'><a href='../S/2691.html#L989' title='Refered from 989 in Modules/mmapmodule.c.'>mmap_object_dealloc</a>(mmap_object *m_obj)
+<a name='L112'><font color='red'>{</font>
+<a name='L113'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L114'>    <b>if</b> (m_obj-&gt;data != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L115'>        UnmapViewOfFile (m_obj-&gt;data);
+<a name='L116'>    <b>if</b> (m_obj-&gt;map_handle != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L117'>        CloseHandle (m_obj-&gt;map_handle);
+<a name='L118'>    <b>if</b> (m_obj-&gt;file_handle != <a href='../S/2583.html#L47' title='Defined at 47 in Modules/_multiprocessing/multiprocessing.h.'>INVALID_HANDLE_VALUE</a>)
+<a name='L119'>        CloseHandle (m_obj-&gt;file_handle);
+<a name='L120'>    <b>if</b> (m_obj-&gt;tagname)
+<a name='L121'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(m_obj-&gt;tagname);
+<a name='L122'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L123'>
+<a name='L124'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L125'>    <b>if</b> (m_obj-&gt;fd &gt;= 0)
+<a name='L126'>        (<b>void</b>) close(m_obj-&gt;fd);
+<a name='L127'>    <b>if</b> (m_obj-&gt;data!=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L128'>        munmap(m_obj-&gt;data, m_obj-&gt;size);
+<a name='L129'>    <font color='red'>}</font>
+<a name='L130'><font color='darkred'>#endif</font> <i><font color='green'>/* UNIX */</font></i>
+<a name='L131'>
+<a name='L132'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(m_obj)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)m_obj);
+<a name='L133'><font color='red'>}</font>
+<a name='L134'>
+<a name='L135'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L136'><a href='../S/2691.html#L683' title='Refered from 683 in Modules/mmapmodule.c.'>mmap_close_method</a>(mmap_object *self, PyObject *unused)
+<a name='L137'><font color='red'>{</font>
+<a name='L138'>    <b>if</b> (self-&gt;exports &gt; 0) <font color='red'>{</font>
+<a name='L139'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_BufferError, "cannot close "\
+<a name='L140'>                        "exported pointers exist");
+<a name='L141'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L142'>    <font color='red'>}</font>
+<a name='L143'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L144'>    <i><font color='green'>/* For each resource we maintain, we need to check</font></i>
+<a name='L145'><i><font color='green'>       the value is valid, and if so, free the resource</font></i>
+<a name='L146'><i><font color='green'>       and set the member value to an invalid value so</font></i>
+<a name='L147'><i><font color='green'>       the dealloc does not attempt to resource clearing</font></i>
+<a name='L148'><i><font color='green'>       again.</font></i>
+<a name='L149'><i><font color='green'>       TODO - should we check for errors in the close operations???</font></i>
+<a name='L150'><i><font color='green'>    */</font></i>
+<a name='L151'>    <b>if</b> (self-&gt;data != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L152'>        UnmapViewOfFile(self-&gt;data);
+<a name='L153'>        self-&gt;data = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L154'>    <font color='red'>}</font>
+<a name='L155'>    <b>if</b> (self-&gt;map_handle != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L156'>        CloseHandle(self-&gt;map_handle);
+<a name='L157'>        self-&gt;map_handle = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L158'>    <font color='red'>}</font>
+<a name='L159'>    <b>if</b> (self-&gt;file_handle != <a href='../S/2583.html#L47' title='Defined at 47 in Modules/_multiprocessing/multiprocessing.h.'>INVALID_HANDLE_VALUE</a>) <font color='red'>{</font>
+<a name='L160'>        CloseHandle(self-&gt;file_handle);
+<a name='L161'>        self-&gt;file_handle = <a href='../S/2583.html#L47' title='Defined at 47 in Modules/_multiprocessing/multiprocessing.h.'>INVALID_HANDLE_VALUE</a>;
+<a name='L162'>    <font color='red'>}</font>
+<a name='L163'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L164'>
+<a name='L165'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L166'>    <b>if</b> (0 &lt;= self-&gt;fd)
+<a name='L167'>        (<b>void</b>) close(self-&gt;fd);
+<a name='L168'>    self-&gt;fd = -1;
+<a name='L169'>    <b>if</b> (self-&gt;data != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L170'>        munmap(self-&gt;data, self-&gt;size);
+<a name='L171'>        self-&gt;data = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L172'>    <font color='red'>}</font>
+<a name='L173'><font color='darkred'>#endif</font>
+<a name='L174'>
+<a name='L175'>    Py_INCREF(Py_None);
+<a name='L176'>    <b>return</b> Py_None;
+<a name='L177'><font color='red'>}</font>
+<a name='L178'>
+<a name='L179'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L180'><font color='darkred'>#define</font> <a href='../R/507.html' title='Multiple refered from 21 places.'>CHECK_VALID</a>(err)                                                \
+<a name='L181'><b>do</b> <font color='red'>{</font>                                                                    \
+<a name='L182'>    <b>if</b> (self-&gt;map_handle == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>                                     \
+<a name='L183'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "mmap closed or invalid");        \
+<a name='L184'>    <b>return</b> err;                                                         \
+<a name='L185'>    <font color='red'>}</font>                                                                   \
+<a name='L186'><font color='red'>}</font> <b>while</b> (0)
+<a name='L187'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L188'>
+<a name='L189'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L190'><font color='darkred'>#define</font> <a href='../R/507.html' title='Multiple refered from 21 places.'>CHECK_VALID</a>(err)                                                \
+<a name='L191'><b>do</b> <font color='red'>{</font>                                                                    \
+<a name='L192'>    <b>if</b> (self-&gt;data == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>                                           \
+<a name='L193'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "mmap closed or invalid");        \
+<a name='L194'>    <b>return</b> err;                                                         \
+<a name='L195'>    <font color='red'>}</font>                                                                   \
+<a name='L196'><font color='red'>}</font> <b>while</b> (0)
+<a name='L197'><font color='darkred'>#endif</font> <i><font color='green'>/* UNIX */</font></i>
+<a name='L198'>
+<a name='L199'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L200'><a href='../S/2691.html#L689' title='Refered from 689 in Modules/mmapmodule.c.'>mmap_read_byte_method</a>(mmap_object *self,
+<a name='L201'>                      PyObject *unused)
+<a name='L202'><font color='red'>{</font>
+<a name='L203'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L204'>    <b>if</b> (self-&gt;pos &lt; self-&gt;size) <font color='red'>{</font>
+<a name='L205'>        <b>char</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = self-&gt;data[self-&gt;pos];
+<a name='L206'>        self-&gt;pos += 1;
+<a name='L207'>        <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("B", (<b>unsigned</b> <b>char</b>)<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L208'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L209'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "read byte out of range");
+<a name='L210'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L211'>    <font color='red'>}</font>
+<a name='L212'><font color='red'>}</font>
+<a name='L213'>
+<a name='L214'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L215'><a href='../S/2691.html#L690' title='Refered from 690 in Modules/mmapmodule.c.'>mmap_read_line_method</a>(mmap_object *self,
+<a name='L216'>                      PyObject *unused)
+<a name='L217'><font color='red'>{</font>
+<a name='L218'>    <b>char</b> *start = self-&gt;data+self-&gt;pos;
+<a name='L219'>    <b>char</b> *eof = self-&gt;data+self-&gt;size;
+<a name='L220'>    <b>char</b> *eol;
+<a name='L221'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L222'>
+<a name='L223'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L224'>
+<a name='L225'>    eol = memchr(start, '\n', self-&gt;size - self-&gt;pos);
+<a name='L226'>    <b>if</b> (!eol)
+<a name='L227'>        eol = eof;
+<a name='L228'>    <b>else</b>
+<a name='L229'>        ++eol;                  <i><font color='green'>/* we're interested in the position after the</font></i>
+<a name='L230'><i><font color='green'>                           newline. */</font></i>
+<a name='L231'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(start, (eol - start));
+<a name='L232'>    self-&gt;pos += (eol - start);
+<a name='L233'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L234'><font color='red'>}</font>
+<a name='L235'>
+<a name='L236'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L237'><a href='../S/2691.html#L688' title='Refered from 688 in Modules/mmapmodule.c.'>mmap_read_method</a>(mmap_object *self,
+<a name='L238'>                 PyObject *args)
+<a name='L239'><font color='red'>{</font>
+<a name='L240'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> num_bytes, n;
+<a name='L241'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L242'>
+<a name='L243'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L244'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "n:read", &amp;num_bytes))
+<a name='L245'>        <b>return</b>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L246'>
+<a name='L247'>    <i><font color='green'>/* silently 'adjust' out-of-range requests */</font></i>
+<a name='L248'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;size &gt;= self-&gt;pos);
+<a name='L249'>    n = self-&gt;size - self-&gt;pos;
+<a name='L250'>    <i><font color='green'>/* The difference can overflow, only if self-&gt;size is greater than</font></i>
+<a name='L251'><i><font color='green'>     * PY_SSIZE_T_MAX.  But then the operation cannot possibly succeed,</font></i>
+<a name='L252'><i><font color='green'>     * because the mapped area and the returned string each need more</font></i>
+<a name='L253'><i><font color='green'>     * than half of the addressable memory.  So we clip the size, and let</font></i>
+<a name='L254'><i><font color='green'>     * the code below raise MemoryError.</font></i>
+<a name='L255'><i><font color='green'>     */</font></i>
+<a name='L256'>    <b>if</b> (n &lt; 0)
+<a name='L257'>        n = <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a>;
+<a name='L258'>    <b>if</b> (num_bytes &lt; 0 || num_bytes &gt; n) <font color='red'>{</font>
+<a name='L259'>        num_bytes = n;
+<a name='L260'>    <font color='red'>}</font>
+<a name='L261'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(self-&gt;data+self-&gt;pos, num_bytes);
+<a name='L262'>    self-&gt;pos += num_bytes;
+<a name='L263'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L264'><font color='red'>}</font>
+<a name='L265'>
+<a name='L266'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L267'><a href='../R/9068.html' title='Multiple refered from 2 places.'>mmap_gfind</a>(mmap_object *self,
+<a name='L268'>           PyObject *args,
+<a name='L269'>           <b>int</b> reverse)
+<a name='L270'><font color='red'>{</font>
+<a name='L271'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> start = self-&gt;pos;
+<a name='L272'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> end = self-&gt;size;
+<a name='L273'>    <b>const</b> <b>char</b> *needle;
+<a name='L274'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L275'>
+<a name='L276'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L277'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, reverse ? "y#|nn:rfind" : "y#|nn:find",
+<a name='L278'>                          &amp;needle, &amp;len, &amp;start, &amp;end)) <font color='red'>{</font>
+<a name='L279'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L280'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L281'>        <b>const</b> <b>char</b> *p, *start_p, *end_p;
+<a name='L282'>        <b>int</b> sign = reverse ? -1 : 1;
+<a name='L283'>
+<a name='L284'>        <b>if</b> (start &lt; 0)
+<a name='L285'>            start += self-&gt;size;
+<a name='L286'>        <b>if</b> (start &lt; 0)
+<a name='L287'>            start = 0;
+<a name='L288'>        <b>else</b> <b>if</b> ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)start &gt; self-&gt;size)
+<a name='L289'>            start = self-&gt;size;
+<a name='L290'>
+<a name='L291'>        <b>if</b> (end &lt; 0)
+<a name='L292'>            end += self-&gt;size;
+<a name='L293'>        <b>if</b> (end &lt; 0)
+<a name='L294'>            end = 0;
+<a name='L295'>        <b>else</b> <b>if</b> ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)end &gt; self-&gt;size)
+<a name='L296'>            end = self-&gt;size;
+<a name='L297'>
+<a name='L298'>        start_p = self-&gt;data + start;
+<a name='L299'>        end_p = self-&gt;data + end;
+<a name='L300'>
+<a name='L301'>        <b>for</b> (p = (reverse ? end_p - len : start_p);
+<a name='L302'>             (p &gt;= start_p) &amp;&amp; (p + len &lt;= end_p); p += sign) <font color='red'>{</font>
+<a name='L303'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L304'>            <b>for</b> (i = 0; i &lt; len &amp;&amp; needle[i] == p[i]; ++i)
+<a name='L305'>                <i><font color='green'>/* nothing */</font></i>;
+<a name='L306'>            <b>if</b> (i == len) <font color='red'>{</font>
+<a name='L307'>                <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(p - self-&gt;data);
+<a name='L308'>            <font color='red'>}</font>
+<a name='L309'>        <font color='red'>}</font>
+<a name='L310'>        <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(-1);
+<a name='L311'>    <font color='red'>}</font>
+<a name='L312'><font color='red'>}</font>
+<a name='L313'>
+<a name='L314'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L315'><a href='../S/2691.html#L684' title='Refered from 684 in Modules/mmapmodule.c.'>mmap_find_method</a>(mmap_object *self,
+<a name='L316'>                 PyObject *args)
+<a name='L317'><font color='red'>{</font>
+<a name='L318'>    <b>return</b> <a href='../S/2691.html#L267' title='Defined at 267 in Modules/mmapmodule.c.'>mmap_gfind</a>(self, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 0);
+<a name='L319'><font color='red'>}</font>
+<a name='L320'>
+<a name='L321'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L322'><a href='../S/2691.html#L685' title='Refered from 685 in Modules/mmapmodule.c.'>mmap_rfind_method</a>(mmap_object *self,
+<a name='L323'>                 PyObject *args)
+<a name='L324'><font color='red'>{</font>
+<a name='L325'>    <b>return</b> <a href='../S/2691.html#L267' title='Defined at 267 in Modules/mmapmodule.c.'>mmap_gfind</a>(self, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 1);
+<a name='L326'><font color='red'>}</font>
+<a name='L327'>
+<a name='L328'><b>static</b> <b>int</b>
+<a name='L329'><a href='../R/8518.html' title='Multiple refered from 5 places.'>is_writable</a>(mmap_object *self)
+<a name='L330'><font color='red'>{</font>
+<a name='L331'>    <b>if</b> (self-&gt;access != <a href='../S/2691.html#L83' title='Defined at 83 in Modules/mmapmodule.c.'>ACCESS_READ</a>)
+<a name='L332'>        <b>return</b> 1;
+<a name='L333'>    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError, "mmap can't modify a readonly memory map.");
+<a name='L334'>    <b>return</b> 0;
+<a name='L335'><font color='red'>}</font>
+<a name='L336'>
+<a name='L337'><b>static</b> <b>int</b>
+<a name='L338'><a href='../S/2691.html#L457' title='Refered from 457 in Modules/mmapmodule.c.'>is_resizeable</a>(mmap_object *self)
+<a name='L339'><font color='red'>{</font>
+<a name='L340'>    <b>if</b> (self-&gt;exports &gt; 0) <font color='red'>{</font>
+<a name='L341'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_BufferError,
+<a name='L342'>                        "mmap can't resize with extant buffers exported.");
+<a name='L343'>        <b>return</b> 0;
+<a name='L344'>    <font color='red'>}</font>
+<a name='L345'>    <b>if</b> ((self-&gt;access == <a href='../S/2691.html#L84' title='Defined at 84 in Modules/mmapmodule.c.'>ACCESS_WRITE</a>) || (self-&gt;access == <a href='../S/2691.html#L82' title='Defined at 82 in Modules/mmapmodule.c.'>ACCESS_DEFAULT</a>))
+<a name='L346'>        <b>return</b> 1;
+<a name='L347'>    <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L348'>                 "mmap can't resize a readonly or copy-on-write memory map.");
+<a name='L349'>    <b>return</b> 0;
+<a name='L350'><font color='red'>}</font>
+<a name='L351'>
+<a name='L352'>
+<a name='L353'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L354'><a href='../S/2691.html#L695' title='Refered from 695 in Modules/mmapmodule.c.'>mmap_write_method</a>(mmap_object *self,
+<a name='L355'>                  PyObject *args)
+<a name='L356'><font color='red'>{</font>
+<a name='L357'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> length;
+<a name='L358'>    <b>char</b> *data;
+<a name='L359'>
+<a name='L360'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L361'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "y#:write", &amp;data, &amp;length))
+<a name='L362'>        <b>return</b>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L363'>
+<a name='L364'>    <b>if</b> (!<a href='../S/2691.html#L329' title='Defined at 329 in Modules/mmapmodule.c.'>is_writable</a>(self))
+<a name='L365'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L366'>
+<a name='L367'>    <b>if</b> ((self-&gt;pos + length) &gt; self-&gt;size) <font color='red'>{</font>
+<a name='L368'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "data out of range");
+<a name='L369'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L370'>    <font color='red'>}</font>
+<a name='L371'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(self-&gt;data+self-&gt;pos, data, length);
+<a name='L372'>    self-&gt;pos = self-&gt;pos+length;
+<a name='L373'>    Py_INCREF(Py_None);
+<a name='L374'>    <b>return</b> Py_None;
+<a name='L375'><font color='red'>}</font>
+<a name='L376'>
+<a name='L377'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L378'><a href='../S/2691.html#L696' title='Refered from 696 in Modules/mmapmodule.c.'>mmap_write_byte_method</a>(mmap_object *self,
+<a name='L379'>                       PyObject *args)
+<a name='L380'><font color='red'>{</font>
+<a name='L381'>    <b>char</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L382'>
+<a name='L383'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L384'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "b:write_byte", &amp;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>))
+<a name='L385'>        <b>return</b>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L386'>
+<a name='L387'>    <b>if</b> (!<a href='../S/2691.html#L329' title='Defined at 329 in Modules/mmapmodule.c.'>is_writable</a>(self))
+<a name='L388'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L389'>
+<a name='L390'>    <b>if</b> (self-&gt;pos &lt; self-&gt;size) <font color='red'>{</font>
+<a name='L391'>        *(self-&gt;data+self-&gt;pos) = <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L392'>        self-&gt;pos += 1;
+<a name='L393'>        Py_INCREF(Py_None);
+<a name='L394'>        <b>return</b> Py_None;
+<a name='L395'>    <font color='red'>}</font>
+<a name='L396'>    <b>else</b> <font color='red'>{</font>
+<a name='L397'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "write byte out of range");
+<a name='L398'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L399'>    <font color='red'>}</font>
+<a name='L400'><font color='red'>}</font>
+<a name='L401'>
+<a name='L402'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L403'><a href='../S/2691.html#L693' title='Refered from 693 in Modules/mmapmodule.c.'>mmap_size_method</a>(mmap_object *self,
+<a name='L404'>                 PyObject *unused)
+<a name='L405'><font color='red'>{</font>
+<a name='L406'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L407'>
+<a name='L408'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L409'>    <b>if</b> (self-&gt;file_handle != <a href='../S/2583.html#L47' title='Defined at 47 in Modules/_multiprocessing/multiprocessing.h.'>INVALID_HANDLE_VALUE</a>) <font color='red'>{</font>
+<a name='L410'>        DWORD low,high;
+<a name='L411'>        <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> size;
+<a name='L412'>        low = GetFileSize(self-&gt;file_handle, &amp;high);
+<a name='L413'>        <b>if</b> (low == INVALID_FILE_SIZE) <font color='red'>{</font>
+<a name='L414'>            <i><font color='green'>/* It might be that the function appears to have failed,</font></i>
+<a name='L415'><i><font color='green'>               when indeed its size equals INVALID_FILE_SIZE */</font></i>
+<a name='L416'>            DWORD <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> = GetLastError();
+<a name='L417'>            <b>if</b> (<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> != NO_ERROR)
+<a name='L418'>                <b>return</b> <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>);
+<a name='L419'>        <font color='red'>}</font>
+<a name='L420'>        <b>if</b> (!high &amp;&amp; low &lt; <a href='../D/1965.html' title='Multiple defined in 2 places.'>LONG_MAX</a>)
+<a name='L421'>            <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)low);
+<a name='L422'>        size = (((<a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>)high)&lt;&lt;32) + low;
+<a name='L423'>        <b>return</b> <a href='../S/2799.html#L994' title='Defined at 994 in Objects/longobject.c.'>PyLong_FromLongLong</a>(size);
+<a name='L424'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L425'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(self-&gt;size);
+<a name='L426'>    <font color='red'>}</font>
+<a name='L427'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L428'>
+<a name='L429'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L430'>    <font color='red'>{</font>
+<a name='L431'>        <b>struct</b> stat buf;
+<a name='L432'>        <b>if</b> (-1 == fstat(self-&gt;fd, &amp;buf)) <font color='red'>{</font>
+<a name='L433'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L434'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L435'>        <font color='red'>}</font>
+<a name='L436'>        <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(buf.st_size);
+<a name='L437'>    <font color='red'>}</font>
+<a name='L438'><font color='darkred'>#endif</font> <i><font color='green'>/* UNIX */</font></i>
+<a name='L439'><font color='red'>}</font>
+<a name='L440'>
+<a name='L441'><i><font color='green'>/* This assumes that you want the entire file mapped,</font></i>
+<a name='L442'><i><font color='green'> / and when recreating the map will make the new file</font></i>
+<a name='L443'><i><font color='green'> / have the new size</font></i>
+<a name='L444'><i><font color='green'> /</font></i>
+<a name='L445'><i><font color='green'> / Is this really necessary?  This could easily be done</font></i>
+<a name='L446'><i><font color='green'> / from python by just closing and re-opening with the</font></i>
+<a name='L447'><i><font color='green'> / new size?</font></i>
+<a name='L448'><i><font color='green'> */</font></i>
+<a name='L449'>
+<a name='L450'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L451'><a href='../S/2691.html#L691' title='Refered from 691 in Modules/mmapmodule.c.'>mmap_resize_method</a>(mmap_object *self,
+<a name='L452'>                   PyObject *args)
+<a name='L453'><font color='red'>{</font>
+<a name='L454'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> new_size;
+<a name='L455'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L456'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "n:resize", &amp;new_size) ||
+<a name='L457'>        !<a href='../S/2691.html#L338' title='Defined at 338 in Modules/mmapmodule.c.'>is_resizeable</a>(self)) <font color='red'>{</font>
+<a name='L458'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L459'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L460'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L461'>        DWORD dwErrCode = 0;
+<a name='L462'>        DWORD off_hi, off_lo, newSizeLow, newSizeHigh;
+<a name='L463'>        <i><font color='green'>/* First, unmap the file view */</font></i>
+<a name='L464'>        UnmapViewOfFile(self-&gt;data);
+<a name='L465'>        self-&gt;data = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L466'>        <i><font color='green'>/* Close the mapping object */</font></i>
+<a name='L467'>        CloseHandle(self-&gt;map_handle);
+<a name='L468'>        self-&gt;map_handle = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L469'>        <i><font color='green'>/* Move to the desired EOF position */</font></i>
+<a name='L470'><font color='darkred'>#if</font> <a href='../D/4740.html' title='Multiple defined in 6 places.'>SIZEOF_SIZE_T</a> &gt; 4
+<a name='L471'>        newSizeHigh = (DWORD)((self-&gt;offset + new_size) &gt;&gt; 32);
+<a name='L472'>        newSizeLow = (DWORD)((self-&gt;offset + new_size) &amp; 0xFFFFFFFF);
+<a name='L473'>        off_hi = (DWORD)(self-&gt;offset &gt;&gt; 32);
+<a name='L474'>        off_lo = (DWORD)(self-&gt;offset &amp; 0xFFFFFFFF);
+<a name='L475'><font color='darkred'>#else</font>
+<a name='L476'>        newSizeHigh = 0;
+<a name='L477'>        newSizeLow = (DWORD)(self-&gt;offset + new_size);
+<a name='L478'>        off_hi = 0;
+<a name='L479'>        off_lo = (DWORD)self-&gt;offset;
+<a name='L480'><font color='darkred'>#endif</font>
+<a name='L481'>        SetFilePointer(self-&gt;file_handle,
+<a name='L482'>                       newSizeLow, &amp;newSizeHigh, FILE_BEGIN);
+<a name='L483'>        <i><font color='green'>/* Change the size of the file */</font></i>
+<a name='L484'>        SetEndOfFile(self-&gt;file_handle);
+<a name='L485'>        <i><font color='green'>/* Create another mapping object and remap the file view */</font></i>
+<a name='L486'>        self-&gt;map_handle = CreateFileMapping(
+<a name='L487'>            self-&gt;file_handle,
+<a name='L488'>            <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L489'>            PAGE_READWRITE,
+<a name='L490'>            0,
+<a name='L491'>            0,
+<a name='L492'>            self-&gt;tagname);
+<a name='L493'>        <b>if</b> (self-&gt;map_handle != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L494'>            self-&gt;data = (<b>char</b> *) MapViewOfFile(self-&gt;map_handle,
+<a name='L495'>                                                FILE_MAP_WRITE,
+<a name='L496'>                                                off_hi,
+<a name='L497'>                                                off_lo,
+<a name='L498'>                                                new_size);
+<a name='L499'>            <b>if</b> (self-&gt;data != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L500'>                self-&gt;size = new_size;
+<a name='L501'>                Py_INCREF(Py_None);
+<a name='L502'>                <b>return</b> Py_None;
+<a name='L503'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L504'>                dwErrCode = GetLastError();
+<a name='L505'>                CloseHandle(self-&gt;map_handle);
+<a name='L506'>                self-&gt;map_handle = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L507'>            <font color='red'>}</font>
+<a name='L508'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L509'>            dwErrCode = GetLastError();
+<a name='L510'>        <font color='red'>}</font>
+<a name='L511'>        <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(dwErrCode);
+<a name='L512'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L513'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L514'>
+<a name='L515'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L516'><font color='darkred'>#ifndef</font> <a href='../D/1538.html' title='Multiple defined in 3 places.'>HAVE_MREMAP</a>
+<a name='L517'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L518'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L519'>                        "mmap: resizing not available--no mremap()");
+<a name='L520'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L521'><font color='darkred'>#else</font>
+<a name='L522'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L523'>        <b>void</b> *newmap;
+<a name='L524'>
+<a name='L525'>        <b>if</b> (ftruncate(self-&gt;fd, self-&gt;offset + new_size) == -1) <font color='red'>{</font>
+<a name='L526'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L527'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L528'>        <font color='red'>}</font>
+<a name='L529'>
+<a name='L530'><font color='darkred'>#ifdef</font> MREMAP_MAYMOVE
+<a name='L531'>        newmap = mremap(self-&gt;data, self-&gt;size, new_size, MREMAP_MAYMOVE);
+<a name='L532'><font color='darkred'>#else</font>
+<a name='L533'><font color='darkred'>        #if</font> <b>defined</b>(__NetBSD__)
+<a name='L534'>            newmap = mremap(self-&gt;data, self-&gt;size, self-&gt;data, new_size, 0);
+<a name='L535'><font color='darkred'>        #else</font>
+<a name='L536'>            newmap = mremap(self-&gt;data, self-&gt;size, new_size, 0);
+<a name='L537'><font color='darkred'>        #endif</font> <i><font color='green'>/* __NetBSD__ */</font></i>
+<a name='L538'><font color='darkred'>#endif</font>
+<a name='L539'>        <b>if</b> (newmap == (<b>void</b> *)-1)
+<a name='L540'>        <font color='red'>{</font>
+<a name='L541'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L542'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L543'>        <font color='red'>}</font>
+<a name='L544'>        self-&gt;data = newmap;
+<a name='L545'>        self-&gt;size = new_size;
+<a name='L546'>        Py_INCREF(Py_None);
+<a name='L547'>        <b>return</b> Py_None;
+<a name='L548'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_MREMAP */</font></i>
+<a name='L549'><font color='darkred'>#endif</font> <i><font color='green'>/* UNIX */</font></i>
+<a name='L550'>    <font color='red'>}</font>
+<a name='L551'><font color='red'>}</font>
+<a name='L552'>
+<a name='L553'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L554'><a href='../S/2691.html#L694' title='Refered from 694 in Modules/mmapmodule.c.'>mmap_tell_method</a>(mmap_object *self, PyObject *unused)
+<a name='L555'><font color='red'>{</font>
+<a name='L556'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L557'>    <b>return</b> <a href='../S/2799.html#L1107' title='Defined at 1107 in Objects/longobject.c.'>PyLong_FromSize_t</a>(self-&gt;pos);
+<a name='L558'><font color='red'>}</font>
+<a name='L559'>
+<a name='L560'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L561'><a href='../S/2691.html#L686' title='Refered from 686 in Modules/mmapmodule.c.'>mmap_flush_method</a>(mmap_object *self, PyObject *args)
+<a name='L562'><font color='red'>{</font>
+<a name='L563'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> offset = 0;
+<a name='L564'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size = self-&gt;size;
+<a name='L565'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L566'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|nn:flush", &amp;offset, &amp;size))
+<a name='L567'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L568'>    <b>if</b> ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)(offset + size) &gt; self-&gt;size) <font color='red'>{</font>
+<a name='L569'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "flush values out of range");
+<a name='L570'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L571'>    <font color='red'>}</font>
+<a name='L572'>
+<a name='L573'>    <b>if</b> (self-&gt;access == <a href='../S/2691.html#L83' title='Defined at 83 in Modules/mmapmodule.c.'>ACCESS_READ</a> || self-&gt;access == <a href='../S/2691.html#L85' title='Defined at 85 in Modules/mmapmodule.c.'>ACCESS_COPY</a>)
+<a name='L574'>        <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L575'>
+<a name='L576'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L577'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>) FlushViewOfFile(self-&gt;data+offset, size));
+<a name='L578'><font color='darkred'>#elif</font> <b>defined</b>(<a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>)
+<a name='L579'>    <i><font color='green'>/* XXX semantics of return value? */</font></i>
+<a name='L580'>    <i><font color='green'>/* XXX flags for msync? */</font></i>
+<a name='L581'>    <b>if</b> (-1 == msync(self-&gt;data + offset, size, MS_SYNC)) <font color='red'>{</font>
+<a name='L582'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L583'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L584'>    <font color='red'>}</font>
+<a name='L585'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0);
+<a name='L586'><font color='darkred'>#else</font>
+<a name='L587'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "flush not supported on this system");
+<a name='L588'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L589'><font color='darkred'>#endif</font>
+<a name='L590'><font color='red'>}</font>
+<a name='L591'>
+<a name='L592'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L593'><a href='../S/2691.html#L692' title='Refered from 692 in Modules/mmapmodule.c.'>mmap_seek_method</a>(mmap_object *self, PyObject *args)
+<a name='L594'><font color='red'>{</font>
+<a name='L595'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> dist;
+<a name='L596'>    <b>int</b> how=0;
+<a name='L597'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L598'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "n|i:seek", &amp;dist, &amp;how))
+<a name='L599'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L600'>    <b>else</b> <font color='red'>{</font>
+<a name='L601'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> where;
+<a name='L602'>        <b>switch</b> (how) <font color='red'>{</font>
+<a name='L603'>        <b>case</b> 0: <i><font color='green'>/* relative to start */</font></i>
+<a name='L604'>            <b>if</b> (dist &lt; 0)
+<a name='L605'>                <b>goto</b> onoutofrange;
+<a name='L606'>            where = dist;
+<a name='L607'>            <b>break</b>;
+<a name='L608'>        <b>case</b> 1: <i><font color='green'>/* relative to current position */</font></i>
+<a name='L609'>            <b>if</b> ((<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)self-&gt;pos + dist &lt; 0)
+<a name='L610'>                <b>goto</b> onoutofrange;
+<a name='L611'>            where = self-&gt;pos + dist;
+<a name='L612'>            <b>break</b>;
+<a name='L613'>        <b>case</b> 2: <i><font color='green'>/* relative to end */</font></i>
+<a name='L614'>            <b>if</b> ((<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)self-&gt;size + dist &lt; 0)
+<a name='L615'>                <b>goto</b> onoutofrange;
+<a name='L616'>            where = self-&gt;size + dist;
+<a name='L617'>            <b>break</b>;
+<a name='L618'>        <b>default</b>:
+<a name='L619'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "unknown seek type");
+<a name='L620'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L621'>        <font color='red'>}</font>
+<a name='L622'>        <b>if</b> (where &gt; self-&gt;size)
+<a name='L623'>            <b>goto</b> onoutofrange;
+<a name='L624'>        self-&gt;pos = where;
+<a name='L625'>        Py_INCREF(Py_None);
+<a name='L626'>        <b>return</b> Py_None;
+<a name='L627'>    <font color='red'>}</font>
+<a name='L628'>
+<a name='L629'>  onoutofrange:
+<a name='L630'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "seek out of range");
+<a name='L631'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L632'><font color='red'>}</font>
+<a name='L633'>
+<a name='L634'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L635'><a href='../S/2691.html#L687' title='Refered from 687 in Modules/mmapmodule.c.'>mmap_move_method</a>(mmap_object *self, PyObject *args)
+<a name='L636'><font color='red'>{</font>
+<a name='L637'>    <b>unsigned</b> <b>long</b> dest, src, cnt;
+<a name='L638'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L639'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "kkk:move", &amp;dest, &amp;src, &amp;cnt) ||
+<a name='L640'>        !<a href='../S/2691.html#L329' title='Defined at 329 in Modules/mmapmodule.c.'>is_writable</a>(self)) <font color='red'>{</font>
+<a name='L641'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L642'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L643'>        <i><font color='green'>/* bounds check the values */</font></i>
+<a name='L644'>        <b>if</b> (cnt &lt; 0 || (cnt + dest) &lt; cnt || (cnt + src) &lt; cnt ||
+<a name='L645'>           src &lt; 0 || src &gt; self-&gt;size || (src + cnt) &gt; self-&gt;size ||
+<a name='L646'>           dest &lt; 0 || dest &gt; self-&gt;size || (dest + cnt) &gt; self-&gt;size) <font color='red'>{</font>
+<a name='L647'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L648'>                "source, destination, or count out of range");
+<a name='L649'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L650'>        <font color='red'>}</font>
+<a name='L651'>        <a href='../S/2664.html#L75' title='Defined at 75 in Modules/expat/xmlparse.c.'>memmove</a>(self-&gt;data+dest, self-&gt;data+src, cnt);
+<a name='L652'>        Py_INCREF(Py_None);
+<a name='L653'>        <b>return</b> Py_None;
+<a name='L654'>    <font color='red'>}</font>
+<a name='L655'><font color='red'>}</font>
+<a name='L656'>
+<a name='L657'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L658'><a href='../S/2691.html#L703' title='Refered from 703 in Modules/mmapmodule.c.'>mmap_closed_get</a>(mmap_object *self)
+<a name='L659'><font color='red'>{</font>
+<a name='L660'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L661'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(self-&gt;map_handle == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ? 1 : 0);
+<a name='L662'><font color='darkred'>#elif</font> <b>defined</b>(<a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>)
+<a name='L663'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(self-&gt;data == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ? 1 : 0);
+<a name='L664'><font color='darkred'>#endif</font>
+<a name='L665'><font color='red'>}</font>
+<a name='L666'>
+<a name='L667'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L668'><a href='../S/2691.html#L697' title='Refered from 697 in Modules/mmapmodule.c.'>mmap__enter__method</a>(mmap_object *self, PyObject *args)
+<a name='L669'><font color='red'>{</font>
+<a name='L670'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L671'>
+<a name='L672'>    Py_INCREF(self);
+<a name='L673'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L674'><font color='red'>}</font>
+<a name='L675'>
+<a name='L676'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L677'><a href='../S/2691.html#L698' title='Refered from 698 in Modules/mmapmodule.c.'>mmap__exit__method</a>(PyObject *self, PyObject *args)
+<a name='L678'><font color='red'>{</font>
+<a name='L679'>    <b>return</b> <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(self, "close", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L680'><font color='red'>}</font>
+<a name='L681'>
+<a name='L682'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> mmap_object_methods[] = <font color='red'>{</font>
+<a name='L683'>    <font color='red'>{</font>"close",           (PyCFunction) <a href='../S/2691.html#L136' title='Defined at 136 in Modules/mmapmodule.c.'>mmap_close_method</a>,        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L684'>    <font color='red'>{</font>"find",            (PyCFunction) <a href='../S/2691.html#L315' title='Defined at 315 in Modules/mmapmodule.c.'>mmap_find_method</a>,         <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L685'>    <font color='red'>{</font>"rfind",           (PyCFunction) <a href='../S/2691.html#L322' title='Defined at 322 in Modules/mmapmodule.c.'>mmap_rfind_method</a>,        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L686'>    <font color='red'>{</font>"flush",           (PyCFunction) <a href='../S/2691.html#L561' title='Defined at 561 in Modules/mmapmodule.c.'>mmap_flush_method</a>,        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L687'>    <font color='red'>{</font>"move",            (PyCFunction) <a href='../S/2691.html#L635' title='Defined at 635 in Modules/mmapmodule.c.'>mmap_move_method</a>,         <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L688'>    <font color='red'>{</font>"read",            (PyCFunction) <a href='../S/2691.html#L237' title='Defined at 237 in Modules/mmapmodule.c.'>mmap_read_method</a>,         <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L689'>    <font color='red'>{</font>"read_byte",       (PyCFunction) <a href='../S/2691.html#L200' title='Defined at 200 in Modules/mmapmodule.c.'>mmap_read_byte_method</a>,    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L690'>    <font color='red'>{</font>"readline",        (PyCFunction) <a href='../S/2691.html#L215' title='Defined at 215 in Modules/mmapmodule.c.'>mmap_read_line_method</a>,    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L691'>    <font color='red'>{</font>"resize",          (PyCFunction) <a href='../S/2691.html#L451' title='Defined at 451 in Modules/mmapmodule.c.'>mmap_resize_method</a>,       <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L692'>    <font color='red'>{</font>"seek",            (PyCFunction) <a href='../S/2691.html#L593' title='Defined at 593 in Modules/mmapmodule.c.'>mmap_seek_method</a>,         <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L693'>    <font color='red'>{</font>"size",            (PyCFunction) <a href='../S/2691.html#L403' title='Defined at 403 in Modules/mmapmodule.c.'>mmap_size_method</a>,         <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L694'>    <font color='red'>{</font>"tell",            (PyCFunction) <a href='../S/2691.html#L554' title='Defined at 554 in Modules/mmapmodule.c.'>mmap_tell_method</a>,         <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L695'>    <font color='red'>{</font>"write",           (PyCFunction) <a href='../S/2691.html#L354' title='Defined at 354 in Modules/mmapmodule.c.'>mmap_write_method</a>,        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L696'>    <font color='red'>{</font>"write_byte",      (PyCFunction) <a href='../S/2691.html#L378' title='Defined at 378 in Modules/mmapmodule.c.'>mmap_write_byte_method</a>,   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L697'>    <font color='red'>{</font>"__enter__",       (PyCFunction) <a href='../S/2691.html#L668' title='Defined at 668 in Modules/mmapmodule.c.'>mmap__enter__method</a>,      <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L698'>    <font color='red'>{</font>"__exit__",        (PyCFunction) <a href='../S/2691.html#L677' title='Defined at 677 in Modules/mmapmodule.c.'>mmap__exit__method</a>,       <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L699'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,         <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>       <i><font color='green'>/* sentinel */</font></i>
+<a name='L700'><font color='red'>}</font>;
+<a name='L701'>
+<a name='L702'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> mmap_object_getset[] = <font color='red'>{</font>
+<a name='L703'>    <font color='red'>{</font>"closed", (getter) <a href='../S/2691.html#L658' title='Defined at 658 in Modules/mmapmodule.c.'>mmap_closed_get</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L704'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L705'><font color='red'>}</font>;
+<a name='L706'>
+<a name='L707'>
+<a name='L708'><i><font color='green'>/* Functions for treating an mmap'ed file as a buffer */</font></i>
+<a name='L709'>
+<a name='L710'><b>static</b> <b>int</b>
+<a name='L711'><a href='../S/2691.html#L952' title='Refered from 952 in Modules/mmapmodule.c.'>mmap_buffer_getbuf</a>(mmap_object *self, Py_buffer *view, <b>int</b> flags)
+<a name='L712'><font color='red'>{</font>
+<a name='L713'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(-1);
+<a name='L714'>    <b>if</b> (<a href='../S/2775.html#L650' title='Defined at 650 in Objects/abstract.c.'>PyBuffer_FillInfo</a>(view, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self, self-&gt;data, self-&gt;size,
+<a name='L715'>                          (self-&gt;access == <a href='../S/2691.html#L83' title='Defined at 83 in Modules/mmapmodule.c.'>ACCESS_READ</a>), <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>) &lt; 0)
+<a name='L716'>        <b>return</b> -1;
+<a name='L717'>    self-&gt;exports++;
+<a name='L718'>    <b>return</b> 0;
+<a name='L719'><font color='red'>}</font>
+<a name='L720'>
+<a name='L721'><b>static</b> <b>void</b>
+<a name='L722'><a href='../S/2691.html#L953' title='Refered from 953 in Modules/mmapmodule.c.'>mmap_buffer_releasebuf</a>(mmap_object *self, Py_buffer *view)
+<a name='L723'><font color='red'>{</font>
+<a name='L724'>    self-&gt;exports--;
+<a name='L725'><font color='red'>}</font>
+<a name='L726'>
+<a name='L727'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L728'><a href='../R/9070.html' title='Multiple refered from 2 places.'>mmap_length</a>(mmap_object *self)
+<a name='L729'><font color='red'>{</font>
+<a name='L730'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(-1);
+<a name='L731'>    <b>return</b> self-&gt;size;
+<a name='L732'><font color='red'>}</font>
+<a name='L733'>
+<a name='L734'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L735'><a href='../S/2691.html#L939' title='Refered from 939 in Modules/mmapmodule.c.'>mmap_item</a>(mmap_object *self, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i)
+<a name='L736'><font color='red'>{</font>
+<a name='L737'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L738'>    <b>if</b> (i &lt; 0 || (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)i &gt;= self-&gt;size) <font color='red'>{</font>
+<a name='L739'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError, "mmap index out of range");
+<a name='L740'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L741'>    <font color='red'>}</font>
+<a name='L742'>    <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(self-&gt;data + i, 1);
+<a name='L743'><font color='red'>}</font>
+<a name='L744'>
+<a name='L745'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L746'><a href='../S/2691.html#L947' title='Refered from 947 in Modules/mmapmodule.c.'>mmap_subscript</a>(mmap_object *self, PyObject *item)
+<a name='L747'><font color='red'>{</font>
+<a name='L748'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L749'>    <b>if</b> (PyIndex_Check(item)) <font color='red'>{</font>
+<a name='L750'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(item, PyExc_IndexError);
+<a name='L751'>        <b>if</b> (i == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L752'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L753'>        <b>if</b> (i &lt; 0)
+<a name='L754'>            i += self-&gt;size;
+<a name='L755'>        <b>if</b> (i &lt; 0 || (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)i &gt;= self-&gt;size) <font color='red'>{</font>
+<a name='L756'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L757'>                "mmap index out of range");
+<a name='L758'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L759'>        <font color='red'>}</font>
+<a name='L760'>        <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/570.html#L144' title='Defined at 144 in Include/Python.h.'>Py_CHARMASK</a>(self-&gt;data[i]));
+<a name='L761'>    <font color='red'>}</font>
+<a name='L762'>    <b>else</b> <b>if</b> (PySlice_Check(item)) <font color='red'>{</font>
+<a name='L763'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> start, stop, step, slicelen;
+<a name='L764'>
+<a name='L765'>        <b>if</b> (<a href='../S/2807.html#L134' title='Defined at 134 in Objects/sliceobject.c.'>PySlice_GetIndicesEx</a>(item, self-&gt;size,
+<a name='L766'>                         &amp;start, &amp;stop, &amp;step, &amp;slicelen) &lt; 0) <font color='red'>{</font>
+<a name='L767'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L768'>        <font color='red'>}</font>
+<a name='L769'>
+<a name='L770'>        <b>if</b> (slicelen &lt;= 0)
+<a name='L771'>            <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>("", 0);
+<a name='L772'>        <b>else</b> <b>if</b> (step == 1)
+<a name='L773'>            <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(self-&gt;data + start,
+<a name='L774'>                                              slicelen);
+<a name='L775'>        <b>else</b> <font color='red'>{</font>
+<a name='L776'>            <b>char</b> *result_buf = (<b>char</b> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(slicelen);
+<a name='L777'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> cur, i;
+<a name='L778'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L779'>
+<a name='L780'>            <b>if</b> (result_buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L781'>                <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L782'>            <b>for</b> (cur = start, i = 0; i &lt; slicelen;
+<a name='L783'>                 cur += step, i++) <font color='red'>{</font>
+<a name='L784'>                result_buf[i] = self-&gt;data[cur];
+<a name='L785'>            <font color='red'>}</font>
+<a name='L786'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(result_buf,
+<a name='L787'>                                                slicelen);
+<a name='L788'>            <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(result_buf);
+<a name='L789'>            <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L790'>        <font color='red'>}</font>
+<a name='L791'>    <font color='red'>}</font>
+<a name='L792'>    <b>else</b> <font color='red'>{</font>
+<a name='L793'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L794'>                        "mmap indices must be integers");
+<a name='L795'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L796'>    <font color='red'>}</font>
+<a name='L797'><font color='red'>}</font>
+<a name='L798'>
+<a name='L799'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L800'><a href='../S/2691.html#L937' title='Refered from 937 in Modules/mmapmodule.c.'>mmap_concat</a>(mmap_object *self, PyObject *bb)
+<a name='L801'><font color='red'>{</font>
+<a name='L802'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L803'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L804'>                    "mmaps don't support concatenation");
+<a name='L805'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L806'><font color='red'>}</font>
+<a name='L807'>
+<a name='L808'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L809'><a href='../S/2691.html#L938' title='Refered from 938 in Modules/mmapmodule.c.'>mmap_repeat</a>(mmap_object *self, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n)
+<a name='L810'><font color='red'>{</font>
+<a name='L811'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L812'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L813'>                    "mmaps don't support repeat operation");
+<a name='L814'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L815'><font color='red'>}</font>
+<a name='L816'>
+<a name='L817'><b>static</b> <b>int</b>
+<a name='L818'><a href='../S/2691.html#L941' title='Refered from 941 in Modules/mmapmodule.c.'>mmap_ass_item</a>(mmap_object *self, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, PyObject *v)
+<a name='L819'><font color='red'>{</font>
+<a name='L820'>    <b>const</b> <b>char</b> *buf;
+<a name='L821'>
+<a name='L822'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(-1);
+<a name='L823'>    <b>if</b> (i &lt; 0 || (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)i &gt;= self-&gt;size) <font color='red'>{</font>
+<a name='L824'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError, "mmap index out of range");
+<a name='L825'>        <b>return</b> -1;
+<a name='L826'>    <font color='red'>}</font>
+<a name='L827'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L828'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L829'>                        "mmap object doesn't support item deletion");
+<a name='L830'>        <b>return</b> -1;
+<a name='L831'>    <font color='red'>}</font>
+<a name='L832'>    <b>if</b> (! (PyBytes_Check(v) &amp;&amp; <a href='../S/2779.html#L506' title='Defined at 506 in Objects/bytesobject.c.'>PyBytes_Size</a>(v)==1) ) <font color='red'>{</font>
+<a name='L833'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L834'>                        "mmap assignment must be length-1 bytes()");
+<a name='L835'>        <b>return</b> -1;
+<a name='L836'>    <font color='red'>}</font>
+<a name='L837'>    <b>if</b> (!<a href='../S/2691.html#L329' title='Defined at 329 in Modules/mmapmodule.c.'>is_writable</a>(self))
+<a name='L838'>        <b>return</b> -1;
+<a name='L839'>    buf = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(v);
+<a name='L840'>    self-&gt;data[i] = buf[0];
+<a name='L841'>    <b>return</b> 0;
+<a name='L842'><font color='red'>}</font>
+<a name='L843'>
+<a name='L844'><b>static</b> <b>int</b>
+<a name='L845'><a href='../S/2691.html#L948' title='Refered from 948 in Modules/mmapmodule.c.'>mmap_ass_subscript</a>(mmap_object *self, PyObject *item, PyObject *value)
+<a name='L846'><font color='red'>{</font>
+<a name='L847'>    <a href='../D/541.html' title='Multiple defined in 2 places.'>CHECK_VALID</a>(-1);
+<a name='L848'>
+<a name='L849'>    <b>if</b> (!<a href='../S/2691.html#L329' title='Defined at 329 in Modules/mmapmodule.c.'>is_writable</a>(self))
+<a name='L850'>        <b>return</b> -1;
+<a name='L851'>
+<a name='L852'>    <b>if</b> (PyIndex_Check(item)) <font color='red'>{</font>
+<a name='L853'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(item, PyExc_IndexError);
+<a name='L854'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> v;
+<a name='L855'>
+<a name='L856'>        <b>if</b> (i == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L857'>            <b>return</b> -1;
+<a name='L858'>        <b>if</b> (i &lt; 0)
+<a name='L859'>            i += self-&gt;size;
+<a name='L860'>        <b>if</b> (i &lt; 0 || (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)i &gt;= self-&gt;size) <font color='red'>{</font>
+<a name='L861'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L862'>                            "mmap index out of range");
+<a name='L863'>            <b>return</b> -1;
+<a name='L864'>        <font color='red'>}</font>
+<a name='L865'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L866'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L867'>                            "mmap doesn't support item deletion");
+<a name='L868'>            <b>return</b> -1;
+<a name='L869'>        <font color='red'>}</font>
+<a name='L870'>        <b>if</b> (!PyIndex_Check(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)) <font color='red'>{</font>
+<a name='L871'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L872'>                            "mmap item value must be an int");
+<a name='L873'>            <b>return</b> -1;
+<a name='L874'>        <font color='red'>}</font>
+<a name='L875'>        v = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, PyExc_TypeError);
+<a name='L876'>        <b>if</b> (v == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L877'>            <b>return</b> -1;
+<a name='L878'>        <b>if</b> (v &lt; 0 || v &gt; 255) <font color='red'>{</font>
+<a name='L879'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L880'>                            "mmap item value must be "
+<a name='L881'>                            "in range(0, 256)");
+<a name='L882'>            <b>return</b> -1;
+<a name='L883'>        <font color='red'>}</font>
+<a name='L884'>        self-&gt;data[i] = (<b>char</b>) v;
+<a name='L885'>        <b>return</b> 0;
+<a name='L886'>    <font color='red'>}</font>
+<a name='L887'>    <b>else</b> <b>if</b> (PySlice_Check(item)) <font color='red'>{</font>
+<a name='L888'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> start, stop, step, slicelen;
+<a name='L889'>        <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> vbuf;
+<a name='L890'>
+<a name='L891'>        <b>if</b> (<a href='../S/2807.html#L134' title='Defined at 134 in Objects/sliceobject.c.'>PySlice_GetIndicesEx</a>(item,
+<a name='L892'>                                 self-&gt;size, &amp;start, &amp;stop,
+<a name='L893'>                                 &amp;step, &amp;slicelen) &lt; 0) <font color='red'>{</font>
+<a name='L894'>            <b>return</b> -1;
+<a name='L895'>        <font color='red'>}</font>
+<a name='L896'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L897'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L898'>                "mmap object doesn't support slice deletion");
+<a name='L899'>            <b>return</b> -1;
+<a name='L900'>        <font color='red'>}</font>
+<a name='L901'>        <b>if</b> (<a href='../S/2775.html#L330' title='Defined at 330 in Objects/abstract.c.'>PyObject_GetBuffer</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, &amp;vbuf, <a href='../S/544.html#L169' title='Defined at 169 in Include/object.h.'>PyBUF_SIMPLE</a>) &lt; 0)
+<a name='L902'>            <b>return</b> -1;
+<a name='L903'>        <b>if</b> (vbuf.len != slicelen) <font color='red'>{</font>
+<a name='L904'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L905'>                "mmap slice assignment is wrong size");
+<a name='L906'>            <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;vbuf);
+<a name='L907'>            <b>return</b> -1;
+<a name='L908'>        <font color='red'>}</font>
+<a name='L909'>
+<a name='L910'>        <b>if</b> (slicelen == 0) <font color='red'>{</font>
+<a name='L911'>        <font color='red'>}</font>
+<a name='L912'>        <b>else</b> <b>if</b> (step == 1) <font color='red'>{</font>
+<a name='L913'>            <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(self-&gt;data + start, vbuf.buf, slicelen);
+<a name='L914'>        <font color='red'>}</font>
+<a name='L915'>        <b>else</b> <font color='red'>{</font>
+<a name='L916'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> cur, i;
+<a name='L917'>
+<a name='L918'>            <b>for</b> (cur = start, i = 0;
+<a name='L919'>                 i &lt; slicelen;
+<a name='L920'>                 cur += step, i++)
+<a name='L921'>            <font color='red'>{</font>
+<a name='L922'>                self-&gt;data[cur] = ((<b>char</b> *)vbuf.buf)[i];
+<a name='L923'>            <font color='red'>}</font>
+<a name='L924'>        <font color='red'>}</font>
+<a name='L925'>        <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;vbuf);
+<a name='L926'>        <b>return</b> 0;
+<a name='L927'>    <font color='red'>}</font>
+<a name='L928'>    <b>else</b> <font color='red'>{</font>
+<a name='L929'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L930'>                        "mmap indices must be integer");
+<a name='L931'>        <b>return</b> -1;
+<a name='L932'>    <font color='red'>}</font>
+<a name='L933'><font color='red'>}</font>
+<a name='L934'>
+<a name='L935'><b>static</b> <a href='../S/544.html#L261' title='Defined at 261 in Include/object.h.'>PySequenceMethods</a> mmap_as_sequence = <font color='red'>{</font>
+<a name='L936'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2691.html#L728' title='Defined at 728 in Modules/mmapmodule.c.'>mmap_length</a>,                      <i><font color='green'>/*sq_length*/</font></i>
+<a name='L937'>    (binaryfunc)<a href='../S/2691.html#L800' title='Defined at 800 in Modules/mmapmodule.c.'>mmap_concat</a>,                   <i><font color='green'>/*sq_concat*/</font></i>
+<a name='L938'>    (ssizeargfunc)<a href='../S/2691.html#L809' title='Defined at 809 in Modules/mmapmodule.c.'>mmap_repeat</a>,                 <i><font color='green'>/*sq_repeat*/</font></i>
+<a name='L939'>    (ssizeargfunc)<a href='../S/2691.html#L735' title='Defined at 735 in Modules/mmapmodule.c.'>mmap_item</a>,                           <i><font color='green'>/*sq_item*/</font></i>
+<a name='L940'>    0,                                        <i><font color='green'>/*sq_slice*/</font></i>
+<a name='L941'>    (ssizeobjargproc)<a href='../S/2691.html#L818' title='Defined at 818 in Modules/mmapmodule.c.'>mmap_ass_item</a>,            <i><font color='green'>/*sq_ass_item*/</font></i>
+<a name='L942'>    0,                                        <i><font color='green'>/*sq_ass_slice*/</font></i>
+<a name='L943'><font color='red'>}</font>;
+<a name='L944'>
+<a name='L945'><b>static</b> <a href='../S/544.html#L267' title='Defined at 267 in Include/object.h.'>PyMappingMethods</a> mmap_as_mapping = <font color='red'>{</font>
+<a name='L946'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2691.html#L728' title='Defined at 728 in Modules/mmapmodule.c.'>mmap_length</a>,
+<a name='L947'>    (binaryfunc)<a href='../S/2691.html#L746' title='Defined at 746 in Modules/mmapmodule.c.'>mmap_subscript</a>,
+<a name='L948'>    (objobjargproc)<a href='../S/2691.html#L845' title='Defined at 845 in Modules/mmapmodule.c.'>mmap_ass_subscript</a>,
+<a name='L949'><font color='red'>}</font>;
+<a name='L950'>
+<a name='L951'><b>static</b> <a href='../S/544.html#L273' title='Defined at 273 in Include/object.h.'>PyBufferProcs</a> mmap_as_buffer = <font color='red'>{</font>
+<a name='L952'>    (getbufferproc)<a href='../S/2691.html#L711' title='Defined at 711 in Modules/mmapmodule.c.'>mmap_buffer_getbuf</a>,
+<a name='L953'>    (releasebufferproc)<a href='../S/2691.html#L722' title='Defined at 722 in Modules/mmapmodule.c.'>mmap_buffer_releasebuf</a>,
+<a name='L954'><font color='red'>}</font>;
+<a name='L955'>
+<a name='L956'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L957'><a href='../D/10035.html' title='Multiple defined in 2 places.'>new_mmap_object</a>(PyTypeObject *type, PyObject *args, PyObject *kwdict);
+<a name='L958'>
+<a name='L959'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(mmap_doc,
+<a name='L960'>"Windows: mmap(fileno, length[, tagname[, access[, offset]]])\n\
+<a name='L961'>\n\
+<a name='L962'>Maps length bytes from the file specified by the file handle fileno,\n\
+<a name='L963'>and returns a mmap object.  If length is larger than the current size\n\
+<a name='L964'>of the file, the file is extended to contain length bytes.  If length\n\
+<a name='L965'>is 0, the maximum length of the map is the current size of the file,\n\
+<a name='L966'>except that if the file is empty Windows raises an exception (you cannot\n\
+<a name='L967'>create an empty mapping on Windows).\n\
+<a name='L968'>\n\
+<a name='L969'>Unix: mmap(fileno, length[, flags[, prot[, access[, offset]]]])\n\
+<a name='L970'>\n\
+<a name='L971'>Maps length bytes from the file specified by the file descriptor fileno,\n\
+<a name='L972'>and returns a mmap object.  If length is 0, the maximum length of the map\n\
+<a name='L973'>will be the current size of the file when mmap is called.\n\
+<a name='L974'>flags specifies the nature of the mapping. MAP_PRIVATE creates a\n\
+<a name='L975'>private copy-on-write mapping, so changes to the contents of the mmap\n\
+<a name='L976'>object will be private to this process, and MAP_SHARED creates a mapping\n\
+<a name='L977'>that's shared with all other processes mapping the same areas of the file.\n\
+<a name='L978'>The default value is MAP_SHARED.\n\
+<a name='L979'>\n\
+<a name='L980'>To map anonymous memory, pass -1 as the fileno (both versions).");
+<a name='L981'>
+<a name='L982'>
+<a name='L983'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> mmap_object_type = <font color='red'>{</font>
+<a name='L984'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L985'>    "mmap.mmap",                                <i><font color='green'>/* tp_name */</font></i>
+<a name='L986'>    <b>sizeof</b>(<a href='../S/2691.html#L107' title='Defined at 107 in Modules/mmapmodule.c.'>mmap_object</a>),                        <i><font color='green'>/* tp_size */</font></i>
+<a name='L987'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L988'>    <i><font color='green'>/* methods */</font></i>
+<a name='L989'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>) <a href='../S/2691.html#L111' title='Defined at 111 in Modules/mmapmodule.c.'>mmap_object_dealloc</a>,           <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L990'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L991'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L992'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L993'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L994'>    0,                                          <i><font color='green'>/* tp_repr */</font></i>
+<a name='L995'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L996'>    &amp;mmap_as_sequence,                          <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L997'>    &amp;mmap_as_mapping,                           <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L998'>    0,                                          <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L999'>    0,                                          <i><font color='green'>/*tp_call*/</font></i>
+<a name='L1000'>    0,                                          <i><font color='green'>/*tp_str*/</font></i>
+<a name='L1001'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L1002'>    0,                                          <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L1003'>    &amp;mmap_as_buffer,                            <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L1004'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,                   <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L1005'>    mmap_doc,                                   <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L1006'>    0,                                          <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1007'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1008'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1009'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L1010'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1011'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1012'>    mmap_object_methods,                        <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1013'>    0,                                          <i><font color='green'>/* tp_members */</font></i>
+<a name='L1014'>    mmap_object_getset,                         <i><font color='green'>/* tp_getset */</font></i>
+<a name='L1015'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L1016'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L1017'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L1018'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L1019'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L1020'>    0,                                      <i><font color='green'>/* tp_init */</font></i>
+<a name='L1021'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,                        <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L1022'>    <a href='../D/10035.html' title='Multiple defined in 2 places.'>new_mmap_object</a>,                            <i><font color='green'>/* tp_new */</font></i>
+<a name='L1023'>    PyObject_Del,                           <i><font color='green'>/* tp_free */</font></i>
+<a name='L1024'><font color='red'>}</font>;
+<a name='L1025'>
+<a name='L1026'>
+<a name='L1027'><i><font color='green'>/* extract the map size from the given PyObject</font></i>
+<a name='L1028'><i><font color='green'></font></i>
+<a name='L1029'><i><font color='green'>   Returns -1 on error, with an appropriate Python exception raised. On</font></i>
+<a name='L1030'><i><font color='green'>   success, the map size is returned. */</font></i>
+<a name='L1031'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L1032'><a href='../R/5325.html' title='Multiple refered from 4 places.'>_GetMapSize</a>(PyObject *o, <b>const</b> <b>char</b>* param)
+<a name='L1033'><font color='red'>{</font>
+<a name='L1034'>    <b>if</b> (o == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1035'>        <b>return</b> 0;
+<a name='L1036'>    <b>if</b> (PyIndex_Check(o)) <font color='red'>{</font>
+<a name='L1037'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(o, PyExc_OverflowError);
+<a name='L1038'>        <b>if</b> (i==-1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L1039'>            <b>return</b> -1;
+<a name='L1040'>        <b>if</b> (i &lt; 0) <font color='red'>{</font>
+<a name='L1041'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_OverflowError,
+<a name='L1042'>                            "memory mapped %s must be positive",
+<a name='L1043'>                            param);
+<a name='L1044'>            <b>return</b> -1;
+<a name='L1045'>        <font color='red'>}</font>
+<a name='L1046'>        <b>return</b> i;
+<a name='L1047'>    <font color='red'>}</font>
+<a name='L1048'>
+<a name='L1049'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError, "map size must be an integral value");
+<a name='L1050'>    <b>return</b> -1;
+<a name='L1051'><font color='red'>}</font>
+<a name='L1052'>
+<a name='L1053'><font color='darkred'>#ifdef</font> <a href='../S/2691.html#L25' title='Defined at 25 in Modules/mmapmodule.c.'>UNIX</a>
+<a name='L1054'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1055'><a href='../R/9205.html' title='Multiple refered from 2 places.'>new_mmap_object</a>(PyTypeObject *type, PyObject *args, PyObject *kwdict)
+<a name='L1056'><font color='red'>{</font>
+<a name='L1057'><font color='darkred'>#ifdef</font> <a href='../S/565.html#L375' title='Defined at 375 in Include/pyport.h.'>HAVE_FSTAT</a>
+<a name='L1058'>    <b>struct</b> stat st;
+<a name='L1059'><font color='darkred'>#endif</font>
+<a name='L1060'>    <a href='../S/2691.html#L107' title='Defined at 107 in Modules/mmapmodule.c.'>mmap_object</a> *m_obj;
+<a name='L1061'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *map_size_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *offset_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1062'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> map_size, offset;
+<a name='L1063'>    <b>int</b> fd, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = MAP_SHARED, prot = PROT_WRITE | PROT_READ;
+<a name='L1064'>    <b>int</b> devzero = -1;
+<a name='L1065'>    <b>int</b> access = (<b>int</b>)<a href='../S/2691.html#L82' title='Defined at 82 in Modules/mmapmodule.c.'>ACCESS_DEFAULT</a>;
+<a name='L1066'>    <b>static</b> <b>char</b> *keywords[] = <font color='red'>{</font>"fileno", "length",
+<a name='L1067'>                                     "flags", "prot",
+<a name='L1068'>                                     "access", "offset", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L1069'>
+<a name='L1070'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict, "iO|iiiO", keywords,
+<a name='L1071'>                                     &amp;fd, &amp;map_size_obj, &amp;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, &amp;prot,
+<a name='L1072'>                                     &amp;access, &amp;offset_obj))
+<a name='L1073'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1074'>    map_size = <a href='../S/2691.html#L1032' title='Defined at 1032 in Modules/mmapmodule.c.'>_GetMapSize</a>(map_size_obj, "size");
+<a name='L1075'>    <b>if</b> (map_size &lt; 0)
+<a name='L1076'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1077'>    offset = <a href='../S/2691.html#L1032' title='Defined at 1032 in Modules/mmapmodule.c.'>_GetMapSize</a>(offset_obj, "offset");
+<a name='L1078'>    <b>if</b> (offset &lt; 0)
+<a name='L1079'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1080'>
+<a name='L1081'>    <b>if</b> ((access != (<b>int</b>)<a href='../S/2691.html#L82' title='Defined at 82 in Modules/mmapmodule.c.'>ACCESS_DEFAULT</a>) &amp;&amp;
+<a name='L1082'>        ((<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> != MAP_SHARED) || (prot != (PROT_WRITE | PROT_READ))))
+<a name='L1083'>        <b>return</b> <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L1084'>                            "mmap can't specify both access and flags, prot.");
+<a name='L1085'>    <b>switch</b> ((<a href='../S/2691.html#L86' title='Defined at 86 in Modules/mmapmodule.c.'>access_mode</a>)access) <font color='red'>{</font>
+<a name='L1086'>    <b>case</b> <a href='../S/2691.html#L83' title='Defined at 83 in Modules/mmapmodule.c.'>ACCESS_READ</a>:
+<a name='L1087'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = MAP_SHARED;
+<a name='L1088'>        prot = PROT_READ;
+<a name='L1089'>        <b>break</b>;
+<a name='L1090'>    <b>case</b> <a href='../S/2691.html#L84' title='Defined at 84 in Modules/mmapmodule.c.'>ACCESS_WRITE</a>:
+<a name='L1091'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = MAP_SHARED;
+<a name='L1092'>        prot = PROT_READ | PROT_WRITE;
+<a name='L1093'>        <b>break</b>;
+<a name='L1094'>    <b>case</b> <a href='../S/2691.html#L85' title='Defined at 85 in Modules/mmapmodule.c.'>ACCESS_COPY</a>:
+<a name='L1095'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = MAP_PRIVATE;
+<a name='L1096'>        prot = PROT_READ | PROT_WRITE;
+<a name='L1097'>        <b>break</b>;
+<a name='L1098'>    <b>case</b> <a href='../S/2691.html#L82' title='Defined at 82 in Modules/mmapmodule.c.'>ACCESS_DEFAULT</a>:
+<a name='L1099'>        <i><font color='green'>/* use the specified or default values of flags and prot */</font></i>
+<a name='L1100'>        <b>break</b>;
+<a name='L1101'>    <b>default</b>:
+<a name='L1102'>        <b>return</b> <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L1103'>                            "mmap invalid access parameter.");
+<a name='L1104'>    <font color='red'>}</font>
+<a name='L1105'>
+<a name='L1106'>    <b>if</b> (prot == PROT_READ) <font color='red'>{</font>
+<a name='L1107'>    access = <a href='../S/2691.html#L83' title='Defined at 83 in Modules/mmapmodule.c.'>ACCESS_READ</a>;
+<a name='L1108'>    <font color='red'>}</font>
+<a name='L1109'>
+<a name='L1110'><font color='darkred'>#ifdef</font> <a href='../S/565.html#L375' title='Defined at 375 in Include/pyport.h.'>HAVE_FSTAT</a>
+<a name='L1111'><font color='darkred'>#  ifdef</font> __VMS
+<a name='L1112'>    <i><font color='green'>/* on OpenVMS we must ensure that all bytes are written to the file */</font></i>
+<a name='L1113'>    <b>if</b> (fd != -1) <font color='red'>{</font>
+<a name='L1114'>        <a href='../S/2696.html#L131' title='Defined at 131 in Modules/posixmodule.c.'>fsync</a>(fd);
+<a name='L1115'>    <font color='red'>}</font>
+<a name='L1116'><font color='darkred'>#  endif</font>
+<a name='L1117'>    <b>if</b> (fd != -1 &amp;&amp; fstat(fd, &amp;st) == 0 &amp;&amp; <a href='../S/565.html#L393' title='Defined at 393 in Include/pyport.h.'>S_ISREG</a>(st.st_mode)) <font color='red'>{</font>
+<a name='L1118'>        <b>if</b> (map_size == 0) <font color='red'>{</font>
+<a name='L1119'>            <b>if</b> (offset &gt;= st.st_size) <font color='red'>{</font>
+<a name='L1120'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L1121'>                                "mmap offset is greater than file size");
+<a name='L1122'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1123'>            <font color='red'>}</font>
+<a name='L1124'>            map_size = st.st_size - offset;
+<a name='L1125'>        <font color='red'>}</font> <b>else</b> <b>if</b> ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)offset + (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)map_size &gt; st.st_size) <font color='red'>{</font>
+<a name='L1126'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L1127'>                            "mmap length is greater than file size");
+<a name='L1128'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1129'>        <font color='red'>}</font>
+<a name='L1130'>    <font color='red'>}</font>
+<a name='L1131'><font color='darkred'>#endif</font>
+<a name='L1132'>    m_obj = (<a href='../S/2691.html#L107' title='Defined at 107 in Modules/mmapmodule.c.'>mmap_object</a> *)type-&gt;tp_alloc(type, 0);
+<a name='L1133'>    <b>if</b> (m_obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font><b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;<font color='red'>}</font>
+<a name='L1134'>    m_obj-&gt;data = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1135'>    m_obj-&gt;size = (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) map_size;
+<a name='L1136'>    m_obj-&gt;pos = (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) 0;
+<a name='L1137'>    m_obj-&gt;exports = 0;
+<a name='L1138'>    m_obj-&gt;offset = offset;
+<a name='L1139'>    <b>if</b> (fd == -1) <font color='red'>{</font>
+<a name='L1140'>        m_obj-&gt;fd = -1;
+<a name='L1141'>        <i><font color='green'>/* Assume the caller wants to map anonymous memory.</font></i>
+<a name='L1142'><i><font color='green'>           This is the same behaviour as Windows.  mmap.mmap(-1, size)</font></i>
+<a name='L1143'><i><font color='green'>           on both Windows and Unix map anonymous memory.</font></i>
+<a name='L1144'><i><font color='green'>        */</font></i>
+<a name='L1145'><font color='darkred'>#ifdef</font> <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>
+<a name='L1146'>        <i><font color='green'>/* BSD way to map anonymous memory */</font></i>
+<a name='L1147'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>;
+<a name='L1148'><font color='darkred'>#else</font>
+<a name='L1149'>        <i><font color='green'>/* SVR4 method to map anonymous memory is to open /dev/zero */</font></i>
+<a name='L1150'>        fd = devzero = open("/dev/zero", O_RDWR);
+<a name='L1151'>        <b>if</b> (devzero == -1) <font color='red'>{</font>
+<a name='L1152'>            Py_DECREF(m_obj);
+<a name='L1153'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L1154'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1155'>        <font color='red'>}</font>
+<a name='L1156'><font color='darkred'>#endif</font>
+<a name='L1157'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1158'>        m_obj-&gt;fd = dup(fd);
+<a name='L1159'>        <b>if</b> (m_obj-&gt;fd == -1) <font color='red'>{</font>
+<a name='L1160'>            Py_DECREF(m_obj);
+<a name='L1161'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L1162'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1163'>        <font color='red'>}</font>
+<a name='L1164'>    <font color='red'>}</font>
+<a name='L1165'>
+<a name='L1166'>    m_obj-&gt;data = mmap(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, map_size,
+<a name='L1167'>                       prot, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>,
+<a name='L1168'>                       fd, offset);
+<a name='L1169'>
+<a name='L1170'>    <b>if</b> (devzero != -1) <font color='red'>{</font>
+<a name='L1171'>        close(devzero);
+<a name='L1172'>    <font color='red'>}</font>
+<a name='L1173'>
+<a name='L1174'>    <b>if</b> (m_obj-&gt;data == (<b>char</b> *)-1) <font color='red'>{</font>
+<a name='L1175'>        m_obj-&gt;data = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1176'>        Py_DECREF(m_obj);
+<a name='L1177'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L1178'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1179'>    <font color='red'>}</font>
+<a name='L1180'>    m_obj-&gt;access = (<a href='../S/2691.html#L86' title='Defined at 86 in Modules/mmapmodule.c.'>access_mode</a>)access;
+<a name='L1181'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)m_obj;
+<a name='L1182'><font color='red'>}</font>
+<a name='L1183'><font color='darkred'>#endif</font> <i><font color='green'>/* UNIX */</font></i>
+<a name='L1184'>
+<a name='L1185'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L1186'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1187'><a href='../R/9205.html' title='Multiple refered from 2 places.'>new_mmap_object</a>(PyTypeObject *type, PyObject *args, PyObject *kwdict)
+<a name='L1188'><font color='red'>{</font>
+<a name='L1189'>    <a href='../S/2691.html#L107' title='Defined at 107 in Modules/mmapmodule.c.'>mmap_object</a> *m_obj;
+<a name='L1190'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *map_size_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *offset_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1191'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> map_size, offset;
+<a name='L1192'>    DWORD off_hi;       <i><font color='green'>/* upper 32 bits of offset */</font></i>
+<a name='L1193'>    DWORD off_lo;       <i><font color='green'>/* lower 32 bits of offset */</font></i>
+<a name='L1194'>    DWORD size_hi;      <i><font color='green'>/* upper 32 bits of size */</font></i>
+<a name='L1195'>    DWORD size_lo;      <i><font color='green'>/* lower 32 bits of size */</font></i>
+<a name='L1196'>    <b>char</b> *tagname = "";
+<a name='L1197'>    DWORD dwErr = 0;
+<a name='L1198'>    <b>int</b> <a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>;
+<a name='L1199'>    <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> fh = 0;
+<a name='L1200'>    <b>int</b> access = (<a href='../S/2691.html#L86' title='Defined at 86 in Modules/mmapmodule.c.'>access_mode</a>)<a href='../S/2691.html#L82' title='Defined at 82 in Modules/mmapmodule.c.'>ACCESS_DEFAULT</a>;
+<a name='L1201'>    DWORD flProtect, dwDesiredAccess;
+<a name='L1202'>    <b>static</b> <b>char</b> *keywords[] = <font color='red'>{</font> "fileno", "length",
+<a name='L1203'>                                      "tagname",
+<a name='L1204'>                                      "access", "offset", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> <font color='red'>}</font>;
+<a name='L1205'>
+<a name='L1206'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict, "iO|ziO", keywords,
+<a name='L1207'>                                     &amp;<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>, &amp;map_size_obj,
+<a name='L1208'>                                     &amp;tagname, &amp;access, &amp;offset_obj)) <font color='red'>{</font>
+<a name='L1209'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1210'>    <font color='red'>}</font>
+<a name='L1211'>
+<a name='L1212'>    <b>switch</b>((<a href='../S/2691.html#L86' title='Defined at 86 in Modules/mmapmodule.c.'>access_mode</a>)access) <font color='red'>{</font>
+<a name='L1213'>    <b>case</b> <a href='../S/2691.html#L83' title='Defined at 83 in Modules/mmapmodule.c.'>ACCESS_READ</a>:
+<a name='L1214'>        flProtect = PAGE_READONLY;
+<a name='L1215'>        dwDesiredAccess = FILE_MAP_READ;
+<a name='L1216'>        <b>break</b>;
+<a name='L1217'>    <b>case</b> <a href='../S/2691.html#L82' title='Defined at 82 in Modules/mmapmodule.c.'>ACCESS_DEFAULT</a>:  <b>case</b> <a href='../S/2691.html#L84' title='Defined at 84 in Modules/mmapmodule.c.'>ACCESS_WRITE</a>:
+<a name='L1218'>        flProtect = PAGE_READWRITE;
+<a name='L1219'>        dwDesiredAccess = FILE_MAP_WRITE;
+<a name='L1220'>        <b>break</b>;
+<a name='L1221'>    <b>case</b> <a href='../S/2691.html#L85' title='Defined at 85 in Modules/mmapmodule.c.'>ACCESS_COPY</a>:
+<a name='L1222'>        flProtect = PAGE_WRITECOPY;
+<a name='L1223'>        dwDesiredAccess = FILE_MAP_COPY;
+<a name='L1224'>        <b>break</b>;
+<a name='L1225'>    <b>default</b>:
+<a name='L1226'>        <b>return</b> <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L1227'>                            "mmap invalid access parameter.");
+<a name='L1228'>    <font color='red'>}</font>
+<a name='L1229'>
+<a name='L1230'>    map_size = <a href='../S/2691.html#L1032' title='Defined at 1032 in Modules/mmapmodule.c.'>_GetMapSize</a>(map_size_obj, "size");
+<a name='L1231'>    <b>if</b> (map_size &lt; 0)
+<a name='L1232'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1233'>    offset = <a href='../S/2691.html#L1032' title='Defined at 1032 in Modules/mmapmodule.c.'>_GetMapSize</a>(offset_obj, "offset");
+<a name='L1234'>    <b>if</b> (offset &lt; 0)
+<a name='L1235'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1236'>
+<a name='L1237'>    <i><font color='green'>/* assume -1 and 0 both mean invalid filedescriptor</font></i>
+<a name='L1238'><i><font color='green'>       to 'anonymously' map memory.</font></i>
+<a name='L1239'><i><font color='green'>       XXX: fileno == 0 is a valid fd, but was accepted prior to 2.5.</font></i>
+<a name='L1240'><i><font color='green'>       XXX: Should this code be added?</font></i>
+<a name='L1241'><i><font color='green'>       if (fileno == 0)</font></i>
+<a name='L1242'><i><font color='green'>        PyErr_WarnEx(PyExc_DeprecationWarning,</font></i>
+<a name='L1243'><i><font color='green'>                     "don't use 0 for anonymous memory",</font></i>
+<a name='L1244'><i><font color='green'>                     1);</font></i>
+<a name='L1245'><i><font color='green'>     */</font></i>
+<a name='L1246'>    <b>if</b> (<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a> != -1 &amp;&amp; <a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a> != 0) <font color='red'>{</font>
+<a name='L1247'>        <i><font color='green'>/* Ensure that fileno is within the CRT's valid range */</font></i>
+<a name='L1248'>        <b>if</b> (_PyVerify_fd(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>) == 0) <font color='red'>{</font>
+<a name='L1249'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L1250'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1251'>        <font color='red'>}</font>
+<a name='L1252'>        fh = (<a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a>)_get_osfhandle(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>);
+<a name='L1253'>        <b>if</b> (fh==(<a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a>)-1) <font color='red'>{</font>
+<a name='L1254'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(mmap_module_error);
+<a name='L1255'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1256'>        <font color='red'>}</font>
+<a name='L1257'>        <i><font color='green'>/* Win9x appears to need us seeked to zero */</font></i>
+<a name='L1258'>        lseek(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>, 0, <a href='../D/4576.html' title='Multiple defined in 2 places.'>SEEK_SET</a>);
+<a name='L1259'>    <font color='red'>}</font>
+<a name='L1260'>
+<a name='L1261'>    m_obj = (<a href='../S/2691.html#L107' title='Defined at 107 in Modules/mmapmodule.c.'>mmap_object</a> *)type-&gt;tp_alloc(type, 0);
+<a name='L1262'>    <b>if</b> (m_obj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1263'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1264'>    <i><font color='green'>/* Set every field to an invalid marker, so we can safely</font></i>
+<a name='L1265'><i><font color='green'>       destruct the object in the face of failure */</font></i>
+<a name='L1266'>    m_obj-&gt;data = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1267'>    m_obj-&gt;file_handle = <a href='../S/2583.html#L47' title='Defined at 47 in Modules/_multiprocessing/multiprocessing.h.'>INVALID_HANDLE_VALUE</a>;
+<a name='L1268'>    m_obj-&gt;map_handle = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1269'>    m_obj-&gt;tagname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1270'>    m_obj-&gt;offset = offset;
+<a name='L1271'>
+<a name='L1272'>    <b>if</b> (fh) <font color='red'>{</font>
+<a name='L1273'>        <i><font color='green'>/* It is necessary to duplicate the handle, so the</font></i>
+<a name='L1274'><i><font color='green'>           Python code can close it on us */</font></i>
+<a name='L1275'>        <b>if</b> (!DuplicateHandle(
+<a name='L1276'>            GetCurrentProcess(), <i><font color='green'>/* source process handle */</font></i>
+<a name='L1277'>            fh, <i><font color='green'>/* handle to be duplicated */</font></i>
+<a name='L1278'>            GetCurrentProcess(), <i><font color='green'>/* target proc handle */</font></i>
+<a name='L1279'>            (LPHANDLE)&amp;m_obj-&gt;file_handle, <i><font color='green'>/* result */</font></i>
+<a name='L1280'>            0, <i><font color='green'>/* access - ignored due to options value */</font></i>
+<a name='L1281'>            <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>, <i><font color='green'>/* inherited by child processes? */</font></i>
+<a name='L1282'>            DUPLICATE_SAME_ACCESS)) <font color='red'>{</font> <i><font color='green'>/* options */</font></i>
+<a name='L1283'>            dwErr = GetLastError();
+<a name='L1284'>            Py_DECREF(m_obj);
+<a name='L1285'>            <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(dwErr);
+<a name='L1286'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1287'>        <font color='red'>}</font>
+<a name='L1288'>        <b>if</b> (!map_size) <font color='red'>{</font>
+<a name='L1289'>            DWORD low,high;
+<a name='L1290'>            low = GetFileSize(fh, &amp;high);
+<a name='L1291'>            <i><font color='green'>/* low might just happen to have the value INVALID_FILE_SIZE;</font></i>
+<a name='L1292'><i><font color='green'>               so we need to check the last error also. */</font></i>
+<a name='L1293'>            <b>if</b> (low == INVALID_FILE_SIZE &amp;&amp;
+<a name='L1294'>                (dwErr = GetLastError()) != NO_ERROR) <font color='red'>{</font>
+<a name='L1295'>                Py_DECREF(m_obj);
+<a name='L1296'>                <b>return</b> <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(dwErr);
+<a name='L1297'>            <font color='red'>}</font>
+<a name='L1298'>
+<a name='L1299'><font color='darkred'>#if</font> <a href='../D/4740.html' title='Multiple defined in 6 places.'>SIZEOF_SIZE_T</a> &gt; 4
+<a name='L1300'>            m_obj-&gt;size = (((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)high)&lt;&lt;32) + low;
+<a name='L1301'><font color='darkred'>#else</font>
+<a name='L1302'>            <b>if</b> (high)
+<a name='L1303'>                <i><font color='green'>/* File is too large to map completely */</font></i>
+<a name='L1304'>                m_obj-&gt;size = (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)-1;
+<a name='L1305'>            <b>else</b>
+<a name='L1306'>                m_obj-&gt;size = low;
+<a name='L1307'><font color='darkred'>#endif</font>
+<a name='L1308'>            <b>if</b> (offset &gt;= m_obj-&gt;size) <font color='red'>{</font>
+<a name='L1309'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L1310'>                                "mmap offset is greater than file size");
+<a name='L1311'>                Py_DECREF(m_obj);
+<a name='L1312'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1313'>            <font color='red'>}</font>
+<a name='L1314'>            m_obj-&gt;size -= offset;
+<a name='L1315'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1316'>            m_obj-&gt;size = map_size;
+<a name='L1317'>        <font color='red'>}</font>
+<a name='L1318'>    <font color='red'>}</font>
+<a name='L1319'>    <b>else</b> <font color='red'>{</font>
+<a name='L1320'>        m_obj-&gt;size = map_size;
+<a name='L1321'>    <font color='red'>}</font>
+<a name='L1322'>
+<a name='L1323'>    <i><font color='green'>/* set the initial position */</font></i>
+<a name='L1324'>    m_obj-&gt;pos = (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) 0;
+<a name='L1325'>
+<a name='L1326'>    m_obj-&gt;exports = 0;
+<a name='L1327'>    <i><font color='green'>/* set the tag name */</font></i>
+<a name='L1328'>    <b>if</b> (tagname != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; *tagname != '\0') <font color='red'>{</font>
+<a name='L1329'>        m_obj-&gt;tagname = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(strlen(tagname)+1);
+<a name='L1330'>        <b>if</b> (m_obj-&gt;tagname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1331'>            <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1332'>            Py_DECREF(m_obj);
+<a name='L1333'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1334'>        <font color='red'>}</font>
+<a name='L1335'>        strcpy(m_obj-&gt;tagname, tagname);
+<a name='L1336'>    <font color='red'>}</font>
+<a name='L1337'>    <b>else</b>
+<a name='L1338'>        m_obj-&gt;tagname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1339'>
+<a name='L1340'>    m_obj-&gt;access = (<a href='../S/2691.html#L86' title='Defined at 86 in Modules/mmapmodule.c.'>access_mode</a>)access;
+<a name='L1341'>    <i><font color='green'>/* DWORD is a 4-byte int.  If we're on a box where size_t consumes</font></i>
+<a name='L1342'><i><font color='green'>     * more than 4 bytes, we need to break it apart.  Else (size_t</font></i>
+<a name='L1343'><i><font color='green'>     * consumes 4 bytes), C doesn't define what happens if we shift</font></i>
+<a name='L1344'><i><font color='green'>     * right by 32, so we need different code.</font></i>
+<a name='L1345'><i><font color='green'>     */</font></i>
+<a name='L1346'><font color='darkred'>#if</font> <a href='../D/4740.html' title='Multiple defined in 6 places.'>SIZEOF_SIZE_T</a> &gt; 4
+<a name='L1347'>    size_hi = (DWORD)((offset + m_obj-&gt;size) &gt;&gt; 32);
+<a name='L1348'>    size_lo = (DWORD)((offset + m_obj-&gt;size) &amp; 0xFFFFFFFF);
+<a name='L1349'>    off_hi = (DWORD)(offset &gt;&gt; 32);
+<a name='L1350'>    off_lo = (DWORD)(offset &amp; 0xFFFFFFFF);
+<a name='L1351'><font color='darkred'>#else</font>
+<a name='L1352'>    size_hi = 0;
+<a name='L1353'>    size_lo = (DWORD)(offset + m_obj-&gt;size);
+<a name='L1354'>    off_hi = 0;
+<a name='L1355'>    off_lo = (DWORD)offset;
+<a name='L1356'><font color='darkred'>#endif</font>
+<a name='L1357'>    <i><font color='green'>/* For files, it would be sufficient to pass 0 as size.</font></i>
+<a name='L1358'><i><font color='green'>       For anonymous maps, we have to pass the size explicitly. */</font></i>
+<a name='L1359'>    m_obj-&gt;map_handle = CreateFileMapping(m_obj-&gt;file_handle,
+<a name='L1360'>                                          <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1361'>                                          flProtect,
+<a name='L1362'>                                          size_hi,
+<a name='L1363'>                                          size_lo,
+<a name='L1364'>                                          m_obj-&gt;tagname);
+<a name='L1365'>    <b>if</b> (m_obj-&gt;map_handle != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1366'>        m_obj-&gt;data = (<b>char</b> *) MapViewOfFile(m_obj-&gt;map_handle,
+<a name='L1367'>                                             dwDesiredAccess,
+<a name='L1368'>                                             off_hi,
+<a name='L1369'>                                             off_lo,
+<a name='L1370'>                                             m_obj-&gt;size);
+<a name='L1371'>        <b>if</b> (m_obj-&gt;data != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1372'>            <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)m_obj;
+<a name='L1373'>        <b>else</b> <font color='red'>{</font>
+<a name='L1374'>            dwErr = GetLastError();
+<a name='L1375'>            CloseHandle(m_obj-&gt;map_handle);
+<a name='L1376'>            m_obj-&gt;map_handle = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1377'>        <font color='red'>}</font>
+<a name='L1378'>    <font color='red'>}</font> <b>else</b>
+<a name='L1379'>        dwErr = GetLastError();
+<a name='L1380'>    Py_DECREF(m_obj);
+<a name='L1381'>    <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(dwErr);
+<a name='L1382'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1383'><font color='red'>}</font>
+<a name='L1384'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L1385'>
+<a name='L1386'><b>static</b> <b>void</b>
+<a name='L1387'><a href='../R/10269.html' title='Multiple refered from 24 places.'>setint</a>(PyObject *d, <b>const</b> <b>char</b> *name, <b>long</b> value)
+<a name='L1388'><font color='red'>{</font>
+<a name='L1389'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1390'>    <b>if</b> (o &amp;&amp; <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, name, o) == 0) <font color='red'>{</font>
+<a name='L1391'>        Py_DECREF(o);
+<a name='L1392'>    <font color='red'>}</font>
+<a name='L1393'><font color='red'>}</font>
+<a name='L1394'>
+<a name='L1395'>
+<a name='L1396'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> mmapmodule = <font color='red'>{</font>
+<a name='L1397'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L1398'>    "mmap",
+<a name='L1399'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1400'>    -1,
+<a name='L1401'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1402'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1403'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1404'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1405'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L1406'><font color='red'>}</font>;
+<a name='L1407'>
+<a name='L1408'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L1409'><a href='../R/3057.html' title='Multiple refered from 2 places.'>PyInit_mmap</a>(<b>void</b>)
+<a name='L1410'><font color='red'>{</font>
+<a name='L1411'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict, *module;
+<a name='L1412'>
+<a name='L1413'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;mmap_object_type) &lt; 0)
+<a name='L1414'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1415'>
+<a name='L1416'>    module = PyModule_Create(&amp;mmapmodule);
+<a name='L1417'>    <b>if</b> (module == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1418'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1419'>    dict = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(module);
+<a name='L1420'>    <b>if</b> (!dict)
+<a name='L1421'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1422'>    mmap_module_error = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("mmap.error",
+<a name='L1423'>        PyExc_EnvironmentError , <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1424'>    <b>if</b> (mmap_module_error == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1425'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1426'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "error", mmap_module_error);
+<a name='L1427'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "mmap", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;mmap_object_type);
+<a name='L1428'><font color='darkred'>#ifdef</font> PROT_EXEC
+<a name='L1429'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "PROT_EXEC", PROT_EXEC);
+<a name='L1430'><font color='darkred'>#endif</font>
+<a name='L1431'><font color='darkred'>#ifdef</font> PROT_READ
+<a name='L1432'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "PROT_READ", PROT_READ);
+<a name='L1433'><font color='darkred'>#endif</font>
+<a name='L1434'><font color='darkred'>#ifdef</font> PROT_WRITE
+<a name='L1435'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "PROT_WRITE", PROT_WRITE);
+<a name='L1436'><font color='darkred'>#endif</font>
+<a name='L1437'>
+<a name='L1438'><font color='darkred'>#ifdef</font> MAP_SHARED
+<a name='L1439'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "MAP_SHARED", MAP_SHARED);
+<a name='L1440'><font color='darkred'>#endif</font>
+<a name='L1441'><font color='darkred'>#ifdef</font> MAP_PRIVATE
+<a name='L1442'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "MAP_PRIVATE", MAP_PRIVATE);
+<a name='L1443'><font color='darkred'>#endif</font>
+<a name='L1444'><font color='darkred'>#ifdef</font> MAP_DENYWRITE
+<a name='L1445'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "MAP_DENYWRITE", MAP_DENYWRITE);
+<a name='L1446'><font color='darkred'>#endif</font>
+<a name='L1447'><font color='darkred'>#ifdef</font> MAP_EXECUTABLE
+<a name='L1448'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "MAP_EXECUTABLE", MAP_EXECUTABLE);
+<a name='L1449'><font color='darkred'>#endif</font>
+<a name='L1450'><font color='darkred'>#ifdef</font> <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>
+<a name='L1451'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "MAP_ANON", <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>);
+<a name='L1452'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "MAP_ANONYMOUS", <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>);
+<a name='L1453'><font color='darkred'>#endif</font>
+<a name='L1454'>
+<a name='L1455'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "PAGESIZE", (<b>long</b>)<a href='../D/9999.html' title='Multiple defined in 3 places.'>my_getpagesize</a>());
+<a name='L1456'>
+<a name='L1457'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "ALLOCATIONGRANULARITY", (<b>long</b>)<a href='../D/9998.html' title='Multiple defined in 2 places.'>my_getallocationgranularity</a>());
+<a name='L1458'>
+<a name='L1459'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "ACCESS_READ", <a href='../S/2691.html#L83' title='Defined at 83 in Modules/mmapmodule.c.'>ACCESS_READ</a>);
+<a name='L1460'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "ACCESS_WRITE", <a href='../S/2691.html#L84' title='Defined at 84 in Modules/mmapmodule.c.'>ACCESS_WRITE</a>);
+<a name='L1461'>    <a href='../D/11129.html' title='Multiple defined in 2 places.'>setint</a>(dict, "ACCESS_COPY", <a href='../S/2691.html#L85' title='Defined at 85 in Modules/mmapmodule.c.'>ACCESS_COPY</a>);
+<a name='L1462'>    <b>return</b> module;
+<a name='L1463'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L31'>[^]</a><a href='#L1409'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

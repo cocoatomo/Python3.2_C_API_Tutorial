@@ -1,0 +1,965 @@
+<html>
+<head>
+<title>Modules/_lsprof.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/_lsprof.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L16'>[^]</a><a href='#L886'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L16' title='Defined at 16.'>hpTimer</a>
+<li><a href='#L24' title='Defined at 24.'>hpTimerUnit</a>
+<li><a href='#L47' title='Defined at 47.'>hpTimer</a>
+<li><a href='#L62' title='Defined at 62.'>hpTimerUnit</a>
+<li><a href='#L128' title='Defined at 128.'>CallExternalTimer</a>
+<li><a href='#L164' title='Defined at 164.'>normalizeUserObj</a>
+<li><a href='#L234' title='Defined at 234.'>newProfilerEntry</a>
+<li><a href='#L262' title='Defined at 262.'>getEntry</a>
+<li><a href='#L268' title='Defined at 268.'>getSubEntry</a>
+<li><a href='#L275' title='Defined at 275.'>newSubEntry</a>
+<li><a href='#L293' title='Defined at 293.'>freeSubEntry</a>
+<li><a href='#L300' title='Defined at 300.'>freeEntry</a>
+<li><a href='#L309' title='Defined at 309.'>clearEntries</a>
+<li><a href='#L327' title='Defined at 327.'>initContext</a>
+<li><a href='#L347' title='Defined at 347.'>Stop</a>
+<li><a href='#L376' title='Defined at 376.'>ptrace_enter_call</a>
+<li><a href='#L420' title='Defined at 420.'>ptrace_leave_call</a>
+<li><a href='#L443' title='Defined at 443.'>profiler_callback</a>
+<li><a href='#L496' title='Defined at 496.'>pending_exception</a>
+<li><a href='#L553' title='Defined at 553.'>statsForSubEntry</a>
+<li><a href='#L574' title='Defined at 574.'>statsForEntry</a>
+<li><a href='#L639' title='Defined at 639.'>profiler_getstats</a>
+<li><a href='#L662' title='Defined at 662.'>setSubcalls</a>
+<li><a href='#L672' title='Defined at 672.'>setBuiltins</a>
+<li><a href='#L699' title='Defined at 699.'>profiler_enable</a>
+<li><a href='#L716' title='Defined at 716.'>flush_unmatched</a>
+<li><a href='#L738' title='Defined at 738.'>profiler_disable</a>
+<li><a href='#L756' title='Defined at 756.'>profiler_clear</a>
+<li><a href='#L764' title='Defined at 764.'>profiler_dealloc</a>
+<li><a href='#L775' title='Defined at 775.'>profiler_init</a>
+<li><a href='#L886' title='Defined at 886.'>PyInit__lsprof</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L2'><font color='darkred'>#include</font> "<a href='526.html'>frameobject.h</a>"
+<a name='L3'><font color='darkred'>#include</font> "<a href='2703.html'>rotatingtree.h</a>"
+<a name='L4'>
+<a name='L5'><font color='darkred'>#if</font> !<b>defined</b>(<a href='../D/1527.html' title='Multiple defined in 2 places.'>HAVE_LONG_LONG</a>)
+<a name='L6'><font color='darkred'>#error</font> "This module requires long longs!"
+<a name='L7'><font color='darkred'>#endif</font>
+<a name='L8'>
+<a name='L9'><i><font color='green'>/*** Selection of a high-precision timer ***/</font></i>
+<a name='L10'>
+<a name='L11'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L12'>
+<a name='L13'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L14'>
+<a name='L15'><b>static</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>
+<a name='L16'><a href='../S/2578.html#L159' title='Refered from 159 in Modules/_lsprof.c.'>hpTimer</a>(<b>void</b>)
+<a name='L17'><font color='red'>{</font>
+<a name='L18'>    LARGE_INTEGER li;
+<a name='L19'>    QueryPerformanceCounter(&amp;li);
+<a name='L20'>    <b>return</b> li.QuadPart;
+<a name='L21'><font color='red'>}</font>
+<a name='L22'>
+<a name='L23'><b>static</b> <b>double</b>
+<a name='L24'><a href='../S/2578.html#L645' title='Refered from 645 in Modules/_lsprof.c.'>hpTimerUnit</a>(<b>void</b>)
+<a name='L25'><font color='red'>{</font>
+<a name='L26'>    LARGE_INTEGER li;
+<a name='L27'>    <b>if</b> (QueryPerformanceFrequency(&amp;li))
+<a name='L28'>        <b>return</b> 1.0 / li.QuadPart;
+<a name='L29'>    <b>else</b>
+<a name='L30'>        <b>return</b> 0.000001;  <i><font color='green'>/* unlikely */</font></i>
+<a name='L31'><font color='red'>}</font>
+<a name='L32'>
+<a name='L33'><font color='darkred'>#else</font>  <i><font color='green'>/* !MS_WINDOWS */</font></i>
+<a name='L34'>
+<a name='L35'><font color='darkred'>#ifndef</font> <a href='../D/1511.html' title='Multiple defined in 2 places.'>HAVE_GETTIMEOFDAY</a>
+<a name='L36'><font color='darkred'>#error</font> "This module requires gettimeofday() on non-Windows platforms!"
+<a name='L37'><font color='darkred'>#endif</font>
+<a name='L38'>
+<a name='L39'><font color='darkred'>#if</font> (<b>defined</b>(<a href='../D/2567.html' title='Multiple defined in 2 places.'>PYOS_OS2</a>) &amp;&amp; <b>defined</b>(<a href='../S/2894.html#L13' title='Defined at 13 in PC/os2emx/pyconfig.h.'>PYCC_GCC</a>))
+<a name='L40'><font color='darkred'>#include</font> &lt;sys/time.h&gt;
+<a name='L41'><font color='darkred'>#else</font>
+<a name='L42'><font color='darkred'>#include</font> &lt;<a href='2861.html'>sys/resource.h</a>&gt;
+<a name='L43'><font color='darkred'>#include</font> &lt;sys/times.h&gt;
+<a name='L44'><font color='darkred'>#endif</font>
+<a name='L45'>
+<a name='L46'><b>static</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>
+<a name='L47'><a href='../S/2578.html#L159' title='Refered from 159 in Modules/_lsprof.c.'>hpTimer</a>(<b>void</b>)
+<a name='L48'><font color='red'>{</font>
+<a name='L49'>    <b>struct</b> timeval tv;
+<a name='L50'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> ret;
+<a name='L51'><font color='darkred'>#ifdef</font> GETTIMEOFDAY_NO_TZ
+<a name='L52'>    gettimeofday(&amp;tv);
+<a name='L53'><font color='darkred'>#else</font>
+<a name='L54'>    gettimeofday(&amp;tv, (<b>struct</b> <a href='../S/2720.html#L41' title='Defined at 41 in Modules/timemodule.c.'>timezone</a> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L55'><font color='darkred'>#endif</font>
+<a name='L56'>    ret = tv.tv_sec;
+<a name='L57'>    ret = ret * 1000000 + tv.tv_usec;
+<a name='L58'>    <b>return</b> ret;
+<a name='L59'><font color='red'>}</font>
+<a name='L60'>
+<a name='L61'><b>static</b> <b>double</b>
+<a name='L62'><a href='../S/2578.html#L645' title='Refered from 645 in Modules/_lsprof.c.'>hpTimerUnit</a>(<b>void</b>)
+<a name='L63'><font color='red'>{</font>
+<a name='L64'>    <b>return</b> 0.000001;
+<a name='L65'><font color='red'>}</font>
+<a name='L66'>
+<a name='L67'><font color='darkred'>#endif</font>  <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L68'>
+<a name='L69'><i><font color='green'>/************************************************************/</font></i>
+<a name='L70'><i><font color='green'>/* Written by Brett Rosen and Ted Czotter */</font></i>
+<a name='L71'>
+<a name='L72'><b>struct</b> <a href='../S/2578.html#L85' title='Defined at 85 in Modules/_lsprof.c.'>_ProfilerEntry</a>;
+<a name='L73'>
+<a name='L74'><i><font color='green'>/* represents a function called from another function */</font></i>
+<a name='L75'><b>typedef</b> <b>struct</b> _ProfilerSubEntry <font color='red'>{</font>
+<a name='L76'>    <a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> header;
+<a name='L77'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> tt;
+<a name='L78'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> it;
+<a name='L79'>    <b>long</b> callcount;
+<a name='L80'>    <b>long</b> recursivecallcount;
+<a name='L81'>    <b>long</b> recursionLevel;
+<a name='L82'><font color='red'>}</font> <a href='../R/2471.html' title='Multiple refered from 9 places.'>ProfilerSubEntry</a>;
+<a name='L83'>
+<a name='L84'><i><font color='green'>/* represents a function or user defined block */</font></i>
+<a name='L85'><b>typedef</b> <b>struct</b> <a href='../S/2578.html#L72' title='Refered from 72 in Modules/_lsprof.c.'>_ProfilerEntry</a> <font color='red'>{</font>
+<a name='L86'>    <a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> header;
+<a name='L87'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *userObj; <i><font color='green'>/* PyCodeObject, or a descriptive str for builtins */</font></i>
+<a name='L88'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> tt; <i><font color='green'>/* total time in this entry */</font></i>
+<a name='L89'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> it; <i><font color='green'>/* inline time in this entry (not in subcalls) */</font></i>
+<a name='L90'>    <b>long</b> callcount; <i><font color='green'>/* how many times this was called */</font></i>
+<a name='L91'>    <b>long</b> recursivecallcount; <i><font color='green'>/* how many times called recursively */</font></i>
+<a name='L92'>    <b>long</b> recursionLevel;
+<a name='L93'>    <a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> *calls;
+<a name='L94'><font color='red'>}</font> <a href='../R/2469.html' title='Multiple refered from 14 places.'>ProfilerEntry</a>;
+<a name='L95'>
+<a name='L96'><b>typedef</b> <b>struct</b> <a href='../S/2578.html#L99' title='Refered from 99 in Modules/_lsprof.c.'>_ProfilerContext</a> <font color='red'>{</font>
+<a name='L97'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> <a href='../S/2333.html#L122' title='Defined at 122 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t0</a>;
+<a name='L98'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> subt;
+<a name='L99'>    <b>struct</b> <a href='../S/2578.html#L96' title='Defined at 96 in Modules/_lsprof.c.'>_ProfilerContext</a> *previous;
+<a name='L100'>    <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *ctxEntry;
+<a name='L101'><font color='red'>}</font> <a href='../R/2468.html' title='Multiple refered from 8 places.'>ProfilerContext</a>;
+<a name='L102'>
+<a name='L103'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L104'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L105'>    <a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> *profilerEntries;
+<a name='L106'>    <a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a> *currentProfilerContext;
+<a name='L107'>    <a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a> *freelistProfilerContext;
+<a name='L108'>    <b>int</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L109'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *externalTimer;
+<a name='L110'>    <b>double</b> externalTimerUnit;
+<a name='L111'><font color='red'>}</font> <a href='../R/2470.html' title='Multiple refered from 5 places.'>ProfilerObject</a>;
+<a name='L112'>
+<a name='L113'><font color='darkred'>#define</font> <a href='../R/2263.html' title='Multiple refered from 3 places.'>POF_ENABLED</a>     0x001
+<a name='L114'><font color='darkred'>#define</font> <a href='../R/2265.html' title='Multiple refered from 4 places.'>POF_SUBCALLS</a>    0x002
+<a name='L115'><font color='darkred'>#define</font> <a href='../R/2262.html' title='Multiple refered from 4 places.'>POF_BUILTINS</a>    0x004
+<a name='L116'><font color='darkred'>#define</font> <a href='../R/2264.html' title='Multiple refered from 6 places.'>POF_NOMEMORY</a>    0x100
+<a name='L117'>
+<a name='L118'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyProfiler_Type;
+<a name='L119'>
+<a name='L120'><font color='darkred'>#define</font> PyProfiler_Check(op) PyObject_TypeCheck(op, &amp;PyProfiler_Type)
+<a name='L121'><font color='darkred'>#define</font> PyProfiler_CheckExact(op) (<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(op) == &amp;PyProfiler_Type)
+<a name='L122'>
+<a name='L123'><i><font color='green'>/*** External Timers ***/</font></i>
+<a name='L124'>
+<a name='L125'><font color='darkred'>#define</font> <a href='../R/767.html' title='Multiple refered from 2 places.'>DOUBLE_TIMER_PRECISION</a>   4294967296.0
+<a name='L126'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *empty_tuple;
+<a name='L127'>
+<a name='L128'><b>static</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> <a href='../S/2578.html#L158' title='Refered from 158 in Modules/_lsprof.c.'>CallExternalTimer</a>(ProfilerObject *pObj)
+<a name='L129'><font color='red'>{</font>
+<a name='L130'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L131'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o = <a href='../S/2775.html#L2141' title='Defined at 2141 in Objects/abstract.c.'>PyObject_Call</a>(pObj-&gt;externalTimer, empty_tuple, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L132'>    <b>if</b> (o == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L133'>        <a href='../S/3106.html#L708' title='Defined at 708 in Python/errors.c.'>PyErr_WriteUnraisable</a>(pObj-&gt;externalTimer);
+<a name='L134'>        <b>return</b> 0;
+<a name='L135'>    <font color='red'>}</font>
+<a name='L136'>    <b>if</b> (pObj-&gt;externalTimerUnit &gt; 0.0) <font color='red'>{</font>
+<a name='L137'>        <i><font color='green'>/* interpret the result as an integer that will be scaled</font></i>
+<a name='L138'><i><font color='green'>           in profiler_getstats() */</font></i>
+<a name='L139'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2799.html#L1137' title='Defined at 1137 in Objects/longobject.c.'>PyLong_AsLongLong</a>(o);
+<a name='L140'>    <font color='red'>}</font>
+<a name='L141'>    <b>else</b> <font color='red'>{</font>
+<a name='L142'>        <i><font color='green'>/* interpret the result as a double measured in seconds.</font></i>
+<a name='L143'><i><font color='green'>           As the profiler works with PY_LONG_LONG internally</font></i>
+<a name='L144'><i><font color='green'>           we convert it to a large integer */</font></i>
+<a name='L145'>        <b>double</b> val = <a href='../S/2791.html#L244' title='Defined at 244 in Objects/floatobject.c.'>PyFloat_AsDouble</a>(o);
+<a name='L146'>        <i><font color='green'>/* error handling delayed to the code below */</font></i>
+<a name='L147'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = (<a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>) (val * <a href='../S/2578.html#L125' title='Defined at 125 in Modules/_lsprof.c.'>DOUBLE_TIMER_PRECISION</a>);
+<a name='L148'>    <font color='red'>}</font>
+<a name='L149'>    Py_DECREF(o);
+<a name='L150'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L151'>        <a href='../S/3106.html#L708' title='Defined at 708 in Python/errors.c.'>PyErr_WriteUnraisable</a>(pObj-&gt;externalTimer);
+<a name='L152'>        <b>return</b> 0;
+<a name='L153'>    <font color='red'>}</font>
+<a name='L154'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L155'><font color='red'>}</font>
+<a name='L156'>
+<a name='L157'><font color='darkred'>#define</font> <a href='../R/447.html' title='Multiple refered from 2 places.'>CALL_TIMER</a>(pObj)        ((pObj)-&gt;externalTimer ?                \
+<a name='L158'>                                        <a href='../S/2578.html#L128' title='Defined at 128 in Modules/_lsprof.c.'>CallExternalTimer</a>(pObj) :       \
+<a name='L159'>                                        <a href='../D/9084.html' title='Multiple defined in 2 places.'>hpTimer</a>())
+<a name='L160'>
+<a name='L161'><i><font color='green'>/*** ProfilerObject ***/</font></i>
+<a name='L162'>
+<a name='L163'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L164'><a href='../S/2578.html#L242' title='Refered from 242 in Modules/_lsprof.c.'>normalizeUserObj</a>(PyObject *obj)
+<a name='L165'><font color='red'>{</font>
+<a name='L166'>    PyCFunctionObject *<a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>;
+<a name='L167'>    <b>if</b> (!PyCFunction_Check(obj)) <font color='red'>{</font>
+<a name='L168'>        Py_INCREF(obj);
+<a name='L169'>        <b>return</b> obj;
+<a name='L170'>    <font color='red'>}</font>
+<a name='L171'>    <i><font color='green'>/* Replace built-in function objects with a descriptive string</font></i>
+<a name='L172'><i><font color='green'>       because of built-in methods -- keeping a reference to</font></i>
+<a name='L173'><i><font color='green'>       __self__ is probably not a good idea. */</font></i>
+<a name='L174'>    <a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a> = (PyCFunctionObject *)obj;
+<a name='L175'>
+<a name='L176'>    <b>if</b> (<a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>-&gt;m_self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L177'>        <i><font color='green'>/* built-in function: look up the module name */</font></i>
+<a name='L178'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *mod = <a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>-&gt;m_module;
+<a name='L179'>        <b>const</b> <b>char</b> *modname;
+<a name='L180'>        <b>if</b> (mod &amp;&amp; PyUnicode_Check(mod)) <font color='red'>{</font>
+<a name='L181'>            <i><font color='green'>/* XXX: The following will truncate module names with embedded</font></i>
+<a name='L182'><i><font color='green'>             * null-characters.  It is unlikely that this can happen in</font></i>
+<a name='L183'><i><font color='green'>             * practice and the concequences are not serious enough to</font></i>
+<a name='L184'><i><font color='green'>             * introduce extra checks here.</font></i>
+<a name='L185'><i><font color='green'>             */</font></i>
+<a name='L186'>            modname = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(mod);
+<a name='L187'>            <b>if</b> (modname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L188'>                modname = "&lt;encoding error&gt;";
+<a name='L189'>                <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L190'>            <font color='red'>}</font>
+<a name='L191'>        <font color='red'>}</font>
+<a name='L192'>        <b>else</b> <b>if</b> (mod &amp;&amp; PyModule_Check(mod)) <font color='red'>{</font>
+<a name='L193'>            modname = <a href='../S/2802.html#L173' title='Defined at 173 in Objects/moduleobject.c.'>PyModule_GetName</a>(mod);
+<a name='L194'>            <b>if</b> (modname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L195'>                <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L196'>                modname = "builtins";
+<a name='L197'>            <font color='red'>}</font>
+<a name='L198'>        <font color='red'>}</font>
+<a name='L199'>        <b>else</b> <font color='red'>{</font>
+<a name='L200'>            modname = "builtins";
+<a name='L201'>        <font color='red'>}</font>
+<a name='L202'>        <b>if</b> (strcmp(modname, "builtins") != 0)
+<a name='L203'>            <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;%s.%s&gt;",
+<a name='L204'>                                        modname,
+<a name='L205'>                                        <a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>-&gt;m_ml-&gt;ml_name);
+<a name='L206'>        <b>else</b>
+<a name='L207'>            <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;%s&gt;",
+<a name='L208'>                                        <a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>-&gt;m_ml-&gt;ml_name);
+<a name='L209'>    <font color='red'>}</font>
+<a name='L210'>    <b>else</b> <font color='red'>{</font>
+<a name='L211'>        <i><font color='green'>/* built-in method: try to return</font></i>
+<a name='L212'><i><font color='green'>            repr(getattr(type(__self__), __name__))</font></i>
+<a name='L213'><i><font color='green'>        */</font></i>
+<a name='L214'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *self = <a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>-&gt;m_self;
+<a name='L215'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(<a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>-&gt;m_ml-&gt;ml_name);
+<a name='L216'>        <b>if</b> (name != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L217'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *mo = <a href='../S/2824.html#L2374' title='Defined at 2374 in Objects/typeobject.c.'>_PyType_Lookup</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self), name);
+<a name='L218'>            <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(mo);
+<a name='L219'>            Py_DECREF(name);
+<a name='L220'>            <b>if</b> (mo != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L221'>                <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res = <a href='../S/2803.html#L368' title='Defined at 368 in Objects/object.c.'>PyObject_Repr</a>(mo);
+<a name='L222'>                Py_DECREF(mo);
+<a name='L223'>                <b>if</b> (res != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L224'>                    <b>return</b> res;
+<a name='L225'>            <font color='red'>}</font>
+<a name='L226'>        <font color='red'>}</font>
+<a name='L227'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L228'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;built-in method %s&gt;",
+<a name='L229'>                                    <a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>-&gt;m_ml-&gt;ml_name);
+<a name='L230'>    <font color='red'>}</font>
+<a name='L231'><font color='red'>}</font>
+<a name='L232'>
+<a name='L233'><b>static</b> <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>*
+<a name='L234'><a href='../S/2578.html#L395' title='Refered from 395 in Modules/_lsprof.c.'>newProfilerEntry</a>(ProfilerObject *pObj, <b>void</b> *key, PyObject *userObj)
+<a name='L235'><font color='red'>{</font>
+<a name='L236'>    <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *self;
+<a name='L237'>    self = (<a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>*) malloc(<b>sizeof</b>(<a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>));
+<a name='L238'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L239'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= <a href='../S/2578.html#L116' title='Defined at 116 in Modules/_lsprof.c.'>POF_NOMEMORY</a>;
+<a name='L240'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L241'>    <font color='red'>}</font>
+<a name='L242'>    userObj = <a href='../S/2578.html#L164' title='Defined at 164 in Modules/_lsprof.c.'>normalizeUserObj</a>(userObj);
+<a name='L243'>    <b>if</b> (userObj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L244'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L245'>        free(self);
+<a name='L246'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= <a href='../S/2578.html#L116' title='Defined at 116 in Modules/_lsprof.c.'>POF_NOMEMORY</a>;
+<a name='L247'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L248'>    <font color='red'>}</font>
+<a name='L249'>    self-&gt;header.<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L250'>    self-&gt;userObj = userObj;
+<a name='L251'>    self-&gt;tt = 0;
+<a name='L252'>    self-&gt;it = 0;
+<a name='L253'>    self-&gt;callcount = 0;
+<a name='L254'>    self-&gt;recursivecallcount = 0;
+<a name='L255'>    self-&gt;recursionLevel = 0;
+<a name='L256'>    self-&gt;calls = <a href='../S/2703.html#L13' title='Defined at 13 in Modules/rotatingtree.h.'>EMPTY_ROTATING_TREE</a>;
+<a name='L257'>    <a href='../S/2702.html#L31' title='Defined at 31 in Modules/rotatingtree.c.'>RotatingTree_Add</a>(&amp;pObj-&gt;profilerEntries, &amp;self-&gt;header);
+<a name='L258'>    <b>return</b> self;
+<a name='L259'><font color='red'>}</font>
+<a name='L260'>
+<a name='L261'><b>static</b> <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>*
+<a name='L262'><a href='../R/8022.html' title='Multiple refered from 2 places.'>getEntry</a>(ProfilerObject *pObj, <b>void</b> *key)
+<a name='L263'><font color='red'>{</font>
+<a name='L264'>    <b>return</b> (<a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>*) <a href='../S/2702.html#L48' title='Defined at 48 in Modules/rotatingtree.c.'>RotatingTree_Get</a>(&amp;pObj-&gt;profilerEntries, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L265'><font color='red'>}</font>
+<a name='L266'>
+<a name='L267'><b>static</b> <a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a> *
+<a name='L268'><a href='../R/8024.html' title='Multiple refered from 2 places.'>getSubEntry</a>(ProfilerObject *pObj, ProfilerEntry *caller, ProfilerEntry* entry)
+<a name='L269'><font color='red'>{</font>
+<a name='L270'>    <b>return</b> (<a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a>*) <a href='../S/2702.html#L48' title='Defined at 48 in Modules/rotatingtree.c.'>RotatingTree_Get</a>(&amp;caller-&gt;calls,
+<a name='L271'>                                                (<b>void</b> *)entry);
+<a name='L272'><font color='red'>}</font>
+<a name='L273'>
+<a name='L274'><b>static</b> <a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a> *
+<a name='L275'><a href='../S/2578.html#L339' title='Refered from 339 in Modules/_lsprof.c.'>newSubEntry</a>(ProfilerObject *pObj,  ProfilerEntry *caller, ProfilerEntry* entry)
+<a name='L276'><font color='red'>{</font>
+<a name='L277'>    <a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a> *self;
+<a name='L278'>    self = (<a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a>*) malloc(<b>sizeof</b>(<a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a>));
+<a name='L279'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L280'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= <a href='../S/2578.html#L116' title='Defined at 116 in Modules/_lsprof.c.'>POF_NOMEMORY</a>;
+<a name='L281'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L282'>    <font color='red'>}</font>
+<a name='L283'>    self-&gt;header.<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = (<b>void</b> *)entry;
+<a name='L284'>    self-&gt;tt = 0;
+<a name='L285'>    self-&gt;it = 0;
+<a name='L286'>    self-&gt;callcount = 0;
+<a name='L287'>    self-&gt;recursivecallcount = 0;
+<a name='L288'>    self-&gt;recursionLevel = 0;
+<a name='L289'>    <a href='../S/2702.html#L31' title='Defined at 31 in Modules/rotatingtree.c.'>RotatingTree_Add</a>(&amp;caller-&gt;calls, &amp;self-&gt;header);
+<a name='L290'>    <b>return</b> self;
+<a name='L291'><font color='red'>}</font>
+<a name='L292'>
+<a name='L293'><b>static</b> <b>int</b> <a href='../S/2578.html#L303' title='Refered from 303 in Modules/_lsprof.c.'>freeSubEntry</a>(<a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> *header, <b>void</b> *arg)
+<a name='L294'><font color='red'>{</font>
+<a name='L295'>    <a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a> *subentry = (<a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a>*) header;
+<a name='L296'>    free(subentry);
+<a name='L297'>    <b>return</b> 0;
+<a name='L298'><font color='red'>}</font>
+<a name='L299'>
+<a name='L300'><b>static</b> <b>int</b> <a href='../S/2578.html#L311' title='Refered from 311 in Modules/_lsprof.c.'>freeEntry</a>(<a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> *header, <b>void</b> *arg)
+<a name='L301'><font color='red'>{</font>
+<a name='L302'>    <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *entry = (<a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>*) header;
+<a name='L303'>    <a href='../S/2702.html#L107' title='Defined at 107 in Modules/rotatingtree.c.'>RotatingTree_Enum</a>(entry-&gt;calls, <a href='../S/2578.html#L293' title='Defined at 293 in Modules/_lsprof.c.'>freeSubEntry</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L304'>    Py_DECREF(entry-&gt;userObj);
+<a name='L305'>    free(entry);
+<a name='L306'>    <b>return</b> 0;
+<a name='L307'><font color='red'>}</font>
+<a name='L308'>
+<a name='L309'><b>static</b> <b>void</b> <a href='../R/6668.html' title='Multiple refered from 2 places.'>clearEntries</a>(ProfilerObject *pObj)
+<a name='L310'><font color='red'>{</font>
+<a name='L311'>    <a href='../S/2702.html#L107' title='Defined at 107 in Modules/rotatingtree.c.'>RotatingTree_Enum</a>(pObj-&gt;profilerEntries, <a href='../S/2578.html#L300' title='Defined at 300 in Modules/_lsprof.c.'>freeEntry</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L312'>    pObj-&gt;profilerEntries = <a href='../S/2703.html#L13' title='Defined at 13 in Modules/rotatingtree.h.'>EMPTY_ROTATING_TREE</a>;
+<a name='L313'>    <i><font color='green'>/* release the memory hold by the ProfilerContexts */</font></i>
+<a name='L314'>    <b>if</b> (pObj-&gt;currentProfilerContext) <font color='red'>{</font>
+<a name='L315'>        free(pObj-&gt;currentProfilerContext);
+<a name='L316'>        pObj-&gt;currentProfilerContext = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L317'>    <font color='red'>}</font>
+<a name='L318'>    <b>while</b> (pObj-&gt;freelistProfilerContext) <font color='red'>{</font>
+<a name='L319'>        <a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a> *c = pObj-&gt;freelistProfilerContext;
+<a name='L320'>        pObj-&gt;freelistProfilerContext = c-&gt;previous;
+<a name='L321'>        free(c);
+<a name='L322'>    <font color='red'>}</font>
+<a name='L323'>    pObj-&gt;freelistProfilerContext = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L324'><font color='red'>}</font>
+<a name='L325'>
+<a name='L326'><b>static</b> <b>void</b>
+<a name='L327'><a href='../S/2578.html#L413' title='Refered from 413 in Modules/_lsprof.c.'>initContext</a>(ProfilerObject *pObj, ProfilerContext *self, ProfilerEntry *entry)
+<a name='L328'><font color='red'>{</font>
+<a name='L329'>    self-&gt;ctxEntry = entry;
+<a name='L330'>    self-&gt;subt = 0;
+<a name='L331'>    self-&gt;previous = pObj-&gt;currentProfilerContext;
+<a name='L332'>    pObj-&gt;currentProfilerContext = self;
+<a name='L333'>    ++entry-&gt;recursionLevel;
+<a name='L334'>    <b>if</b> ((pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2578.html#L114' title='Defined at 114 in Modules/_lsprof.c.'>POF_SUBCALLS</a>) &amp;&amp; self-&gt;previous) <font color='red'>{</font>
+<a name='L335'>        <i><font color='green'>/* find or create an entry for me in my caller's entry */</font></i>
+<a name='L336'>        <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *caller = self-&gt;previous-&gt;ctxEntry;
+<a name='L337'>        <a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a> *subentry = <a href='../S/2578.html#L268' title='Defined at 268 in Modules/_lsprof.c.'>getSubEntry</a>(pObj, caller, entry);
+<a name='L338'>        <b>if</b> (subentry == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L339'>            subentry = <a href='../S/2578.html#L275' title='Defined at 275 in Modules/_lsprof.c.'>newSubEntry</a>(pObj, caller, entry);
+<a name='L340'>        <b>if</b> (subentry)
+<a name='L341'>            ++subentry-&gt;recursionLevel;
+<a name='L342'>    <font color='red'>}</font>
+<a name='L343'>    self-&gt;<a href='../S/2333.html#L122' title='Defined at 122 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t0</a> = <a href='../S/2578.html#L157' title='Defined at 157 in Modules/_lsprof.c.'>CALL_TIMER</a>(pObj);
+<a name='L344'><font color='red'>}</font>
+<a name='L345'>
+<a name='L346'><b>static</b> <b>void</b>
+<a name='L347'><a href='../R/4500.html' title='Multiple refered from 2 places.'>Stop</a>(ProfilerObject *pObj, ProfilerContext *self, ProfilerEntry *entry)
+<a name='L348'><font color='red'>{</font>
+<a name='L349'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> tt = <a href='../S/2578.html#L157' title='Defined at 157 in Modules/_lsprof.c.'>CALL_TIMER</a>(pObj) - self-&gt;<a href='../S/2333.html#L122' title='Defined at 122 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t0</a>;
+<a name='L350'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> it = tt - self-&gt;subt;
+<a name='L351'>    <b>if</b> (self-&gt;previous)
+<a name='L352'>        self-&gt;previous-&gt;subt += tt;
+<a name='L353'>    pObj-&gt;currentProfilerContext = self-&gt;previous;
+<a name='L354'>    <b>if</b> (--entry-&gt;recursionLevel == 0)
+<a name='L355'>        entry-&gt;tt += tt;
+<a name='L356'>    <b>else</b>
+<a name='L357'>        ++entry-&gt;recursivecallcount;
+<a name='L358'>    entry-&gt;it += it;
+<a name='L359'>    entry-&gt;callcount++;
+<a name='L360'>    <b>if</b> ((pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2578.html#L114' title='Defined at 114 in Modules/_lsprof.c.'>POF_SUBCALLS</a>) &amp;&amp; self-&gt;previous) <font color='red'>{</font>
+<a name='L361'>        <i><font color='green'>/* find or create an entry for me in my caller's entry */</font></i>
+<a name='L362'>        <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *caller = self-&gt;previous-&gt;ctxEntry;
+<a name='L363'>        <a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a> *subentry = <a href='../S/2578.html#L268' title='Defined at 268 in Modules/_lsprof.c.'>getSubEntry</a>(pObj, caller, entry);
+<a name='L364'>        <b>if</b> (subentry) <font color='red'>{</font>
+<a name='L365'>            <b>if</b> (--subentry-&gt;recursionLevel == 0)
+<a name='L366'>                subentry-&gt;tt += tt;
+<a name='L367'>            <b>else</b>
+<a name='L368'>                ++subentry-&gt;recursivecallcount;
+<a name='L369'>            subentry-&gt;it += it;
+<a name='L370'>            ++subentry-&gt;callcount;
+<a name='L371'>        <font color='red'>}</font>
+<a name='L372'>    <font color='red'>}</font>
+<a name='L373'><font color='red'>}</font>
+<a name='L374'>
+<a name='L375'><b>static</b> <b>void</b>
+<a name='L376'><a href='../R/9783.html' title='Multiple refered from 2 places.'>ptrace_enter_call</a>(PyObject *self, <b>void</b> *key, PyObject *userObj)
+<a name='L377'><font color='red'>{</font>
+<a name='L378'>    <i><font color='green'>/* entering a call to the function identified by 'key'</font></i>
+<a name='L379'><i><font color='green'>       (which can be a PyCodeObject or a PyMethodDef pointer) */</font></i>
+<a name='L380'>    <a href='../S/2578.html#L111' title='Defined at 111 in Modules/_lsprof.c.'>ProfilerObject</a> *pObj = (<a href='../S/2578.html#L111' title='Defined at 111 in Modules/_lsprof.c.'>ProfilerObject</a>*)self;
+<a name='L381'>    <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *profEntry;
+<a name='L382'>    <a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a> *pContext;
+<a name='L383'>
+<a name='L384'>    <i><font color='green'>/* In the case of entering a generator expression frame via a</font></i>
+<a name='L385'><i><font color='green'>     * throw (gen_send_ex(.., 1)), we may already have an</font></i>
+<a name='L386'><i><font color='green'>     * Exception set here. We must not mess around with this</font></i>
+<a name='L387'><i><font color='green'>     * exception, and some of the code under here assumes that</font></i>
+<a name='L388'><i><font color='green'>     * PyErr_* is its own to mess around with, so we have to</font></i>
+<a name='L389'><i><font color='green'>     * save and restore any current exception. */</font></i>
+<a name='L390'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *last_type, *last_value, *last_tb;
+<a name='L391'>    <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;last_type, &amp;last_value, &amp;last_tb);
+<a name='L392'>
+<a name='L393'>    profEntry = <a href='../S/2578.html#L262' title='Defined at 262 in Modules/_lsprof.c.'>getEntry</a>(pObj, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L394'>    <b>if</b> (profEntry == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L395'>        profEntry = <a href='../S/2578.html#L234' title='Defined at 234 in Modules/_lsprof.c.'>newProfilerEntry</a>(pObj, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, userObj);
+<a name='L396'>        <b>if</b> (profEntry == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L397'>            <b>goto</b> restorePyerr;
+<a name='L398'>    <font color='red'>}</font>
+<a name='L399'>    <i><font color='green'>/* grab a ProfilerContext out of the free list */</font></i>
+<a name='L400'>    pContext = pObj-&gt;freelistProfilerContext;
+<a name='L401'>    <b>if</b> (pContext) <font color='red'>{</font>
+<a name='L402'>        pObj-&gt;freelistProfilerContext = pContext-&gt;previous;
+<a name='L403'>    <font color='red'>}</font>
+<a name='L404'>    <b>else</b> <font color='red'>{</font>
+<a name='L405'>        <i><font color='green'>/* free list exhausted, allocate a new one */</font></i>
+<a name='L406'>        pContext = (<a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a>*)
+<a name='L407'>            malloc(<b>sizeof</b>(<a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a>));
+<a name='L408'>        <b>if</b> (pContext == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L409'>            pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= <a href='../S/2578.html#L116' title='Defined at 116 in Modules/_lsprof.c.'>POF_NOMEMORY</a>;
+<a name='L410'>            <b>goto</b> restorePyerr;
+<a name='L411'>        <font color='red'>}</font>
+<a name='L412'>    <font color='red'>}</font>
+<a name='L413'>    <a href='../S/2578.html#L327' title='Defined at 327 in Modules/_lsprof.c.'>initContext</a>(pObj, pContext, profEntry);
+<a name='L414'>
+<a name='L415'>restorePyerr:
+<a name='L416'>    <a href='../S/3106.html#L25' title='Defined at 25 in Python/errors.c.'>PyErr_Restore</a>(last_type, last_value, last_tb);
+<a name='L417'><font color='red'>}</font>
+<a name='L418'>
+<a name='L419'><b>static</b> <b>void</b>
+<a name='L420'><a href='../R/9784.html' title='Multiple refered from 2 places.'>ptrace_leave_call</a>(PyObject *self, <b>void</b> *key)
+<a name='L421'><font color='red'>{</font>
+<a name='L422'>    <i><font color='green'>/* leaving a call to the function identified by 'key' */</font></i>
+<a name='L423'>    <a href='../S/2578.html#L111' title='Defined at 111 in Modules/_lsprof.c.'>ProfilerObject</a> *pObj = (<a href='../S/2578.html#L111' title='Defined at 111 in Modules/_lsprof.c.'>ProfilerObject</a>*)self;
+<a name='L424'>    <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *profEntry;
+<a name='L425'>    <a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a> *pContext;
+<a name='L426'>
+<a name='L427'>    pContext = pObj-&gt;currentProfilerContext;
+<a name='L428'>    <b>if</b> (pContext == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L429'>        <b>return</b>;
+<a name='L430'>    profEntry = <a href='../S/2578.html#L262' title='Defined at 262 in Modules/_lsprof.c.'>getEntry</a>(pObj, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L431'>    <b>if</b> (profEntry) <font color='red'>{</font>
+<a name='L432'>        <a href='../S/2578.html#L347' title='Defined at 347 in Modules/_lsprof.c.'>Stop</a>(pObj, pContext, profEntry);
+<a name='L433'>    <font color='red'>}</font>
+<a name='L434'>    <b>else</b> <font color='red'>{</font>
+<a name='L435'>        pObj-&gt;currentProfilerContext = pContext-&gt;previous;
+<a name='L436'>    <font color='red'>}</font>
+<a name='L437'>    <i><font color='green'>/* put pContext into the free list */</font></i>
+<a name='L438'>    pContext-&gt;previous = pObj-&gt;freelistProfilerContext;
+<a name='L439'>    pObj-&gt;freelistProfilerContext = pContext;
+<a name='L440'><font color='red'>}</font>
+<a name='L441'>
+<a name='L442'><b>static</b> <b>int</b>
+<a name='L443'><a href='../S/2578.html#L709' title='Refered from 709 in Modules/_lsprof.c.'>profiler_callback</a>(PyObject *self, PyFrameObject *frame, <b>int</b> what,
+<a name='L444'>                  PyObject *arg)
+<a name='L445'><font color='red'>{</font>
+<a name='L446'>    <b>switch</b> (what) <font color='red'>{</font>
+<a name='L447'>
+<a name='L448'>    <i><font color='green'>/* the 'frame' of a called function is about to start its execution */</font></i>
+<a name='L449'>    <b>case</b> <a href='../S/566.html#L55' title='Defined at 55 in Include/pystate.h.'>PyTrace_CALL</a>:
+<a name='L450'>        <a href='../S/2578.html#L376' title='Defined at 376 in Modules/_lsprof.c.'>ptrace_enter_call</a>(self, (<b>void</b> *)frame-&gt;f_code,
+<a name='L451'>                                (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)frame-&gt;f_code);
+<a name='L452'>        <b>break</b>;
+<a name='L453'>
+<a name='L454'>    <i><font color='green'>/* the 'frame' of a called function is about to finish</font></i>
+<a name='L455'><i><font color='green'>       (either normally or with an exception) */</font></i>
+<a name='L456'>    <b>case</b> <a href='../S/566.html#L58' title='Defined at 58 in Include/pystate.h.'>PyTrace_RETURN</a>:
+<a name='L457'>        <a href='../S/2578.html#L420' title='Defined at 420 in Modules/_lsprof.c.'>ptrace_leave_call</a>(self, (<b>void</b> *)frame-&gt;f_code);
+<a name='L458'>        <b>break</b>;
+<a name='L459'>
+<a name='L460'>    <i><font color='green'>/* case PyTrace_EXCEPTION:</font></i>
+<a name='L461'><i><font color='green'>        If the exception results in the function exiting, a</font></i>
+<a name='L462'><i><font color='green'>        PyTrace_RETURN event will be generated, so we don't need to</font></i>
+<a name='L463'><i><font color='green'>        handle it. */</font></i>
+<a name='L464'>
+<a name='L465'><font color='darkred'>#ifdef</font> <a href='../S/566.html#L59' title='Defined at 59 in Include/pystate.h.'>PyTrace_C_CALL</a>   <i><font color='green'>/* not defined in Python &lt;= 2.3 */</font></i>
+<a name='L466'>    <i><font color='green'>/* the Python function 'frame' is issuing a call to the built-in</font></i>
+<a name='L467'><i><font color='green'>       function 'arg' */</font></i>
+<a name='L468'>    <b>case</b> <a href='../S/566.html#L59' title='Defined at 59 in Include/pystate.h.'>PyTrace_C_CALL</a>:
+<a name='L469'>        <b>if</b> ((((<a href='../S/2578.html#L111' title='Defined at 111 in Modules/_lsprof.c.'>ProfilerObject</a> *)self)-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2578.html#L115' title='Defined at 115 in Modules/_lsprof.c.'>POF_BUILTINS</a>)
+<a name='L470'>            &amp;&amp; PyCFunction_Check(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)) <font color='red'>{</font>
+<a name='L471'>            <a href='../S/2578.html#L376' title='Defined at 376 in Modules/_lsprof.c.'>ptrace_enter_call</a>(self,
+<a name='L472'>                              ((PyCFunctionObject *)<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)-&gt;m_ml,
+<a name='L473'>                              <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L474'>        <font color='red'>}</font>
+<a name='L475'>        <b>break</b>;
+<a name='L476'>
+<a name='L477'>    <i><font color='green'>/* the call to the built-in function 'arg' is returning into its</font></i>
+<a name='L478'><i><font color='green'>       caller 'frame' */</font></i>
+<a name='L479'>    <b>case</b> <a href='../S/566.html#L61' title='Defined at 61 in Include/pystate.h.'>PyTrace_C_RETURN</a>:              <i><font color='green'>/* ...normally */</font></i>
+<a name='L480'>    <b>case</b> <a href='../S/566.html#L60' title='Defined at 60 in Include/pystate.h.'>PyTrace_C_EXCEPTION</a>:           <i><font color='green'>/* ...with an exception set */</font></i>
+<a name='L481'>        <b>if</b> ((((<a href='../S/2578.html#L111' title='Defined at 111 in Modules/_lsprof.c.'>ProfilerObject</a> *)self)-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2578.html#L115' title='Defined at 115 in Modules/_lsprof.c.'>POF_BUILTINS</a>)
+<a name='L482'>            &amp;&amp; PyCFunction_Check(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)) <font color='red'>{</font>
+<a name='L483'>            <a href='../S/2578.html#L420' title='Defined at 420 in Modules/_lsprof.c.'>ptrace_leave_call</a>(self,
+<a name='L484'>                              ((PyCFunctionObject *)<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)-&gt;m_ml);
+<a name='L485'>        <font color='red'>}</font>
+<a name='L486'>        <b>break</b>;
+<a name='L487'><font color='darkred'>#endif</font>
+<a name='L488'>
+<a name='L489'>    <b>default</b>:
+<a name='L490'>        <b>break</b>;
+<a name='L491'>    <font color='red'>}</font>
+<a name='L492'>    <b>return</b> 0;
+<a name='L493'><font color='red'>}</font>
+<a name='L494'>
+<a name='L495'><b>static</b> <b>int</b>
+<a name='L496'><a href='../R/9514.html' title='Multiple refered from 2 places.'>pending_exception</a>(ProfilerObject *pObj)
+<a name='L497'><font color='red'>{</font>
+<a name='L498'>    <b>if</b> (pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2578.html#L116' title='Defined at 116 in Modules/_lsprof.c.'>POF_NOMEMORY</a>) <font color='red'>{</font>
+<a name='L499'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> -= <a href='../S/2578.html#L116' title='Defined at 116 in Modules/_lsprof.c.'>POF_NOMEMORY</a>;
+<a name='L500'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_MemoryError,
+<a name='L501'>                        "memory was exhausted while profiling");
+<a name='L502'>        <b>return</b> -1;
+<a name='L503'>    <font color='red'>}</font>
+<a name='L504'>    <b>return</b> 0;
+<a name='L505'><font color='red'>}</font>
+<a name='L506'>
+<a name='L507'><i><font color='green'>/************************************************************/</font></i>
+<a name='L508'>
+<a name='L509'><b>static</b> <a href='../D/3794.html' title='Multiple defined in 2 places.'>PyStructSequence_Field</a> profiler_entry_fields[] = <font color='red'>{</font>
+<a name='L510'>    <font color='red'>{</font>"code",         "code object or built-in function name"<font color='red'>}</font>,
+<a name='L511'>    <font color='red'>{</font>"callcount",    "how many times this was called"<font color='red'>}</font>,
+<a name='L512'>    <font color='red'>{</font>"reccallcount", "how many times called recursively"<font color='red'>}</font>,
+<a name='L513'>    <font color='red'>{</font>"totaltime",    "total time in this entry"<font color='red'>}</font>,
+<a name='L514'>    <font color='red'>{</font>"inlinetime",   "inline time in this entry (not in subcalls)"<font color='red'>}</font>,
+<a name='L515'>    <font color='red'>{</font>"calls",        "details of the calls"<font color='red'>}</font>,
+<a name='L516'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L517'><font color='red'>}</font>;
+<a name='L518'>
+<a name='L519'><b>static</b> <a href='../D/3794.html' title='Multiple defined in 2 places.'>PyStructSequence_Field</a> profiler_subentry_fields[] = <font color='red'>{</font>
+<a name='L520'>    <font color='red'>{</font>"code",         "called code object or built-in function name"<font color='red'>}</font>,
+<a name='L521'>    <font color='red'>{</font>"callcount",    "how many times this is called"<font color='red'>}</font>,
+<a name='L522'>    <font color='red'>{</font>"reccallcount", "how many times this is called recursively"<font color='red'>}</font>,
+<a name='L523'>    <font color='red'>{</font>"totaltime",    "total time spent in this call"<font color='red'>}</font>,
+<a name='L524'>    <font color='red'>{</font>"inlinetime",   "inline time (not in further subcalls)"<font color='red'>}</font>,
+<a name='L525'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L526'><font color='red'>}</font>;
+<a name='L527'>
+<a name='L528'><b>static</b> <a href='../D/3793.html' title='Multiple defined in 2 places.'>PyStructSequence_Desc</a> profiler_entry_desc = <font color='red'>{</font>
+<a name='L529'>    "_lsprof.profiler_entry", <i><font color='green'>/* name */</font></i>
+<a name='L530'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* doc */</font></i>
+<a name='L531'>    profiler_entry_fields,
+<a name='L532'>    6
+<a name='L533'><font color='red'>}</font>;
+<a name='L534'>
+<a name='L535'><b>static</b> <a href='../D/3793.html' title='Multiple defined in 2 places.'>PyStructSequence_Desc</a> profiler_subentry_desc = <font color='red'>{</font>
+<a name='L536'>    "_lsprof.profiler_subentry", <i><font color='green'>/* name */</font></i>
+<a name='L537'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* doc */</font></i>
+<a name='L538'>    profiler_subentry_fields,
+<a name='L539'>    5
+<a name='L540'><font color='red'>}</font>;
+<a name='L541'>
+<a name='L542'><b>static</b> <b>int</b> initialized;
+<a name='L543'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> StatsEntryType;
+<a name='L544'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> StatsSubEntryType;
+<a name='L545'>
+<a name='L546'>
+<a name='L547'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L548'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *list;
+<a name='L549'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *sublist;
+<a name='L550'>    <b>double</b> <a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a>;
+<a name='L551'><font color='red'>}</font> <a href='../R/10514.html' title='Multiple refered from 3 places.'>statscollector_t</a>;
+<a name='L552'>
+<a name='L553'><b>static</b> <b>int</b> <a href='../S/2578.html#L588' title='Refered from 588 in Modules/_lsprof.c.'>statsForSubEntry</a>(<a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> *node, <b>void</b> *arg)
+<a name='L554'><font color='red'>{</font>
+<a name='L555'>    <a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a> *sentry = (<a href='../S/2578.html#L82' title='Defined at 82 in Modules/_lsprof.c.'>ProfilerSubEntry</a>*) <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L556'>    <a href='../S/2578.html#L551' title='Defined at 551 in Modules/_lsprof.c.'>statscollector_t</a> *<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a> = (<a href='../S/2578.html#L551' title='Defined at 551 in Modules/_lsprof.c.'>statscollector_t</a>*) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L557'>    <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *entry = (<a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>*) sentry-&gt;header.<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L558'>    <b>int</b> err;
+<a name='L559'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *sinfo;
+<a name='L560'>    sinfo = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;StatsSubEntryType,
+<a name='L561'>                                  "((Olldd))",
+<a name='L562'>                                  entry-&gt;userObj,
+<a name='L563'>                                  sentry-&gt;callcount,
+<a name='L564'>                                  sentry-&gt;recursivecallcount,
+<a name='L565'>                                  <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;<a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a> * sentry-&gt;tt,
+<a name='L566'>                                  <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;<a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a> * sentry-&gt;it);
+<a name='L567'>    <b>if</b> (sinfo == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L568'>        <b>return</b> -1;
+<a name='L569'>    err = <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;sublist, sinfo);
+<a name='L570'>    Py_DECREF(sinfo);
+<a name='L571'>    <b>return</b> err;
+<a name='L572'><font color='red'>}</font>
+<a name='L573'>
+<a name='L574'><b>static</b> <b>int</b> <a href='../S/2578.html#L653' title='Refered from 653 in Modules/_lsprof.c.'>statsForEntry</a>(<a href='../S/2703.html#L15' title='Defined at 15 in Modules/rotatingtree.h.'>rotating_node_t</a> *node, <b>void</b> *arg)
+<a name='L575'><font color='red'>{</font>
+<a name='L576'>    <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *entry = (<a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a>*) <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L577'>    <a href='../S/2578.html#L551' title='Defined at 551 in Modules/_lsprof.c.'>statscollector_t</a> *<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a> = (<a href='../S/2578.html#L551' title='Defined at 551 in Modules/_lsprof.c.'>statscollector_t</a>*) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L578'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *info;
+<a name='L579'>    <b>int</b> err;
+<a name='L580'>    <b>if</b> (entry-&gt;callcount == 0)
+<a name='L581'>        <b>return</b> 0;   <i><font color='green'>/* skip */</font></i>
+<a name='L582'>
+<a name='L583'>    <b>if</b> (entry-&gt;calls != <a href='../S/2703.html#L13' title='Defined at 13 in Modules/rotatingtree.h.'>EMPTY_ROTATING_TREE</a>) <font color='red'>{</font>
+<a name='L584'>        <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;sublist = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L585'>        <b>if</b> (<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;sublist == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L586'>            <b>return</b> -1;
+<a name='L587'>        <b>if</b> (<a href='../S/2702.html#L107' title='Defined at 107 in Modules/rotatingtree.c.'>RotatingTree_Enum</a>(entry-&gt;calls,
+<a name='L588'>                              <a href='../S/2578.html#L553' title='Defined at 553 in Modules/_lsprof.c.'>statsForSubEntry</a>, <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>) != 0) <font color='red'>{</font>
+<a name='L589'>            Py_DECREF(<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;sublist);
+<a name='L590'>            <b>return</b> -1;
+<a name='L591'>        <font color='red'>}</font>
+<a name='L592'>    <font color='red'>}</font>
+<a name='L593'>    <b>else</b> <font color='red'>{</font>
+<a name='L594'>        Py_INCREF(Py_None);
+<a name='L595'>        <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;sublist = Py_None;
+<a name='L596'>    <font color='red'>}</font>
+<a name='L597'>
+<a name='L598'>    info = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;StatsEntryType,
+<a name='L599'>                                 "((OllddO))",
+<a name='L600'>                                 entry-&gt;userObj,
+<a name='L601'>                                 entry-&gt;callcount,
+<a name='L602'>                                 entry-&gt;recursivecallcount,
+<a name='L603'>                                 <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;<a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a> * entry-&gt;tt,
+<a name='L604'>                                 <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;<a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a> * entry-&gt;it,
+<a name='L605'>                                 <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;sublist);
+<a name='L606'>    Py_DECREF(<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;sublist);
+<a name='L607'>    <b>if</b> (info == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L608'>        <b>return</b> -1;
+<a name='L609'>    err = <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>-&gt;list, info);
+<a name='L610'>    Py_DECREF(info);
+<a name='L611'>    <b>return</b> err;
+<a name='L612'><font color='red'>}</font>
+<a name='L613'>
+<a name='L614'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(getstats_doc, "\
+<a name='L615'>getstats() -&gt; list of profiler_entry objects\n\
+<a name='L616'>\n\
+<a name='L617'>Return all information collected by the profiler.\n\
+<a name='L618'>Each profiler_entry is a tuple-like object with the\n\
+<a name='L619'>following attributes:\n\
+<a name='L620'>\n\
+<a name='L621'>    code          code object\n\
+<a name='L622'>    callcount     how many times this was called\n\
+<a name='L623'>    reccallcount  how many times called recursively\n\
+<a name='L624'>    totaltime     total time in this entry\n\
+<a name='L625'>    inlinetime    inline time in this entry (not in subcalls)\n\
+<a name='L626'>    calls         details of the calls\n\
+<a name='L627'>\n\
+<a name='L628'>The calls attribute is either None or a list of\n\
+<a name='L629'>profiler_subentry objects:\n\
+<a name='L630'>\n\
+<a name='L631'>    code          called code object\n\
+<a name='L632'>    callcount     how many times this is called\n\
+<a name='L633'>    reccallcount  how many times this is called recursively\n\
+<a name='L634'>    totaltime     total time spent in this call\n\
+<a name='L635'>    inlinetime    inline time (not in further subcalls)\n\
+<a name='L636'>");
+<a name='L637'>
+<a name='L638'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L639'><a href='../S/2578.html#L805' title='Refered from 805 in Modules/_lsprof.c.'>profiler_getstats</a>(ProfilerObject *pObj, PyObject* noarg)
+<a name='L640'><font color='red'>{</font>
+<a name='L641'>    <a href='../S/2578.html#L551' title='Defined at 551 in Modules/_lsprof.c.'>statscollector_t</a> <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>;
+<a name='L642'>    <b>if</b> (<a href='../S/2578.html#L496' title='Defined at 496 in Modules/_lsprof.c.'>pending_exception</a>(pObj))
+<a name='L643'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L644'>    <b>if</b> (!pObj-&gt;externalTimer)
+<a name='L645'>        <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>.<a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a> = <a href='../D/9085.html' title='Multiple defined in 2 places.'>hpTimerUnit</a>();
+<a name='L646'>    <b>else</b> <b>if</b> (pObj-&gt;externalTimerUnit &gt; 0.0)
+<a name='L647'>        <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>.<a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a> = pObj-&gt;externalTimerUnit;
+<a name='L648'>    <b>else</b>
+<a name='L649'>        <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>.<a href='../S/529.html#L65' title='Defined at 65 in Include/graminit.h.'>factor</a> = 1.0 / <a href='../S/2578.html#L125' title='Defined at 125 in Modules/_lsprof.c.'>DOUBLE_TIMER_PRECISION</a>;
+<a name='L650'>    <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>.list = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L651'>    <b>if</b> (<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>.list == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L652'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L653'>    <b>if</b> (<a href='../S/2702.html#L107' title='Defined at 107 in Modules/rotatingtree.c.'>RotatingTree_Enum</a>(pObj-&gt;profilerEntries, <a href='../S/2578.html#L574' title='Defined at 574 in Modules/_lsprof.c.'>statsForEntry</a>, &amp;<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>)
+<a name='L654'>        != 0) <font color='red'>{</font>
+<a name='L655'>        Py_DECREF(<a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>.list);
+<a name='L656'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L657'>    <font color='red'>}</font>
+<a name='L658'>    <b>return</b> <a href='../S/2676.html#L788' title='Defined at 788 in Modules/gcmodule.c.'>collect</a>.list;
+<a name='L659'><font color='red'>}</font>
+<a name='L660'>
+<a name='L661'><b>static</b> <b>int</b>
+<a name='L662'><a href='../R/10170.html' title='Multiple refered from 2 places.'>setSubcalls</a>(ProfilerObject *pObj, <b>int</b> nvalue)
+<a name='L663'><font color='red'>{</font>
+<a name='L664'>    <b>if</b> (nvalue == 0)
+<a name='L665'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp;= ~<a href='../S/2578.html#L114' title='Defined at 114 in Modules/_lsprof.c.'>POF_SUBCALLS</a>;
+<a name='L666'>    <b>else</b> <b>if</b> (nvalue &gt; 0)
+<a name='L667'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |=  <a href='../S/2578.html#L114' title='Defined at 114 in Modules/_lsprof.c.'>POF_SUBCALLS</a>;
+<a name='L668'>    <b>return</b> 0;
+<a name='L669'><font color='red'>}</font>
+<a name='L670'>
+<a name='L671'><b>static</b> <b>int</b>
+<a name='L672'><a href='../R/10167.html' title='Multiple refered from 2 places.'>setBuiltins</a>(ProfilerObject *pObj, <b>int</b> nvalue)
+<a name='L673'><font color='red'>{</font>
+<a name='L674'>    <b>if</b> (nvalue == 0)
+<a name='L675'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp;= ~<a href='../S/2578.html#L115' title='Defined at 115 in Modules/_lsprof.c.'>POF_BUILTINS</a>;
+<a name='L676'>    <b>else</b> <b>if</b> (nvalue &gt; 0) <font color='red'>{</font>
+<a name='L677'><font color='darkred'>#ifndef</font> <a href='../S/566.html#L59' title='Defined at 59 in Include/pystate.h.'>PyTrace_C_CALL</a>
+<a name='L678'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L679'>                        "builtins=True requires Python &gt;= 2.4");
+<a name='L680'>        <b>return</b> -1;
+<a name='L681'><font color='darkred'>#else</font>
+<a name='L682'>        pObj-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |=  <a href='../S/2578.html#L115' title='Defined at 115 in Modules/_lsprof.c.'>POF_BUILTINS</a>;
+<a name='L683'><font color='darkred'>#endif</font>
+<a name='L684'>    <font color='red'>}</font>
+<a name='L685'>    <b>return</b> 0;
+<a name='L686'><font color='red'>}</font>
+<a name='L687'>
+<a name='L688'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(enable_doc, "\
+<a name='L689'>enable(subcalls=True, builtins=True)\n\
+<a name='L690'>\n\
+<a name='L691'>Start collecting profiling information.\n\
+<a name='L692'>If 'subcalls' is True, also records for each function\n\
+<a name='L693'>statistics separated according to its current caller.\n\
+<a name='L694'>If 'builtins' is True, records the time spent in\n\
+<a name='L695'>built-in functions separately from their caller.\n\
+<a name='L696'>");
+<a name='L697'>
+<a name='L698'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L699'><a href='../S/2578.html#L807' title='Refered from 807 in Modules/_lsprof.c.'>profiler_enable</a>(ProfilerObject *self, PyObject *args, PyObject *kwds)
+<a name='L700'><font color='red'>{</font>
+<a name='L701'>    <b>int</b> subcalls = -1;
+<a name='L702'>    <b>int</b> builtins = -1;
+<a name='L703'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"subcalls", "builtins", 0<font color='red'>}</font>;
+<a name='L704'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "|ii:enable",
+<a name='L705'>                                     kwlist, &amp;subcalls, &amp;builtins))
+<a name='L706'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L707'>    <b>if</b> (<a href='../S/2578.html#L662' title='Defined at 662 in Modules/_lsprof.c.'>setSubcalls</a>(self, subcalls) &lt; 0 || <a href='../S/2578.html#L672' title='Defined at 672 in Modules/_lsprof.c.'>setBuiltins</a>(self, builtins) &lt; 0)
+<a name='L708'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L709'>    <a href='../S/3091.html#L3631' title='Defined at 3631 in Python/ceval.c.'>PyEval_SetProfile</a>(<a href='../S/2578.html#L443' title='Defined at 443 in Modules/_lsprof.c.'>profiler_callback</a>, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self);
+<a name='L710'>    self-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= <a href='../S/2578.html#L113' title='Defined at 113 in Modules/_lsprof.c.'>POF_ENABLED</a>;
+<a name='L711'>    Py_INCREF(Py_None);
+<a name='L712'>    <b>return</b> Py_None;
+<a name='L713'><font color='red'>}</font>
+<a name='L714'>
+<a name='L715'><b>static</b> <b>void</b>
+<a name='L716'><a href='../R/7877.html' title='Multiple refered from 2 places.'>flush_unmatched</a>(ProfilerObject *pObj)
+<a name='L717'><font color='red'>{</font>
+<a name='L718'>    <b>while</b> (pObj-&gt;currentProfilerContext) <font color='red'>{</font>
+<a name='L719'>        <a href='../S/2578.html#L101' title='Defined at 101 in Modules/_lsprof.c.'>ProfilerContext</a> *pContext = pObj-&gt;currentProfilerContext;
+<a name='L720'>        <a href='../S/2578.html#L94' title='Defined at 94 in Modules/_lsprof.c.'>ProfilerEntry</a> *profEntry= pContext-&gt;ctxEntry;
+<a name='L721'>        <b>if</b> (profEntry)
+<a name='L722'>            <a href='../S/2578.html#L347' title='Defined at 347 in Modules/_lsprof.c.'>Stop</a>(pObj, pContext, profEntry);
+<a name='L723'>        <b>else</b>
+<a name='L724'>            pObj-&gt;currentProfilerContext = pContext-&gt;previous;
+<a name='L725'>        <b>if</b> (pContext)
+<a name='L726'>            free(pContext);
+<a name='L727'>    <font color='red'>}</font>
+<a name='L728'>
+<a name='L729'><font color='red'>}</font>
+<a name='L730'>
+<a name='L731'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(disable_doc, "\
+<a name='L732'>disable()\n\
+<a name='L733'>\n\
+<a name='L734'>Stop collecting profiling information.\n\
+<a name='L735'>");
+<a name='L736'>
+<a name='L737'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L738'><a href='../S/2578.html#L809' title='Refered from 809 in Modules/_lsprof.c.'>profiler_disable</a>(ProfilerObject *self, PyObject* noarg)
+<a name='L739'><font color='red'>{</font>
+<a name='L740'>    self-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp;= ~<a href='../S/2578.html#L113' title='Defined at 113 in Modules/_lsprof.c.'>POF_ENABLED</a>;
+<a name='L741'>    <a href='../S/3091.html#L3631' title='Defined at 3631 in Python/ceval.c.'>PyEval_SetProfile</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L742'>    <a href='../S/2578.html#L716' title='Defined at 716 in Modules/_lsprof.c.'>flush_unmatched</a>(self);
+<a name='L743'>    <b>if</b> (<a href='../S/2578.html#L496' title='Defined at 496 in Modules/_lsprof.c.'>pending_exception</a>(self))
+<a name='L744'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L745'>    Py_INCREF(Py_None);
+<a name='L746'>    <b>return</b> Py_None;
+<a name='L747'><font color='red'>}</font>
+<a name='L748'>
+<a name='L749'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(clear_doc, "\
+<a name='L750'>clear()\n\
+<a name='L751'>\n\
+<a name='L752'>Clear all profiling information collected so far.\n\
+<a name='L753'>");
+<a name='L754'>
+<a name='L755'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L756'><a href='../S/2578.html#L811' title='Refered from 811 in Modules/_lsprof.c.'>profiler_clear</a>(ProfilerObject *pObj, PyObject* noarg)
+<a name='L757'><font color='red'>{</font>
+<a name='L758'>    <a href='../S/2578.html#L309' title='Defined at 309 in Modules/_lsprof.c.'>clearEntries</a>(pObj);
+<a name='L759'>    Py_INCREF(Py_None);
+<a name='L760'>    <b>return</b> Py_None;
+<a name='L761'><font color='red'>}</font>
+<a name='L762'>
+<a name='L763'><b>static</b> <b>void</b>
+<a name='L764'><a href='../S/2578.html#L831' title='Refered from 831 in Modules/_lsprof.c.'>profiler_dealloc</a>(ProfilerObject *op)
+<a name='L765'><font color='red'>{</font>
+<a name='L766'>    <b>if</b> (op-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/2578.html#L113' title='Defined at 113 in Modules/_lsprof.c.'>POF_ENABLED</a>)
+<a name='L767'>        <a href='../S/3091.html#L3631' title='Defined at 3631 in Python/ceval.c.'>PyEval_SetProfile</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L768'>    <a href='../S/2578.html#L716' title='Defined at 716 in Modules/_lsprof.c.'>flush_unmatched</a>(op);
+<a name='L769'>    <a href='../S/2578.html#L309' title='Defined at 309 in Modules/_lsprof.c.'>clearEntries</a>(op);
+<a name='L770'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(op-&gt;externalTimer);
+<a name='L771'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(op)-&gt;tp_free(op);
+<a name='L772'><font color='red'>}</font>
+<a name='L773'>
+<a name='L774'><b>static</b> <b>int</b>
+<a name='L775'><a href='../S/2578.html#L862' title='Refered from 862 in Modules/_lsprof.c.'>profiler_init</a>(ProfilerObject *pObj, PyObject *args, PyObject *kw)
+<a name='L776'><font color='red'>{</font>
+<a name='L777'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o;
+<a name='L778'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2560.html#L4087' title='Defined at 4087 in Modules/_datetimemodule.c.'>timer</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L779'>    <b>double</b> timeunit = 0.0;
+<a name='L780'>    <b>int</b> subcalls = 1;
+<a name='L781'><font color='darkred'>#ifdef</font> <a href='../S/566.html#L59' title='Defined at 59 in Include/pystate.h.'>PyTrace_C_CALL</a>
+<a name='L782'>    <b>int</b> builtins = 1;
+<a name='L783'><font color='darkred'>#else</font>
+<a name='L784'>    <b>int</b> builtins = 0;
+<a name='L785'><font color='darkred'>#endif</font>
+<a name='L786'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"timer", "timeunit",
+<a name='L787'>                                   "subcalls", "builtins", 0<font color='red'>}</font>;
+<a name='L788'>
+<a name='L789'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kw, "|Odii:Profiler", kwlist,
+<a name='L790'>                                     &amp;<a href='../S/2560.html#L4087' title='Defined at 4087 in Modules/_datetimemodule.c.'>timer</a>, &amp;timeunit,
+<a name='L791'>                                     &amp;subcalls, &amp;builtins))
+<a name='L792'>        <b>return</b> -1;
+<a name='L793'>
+<a name='L794'>    <b>if</b> (<a href='../S/2578.html#L662' title='Defined at 662 in Modules/_lsprof.c.'>setSubcalls</a>(pObj, subcalls) &lt; 0 || <a href='../S/2578.html#L672' title='Defined at 672 in Modules/_lsprof.c.'>setBuiltins</a>(pObj, builtins) &lt; 0)
+<a name='L795'>        <b>return</b> -1;
+<a name='L796'>    o = pObj-&gt;externalTimer;
+<a name='L797'>    pObj-&gt;externalTimer = <a href='../S/2560.html#L4087' title='Defined at 4087 in Modules/_datetimemodule.c.'>timer</a>;
+<a name='L798'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(<a href='../S/2560.html#L4087' title='Defined at 4087 in Modules/_datetimemodule.c.'>timer</a>);
+<a name='L799'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(o);
+<a name='L800'>    pObj-&gt;externalTimerUnit = timeunit;
+<a name='L801'>    <b>return</b> 0;
+<a name='L802'><font color='red'>}</font>
+<a name='L803'>
+<a name='L804'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> profiler_methods[] = <font color='red'>{</font>
+<a name='L805'>    <font color='red'>{</font>"getstats",    (PyCFunction)<a href='../S/2578.html#L639' title='Defined at 639 in Modules/_lsprof.c.'>profiler_getstats</a>,
+<a name='L806'>                    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,                        getstats_doc<font color='red'>}</font>,
+<a name='L807'>    <font color='red'>{</font>"enable",          (PyCFunction)<a href='../S/2578.html#L699' title='Defined at 699 in Modules/_lsprof.c.'>profiler_enable</a>,
+<a name='L808'>                    <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS,       enable_doc<font color='red'>}</font>,
+<a name='L809'>    <font color='red'>{</font>"disable",         (PyCFunction)<a href='../S/2578.html#L738' title='Defined at 738 in Modules/_lsprof.c.'>profiler_disable</a>,
+<a name='L810'>                    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,                        disable_doc<font color='red'>}</font>,
+<a name='L811'>    <font color='red'>{</font>"clear",           (PyCFunction)<a href='../S/2578.html#L756' title='Defined at 756 in Modules/_lsprof.c.'>profiler_clear</a>,
+<a name='L812'>                    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,                        clear_doc<font color='red'>}</font>,
+<a name='L813'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L814'><font color='red'>}</font>;
+<a name='L815'>
+<a name='L816'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(profiler_doc, "\
+<a name='L817'>Profiler(custom_timer=None, time_unit=None, subcalls=True, builtins=True)\n\
+<a name='L818'>\n\
+<a name='L819'>    Builds a profiler object using the specified timer function.\n\
+<a name='L820'>    The default timer is a fast built-in one based on real time.\n\
+<a name='L821'>    For custom timer functions returning integers, time_unit can\n\
+<a name='L822'>    be a float specifying a scale (i.e. how long each integer unit\n\
+<a name='L823'>    is, in seconds).\n\
+<a name='L824'>");
+<a name='L825'>
+<a name='L826'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyProfiler_Type = <font color='red'>{</font>
+<a name='L827'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L828'>    "_lsprof.Profiler",                     <i><font color='green'>/* tp_name */</font></i>
+<a name='L829'>    <b>sizeof</b>(<a href='../S/2578.html#L111' title='Defined at 111 in Modules/_lsprof.c.'>ProfilerObject</a>),                 <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L830'>    0,                                      <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L831'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2578.html#L764' title='Defined at 764 in Modules/_lsprof.c.'>profiler_dealloc</a>,           <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L832'>    0,                                      <i><font color='green'>/* tp_print */</font></i>
+<a name='L833'>    0,                                      <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L834'>    0,                                      <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L835'>    0,                                      <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L836'>    0,                                      <i><font color='green'>/* tp_repr */</font></i>
+<a name='L837'>    0,                                      <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L838'>    0,                                      <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L839'>    0,                                      <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L840'>    0,                                      <i><font color='green'>/* tp_hash */</font></i>
+<a name='L841'>    0,                                      <i><font color='green'>/* tp_call */</font></i>
+<a name='L842'>    0,                                      <i><font color='green'>/* tp_str */</font></i>
+<a name='L843'>    0,                                      <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L844'>    0,                                      <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L845'>    0,                                      <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L846'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L847'>    profiler_doc,                           <i><font color='green'>/* tp_doc */</font></i>
+<a name='L848'>    0,                                      <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L849'>    0,                                      <i><font color='green'>/* tp_clear */</font></i>
+<a name='L850'>    0,                                      <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L851'>    0,                                      <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L852'>    0,                                      <i><font color='green'>/* tp_iter */</font></i>
+<a name='L853'>    0,                                      <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L854'>    profiler_methods,                       <i><font color='green'>/* tp_methods */</font></i>
+<a name='L855'>    0,                                      <i><font color='green'>/* tp_members */</font></i>
+<a name='L856'>    0,                                      <i><font color='green'>/* tp_getset */</font></i>
+<a name='L857'>    0,                                      <i><font color='green'>/* tp_base */</font></i>
+<a name='L858'>    0,                                      <i><font color='green'>/* tp_dict */</font></i>
+<a name='L859'>    0,                                      <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L860'>    0,                                      <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L861'>    0,                                      <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L862'>    (initproc)<a href='../S/2578.html#L775' title='Defined at 775 in Modules/_lsprof.c.'>profiler_init</a>,                <i><font color='green'>/* tp_init */</font></i>
+<a name='L863'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,                    <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L864'>    <a href='../S/2824.html#L730' title='Defined at 730 in Objects/typeobject.c.'>PyType_GenericNew</a>,                      <i><font color='green'>/* tp_new */</font></i>
+<a name='L865'>    PyObject_Del,                           <i><font color='green'>/* tp_free */</font></i>
+<a name='L866'><font color='red'>}</font>;
+<a name='L867'>
+<a name='L868'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> moduleMethods[] = <font color='red'>{</font>
+<a name='L869'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L870'><font color='red'>}</font>;
+<a name='L871'>
+<a name='L872'>
+<a name='L873'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _lsprofmodule = <font color='red'>{</font>
+<a name='L874'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L875'>    "_lsprof",
+<a name='L876'>    "Fast profiler",
+<a name='L877'>    -1,
+<a name='L878'>    moduleMethods,
+<a name='L879'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L880'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L881'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L882'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L883'><font color='red'>}</font>;
+<a name='L884'>
+<a name='L885'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L886'><a href='../R/3030.html' title='Multiple refered from 2 places.'>PyInit__lsprof</a>(<b>void</b>)
+<a name='L887'><font color='red'>{</font>
+<a name='L888'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *module, *d;
+<a name='L889'>    module = PyModule_Create(&amp;_lsprofmodule);
+<a name='L890'>    <b>if</b> (module == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L891'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L892'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(module);
+<a name='L893'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;PyProfiler_Type) &lt; 0)
+<a name='L894'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L895'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "Profiler", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyProfiler_Type);
+<a name='L896'>
+<a name='L897'>    <b>if</b> (!initialized) <font color='red'>{</font>
+<a name='L898'>        <a href='../S/2822.html#L318' title='Defined at 318 in Objects/structseq.c.'>PyStructSequence_InitType</a>(&amp;StatsEntryType,
+<a name='L899'>                                  &amp;profiler_entry_desc);
+<a name='L900'>        <a href='../S/2822.html#L318' title='Defined at 318 in Objects/structseq.c.'>PyStructSequence_InitType</a>(&amp;StatsSubEntryType,
+<a name='L901'>                                  &amp;profiler_subentry_desc);
+<a name='L902'>    <font color='red'>}</font>
+<a name='L903'>    Py_INCREF((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;StatsEntryType);
+<a name='L904'>    Py_INCREF((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;StatsSubEntryType);
+<a name='L905'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "profiler_entry",
+<a name='L906'>                       (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;StatsEntryType);
+<a name='L907'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "profiler_subentry",
+<a name='L908'>                       (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;StatsSubEntryType);
+<a name='L909'>    empty_tuple = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L910'>    initialized = 1;
+<a name='L911'>    <b>return</b> module;
+<a name='L912'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L16'>[^]</a><a href='#L886'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

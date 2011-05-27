@@ -1,0 +1,363 @@
+<html>
+<head>
+<title>Modules/zlib/inffast.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3390.html'>zlib</a>/inffast.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L67'>[^]</a>[v][top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L67' title='Defined at 67.'>inflate_fast</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* inffast.c -- fast decoding</font></i>
+<a name='L2'><i><font color='green'> * Copyright (C) 1995-2008, 2010 Mark Adler</font></i>
+<a name='L3'><i><font color='green'> * For conditions of distribution and use, see copyright notice in zlib.h</font></i>
+<a name='L4'><i><font color='green'> */</font></i>
+<a name='L5'>
+<a name='L6'><font color='darkred'>#include</font> "<a href='2773.html'>zutil.h</a>"
+<a name='L7'><font color='darkred'>#include</font> "<a href='2755.html'>inftrees.h</a>"
+<a name='L8'><font color='darkred'>#include</font> "<a href='2753.html'>inflate.h</a>"
+<a name='L9'><font color='darkred'>#include</font> "<a href='2750.html'>inffast.h</a>"
+<a name='L10'>
+<a name='L11'><font color='darkred'>#ifndef</font> ASMINF
+<a name='L12'>
+<a name='L13'><i><font color='green'>/* Allow machine dependent optimization for post-increment or pre-increment.</font></i>
+<a name='L14'><i><font color='green'>   Based on testing to date,</font></i>
+<a name='L15'><i><font color='green'>   Pre-increment preferred for:</font></i>
+<a name='L16'><i><font color='green'>   - PowerPC G3 (Adler)</font></i>
+<a name='L17'><i><font color='green'>   - MIPS R5000 (Randers-Pehrson)</font></i>
+<a name='L18'><i><font color='green'>   Post-increment preferred for:</font></i>
+<a name='L19'><i><font color='green'>   - none</font></i>
+<a name='L20'><i><font color='green'>   No measurable difference:</font></i>
+<a name='L21'><i><font color='green'>   - Pentium III (Anderson)</font></i>
+<a name='L22'><i><font color='green'>   - M68060 (Nikl)</font></i>
+<a name='L23'><i><font color='green'> */</font></i>
+<a name='L24'><font color='darkred'>#ifdef</font> POSTINC
+<a name='L25'><font color='darkred'>#  define</font> <a href='../R/2175.html' title='Multiple refered from 57 places.'>OFF</a> 0
+<a name='L26'><font color='darkred'>#  define</font> <a href='../R/2320.html' title='Multiple refered from 25 places.'>PUP</a>(a) *(a)++
+<a name='L27'><font color='darkred'>#else</font>
+<a name='L28'><font color='darkred'>#  define</font> <a href='../R/2175.html' title='Multiple refered from 57 places.'>OFF</a> 1
+<a name='L29'><font color='darkred'>#  define</font> <a href='../R/2320.html' title='Multiple refered from 25 places.'>PUP</a>(a) *++(a)
+<a name='L30'><font color='darkred'>#endif</font>
+<a name='L31'>
+<a name='L32'><i><font color='green'>/*</font></i>
+<a name='L33'><i><font color='green'>   Decode literal, length, and distance codes and write out the resulting</font></i>
+<a name='L34'><i><font color='green'>   literal and match bytes until either not enough input or output is</font></i>
+<a name='L35'><i><font color='green'>   available, an end-of-block is encountered, or a data error is encountered.</font></i>
+<a name='L36'><i><font color='green'>   When large enough input and output buffers are supplied to inflate(), for</font></i>
+<a name='L37'><i><font color='green'>   example, a 16K input buffer and a 64K output buffer, more than 95% of the</font></i>
+<a name='L38'><i><font color='green'>   inflate execution time is spent in this routine.</font></i>
+<a name='L39'><i><font color='green'></font></i>
+<a name='L40'><i><font color='green'>   Entry assumptions:</font></i>
+<a name='L41'><i><font color='green'></font></i>
+<a name='L42'><i><font color='green'>        state-&gt;mode == LEN</font></i>
+<a name='L43'><i><font color='green'>        strm-&gt;avail_in &gt;= 6</font></i>
+<a name='L44'><i><font color='green'>        strm-&gt;avail_out &gt;= 258</font></i>
+<a name='L45'><i><font color='green'>        start &gt;= strm-&gt;avail_out</font></i>
+<a name='L46'><i><font color='green'>        state-&gt;bits &lt; 8</font></i>
+<a name='L47'><i><font color='green'></font></i>
+<a name='L48'><i><font color='green'>   On return, state-&gt;mode is one of:</font></i>
+<a name='L49'><i><font color='green'></font></i>
+<a name='L50'><i><font color='green'>        LEN -- ran out of enough output space or enough available input</font></i>
+<a name='L51'><i><font color='green'>        TYPE -- reached end of block code, inflate() to interpret next block</font></i>
+<a name='L52'><i><font color='green'>        BAD -- error in block data</font></i>
+<a name='L53'><i><font color='green'></font></i>
+<a name='L54'><i><font color='green'>   Notes:</font></i>
+<a name='L55'><i><font color='green'></font></i>
+<a name='L56'><i><font color='green'>    - The maximum input bits used by a length/distance pair is 15 bits for the</font></i>
+<a name='L57'><i><font color='green'>      length code, 5 bits for the length extra, 15 bits for the distance code,</font></i>
+<a name='L58'><i><font color='green'>      and 13 bits for the distance extra.  This totals 48 bits, or six bytes.</font></i>
+<a name='L59'><i><font color='green'>      Therefore if strm-&gt;avail_in &gt;= 6, then there is enough input to avoid</font></i>
+<a name='L60'><i><font color='green'>      checking for available input while decoding.</font></i>
+<a name='L61'><i><font color='green'></font></i>
+<a name='L62'><i><font color='green'>    - The maximum bytes that a single length/distance pair can output is 258</font></i>
+<a name='L63'><i><font color='green'>      bytes, which is the maximum length that can be coded.  inflate_fast()</font></i>
+<a name='L64'><i><font color='green'>      requires strm-&gt;avail_out &gt;= 258 for each loop to avoid checking for</font></i>
+<a name='L65'><i><font color='green'>      output space.</font></i>
+<a name='L66'><i><font color='green'> */</font></i>
+<a name='L67'><b>void</b> <a href='../D/5928.html' title='Multiple defined in 6 places.'>ZLIB_INTERNAL</a> <a href='../R/8368.html' title='Multiple refered from 3 places.'>inflate_fast</a>(strm, start)
+<a name='L68'>z_streamp strm;
+<a name='L69'><b>unsigned</b> start;         <i><font color='green'>/* inflate()'s starting value for strm-&gt;avail_out */</font></i>
+<a name='L70'><font color='red'>{</font>
+<a name='L71'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L72'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *in;      <i><font color='green'>/* local strm-&gt;next_in */</font></i>
+<a name='L73'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *last;    <i><font color='green'>/* while in &lt; last, enough input available */</font></i>
+<a name='L74'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *out;     <i><font color='green'>/* local strm-&gt;next_out */</font></i>
+<a name='L75'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *beg;     <i><font color='green'>/* inflate()'s initial strm-&gt;next_out */</font></i>
+<a name='L76'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *end;     <i><font color='green'>/* while out &lt; end, enough space available */</font></i>
+<a name='L77'><font color='darkred'>#ifdef</font> INFLATE_STRICT
+<a name='L78'>    <b>unsigned</b> dmax;              <i><font color='green'>/* maximum distance from zlib header */</font></i>
+<a name='L79'><font color='darkred'>#endif</font>
+<a name='L80'>    <b>unsigned</b> wsize;             <i><font color='green'>/* window size or zero if not using window */</font></i>
+<a name='L81'>    <b>unsigned</b> whave;             <i><font color='green'>/* valid bytes in the window */</font></i>
+<a name='L82'>    <b>unsigned</b> wnext;             <i><font color='green'>/* window write index */</font></i>
+<a name='L83'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *window;  <i><font color='green'>/* allocated sliding window, if wsize != 0 */</font></i>
+<a name='L84'>    <b>unsigned</b> <b>long</b> hold;         <i><font color='green'>/* local strm-&gt;hold */</font></i>
+<a name='L85'>    <b>unsigned</b> bits;              <i><font color='green'>/* local strm-&gt;bits */</font></i>
+<a name='L86'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> <b>const</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *lcode;      <i><font color='green'>/* local strm-&gt;lencode */</font></i>
+<a name='L87'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> <b>const</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *dcode;      <i><font color='green'>/* local strm-&gt;distcode */</font></i>
+<a name='L88'>    <b>unsigned</b> lmask;             <i><font color='green'>/* mask for first level of length codes */</font></i>
+<a name='L89'>    <b>unsigned</b> dmask;             <i><font color='green'>/* mask for first level of distance codes */</font></i>
+<a name='L90'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> here;                  <i><font color='green'>/* retrieved table entry */</font></i>
+<a name='L91'>    <b>unsigned</b> op;                <i><font color='green'>/* code bits, operation, extra bits, or */</font></i>
+<a name='L92'>                                <i><font color='green'>/*  window position, window bytes to copy */</font></i>
+<a name='L93'>    <b>unsigned</b> len;               <i><font color='green'>/* match length, unused bytes */</font></i>
+<a name='L94'>    <b>unsigned</b> dist;              <i><font color='green'>/* match distance */</font></i>
+<a name='L95'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *from;    <i><font color='green'>/* where to copy match from */</font></i>
+<a name='L96'>
+<a name='L97'>    <i><font color='green'>/* copy state to local variables */</font></i>
+<a name='L98'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L99'>    in = strm-&gt;next_in - <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>;
+<a name='L100'>    last = in + (strm-&gt;avail_in - 5);
+<a name='L101'>    out = strm-&gt;next_out - <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>;
+<a name='L102'>    beg = out - (start - strm-&gt;avail_out);
+<a name='L103'>    end = out + (strm-&gt;avail_out - 257);
+<a name='L104'><font color='darkred'>#ifdef</font> INFLATE_STRICT
+<a name='L105'>    dmax = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;dmax;
+<a name='L106'><font color='darkred'>#endif</font>
+<a name='L107'>    wsize = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize;
+<a name='L108'>    whave = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave;
+<a name='L109'>    wnext = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext;
+<a name='L110'>    window = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window;
+<a name='L111'>    hold = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold;
+<a name='L112'>    bits = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits;
+<a name='L113'>    lcode = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode;
+<a name='L114'>    dcode = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distcode;
+<a name='L115'>    lmask = (1U &lt;&lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits) - 1;
+<a name='L116'>    dmask = (1U &lt;&lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distbits) - 1;
+<a name='L117'>
+<a name='L118'>    <i><font color='green'>/* decode literals and length/distances until end-of-block or not enough</font></i>
+<a name='L119'><i><font color='green'>       input data or output space */</font></i>
+<a name='L120'>    <b>do</b> <font color='red'>{</font>
+<a name='L121'>        <b>if</b> (bits &lt; 15) <font color='red'>{</font>
+<a name='L122'>            hold += (<b>unsigned</b> <b>long</b>)(<a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(in)) &lt;&lt; bits;
+<a name='L123'>            bits += 8;
+<a name='L124'>            hold += (<b>unsigned</b> <b>long</b>)(<a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(in)) &lt;&lt; bits;
+<a name='L125'>            bits += 8;
+<a name='L126'>        <font color='red'>}</font>
+<a name='L127'>        here = lcode[hold &amp; lmask];
+<a name='L128'>      dolen:
+<a name='L129'>        op = (<b>unsigned</b>)(here.bits);
+<a name='L130'>        hold &gt;&gt;= op;
+<a name='L131'>        bits -= op;
+<a name='L132'>        op = (<b>unsigned</b>)(here.op);
+<a name='L133'>        <b>if</b> (op == 0) <font color='red'>{</font>                          <i><font color='green'>/* literal */</font></i>
+<a name='L134'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, here.val &gt;= 0x20 &amp;&amp; here.val &lt; 0x7f ?
+<a name='L135'>                    "inflate:         literal '%c'\n" :
+<a name='L136'>                    "inflate:         literal 0x%02x\n", here.val));
+<a name='L137'>            <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = (<b>unsigned</b> <b>char</b>)(here.val);
+<a name='L138'>        <font color='red'>}</font>
+<a name='L139'>        <b>else</b> <b>if</b> (op &amp; 16) <font color='red'>{</font>                     <i><font color='green'>/* length base */</font></i>
+<a name='L140'>            len = (<b>unsigned</b>)(here.val);
+<a name='L141'>            op &amp;= 15;                           <i><font color='green'>/* number of extra bits */</font></i>
+<a name='L142'>            <b>if</b> (op) <font color='red'>{</font>
+<a name='L143'>                <b>if</b> (bits &lt; op) <font color='red'>{</font>
+<a name='L144'>                    hold += (<b>unsigned</b> <b>long</b>)(<a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(in)) &lt;&lt; bits;
+<a name='L145'>                    bits += 8;
+<a name='L146'>                <font color='red'>}</font>
+<a name='L147'>                len += (<b>unsigned</b>)hold &amp; ((1U &lt;&lt; op) - 1);
+<a name='L148'>                hold &gt;&gt;= op;
+<a name='L149'>                bits -= op;
+<a name='L150'>            <font color='red'>}</font>
+<a name='L151'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, "inflate:         length %u\n", len));
+<a name='L152'>            <b>if</b> (bits &lt; 15) <font color='red'>{</font>
+<a name='L153'>                hold += (<b>unsigned</b> <b>long</b>)(<a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(in)) &lt;&lt; bits;
+<a name='L154'>                bits += 8;
+<a name='L155'>                hold += (<b>unsigned</b> <b>long</b>)(<a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(in)) &lt;&lt; bits;
+<a name='L156'>                bits += 8;
+<a name='L157'>            <font color='red'>}</font>
+<a name='L158'>            here = dcode[hold &amp; dmask];
+<a name='L159'>          dodist:
+<a name='L160'>            op = (<b>unsigned</b>)(here.bits);
+<a name='L161'>            hold &gt;&gt;= op;
+<a name='L162'>            bits -= op;
+<a name='L163'>            op = (<b>unsigned</b>)(here.op);
+<a name='L164'>            <b>if</b> (op &amp; 16) <font color='red'>{</font>                      <i><font color='green'>/* distance base */</font></i>
+<a name='L165'>                dist = (<b>unsigned</b>)(here.val);
+<a name='L166'>                op &amp;= 15;                       <i><font color='green'>/* number of extra bits */</font></i>
+<a name='L167'>                <b>if</b> (bits &lt; op) <font color='red'>{</font>
+<a name='L168'>                    hold += (<b>unsigned</b> <b>long</b>)(<a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(in)) &lt;&lt; bits;
+<a name='L169'>                    bits += 8;
+<a name='L170'>                    <b>if</b> (bits &lt; op) <font color='red'>{</font>
+<a name='L171'>                        hold += (<b>unsigned</b> <b>long</b>)(<a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(in)) &lt;&lt; bits;
+<a name='L172'>                        bits += 8;
+<a name='L173'>                    <font color='red'>}</font>
+<a name='L174'>                <font color='red'>}</font>
+<a name='L175'>                dist += (<b>unsigned</b>)hold &amp; ((1U &lt;&lt; op) - 1);
+<a name='L176'><font color='darkred'>#ifdef</font> INFLATE_STRICT
+<a name='L177'>                <b>if</b> (dist &gt; dmax) <font color='red'>{</font>
+<a name='L178'>                    strm-&gt;msg = (<b>char</b> *)"invalid distance too far back";
+<a name='L179'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L180'>                    <b>break</b>;
+<a name='L181'>                <font color='red'>}</font>
+<a name='L182'><font color='darkred'>#endif</font>
+<a name='L183'>                hold &gt;&gt;= op;
+<a name='L184'>                bits -= op;
+<a name='L185'>                <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, "inflate:         distance %u\n", dist));
+<a name='L186'>                op = (<b>unsigned</b>)(out - beg);     <i><font color='green'>/* max distance in output */</font></i>
+<a name='L187'>                <b>if</b> (dist &gt; op) <font color='red'>{</font>                <i><font color='green'>/* see if copy from window */</font></i>
+<a name='L188'>                    op = dist - op;             <i><font color='green'>/* distance back in window */</font></i>
+<a name='L189'>                    <b>if</b> (op &gt; whave) <font color='red'>{</font>
+<a name='L190'>                        <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;sane) <font color='red'>{</font>
+<a name='L191'>                            strm-&gt;msg =
+<a name='L192'>                                (<b>char</b> *)"invalid distance too far back";
+<a name='L193'>                            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L194'>                            <b>break</b>;
+<a name='L195'>                        <font color='red'>}</font>
+<a name='L196'><font color='darkred'>#ifdef</font> INFLATE_ALLOW_INVALID_DISTANCE_TOOFAR_ARRR
+<a name='L197'>                        <b>if</b> (len &lt;= op - whave) <font color='red'>{</font>
+<a name='L198'>                            <b>do</b> <font color='red'>{</font>
+<a name='L199'>                                <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = 0;
+<a name='L200'>                            <font color='red'>}</font> <b>while</b> (--len);
+<a name='L201'>                            <b>continue</b>;
+<a name='L202'>                        <font color='red'>}</font>
+<a name='L203'>                        len -= op - whave;
+<a name='L204'>                        <b>do</b> <font color='red'>{</font>
+<a name='L205'>                            <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = 0;
+<a name='L206'>                        <font color='red'>}</font> <b>while</b> (--op &gt; whave);
+<a name='L207'>                        <b>if</b> (op == 0) <font color='red'>{</font>
+<a name='L208'>                            from = out - dist;
+<a name='L209'>                            <b>do</b> <font color='red'>{</font>
+<a name='L210'>                                <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L211'>                            <font color='red'>}</font> <b>while</b> (--len);
+<a name='L212'>                            <b>continue</b>;
+<a name='L213'>                        <font color='red'>}</font>
+<a name='L214'><font color='darkred'>#endif</font>
+<a name='L215'>                    <font color='red'>}</font>
+<a name='L216'>                    from = window - <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>;
+<a name='L217'>                    <b>if</b> (wnext == 0) <font color='red'>{</font>           <i><font color='green'>/* very common case */</font></i>
+<a name='L218'>                        from += wsize - op;
+<a name='L219'>                        <b>if</b> (op &lt; len) <font color='red'>{</font>         <i><font color='green'>/* some from window */</font></i>
+<a name='L220'>                            len -= op;
+<a name='L221'>                            <b>do</b> <font color='red'>{</font>
+<a name='L222'>                                <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L223'>                            <font color='red'>}</font> <b>while</b> (--op);
+<a name='L224'>                            from = out - dist;  <i><font color='green'>/* rest from output */</font></i>
+<a name='L225'>                        <font color='red'>}</font>
+<a name='L226'>                    <font color='red'>}</font>
+<a name='L227'>                    <b>else</b> <b>if</b> (wnext &lt; op) <font color='red'>{</font>      <i><font color='green'>/* wrap around window */</font></i>
+<a name='L228'>                        from += wsize + wnext - op;
+<a name='L229'>                        op -= wnext;
+<a name='L230'>                        <b>if</b> (op &lt; len) <font color='red'>{</font>         <i><font color='green'>/* some from end of window */</font></i>
+<a name='L231'>                            len -= op;
+<a name='L232'>                            <b>do</b> <font color='red'>{</font>
+<a name='L233'>                                <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L234'>                            <font color='red'>}</font> <b>while</b> (--op);
+<a name='L235'>                            from = window - <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>;
+<a name='L236'>                            <b>if</b> (wnext &lt; len) <font color='red'>{</font>  <i><font color='green'>/* some from start of window */</font></i>
+<a name='L237'>                                op = wnext;
+<a name='L238'>                                len -= op;
+<a name='L239'>                                <b>do</b> <font color='red'>{</font>
+<a name='L240'>                                    <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L241'>                                <font color='red'>}</font> <b>while</b> (--op);
+<a name='L242'>                                from = out - dist;      <i><font color='green'>/* rest from output */</font></i>
+<a name='L243'>                            <font color='red'>}</font>
+<a name='L244'>                        <font color='red'>}</font>
+<a name='L245'>                    <font color='red'>}</font>
+<a name='L246'>                    <b>else</b> <font color='red'>{</font>                      <i><font color='green'>/* contiguous in window */</font></i>
+<a name='L247'>                        from += wnext - op;
+<a name='L248'>                        <b>if</b> (op &lt; len) <font color='red'>{</font>         <i><font color='green'>/* some from window */</font></i>
+<a name='L249'>                            len -= op;
+<a name='L250'>                            <b>do</b> <font color='red'>{</font>
+<a name='L251'>                                <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L252'>                            <font color='red'>}</font> <b>while</b> (--op);
+<a name='L253'>                            from = out - dist;  <i><font color='green'>/* rest from output */</font></i>
+<a name='L254'>                        <font color='red'>}</font>
+<a name='L255'>                    <font color='red'>}</font>
+<a name='L256'>                    <b>while</b> (len &gt; 2) <font color='red'>{</font>
+<a name='L257'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L258'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L259'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L260'>                        len -= 3;
+<a name='L261'>                    <font color='red'>}</font>
+<a name='L262'>                    <b>if</b> (len) <font color='red'>{</font>
+<a name='L263'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L264'>                        <b>if</b> (len &gt; 1)
+<a name='L265'>                            <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L266'>                    <font color='red'>}</font>
+<a name='L267'>                <font color='red'>}</font>
+<a name='L268'>                <b>else</b> <font color='red'>{</font>
+<a name='L269'>                    from = out - dist;          <i><font color='green'>/* copy direct from output */</font></i>
+<a name='L270'>                    <b>do</b> <font color='red'>{</font>                        <i><font color='green'>/* minimum length is three */</font></i>
+<a name='L271'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L272'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L273'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L274'>                        len -= 3;
+<a name='L275'>                    <font color='red'>}</font> <b>while</b> (len &gt; 2);
+<a name='L276'>                    <b>if</b> (len) <font color='red'>{</font>
+<a name='L277'>                        <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L278'>                        <b>if</b> (len &gt; 1)
+<a name='L279'>                            <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(out) = <a href='../D/2556.html' title='Multiple defined in 2 places.'>PUP</a>(from);
+<a name='L280'>                    <font color='red'>}</font>
+<a name='L281'>                <font color='red'>}</font>
+<a name='L282'>            <font color='red'>}</font>
+<a name='L283'>            <b>else</b> <b>if</b> ((op &amp; 64) == 0) <font color='red'>{</font>          <i><font color='green'>/* 2nd level distance code */</font></i>
+<a name='L284'>                here = dcode[here.val + (hold &amp; ((1U &lt;&lt; op) - 1))];
+<a name='L285'>                <b>goto</b> dodist;
+<a name='L286'>            <font color='red'>}</font>
+<a name='L287'>            <b>else</b> <font color='red'>{</font>
+<a name='L288'>                strm-&gt;msg = (<b>char</b> *)"invalid distance code";
+<a name='L289'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L290'>                <b>break</b>;
+<a name='L291'>            <font color='red'>}</font>
+<a name='L292'>        <font color='red'>}</font>
+<a name='L293'>        <b>else</b> <b>if</b> ((op &amp; 64) == 0) <font color='red'>{</font>              <i><font color='green'>/* 2nd level length code */</font></i>
+<a name='L294'>            here = lcode[here.val + (hold &amp; ((1U &lt;&lt; op) - 1))];
+<a name='L295'>            <b>goto</b> dolen;
+<a name='L296'>        <font color='red'>}</font>
+<a name='L297'>        <b>else</b> <b>if</b> (op &amp; 32) <font color='red'>{</font>                     <i><font color='green'>/* end-of-block */</font></i>
+<a name='L298'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, "inflate:         end of block\n"));
+<a name='L299'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>;
+<a name='L300'>            <b>break</b>;
+<a name='L301'>        <font color='red'>}</font>
+<a name='L302'>        <b>else</b> <font color='red'>{</font>
+<a name='L303'>            strm-&gt;msg = (<b>char</b> *)"invalid literal/length code";
+<a name='L304'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L305'>            <b>break</b>;
+<a name='L306'>        <font color='red'>}</font>
+<a name='L307'>    <font color='red'>}</font> <b>while</b> (in &lt; last &amp;&amp; out &lt; end);
+<a name='L308'>
+<a name='L309'>    <i><font color='green'>/* return unused bytes (on entry, bits &lt; 8, so in won't go too far back) */</font></i>
+<a name='L310'>    len = bits &gt;&gt; 3;
+<a name='L311'>    in -= len;
+<a name='L312'>    bits -= len &lt;&lt; 3;
+<a name='L313'>    hold &amp;= (1U &lt;&lt; bits) - 1;
+<a name='L314'>
+<a name='L315'>    <i><font color='green'>/* update state and return */</font></i>
+<a name='L316'>    strm-&gt;next_in = in + <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>;
+<a name='L317'>    strm-&gt;next_out = out + <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>;
+<a name='L318'>    strm-&gt;avail_in = (<b>unsigned</b>)(in &lt; last ? 5 + (last - in) : 5 - (in - last));
+<a name='L319'>    strm-&gt;avail_out = (<b>unsigned</b>)(out &lt; end ?
+<a name='L320'>                                 257 + (end - out) : 257 - (out - end));
+<a name='L321'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold = hold;
+<a name='L322'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits = bits;
+<a name='L323'>    <b>return</b>;
+<a name='L324'><font color='red'>}</font>
+<a name='L325'>
+<a name='L326'><i><font color='green'>/*</font></i>
+<a name='L327'><i><font color='green'>   inflate_fast() speedups that turned out slower (on a PowerPC G3 750CXe):</font></i>
+<a name='L328'><i><font color='green'>   - Using bit fields for code structure</font></i>
+<a name='L329'><i><font color='green'>   - Different op definition to avoid &amp; for extra bits (do &amp; for table bits)</font></i>
+<a name='L330'><i><font color='green'>   - Three separate decoding do-loops for direct, window, and wnext == 0</font></i>
+<a name='L331'><i><font color='green'>   - Special case for distance &gt; 1 copies to do overlapped load and store copy</font></i>
+<a name='L332'><i><font color='green'>   - Explicit branch predictions (based on measured branch probabilities)</font></i>
+<a name='L333'><i><font color='green'>   - Deferring match copy and interspersed it with decoding subsequent codes</font></i>
+<a name='L334'><i><font color='green'>   - Swapping literal/length else</font></i>
+<a name='L335'><i><font color='green'>   - Swapping window/direct else</font></i>
+<a name='L336'><i><font color='green'>   - Larger unrolled copy loops (three is about right)</font></i>
+<a name='L337'><i><font color='green'>   - Moving len -= 3 statement into middle of loop</font></i>
+<a name='L338'><i><font color='green'> */</font></i>
+<a name='L339'>
+<a name='L340'><font color='darkred'>#endif</font> <i><font color='green'>/* !ASMINF */</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;][^]<a href='#L67'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

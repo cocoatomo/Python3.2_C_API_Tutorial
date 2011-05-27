@@ -1,0 +1,504 @@
+<html>
+<head>
+<title>Modules/_sqlite/module.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3387.html'>_sqlite</a>/module.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L46'>[^]</a><a href='#L316'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L46' title='Defined at 46.'>module_connect</a>
+<li><a href='#L86' title='Defined at 86.'>module_complete</a>
+<li><a href='#L116' title='Defined at 116.'>module_enable_shared_cache</a>
+<li><a href='#L146' title='Defined at 146.'>module_register_adapter</a>
+<li><a href='#L176' title='Defined at 176.'>module_register_converter</a>
+<li><a href='#L209' title='Defined at 209.'>enable_callback_tracebacks</a>
+<li><a href='#L224' title='Defined at 224.'>converters_init</a>
+<li><a href='#L316' title='Defined at 316.'>PyInit__sqlite3</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* module.c - the module itself</font></i>
+<a name='L2'><i><font color='green'> *</font></i>
+<a name='L3'><i><font color='green'> * Copyright (C) 2004-2010 Gerhard Häring &lt;gh@ghaering.de&gt;</font></i>
+<a name='L4'><i><font color='green'> *</font></i>
+<a name='L5'><i><font color='green'> * This file is part of pysqlite.</font></i>
+<a name='L6'><i><font color='green'> *</font></i>
+<a name='L7'><i><font color='green'> * This software is provided 'as-is', without any express or implied</font></i>
+<a name='L8'><i><font color='green'> * warranty.  In no event will the authors be held liable for any damages</font></i>
+<a name='L9'><i><font color='green'> * arising from the use of this software.</font></i>
+<a name='L10'><i><font color='green'> *</font></i>
+<a name='L11'><i><font color='green'> * Permission is granted to anyone to use this software for any purpose,</font></i>
+<a name='L12'><i><font color='green'> * including commercial applications, and to alter it and redistribute it</font></i>
+<a name='L13'><i><font color='green'> * freely, subject to the following restrictions:</font></i>
+<a name='L14'><i><font color='green'> *</font></i>
+<a name='L15'><i><font color='green'> * 1. The origin of this software must not be misrepresented; you must not</font></i>
+<a name='L16'><i><font color='green'> *    claim that you wrote the original software. If you use this software</font></i>
+<a name='L17'><i><font color='green'> *    in a product, an acknowledgment in the product documentation would be</font></i>
+<a name='L18'><i><font color='green'> *    appreciated but is not required.</font></i>
+<a name='L19'><i><font color='green'> * 2. Altered source versions must be plainly marked as such, and must not be</font></i>
+<a name='L20'><i><font color='green'> *    misrepresented as being the original software.</font></i>
+<a name='L21'><i><font color='green'> * 3. This notice may not be removed or altered from any source distribution.</font></i>
+<a name='L22'><i><font color='green'> */</font></i>
+<a name='L23'>
+<a name='L24'><font color='darkred'>#include</font> "<a href='../I/380.html'>connection.h</a>"
+<a name='L25'><font color='darkred'>#include</font> "<a href='2608.html'>statement.h</a>"
+<a name='L26'><font color='darkred'>#include</font> "<a href='2597.html'>cursor.h</a>"
+<a name='L27'><font color='darkred'>#include</font> "<a href='2593.html'>cache.h</a>"
+<a name='L28'><font color='darkred'>#include</font> "<a href='2603.html'>prepare_protocol.h</a>"
+<a name='L29'><font color='darkred'>#include</font> "<a href='2599.html'>microprotocols.h</a>"
+<a name='L30'><font color='darkred'>#include</font> "<a href='2605.html'>row.h</a>"
+<a name='L31'>
+<a name='L32'><font color='darkred'>#if</font> SQLITE_VERSION_NUMBER &gt;= 3003003
+<a name='L33'><font color='darkred'>#define</font> <a href='../R/1399.html' title='Multiple refered from 2 places.'>HAVE_SHARED_CACHE</a>
+<a name='L34'><font color='darkred'>#endif</font>
+<a name='L35'>
+<a name='L36'><i><font color='green'>/* static objects at module-level */</font></i>
+<a name='L37'>
+<a name='L38'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* pysqlite_Error, *pysqlite_Warning, *pysqlite_InterfaceError, *pysqlite_DatabaseError,
+<a name='L39'>    *pysqlite_InternalError, *pysqlite_OperationalError, *pysqlite_ProgrammingError,
+<a name='L40'>    *pysqlite_IntegrityError, *pysqlite_DataError, *pysqlite_NotSupportedError, *pysqlite_OptimizedUnicode;
+<a name='L41'>
+<a name='L42'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* converters;
+<a name='L43'><b>int</b> _enable_callback_tracebacks;
+<a name='L44'><b>int</b> pysqlite_BaseTypeAdapted;
+<a name='L45'>
+<a name='L46'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2600.html#L235' title='Refered from 235 in Modules/_sqlite/module.c.'>module_connect</a>(PyObject* self, PyObject* args, PyObject*
+<a name='L47'>        kwargs)
+<a name='L48'><font color='red'>{</font>
+<a name='L49'>    <i><font color='green'>/* Python seems to have no way of extracting a single keyword-arg at</font></i>
+<a name='L50'><i><font color='green'>     * C-level, so this code is redundant with the one in connection_init in</font></i>
+<a name='L51'><i><font color='green'>     * connection.c and must always be copied from there ... */</font></i>
+<a name='L52'>
+<a name='L53'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"database", "timeout", "detect_types", "isolation_level", "check_same_thread", "factory", "cached_statements", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L54'>    <b>char</b>* database;
+<a name='L55'>    <b>int</b> detect_types = 0;
+<a name='L56'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* isolation_level;
+<a name='L57'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* factory = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L58'>    <b>int</b> check_same_thread = 1;
+<a name='L59'>    <b>int</b> cached_statements;
+<a name='L60'>    <b>double</b> timeout = 5.0;
+<a name='L61'>
+<a name='L62'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L63'>
+<a name='L64'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs, "s|diOiOi", kwlist,
+<a name='L65'>                                     &amp;database, &amp;timeout, &amp;detect_types, &amp;isolation_level, &amp;check_same_thread, &amp;factory, &amp;cached_statements))
+<a name='L66'>    <font color='red'>{</font>
+<a name='L67'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L68'>    <font color='red'>}</font>
+<a name='L69'>
+<a name='L70'>    <b>if</b> (factory == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L71'>        factory = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;pysqlite_ConnectionType;
+<a name='L72'>    <font color='red'>}</font>
+<a name='L73'>
+<a name='L74'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2775.html#L2141' title='Defined at 2141 in Objects/abstract.c.'>PyObject_Call</a>(factory, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs);
+<a name='L75'>
+<a name='L76'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L77'><font color='red'>}</font>
+<a name='L78'>
+<a name='L79'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_connect_doc,
+<a name='L80'>"connect(database[, timeout, isolation_level, detect_types, factory])\n\
+<a name='L81'>\n\
+<a name='L82'>Opens a connection to the SQLite database file *database*. You can use\n\
+<a name='L83'>\":memory:\" to open a database connection to a database that resides in\n\
+<a name='L84'>RAM instead of on disk.");
+<a name='L85'>
+<a name='L86'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2600.html#L237' title='Refered from 237 in Modules/_sqlite/module.c.'>module_complete</a>(PyObject* self, PyObject* args, PyObject*
+<a name='L87'>        kwargs)
+<a name='L88'><font color='red'>{</font>
+<a name='L89'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"statement", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L90'>    <b>char</b>* statement;
+<a name='L91'>
+<a name='L92'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L93'>
+<a name='L94'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs, "s", kwlist, &amp;statement))
+<a name='L95'>    <font color='red'>{</font>
+<a name='L96'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L97'>    <font color='red'>}</font>
+<a name='L98'>
+<a name='L99'>    <b>if</b> (sqlite3_complete(statement)) <font color='red'>{</font>
+<a name='L100'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = Py_True;
+<a name='L101'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L102'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = Py_False;
+<a name='L103'>    <font color='red'>}</font>
+<a name='L104'>
+<a name='L105'>    Py_INCREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L106'>
+<a name='L107'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L108'><font color='red'>}</font>
+<a name='L109'>
+<a name='L110'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_complete_doc,
+<a name='L111'>"complete_statement(sql)\n\
+<a name='L112'>\n\
+<a name='L113'>Checks if a string contains a complete SQL statement. Non-standard.");
+<a name='L114'>
+<a name='L115'><font color='darkred'>#ifdef</font> <a href='../S/2600.html#L33' title='Defined at 33 in Modules/_sqlite/module.c.'>HAVE_SHARED_CACHE</a>
+<a name='L116'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2600.html#L240' title='Refered from 240 in Modules/_sqlite/module.c.'>module_enable_shared_cache</a>(PyObject* self, PyObject* args, PyObject*
+<a name='L117'>        kwargs)
+<a name='L118'><font color='red'>{</font>
+<a name='L119'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"do_enable", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L120'>    <b>int</b> do_enable;
+<a name='L121'>    <b>int</b> rc;
+<a name='L122'>
+<a name='L123'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs, "i", kwlist, &amp;do_enable))
+<a name='L124'>    <font color='red'>{</font>
+<a name='L125'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L126'>    <font color='red'>}</font>
+<a name='L127'>
+<a name='L128'>    rc = sqlite3_enable_shared_cache(do_enable);
+<a name='L129'>
+<a name='L130'>    <b>if</b> (rc != SQLITE_OK) <font color='red'>{</font>
+<a name='L131'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_OperationalError, "Changing the shared_cache flag failed");
+<a name='L132'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L133'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L134'>        Py_INCREF(Py_None);
+<a name='L135'>        <b>return</b> Py_None;
+<a name='L136'>    <font color='red'>}</font>
+<a name='L137'><font color='red'>}</font>
+<a name='L138'>
+<a name='L139'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_enable_shared_cache_doc,
+<a name='L140'>"enable_shared_cache(do_enable)\n\
+<a name='L141'>\n\
+<a name='L142'>Enable or disable shared cache mode for the calling thread.\n\
+<a name='L143'>Experimental/Non-standard.");
+<a name='L144'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_SHARED_CACHE */</font></i>
+<a name='L145'>
+<a name='L146'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2600.html#L243' title='Refered from 243 in Modules/_sqlite/module.c.'>module_register_adapter</a>(PyObject* self, PyObject* args)
+<a name='L147'><font color='red'>{</font>
+<a name='L148'>    <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a>* type;
+<a name='L149'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* caster;
+<a name='L150'>    <b>int</b> rc;
+<a name='L151'>
+<a name='L152'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "OO", &amp;type, &amp;caster)) <font color='red'>{</font>
+<a name='L153'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L154'>    <font color='red'>}</font>
+<a name='L155'>
+<a name='L156'>    <i><font color='green'>/* a basic type is adapted; there's a performance optimization if that's not the case</font></i>
+<a name='L157'><i><font color='green'>     * (99 % of all usages) */</font></i>
+<a name='L158'>    <b>if</b> (type == &amp;PyLong_Type || type == &amp;PyFloat_Type
+<a name='L159'>            || type == &amp;PyUnicode_Type || type == &amp;PyByteArray_Type) <font color='red'>{</font>
+<a name='L160'>        pysqlite_BaseTypeAdapted = 1;
+<a name='L161'>    <font color='red'>}</font>
+<a name='L162'>
+<a name='L163'>    rc = <a href='../S/2598.html#L55' title='Defined at 55 in Modules/_sqlite/microprotocols.c.'>pysqlite_microprotocols_add</a>(type, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;pysqlite_PrepareProtocolType, caster);
+<a name='L164'>    <b>if</b> (rc == -1)
+<a name='L165'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L166'>
+<a name='L167'>    Py_INCREF(Py_None);
+<a name='L168'>    <b>return</b> Py_None;
+<a name='L169'><font color='red'>}</font>
+<a name='L170'>
+<a name='L171'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_register_adapter_doc,
+<a name='L172'>"register_adapter(type, callable)\n\
+<a name='L173'>\n\
+<a name='L174'>Registers an adapter with pysqlite's adapter registry. Non-standard.");
+<a name='L175'>
+<a name='L176'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2600.html#L245' title='Refered from 245 in Modules/_sqlite/module.c.'>module_register_converter</a>(PyObject* self, PyObject* args)
+<a name='L177'><font color='red'>{</font>
+<a name='L178'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* orig_name;
+<a name='L179'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* name = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L180'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* callable;
+<a name='L181'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L182'>
+<a name='L183'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "UO", &amp;orig_name, &amp;callable)) <font color='red'>{</font>
+<a name='L184'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L185'>    <font color='red'>}</font>
+<a name='L186'>
+<a name='L187'>    <i><font color='green'>/* convert the name to upper case */</font></i>
+<a name='L188'>    name = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(orig_name, "upper", "");
+<a name='L189'>    <b>if</b> (!name) <font color='red'>{</font>
+<a name='L190'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L191'>    <font color='red'>}</font>
+<a name='L192'>
+<a name='L193'>    <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(converters, name, callable) != 0) <font color='red'>{</font>
+<a name='L194'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L195'>    <font color='red'>}</font>
+<a name='L196'>
+<a name='L197'>    Py_INCREF(Py_None);
+<a name='L198'>    retval = Py_None;
+<a name='L199'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L200'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(name);
+<a name='L201'>    <b>return</b> retval;
+<a name='L202'><font color='red'>}</font>
+<a name='L203'>
+<a name='L204'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_register_converter_doc,
+<a name='L205'>"register_converter(typename, callable)\n\
+<a name='L206'>\n\
+<a name='L207'>Registers a converter with pysqlite. Non-standard.");
+<a name='L208'>
+<a name='L209'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2600.html#L249' title='Refered from 249 in Modules/_sqlite/module.c.'>enable_callback_tracebacks</a>(PyObject* self, PyObject* args)
+<a name='L210'><font color='red'>{</font>
+<a name='L211'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i", &amp;_enable_callback_tracebacks)) <font color='red'>{</font>
+<a name='L212'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L213'>    <font color='red'>}</font>
+<a name='L214'>
+<a name='L215'>    Py_INCREF(Py_None);
+<a name='L216'>    <b>return</b> Py_None;
+<a name='L217'><font color='red'>}</font>
+<a name='L218'>
+<a name='L219'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(enable_callback_tracebacks_doc,
+<a name='L220'>"enable_callback_tracebacks(flag)\n\
+<a name='L221'>\n\
+<a name='L222'>Enable or disable callback functions throwing errors to stderr.");
+<a name='L223'>
+<a name='L224'><b>static</b> <b>void</b> <a href='../S/2600.html#L443' title='Refered from 443 in Modules/_sqlite/module.c.'>converters_init</a>(PyObject* dict)
+<a name='L225'><font color='red'>{</font>
+<a name='L226'>    converters = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L227'>    <b>if</b> (!converters) <font color='red'>{</font>
+<a name='L228'>        <b>return</b>;
+<a name='L229'>    <font color='red'>}</font>
+<a name='L230'>
+<a name='L231'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "converters", converters);
+<a name='L232'><font color='red'>}</font>
+<a name='L233'>
+<a name='L234'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> module_methods[] = <font color='red'>{</font>
+<a name='L235'>    <font color='red'>{</font>"connect",  (PyCFunction)<a href='../S/2600.html#L46' title='Defined at 46 in Modules/_sqlite/module.c.'>module_connect</a>,
+<a name='L236'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, module_connect_doc<font color='red'>}</font>,
+<a name='L237'>    <font color='red'>{</font>"complete_statement",  (PyCFunction)<a href='../S/2600.html#L86' title='Defined at 86 in Modules/_sqlite/module.c.'>module_complete</a>,
+<a name='L238'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, module_complete_doc<font color='red'>}</font>,
+<a name='L239'><font color='darkred'>#ifdef</font> <a href='../S/2600.html#L33' title='Defined at 33 in Modules/_sqlite/module.c.'>HAVE_SHARED_CACHE</a>
+<a name='L240'>    <font color='red'>{</font>"enable_shared_cache",  (PyCFunction)<a href='../S/2600.html#L116' title='Defined at 116 in Modules/_sqlite/module.c.'>module_enable_shared_cache</a>,
+<a name='L241'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, module_enable_shared_cache_doc<font color='red'>}</font>,
+<a name='L242'><font color='darkred'>#endif</font>
+<a name='L243'>    <font color='red'>{</font>"register_adapter", (PyCFunction)<a href='../S/2600.html#L146' title='Defined at 146 in Modules/_sqlite/module.c.'>module_register_adapter</a>,
+<a name='L244'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, module_register_adapter_doc<font color='red'>}</font>,
+<a name='L245'>    <font color='red'>{</font>"register_converter", (PyCFunction)<a href='../S/2600.html#L176' title='Defined at 176 in Modules/_sqlite/module.c.'>module_register_converter</a>,
+<a name='L246'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, module_register_converter_doc<font color='red'>}</font>,
+<a name='L247'>    <font color='red'>{</font>"adapt",  (PyCFunction)<a href='../S/2598.html#L135' title='Defined at 135 in Modules/_sqlite/microprotocols.c.'>pysqlite_adapt</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L248'>     <a href='../S/2599.html#L52' title='Defined at 52 in Modules/_sqlite/microprotocols.h.'>pysqlite_adapt_doc</a><font color='red'>}</font>,
+<a name='L249'>    <font color='red'>{</font>"enable_callback_tracebacks",  (PyCFunction)<a href='../S/2600.html#L209' title='Defined at 209 in Modules/_sqlite/module.c.'>enable_callback_tracebacks</a>,
+<a name='L250'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, enable_callback_tracebacks_doc<font color='red'>}</font>,
+<a name='L251'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L252'><font color='red'>}</font>;
+<a name='L253'>
+<a name='L254'><b>struct</b> <a href='../S/2600.html#L259' title='Refered from 259 in Modules/_sqlite/module.c.'>_IntConstantPair</a> <font color='red'>{</font>
+<a name='L255'>    <b>char</b>* constant_name;
+<a name='L256'>    <b>int</b> constant_value;
+<a name='L257'><font color='red'>}</font>;
+<a name='L258'>
+<a name='L259'><b>typedef</b> <b>struct</b> <a href='../S/2600.html#L254' title='Defined at 254 in Modules/_sqlite/module.c.'>_IntConstantPair</a> <a href='../S/2600.html#L261' title='Refered from 261 in Modules/_sqlite/module.c.'>IntConstantPair</a>;
+<a name='L260'>
+<a name='L261'><b>static</b> <a href='../S/2600.html#L259' title='Defined at 259 in Modules/_sqlite/module.c.'>IntConstantPair</a> _int_constants[] = <font color='red'>{</font>
+<a name='L262'>    <font color='red'>{</font>"PARSE_DECLTYPES", <a href='../S/2601.html#L56' title='Defined at 56 in Modules/_sqlite/module.h.'>PARSE_DECLTYPES</a><font color='red'>}</font>,
+<a name='L263'>    <font color='red'>{</font>"PARSE_COLNAMES", <a href='../S/2601.html#L57' title='Defined at 57 in Modules/_sqlite/module.h.'>PARSE_COLNAMES</a><font color='red'>}</font>,
+<a name='L264'>
+<a name='L265'>    <font color='red'>{</font>"SQLITE_OK", SQLITE_OK<font color='red'>}</font>,
+<a name='L266'>    <font color='red'>{</font>"SQLITE_DENY", SQLITE_DENY<font color='red'>}</font>,
+<a name='L267'>    <font color='red'>{</font>"SQLITE_IGNORE", SQLITE_IGNORE<font color='red'>}</font>,
+<a name='L268'>    <font color='red'>{</font>"SQLITE_CREATE_INDEX", SQLITE_CREATE_INDEX<font color='red'>}</font>,
+<a name='L269'>    <font color='red'>{</font>"SQLITE_CREATE_TABLE", SQLITE_CREATE_TABLE<font color='red'>}</font>,
+<a name='L270'>    <font color='red'>{</font>"SQLITE_CREATE_TEMP_INDEX", SQLITE_CREATE_TEMP_INDEX<font color='red'>}</font>,
+<a name='L271'>    <font color='red'>{</font>"SQLITE_CREATE_TEMP_TABLE", SQLITE_CREATE_TEMP_TABLE<font color='red'>}</font>,
+<a name='L272'>    <font color='red'>{</font>"SQLITE_CREATE_TEMP_TRIGGER", SQLITE_CREATE_TEMP_TRIGGER<font color='red'>}</font>,
+<a name='L273'>    <font color='red'>{</font>"SQLITE_CREATE_TEMP_VIEW", SQLITE_CREATE_TEMP_VIEW<font color='red'>}</font>,
+<a name='L274'>    <font color='red'>{</font>"SQLITE_CREATE_TRIGGER", SQLITE_CREATE_TRIGGER<font color='red'>}</font>,
+<a name='L275'>    <font color='red'>{</font>"SQLITE_CREATE_VIEW", SQLITE_CREATE_VIEW<font color='red'>}</font>,
+<a name='L276'>    <font color='red'>{</font>"SQLITE_DELETE", SQLITE_DELETE<font color='red'>}</font>,
+<a name='L277'>    <font color='red'>{</font>"SQLITE_DROP_INDEX", SQLITE_DROP_INDEX<font color='red'>}</font>,
+<a name='L278'>    <font color='red'>{</font>"SQLITE_DROP_TABLE", SQLITE_DROP_TABLE<font color='red'>}</font>,
+<a name='L279'>    <font color='red'>{</font>"SQLITE_DROP_TEMP_INDEX", SQLITE_DROP_TEMP_INDEX<font color='red'>}</font>,
+<a name='L280'>    <font color='red'>{</font>"SQLITE_DROP_TEMP_TABLE", SQLITE_DROP_TEMP_TABLE<font color='red'>}</font>,
+<a name='L281'>    <font color='red'>{</font>"SQLITE_DROP_TEMP_TRIGGER", SQLITE_DROP_TEMP_TRIGGER<font color='red'>}</font>,
+<a name='L282'>    <font color='red'>{</font>"SQLITE_DROP_TEMP_VIEW", SQLITE_DROP_TEMP_VIEW<font color='red'>}</font>,
+<a name='L283'>    <font color='red'>{</font>"SQLITE_DROP_TRIGGER", SQLITE_DROP_TRIGGER<font color='red'>}</font>,
+<a name='L284'>    <font color='red'>{</font>"SQLITE_DROP_VIEW", SQLITE_DROP_VIEW<font color='red'>}</font>,
+<a name='L285'>    <font color='red'>{</font>"SQLITE_INSERT", SQLITE_INSERT<font color='red'>}</font>,
+<a name='L286'>    <font color='red'>{</font>"SQLITE_PRAGMA", SQLITE_PRAGMA<font color='red'>}</font>,
+<a name='L287'>    <font color='red'>{</font>"SQLITE_READ", SQLITE_READ<font color='red'>}</font>,
+<a name='L288'>    <font color='red'>{</font>"SQLITE_SELECT", SQLITE_SELECT<font color='red'>}</font>,
+<a name='L289'>    <font color='red'>{</font>"SQLITE_TRANSACTION", SQLITE_TRANSACTION<font color='red'>}</font>,
+<a name='L290'>    <font color='red'>{</font>"SQLITE_UPDATE", SQLITE_UPDATE<font color='red'>}</font>,
+<a name='L291'>    <font color='red'>{</font>"SQLITE_ATTACH", SQLITE_ATTACH<font color='red'>}</font>,
+<a name='L292'>    <font color='red'>{</font>"SQLITE_DETACH", SQLITE_DETACH<font color='red'>}</font>,
+<a name='L293'><font color='darkred'>#if</font> SQLITE_VERSION_NUMBER &gt;= 3002001
+<a name='L294'>    <font color='red'>{</font>"SQLITE_ALTER_TABLE", SQLITE_ALTER_TABLE<font color='red'>}</font>,
+<a name='L295'>    <font color='red'>{</font>"SQLITE_REINDEX", SQLITE_REINDEX<font color='red'>}</font>,
+<a name='L296'><font color='darkred'>#endif</font>
+<a name='L297'><font color='darkred'>#if</font> SQLITE_VERSION_NUMBER &gt;= 3003000
+<a name='L298'>    <font color='red'>{</font>"SQLITE_ANALYZE", SQLITE_ANALYZE<font color='red'>}</font>,
+<a name='L299'><font color='darkred'>#endif</font>
+<a name='L300'>    <font color='red'>{</font>(<b>char</b>*)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0<font color='red'>}</font>
+<a name='L301'><font color='red'>}</font>;
+<a name='L302'>
+<a name='L303'>
+<a name='L304'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _sqlite3module = <font color='red'>{</font>
+<a name='L305'>        <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L306'>        "_sqlite3",
+<a name='L307'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L308'>        -1,
+<a name='L309'>        module_methods,
+<a name='L310'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L311'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L312'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L313'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L314'><font color='red'>}</font>;
+<a name='L315'>
+<a name='L316'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a> PyInit__sqlite3(<b>void</b>)
+<a name='L317'><font color='red'>{</font>
+<a name='L318'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *module, *dict;
+<a name='L319'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp_obj;
+<a name='L320'>    <b>int</b> i;
+<a name='L321'>
+<a name='L322'>    module = PyModule_Create(&amp;_sqlite3module);
+<a name='L323'>
+<a name='L324'>    <b>if</b> (!module ||
+<a name='L325'>        (<a href='../S/2604.html#L248' title='Defined at 248 in Modules/_sqlite/row.c.'>pysqlite_row_setup_types</a>() &lt; 0) ||
+<a name='L326'>        (<a href='../S/2596.html#L1102' title='Defined at 1102 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_setup_types</a>() &lt; 0) ||
+<a name='L327'>        (<a href='../S/2594.html#L1601' title='Defined at 1601 in Modules/_sqlite/connection.c.'>pysqlite_connection_setup_types</a>() &lt; 0) ||
+<a name='L328'>        (<a href='../S/2592.html#L361' title='Defined at 361 in Modules/_sqlite/cache.c.'>pysqlite_cache_setup_types</a>() &lt; 0) ||
+<a name='L329'>        (<a href='../S/2607.html#L503' title='Defined at 503 in Modules/_sqlite/statement.c.'>pysqlite_statement_setup_types</a>() &lt; 0) ||
+<a name='L330'>        (<a href='../S/2602.html#L79' title='Defined at 79 in Modules/_sqlite/prepare_protocol.c.'>pysqlite_prepare_protocol_setup_types</a>() &lt; 0)
+<a name='L331'>       ) <font color='red'>{</font>
+<a name='L332'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(module);
+<a name='L333'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L334'>    <font color='red'>}</font>
+<a name='L335'>
+<a name='L336'>    Py_INCREF(&amp;pysqlite_ConnectionType);
+<a name='L337'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "Connection", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;pysqlite_ConnectionType);
+<a name='L338'>    Py_INCREF(&amp;pysqlite_CursorType);
+<a name='L339'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "Cursor", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;pysqlite_CursorType);
+<a name='L340'>    Py_INCREF(&amp;pysqlite_CacheType);
+<a name='L341'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "Statement", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;pysqlite_StatementType);
+<a name='L342'>    Py_INCREF(&amp;pysqlite_StatementType);
+<a name='L343'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "Cache", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;pysqlite_CacheType);
+<a name='L344'>    Py_INCREF(&amp;pysqlite_PrepareProtocolType);
+<a name='L345'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "PrepareProtocol", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;pysqlite_PrepareProtocolType);
+<a name='L346'>    Py_INCREF(&amp;pysqlite_RowType);
+<a name='L347'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(module, "Row", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*) &amp;pysqlite_RowType);
+<a name='L348'>
+<a name='L349'>    <b>if</b> (!(dict = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(module))) <font color='red'>{</font>
+<a name='L350'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L351'>    <font color='red'>}</font>
+<a name='L352'>
+<a name='L353'>    <i><font color='green'>/*** Create DB-API Exception hierarchy */</font></i>
+<a name='L354'>
+<a name='L355'>    <b>if</b> (!(pysqlite_Error = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".Error", PyExc_Exception, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L356'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L357'>    <font color='red'>}</font>
+<a name='L358'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "Error", pysqlite_Error);
+<a name='L359'>
+<a name='L360'>    <b>if</b> (!(pysqlite_Warning = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".Warning", PyExc_Exception, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L361'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L362'>    <font color='red'>}</font>
+<a name='L363'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "Warning", pysqlite_Warning);
+<a name='L364'>
+<a name='L365'>    <i><font color='green'>/* Error subclasses */</font></i>
+<a name='L366'>
+<a name='L367'>    <b>if</b> (!(pysqlite_InterfaceError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".InterfaceError", pysqlite_Error, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L368'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L369'>    <font color='red'>}</font>
+<a name='L370'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "InterfaceError", pysqlite_InterfaceError);
+<a name='L371'>
+<a name='L372'>    <b>if</b> (!(pysqlite_DatabaseError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".DatabaseError", pysqlite_Error, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L373'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L374'>    <font color='red'>}</font>
+<a name='L375'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "DatabaseError", pysqlite_DatabaseError);
+<a name='L376'>
+<a name='L377'>    <i><font color='green'>/* pysqlite_DatabaseError subclasses */</font></i>
+<a name='L378'>
+<a name='L379'>    <b>if</b> (!(pysqlite_InternalError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".InternalError", pysqlite_DatabaseError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L380'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L381'>    <font color='red'>}</font>
+<a name='L382'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "InternalError", pysqlite_InternalError);
+<a name='L383'>
+<a name='L384'>    <b>if</b> (!(pysqlite_OperationalError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".OperationalError", pysqlite_DatabaseError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L385'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L386'>    <font color='red'>}</font>
+<a name='L387'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "OperationalError", pysqlite_OperationalError);
+<a name='L388'>
+<a name='L389'>    <b>if</b> (!(pysqlite_ProgrammingError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".ProgrammingError", pysqlite_DatabaseError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L390'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L391'>    <font color='red'>}</font>
+<a name='L392'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "ProgrammingError", pysqlite_ProgrammingError);
+<a name='L393'>
+<a name='L394'>    <b>if</b> (!(pysqlite_IntegrityError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".IntegrityError", pysqlite_DatabaseError,<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L395'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L396'>    <font color='red'>}</font>
+<a name='L397'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "IntegrityError", pysqlite_IntegrityError);
+<a name='L398'>
+<a name='L399'>    <b>if</b> (!(pysqlite_DataError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".DataError", pysqlite_DatabaseError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L400'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L401'>    <font color='red'>}</font>
+<a name='L402'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "DataError", pysqlite_DataError);
+<a name='L403'>
+<a name='L404'>    <b>if</b> (!(pysqlite_NotSupportedError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>(<a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".NotSupportedError", pysqlite_DatabaseError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))) <font color='red'>{</font>
+<a name='L405'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L406'>    <font color='red'>}</font>
+<a name='L407'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "NotSupportedError", pysqlite_NotSupportedError);
+<a name='L408'>
+<a name='L409'>    <i><font color='green'>/* We just need "something" unique for pysqlite_OptimizedUnicode. It does not really</font></i>
+<a name='L410'><i><font color='green'>     * need to be a string subclass. Just anything that can act as a special</font></i>
+<a name='L411'><i><font color='green'>     * marker for us. So I pulled PyCell_Type out of my magic hat.</font></i>
+<a name='L412'><i><font color='green'>     */</font></i>
+<a name='L413'>    Py_INCREF((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;PyCell_Type);
+<a name='L414'>    pysqlite_OptimizedUnicode = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;PyCell_Type;
+<a name='L415'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "OptimizedUnicode", pysqlite_OptimizedUnicode);
+<a name='L416'>
+<a name='L417'>    <i><font color='green'>/* Set integer constants */</font></i>
+<a name='L418'>    <b>for</b> (i = 0; _int_constants[i].constant_name != 0; i++) <font color='red'>{</font>
+<a name='L419'>        tmp_obj = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(_int_constants[i].constant_value);
+<a name='L420'>        <b>if</b> (!tmp_obj) <font color='red'>{</font>
+<a name='L421'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L422'>        <font color='red'>}</font>
+<a name='L423'>        <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, _int_constants[i].constant_name, tmp_obj);
+<a name='L424'>        Py_DECREF(tmp_obj);
+<a name='L425'>    <font color='red'>}</font>
+<a name='L426'>
+<a name='L427'>    <b>if</b> (!(tmp_obj = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(<a href='../S/2601.html#L28' title='Defined at 28 in Modules/_sqlite/module.h.'>PYSQLITE_VERSION</a>))) <font color='red'>{</font>
+<a name='L428'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L429'>    <font color='red'>}</font>
+<a name='L430'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "version", tmp_obj);
+<a name='L431'>    Py_DECREF(tmp_obj);
+<a name='L432'>
+<a name='L433'>    <b>if</b> (!(tmp_obj = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(sqlite3_libversion()))) <font color='red'>{</font>
+<a name='L434'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L435'>    <font color='red'>}</font>
+<a name='L436'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "sqlite_version", tmp_obj);
+<a name='L437'>    Py_DECREF(tmp_obj);
+<a name='L438'>
+<a name='L439'>    <i><font color='green'>/* initialize microprotocols layer */</font></i>
+<a name='L440'>    <a href='../S/2598.html#L41' title='Defined at 41 in Modules/_sqlite/microprotocols.c.'>pysqlite_microprotocols_init</a>(dict);
+<a name='L441'>
+<a name='L442'>    <i><font color='green'>/* initialize the default converters */</font></i>
+<a name='L443'>    <a href='../S/2600.html#L224' title='Defined at 224 in Modules/_sqlite/module.c.'>converters_init</a>(dict);
+<a name='L444'>
+<a name='L445'>    _enable_callback_tracebacks = 0;
+<a name='L446'>
+<a name='L447'>    pysqlite_BaseTypeAdapted = 0;
+<a name='L448'>
+<a name='L449'>    <i><font color='green'>/* Original comment from _bsddb.c in the Python core. This is also still</font></i>
+<a name='L450'><i><font color='green'>     * needed nowadays for Python 2.3/2.4.</font></i>
+<a name='L451'><i><font color='green'>     *</font></i>
+<a name='L452'><i><font color='green'>     * PyEval_InitThreads is called here due to a quirk in python 1.5</font></i>
+<a name='L453'><i><font color='green'>     * - 2.2.1 (at least) according to Russell Williamson &lt;merel@wt.net&gt;:</font></i>
+<a name='L454'><i><font color='green'>     * The global interpreter lock is not initialized until the first</font></i>
+<a name='L455'><i><font color='green'>     * thread is created using thread.start_new_thread() or fork() is</font></i>
+<a name='L456'><i><font color='green'>     * called.  that would cause the ALLOW_THREADS here to segfault due</font></i>
+<a name='L457'><i><font color='green'>     * to a null pointer reference if no threads or child processes</font></i>
+<a name='L458'><i><font color='green'>     * have been created.  This works around that and is a no-op if</font></i>
+<a name='L459'><i><font color='green'>     * threads have already been initialized.</font></i>
+<a name='L460'><i><font color='green'>     *  (see pybsddb-users mailing list post on 2002-08-07)</font></i>
+<a name='L461'><i><font color='green'>     */</font></i>
+<a name='L462'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L463'>    <a href='../S/3091.html#L304' title='Defined at 304 in Python/ceval.c.'>PyEval_InitThreads</a>();
+<a name='L464'><font color='darkred'>#endif</font>
+<a name='L465'>
+<a name='L466'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L467'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L468'>    <font color='red'>{</font>
+<a name='L469'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError, <a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ": init failed");
+<a name='L470'>        Py_DECREF(module);
+<a name='L471'>        module = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L472'>    <font color='red'>}</font>
+<a name='L473'>    <b>return</b> module;
+<a name='L474'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L46'>[^]</a><a href='#L316'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

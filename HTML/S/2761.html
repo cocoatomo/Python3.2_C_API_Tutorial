@@ -1,0 +1,1289 @@
+<html>
+<head>
+<title>Modules/zlib/trees.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3390.html'>zlib</a>/trees.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L193'>[^]</a><a href='#L1222'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L193' title='Defined at 193.'>send_bits</a>
+<li><a href='#L239' title='Defined at 239.'>tr_static_init</a>
+<li><a href='#L333' title='Defined at 333.'>gen_trees_header</a>
+<li><a href='#L386' title='Defined at 386.'>_tr_init</a>
+<li><a href='#L415' title='Defined at 415.'>init_block</a>
+<li><a href='#L459' title='Defined at 459.'>pqdownheap</a>
+<li><a href='#L494' title='Defined at 494.'>gen_bitlen</a>
+<li><a href='#L581' title='Defined at 581.'>gen_codes</a>
+<li><a href='#L623' title='Defined at 623.'>build_tree</a>
+<li><a href='#L711' title='Defined at 711.'>scan_tree</a>
+<li><a href='#L756' title='Defined at 756.'>send_tree</a>
+<li><a href='#L807' title='Defined at 807.'>build_bl_tree</a>
+<li><a href='#L842' title='Defined at 842.'>send_all_trees</a>
+<li><a href='#L871' title='Defined at 871.'>_tr_stored_block</a>
+<li><a href='#L896' title='Defined at 896.'>_tr_align</a>
+<li><a href='#L925' title='Defined at 925.'>_tr_flush_block</a>
+<li><a href='#L1026' title='Defined at 1026.'>_tr_tally</a>
+<li><a href='#L1076' title='Defined at 1076.'>compress_block</a>
+<li><a href='#L1137' title='Defined at 1137.'>detect_data_type</a>
+<li><a href='#L1171' title='Defined at 1171.'>bi_reverse</a>
+<li><a href='#L1186' title='Defined at 1186.'>bi_flush</a>
+<li><a href='#L1203' title='Defined at 1203.'>bi_windup</a>
+<li><a href='#L1222' title='Defined at 1222.'>copy_block</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* trees.c -- output deflated data using Huffman coding</font></i>
+<a name='L2'><i><font color='green'> * Copyright (C) 1995-2010 Jean-loup Gailly</font></i>
+<a name='L3'><i><font color='green'> * detect_data_type() function provided freely by Cosmin Truta, 2006</font></i>
+<a name='L4'><i><font color='green'> * For conditions of distribution and use, see copyright notice in zlib.h</font></i>
+<a name='L5'><i><font color='green'> */</font></i>
+<a name='L6'>
+<a name='L7'><i><font color='green'>/*</font></i>
+<a name='L8'><i><font color='green'> *  ALGORITHM</font></i>
+<a name='L9'><i><font color='green'> *</font></i>
+<a name='L10'><i><font color='green'> *      The "deflation" process uses several Huffman trees. The more</font></i>
+<a name='L11'><i><font color='green'> *      common source values are represented by shorter bit sequences.</font></i>
+<a name='L12'><i><font color='green'> *</font></i>
+<a name='L13'><i><font color='green'> *      Each code tree is stored in a compressed form which is itself</font></i>
+<a name='L14'><i><font color='green'> * a Huffman encoding of the lengths of all the code strings (in</font></i>
+<a name='L15'><i><font color='green'> * ascending order by source values).  The actual code strings are</font></i>
+<a name='L16'><i><font color='green'> * reconstructed from the lengths in the inflate process, as described</font></i>
+<a name='L17'><i><font color='green'> * in the deflate specification.</font></i>
+<a name='L18'><i><font color='green'> *</font></i>
+<a name='L19'><i><font color='green'> *  REFERENCES</font></i>
+<a name='L20'><i><font color='green'> *</font></i>
+<a name='L21'><i><font color='green'> *      Deutsch, L.P.,"'Deflate' Compressed Data Format Specification".</font></i>
+<a name='L22'><i><font color='green'> *      Available in ftp.uu.net:/pub/archiving/zip/doc/deflate-1.1.doc</font></i>
+<a name='L23'><i><font color='green'> *</font></i>
+<a name='L24'><i><font color='green'> *      Storer, James A.</font></i>
+<a name='L25'><i><font color='green'> *          Data Compression:  Methods and Theory, pp. 49-50.</font></i>
+<a name='L26'><i><font color='green'> *          Computer Science Press, 1988.  ISBN 0-7167-8156-5.</font></i>
+<a name='L27'><i><font color='green'> *</font></i>
+<a name='L28'><i><font color='green'> *      Sedgewick, R.</font></i>
+<a name='L29'><i><font color='green'> *          Algorithms, p290.</font></i>
+<a name='L30'><i><font color='green'> *          Addison-Wesley, 1983. ISBN 0-201-06672-6.</font></i>
+<a name='L31'><i><font color='green'> */</font></i>
+<a name='L32'>
+<a name='L33'><i><font color='green'>/* @(#) $Id$ */</font></i>
+<a name='L34'>
+<a name='L35'><i><font color='green'>/* #define GEN_TREES_H */</font></i>
+<a name='L36'>
+<a name='L37'><font color='darkred'>#include</font> "<a href='2738.html'>deflate.h</a>"
+<a name='L38'>
+<a name='L39'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L40'><font color='darkred'>#  include</font> &lt;<a href='2809.html'>ctype.h</a>&gt;
+<a name='L41'><font color='darkred'>#endif</font>
+<a name='L42'>
+<a name='L43'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L44'><i><font color='green'> * Constants</font></i>
+<a name='L45'><i><font color='green'> */</font></i>
+<a name='L46'>
+<a name='L47'><font color='darkred'>#define</font> <a href='../S/2761.html#L137' title='Refered from 137 in Modules/zlib/trees.c.'>MAX_BL_BITS</a> 7
+<a name='L48'><i><font color='green'>/* Bit length codes must not exceed MAX_BL_BITS bits */</font></i>
+<a name='L49'>
+<a name='L50'><font color='darkred'>#define</font> <a href='../R/853.html' title='Multiple refered from 5 places.'>END_BLOCK</a> 256
+<a name='L51'><i><font color='green'>/* end of block literal code */</font></i>
+<a name='L52'>
+<a name='L53'><font color='darkred'>#define</font> <a href='../R/3943.html' title='Multiple refered from 2 places.'>REP_3_6</a>      16
+<a name='L54'><i><font color='green'>/* repeat previous bit length 3-6 times (2 bits of repeat count) */</font></i>
+<a name='L55'>
+<a name='L56'><font color='darkred'>#define</font> <a href='../R/3942.html' title='Multiple refered from 2 places.'>REPZ_3_10</a>    17
+<a name='L57'><i><font color='green'>/* repeat a zero length 3-10 times  (3 bits of repeat count) */</font></i>
+<a name='L58'>
+<a name='L59'><font color='darkred'>#define</font> <a href='../R/3941.html' title='Multiple refered from 2 places.'>REPZ_11_138</a>  18
+<a name='L60'><i><font color='green'>/* repeat a zero length 11-138 times  (7 bits of repeat count) */</font></i>
+<a name='L61'>
+<a name='L62'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>const</b> <b>int</b> extra_lbits[<a href='../S/2738.html#L30' title='Defined at 30 in Modules/zlib/deflate.h.'>LENGTH_CODES</a>] <i><font color='green'>/* extra bits for each length code */</font></i>
+<a name='L63'>   = <font color='red'>{</font>0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0<font color='red'>}</font>;
+<a name='L64'>
+<a name='L65'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>const</b> <b>int</b> extra_dbits[<a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>] <i><font color='green'>/* extra bits for each distance code */</font></i>
+<a name='L66'>   = <font color='red'>{</font>0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13<font color='red'>}</font>;
+<a name='L67'>
+<a name='L68'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>const</b> <b>int</b> extra_blbits[<a href='../S/2738.html#L42' title='Defined at 42 in Modules/zlib/deflate.h.'>BL_CODES</a>]<i><font color='green'>/* extra bits for each bit length code */</font></i>
+<a name='L69'>   = <font color='red'>{</font>0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,3,7<font color='red'>}</font>;
+<a name='L70'>
+<a name='L71'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>const</b> <a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a> bl_order[<a href='../S/2738.html#L42' title='Defined at 42 in Modules/zlib/deflate.h.'>BL_CODES</a>]
+<a name='L72'>   = <font color='red'>{</font>16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15<font color='red'>}</font>;
+<a name='L73'><i><font color='green'>/* The lengths of the bit length codes are sent in order of decreasing</font></i>
+<a name='L74'><i><font color='green'> * probability, to avoid transmitting the lengths for unused bit length codes.</font></i>
+<a name='L75'><i><font color='green'> */</font></i>
+<a name='L76'>
+<a name='L77'><font color='darkred'>#define</font> <a href='../R/428.html' title='Multiple refered from 6 places.'>Buf_size</a> (8 * 2*<b>sizeof</b>(<b>char</b>))
+<a name='L78'><i><font color='green'>/* Number of bits used within bi_buf. (bi_buf might be implemented on</font></i>
+<a name='L79'><i><font color='green'> * more than 16 bits on some systems.)</font></i>
+<a name='L80'><i><font color='green'> */</font></i>
+<a name='L81'>
+<a name='L82'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L83'><i><font color='green'> * Local data. These are initialized only once.</font></i>
+<a name='L84'><i><font color='green'> */</font></i>
+<a name='L85'>
+<a name='L86'><font color='darkred'>#define</font> <a href='../R/744.html' title='Multiple refered from 4 places.'>DIST_CODE_LEN</a>  512 <i><font color='green'>/* see definition of array dist_code below */</font></i>
+<a name='L87'>
+<a name='L88'><font color='darkred'>#if</font> <b>defined</b>(GEN_TREES_H) || !<b>defined</b>(<a href='../D/4951.html' title='Multiple defined in 12 places.'>STDC</a>)
+<a name='L89'><i><font color='green'>/* non ANSI compilers may not accept trees.h */</font></i>
+<a name='L90'>
+<a name='L91'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> static_ltree[<a href='../S/2738.html#L36' title='Defined at 36 in Modules/zlib/deflate.h.'>L_CODES</a>+2];
+<a name='L92'><i><font color='green'>/* The static literal tree. Since the bit lengths are imposed, there is no</font></i>
+<a name='L93'><i><font color='green'> * need for the L_CODES extra codes used during heap construction. However</font></i>
+<a name='L94'><i><font color='green'> * The codes 286 and 287 are needed to build a canonical tree (see _tr_init</font></i>
+<a name='L95'><i><font color='green'> * below).</font></i>
+<a name='L96'><i><font color='green'> */</font></i>
+<a name='L97'>
+<a name='L98'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> static_dtree[<a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>];
+<a name='L99'><i><font color='green'>/* The static distance tree. (Actually a trivial tree since all codes use</font></i>
+<a name='L100'><i><font color='green'> * 5 bits.)</font></i>
+<a name='L101'><i><font color='green'> */</font></i>
+<a name='L102'>
+<a name='L103'><a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a> <a href='../S/2764.html#L20' title='Defined at 20 in Modules/zlib/zconf.h.'>_dist_code</a>[<a href='../S/2761.html#L86' title='Defined at 86 in Modules/zlib/trees.c.'>DIST_CODE_LEN</a>];
+<a name='L104'><i><font color='green'>/* Distance codes. The first 256 values correspond to the distances</font></i>
+<a name='L105'><i><font color='green'> * 3 .. 258, the last 256 values correspond to the top 8 bits of</font></i>
+<a name='L106'><i><font color='green'> * the 15 bit distances.</font></i>
+<a name='L107'><i><font color='green'> */</font></i>
+<a name='L108'>
+<a name='L109'><a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a> <a href='../S/2764.html#L21' title='Defined at 21 in Modules/zlib/zconf.h.'>_length_code</a>[<a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>-<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>+1];
+<a name='L110'><i><font color='green'>/* length code for each normalized match length (0 == MIN_MATCH) */</font></i>
+<a name='L111'>
+<a name='L112'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> base_length[<a href='../S/2738.html#L30' title='Defined at 30 in Modules/zlib/deflate.h.'>LENGTH_CODES</a>];
+<a name='L113'><i><font color='green'>/* First normalized length for each code (0 = MIN_MATCH) */</font></i>
+<a name='L114'>
+<a name='L115'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> base_dist[<a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>];
+<a name='L116'><i><font color='green'>/* First normalized distance for each code (0 = distance of 1) */</font></i>
+<a name='L117'>
+<a name='L118'><font color='darkred'>#else</font>
+<a name='L119'><font color='darkred'>#  include</font> "<a href='2762.html'>trees.h</a>"
+<a name='L120'><font color='darkred'>#endif</font> <i><font color='green'>/* GEN_TREES_H */</font></i>
+<a name='L121'>
+<a name='L122'><b>struct</b> <a href='../S/2738.html#L78' title='Refered from 78 in Modules/zlib/deflate.h.'>static_tree_desc_s</a> <font color='red'>{</font>
+<a name='L123'>    <b>const</b> <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *static_tree;  <i><font color='green'>/* static tree or NULL */</font></i>
+<a name='L124'>    <b>const</b> <a href='../D/9268.html' title='Multiple defined in 4 places.'>intf</a> *extra_bits;      <i><font color='green'>/* extra bits for each code or NULL */</font></i>
+<a name='L125'>    <b>int</b>     extra_base;          <i><font color='green'>/* base index for extra_bits */</font></i>
+<a name='L126'>    <b>int</b>     elems;               <i><font color='green'>/* max number of elements in the tree */</font></i>
+<a name='L127'>    <b>int</b>     max_length;          <i><font color='green'>/* max bit length for the codes */</font></i>
+<a name='L128'><font color='red'>}</font>;
+<a name='L129'>
+<a name='L130'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2738.html#L78' title='Defined at 78 in Modules/zlib/deflate.h.'>static_tree_desc</a>  static_l_desc =
+<a name='L131'><font color='red'>{</font>static_ltree, extra_lbits, <a href='../S/2738.html#L33' title='Defined at 33 in Modules/zlib/deflate.h.'>LITERALS</a>+1, <a href='../S/2738.html#L36' title='Defined at 36 in Modules/zlib/deflate.h.'>L_CODES</a>, <a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a><font color='red'>}</font>;
+<a name='L132'>
+<a name='L133'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2738.html#L78' title='Defined at 78 in Modules/zlib/deflate.h.'>static_tree_desc</a>  static_d_desc =
+<a name='L134'><font color='red'>{</font>static_dtree, extra_dbits, 0,          <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>, <a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a><font color='red'>}</font>;
+<a name='L135'>
+<a name='L136'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../S/2738.html#L78' title='Defined at 78 in Modules/zlib/deflate.h.'>static_tree_desc</a>  static_bl_desc =
+<a name='L137'><font color='red'>{</font>(<b>const</b> <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)0, extra_blbits, 0,   <a href='../S/2738.html#L42' title='Defined at 42 in Modules/zlib/deflate.h.'>BL_CODES</a>, <a href='../S/2761.html#L47' title='Defined at 47 in Modules/zlib/trees.c.'>MAX_BL_BITS</a><font color='red'>}</font>;
+<a name='L138'>
+<a name='L139'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L140'><i><font color='green'> * Local (static) routines in this file.</font></i>
+<a name='L141'><i><font color='green'> */</font></i>
+<a name='L142'>
+<a name='L143'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L239' title='Defined at 239 in Modules/zlib/trees.c.'>tr_static_init</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>void</b>));
+<a name='L144'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L415' title='Defined at 415 in Modules/zlib/trees.c.'>init_block</a>     <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s));
+<a name='L145'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L459' title='Defined at 459 in Modules/zlib/trees.c.'>pqdownheap</a>     <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, ct_data *tree, <b>int</b> k));
+<a name='L146'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L494' title='Defined at 494 in Modules/zlib/trees.c.'>gen_bitlen</a>     <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, tree_desc *desc));
+<a name='L147'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L581' title='Defined at 581 in Modules/zlib/trees.c.'>gen_codes</a>      <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((ct_data *tree, <b>int</b> max_code, ushf *bl_count));
+<a name='L148'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L623' title='Defined at 623 in Modules/zlib/trees.c.'>build_tree</a>     <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, tree_desc *desc));
+<a name='L149'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L711' title='Defined at 711 in Modules/zlib/trees.c.'>scan_tree</a>      <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, ct_data *tree, <b>int</b> max_code));
+<a name='L150'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L756' title='Defined at 756 in Modules/zlib/trees.c.'>send_tree</a>      <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, ct_data *tree, <b>int</b> max_code));
+<a name='L151'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b>  <a href='../S/2761.html#L807' title='Defined at 807 in Modules/zlib/trees.c.'>build_bl_tree</a>  <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s));
+<a name='L152'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L842' title='Defined at 842 in Modules/zlib/trees.c.'>send_all_trees</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, <b>int</b> lcodes, <b>int</b> dcodes,
+<a name='L153'>                              <b>int</b> blcodes));
+<a name='L154'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L1076' title='Defined at 1076 in Modules/zlib/trees.c.'>compress_block</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, ct_data *ltree,
+<a name='L155'>                              ct_data *dtree));
+<a name='L156'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b>  <a href='../S/2761.html#L1137' title='Defined at 1137 in Modules/zlib/trees.c.'>detect_data_type</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s));
+<a name='L157'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <a href='../S/2761.html#L1171' title='Defined at 1171 in Modules/zlib/trees.c.'>bi_reverse</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>unsigned</b> value, <b>int</b> length));
+<a name='L158'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L1203' title='Defined at 1203 in Modules/zlib/trees.c.'>bi_windup</a>      <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s));
+<a name='L159'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L1186' title='Defined at 1186 in Modules/zlib/trees.c.'>bi_flush</a>       <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s));
+<a name='L160'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L1222' title='Defined at 1222 in Modules/zlib/trees.c.'>copy_block</a>     <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, charf *buf, <b>unsigned</b> len,
+<a name='L161'>                              <b>int</b> header));
+<a name='L162'>
+<a name='L163'><font color='darkred'>#ifdef</font> GEN_TREES_H
+<a name='L164'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2761.html#L333' title='Defined at 333 in Modules/zlib/trees.c.'>gen_trees_header</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>void</b>));
+<a name='L165'><font color='darkred'>#endif</font>
+<a name='L166'>
+<a name='L167'><font color='darkred'>#ifndef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L168'><font color='darkred'>#  define</font> <a href='../R/10158.html' title='Multiple refered from 11 places.'>send_code</a>(s, c, tree) <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, tree[c].<a href='../S/2738.html#L74' title='Defined at 74 in Modules/zlib/deflate.h.'>Code</a>, tree[c].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>)
+<a name='L169'>   <i><font color='green'>/* Send a code of the given tree. c and tree must not have side effects */</font></i>
+<a name='L170'>
+<a name='L171'><font color='darkred'>#else</font> <i><font color='green'>/* DEBUG */</font></i>
+<a name='L172'><font color='darkred'>#  define</font> <a href='../R/10158.html' title='Multiple refered from 11 places.'>send_code</a>(s, c, tree) \
+<a name='L173'>     <font color='red'>{</font> <b>if</b> (z_verbose&gt;2) fprintf(stderr,"\ncd %3d ",(c)); \
+<a name='L174'>       <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, tree[c].<a href='../S/2738.html#L74' title='Defined at 74 in Modules/zlib/deflate.h.'>Code</a>, tree[c].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>); <font color='red'>}</font>
+<a name='L175'><font color='darkred'>#endif</font>
+<a name='L176'>
+<a name='L177'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L178'><i><font color='green'> * Output a short LSB first on the stream.</font></i>
+<a name='L179'><i><font color='green'> * IN assertion: there is enough room in pendingBuf.</font></i>
+<a name='L180'><i><font color='green'> */</font></i>
+<a name='L181'><font color='darkred'>#define</font> <a href='../R/9790.html' title='Multiple refered from 6 places.'>put_short</a>(s, w) <font color='red'>{</font> \
+<a name='L182'>    <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)((w) &amp; 0xff)); \
+<a name='L183'>    <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)((<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)(w) &gt;&gt; 8)); \
+<a name='L184'><font color='red'>}</font>
+<a name='L185'>
+<a name='L186'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L187'><i><font color='green'> * Send a value on a given number of bits.</font></i>
+<a name='L188'><i><font color='green'> * IN assertion: length &lt;= 16 and value fits in length bits.</font></i>
+<a name='L189'><i><font color='green'> */</font></i>
+<a name='L190'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L191'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>      <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((deflate_state *s, <b>int</b> value, <b>int</b> length));
+<a name='L192'>
+<a name='L193'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/10157.html' title='Multiple refered from 17 places.'>send_bits</a>(s, value, length)
+<a name='L194'>    deflate_state *s;
+<a name='L195'>    <b>int</b> value;  <i><font color='green'>/* value to send */</font></i>
+<a name='L196'>    <b>int</b> length; <i><font color='green'>/* number of bits */</font></i>
+<a name='L197'><font color='red'>{</font>
+<a name='L198'>    <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr," l %2d v %4x ", length, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>));
+<a name='L199'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(length &gt; 0 &amp;&amp; length &lt;= 15, "invalid length");
+<a name='L200'>    s-&gt;bits_sent += (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)length;
+<a name='L201'>
+<a name='L202'>    <i><font color='green'>/* If not enough room in bi_buf, use (valid) bits from bi_buf and</font></i>
+<a name='L203'><i><font color='green'>     * (16 - bi_valid) bits from value, leaving (width - (16-bi_valid))</font></i>
+<a name='L204'><i><font color='green'>     * unused bits in value.</font></i>
+<a name='L205'><i><font color='green'>     */</font></i>
+<a name='L206'>    <b>if</b> (s-&gt;bi_valid &gt; (<b>int</b>)<a href='../S/2761.html#L77' title='Defined at 77 in Modules/zlib/trees.c.'>Buf_size</a> - length) <font color='red'>{</font>
+<a name='L207'>        s-&gt;bi_buf |= (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &lt;&lt; s-&gt;bi_valid;
+<a name='L208'>        <a href='../S/2761.html#L181' title='Defined at 181 in Modules/zlib/trees.c.'>put_short</a>(s, s-&gt;bi_buf);
+<a name='L209'>        s-&gt;bi_buf = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt; (<a href='../S/2761.html#L77' title='Defined at 77 in Modules/zlib/trees.c.'>Buf_size</a> - s-&gt;bi_valid);
+<a name='L210'>        s-&gt;bi_valid += length - <a href='../S/2761.html#L77' title='Defined at 77 in Modules/zlib/trees.c.'>Buf_size</a>;
+<a name='L211'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L212'>        s-&gt;bi_buf |= (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &lt;&lt; s-&gt;bi_valid;
+<a name='L213'>        s-&gt;bi_valid += length;
+<a name='L214'>    <font color='red'>}</font>
+<a name='L215'><font color='red'>}</font>
+<a name='L216'><font color='darkred'>#else</font> <i><font color='green'>/* !DEBUG */</font></i>
+<a name='L217'>
+<a name='L218'><font color='darkred'>#define</font> <a href='../R/10157.html' title='Multiple refered from 17 places.'>send_bits</a>(s, value, length) \
+<a name='L219'><font color='red'>{</font> <b>int</b> len = length;\
+<a name='L220'>  <b>if</b> (s-&gt;bi_valid &gt; (<b>int</b>)<a href='../S/2761.html#L77' title='Defined at 77 in Modules/zlib/trees.c.'>Buf_size</a> - len) <font color='red'>{</font>\
+<a name='L221'>    <b>int</b> val = <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;\
+<a name='L222'>    s-&gt;bi_buf |= (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)val &lt;&lt; s-&gt;bi_valid;\
+<a name='L223'>    <a href='../S/2761.html#L181' title='Defined at 181 in Modules/zlib/trees.c.'>put_short</a>(s, s-&gt;bi_buf);\
+<a name='L224'>    s-&gt;bi_buf = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)val &gt;&gt; (<a href='../S/2761.html#L77' title='Defined at 77 in Modules/zlib/trees.c.'>Buf_size</a> - s-&gt;bi_valid);\
+<a name='L225'>    s-&gt;bi_valid += len - <a href='../S/2761.html#L77' title='Defined at 77 in Modules/zlib/trees.c.'>Buf_size</a>;\
+<a name='L226'>  <font color='red'>}</font> <b>else</b> <font color='red'>{</font>\
+<a name='L227'>    s-&gt;bi_buf |= (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) &lt;&lt; s-&gt;bi_valid;\
+<a name='L228'>    s-&gt;bi_valid += len;\
+<a name='L229'>  <font color='red'>}</font>\
+<a name='L230'><font color='red'>}</font>
+<a name='L231'><font color='darkred'>#endif</font> <i><font color='green'>/* DEBUG */</font></i>
+<a name='L232'>
+<a name='L233'>
+<a name='L234'><i><font color='green'>/* the arguments must not have side effects */</font></i>
+<a name='L235'>
+<a name='L236'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L237'><i><font color='green'> * Initialize the various 'constant' tables.</font></i>
+<a name='L238'><i><font color='green'> */</font></i>
+<a name='L239'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/10940.html' title='Multiple refered from 2 places.'>tr_static_init</a>()
+<a name='L240'><font color='red'>{</font>
+<a name='L241'><font color='darkred'>#if</font> <b>defined</b>(GEN_TREES_H) || !<b>defined</b>(<a href='../D/4951.html' title='Multiple defined in 12 places.'>STDC</a>)
+<a name='L242'>    <b>static</b> <b>int</b> static_init_done = 0;
+<a name='L243'>    <b>int</b> n;        <i><font color='green'>/* iterates over tree elements */</font></i>
+<a name='L244'>    <b>int</b> bits;     <i><font color='green'>/* bit counter */</font></i>
+<a name='L245'>    <b>int</b> length;   <i><font color='green'>/* length value */</font></i>
+<a name='L246'>    <b>int</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;     <i><font color='green'>/* code value */</font></i>
+<a name='L247'>    <b>int</b> dist;     <i><font color='green'>/* distance index */</font></i>
+<a name='L248'>    <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> bl_count[<a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a>+1];
+<a name='L249'>    <i><font color='green'>/* number of codes at each bit length for an optimal tree */</font></i>
+<a name='L250'>
+<a name='L251'>    <b>if</b> (static_init_done) <b>return</b>;
+<a name='L252'>
+<a name='L253'>    <i><font color='green'>/* For some embedded targets, global variables are not initialized: */</font></i>
+<a name='L254'><font color='darkred'>#ifdef</font> NO_INIT_GLOBAL_POINTERS
+<a name='L255'>    static_l_desc.static_tree = static_ltree;
+<a name='L256'>    static_l_desc.extra_bits = extra_lbits;
+<a name='L257'>    static_d_desc.static_tree = static_dtree;
+<a name='L258'>    static_d_desc.extra_bits = extra_dbits;
+<a name='L259'>    static_bl_desc.extra_bits = extra_blbits;
+<a name='L260'><font color='darkred'>#endif</font>
+<a name='L261'>
+<a name='L262'>    <i><font color='green'>/* Initialize the mapping length (0..255) -&gt; length code (0..28) */</font></i>
+<a name='L263'>    length = 0;
+<a name='L264'>    <b>for</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = 0; <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> &lt; <a href='../S/2738.html#L30' title='Defined at 30 in Modules/zlib/deflate.h.'>LENGTH_CODES</a>-1; <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>++) <font color='red'>{</font>
+<a name='L265'>        base_length[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>] = length;
+<a name='L266'>        <b>for</b> (n = 0; n &lt; (1&lt;&lt;extra_lbits[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>]); n++) <font color='red'>{</font>
+<a name='L267'>            <a href='../S/2764.html#L21' title='Defined at 21 in Modules/zlib/zconf.h.'>_length_code</a>[length++] = (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L268'>        <font color='red'>}</font>
+<a name='L269'>    <font color='red'>}</font>
+<a name='L270'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (length == 256, "tr_static_init: length != 256");
+<a name='L271'>    <i><font color='green'>/* Note that the length 255 (match length 258) can be represented</font></i>
+<a name='L272'><i><font color='green'>     * in two different ways: code 284 + 5 bits or code 285, so we</font></i>
+<a name='L273'><i><font color='green'>     * overwrite length_code[255] to use the best encoding:</font></i>
+<a name='L274'><i><font color='green'>     */</font></i>
+<a name='L275'>    <a href='../S/2764.html#L21' title='Defined at 21 in Modules/zlib/zconf.h.'>_length_code</a>[length-1] = (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L276'>
+<a name='L277'>    <i><font color='green'>/* Initialize the mapping dist (0..32K) -&gt; dist code (0..29) */</font></i>
+<a name='L278'>    dist = 0;
+<a name='L279'>    <b>for</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = 0 ; <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> &lt; 16; <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>++) <font color='red'>{</font>
+<a name='L280'>        base_dist[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>] = dist;
+<a name='L281'>        <b>for</b> (n = 0; n &lt; (1&lt;&lt;extra_dbits[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>]); n++) <font color='red'>{</font>
+<a name='L282'>            <a href='../S/2764.html#L20' title='Defined at 20 in Modules/zlib/zconf.h.'>_dist_code</a>[dist++] = (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L283'>        <font color='red'>}</font>
+<a name='L284'>    <font color='red'>}</font>
+<a name='L285'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (dist == 256, "tr_static_init: dist != 256");
+<a name='L286'>    dist &gt;&gt;= 7; <i><font color='green'>/* from now on, all distances are divided by 128 */</font></i>
+<a name='L287'>    <b>for</b> ( ; <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> &lt; <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>; <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>++) <font color='red'>{</font>
+<a name='L288'>        base_dist[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>] = dist &lt;&lt; 7;
+<a name='L289'>        <b>for</b> (n = 0; n &lt; (1&lt;&lt;(extra_dbits[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>]-7)); n++) <font color='red'>{</font>
+<a name='L290'>            <a href='../S/2764.html#L20' title='Defined at 20 in Modules/zlib/zconf.h.'>_dist_code</a>[256 + dist++] = (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L291'>        <font color='red'>}</font>
+<a name='L292'>    <font color='red'>}</font>
+<a name='L293'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (dist == 256, "tr_static_init: 256+dist != 512");
+<a name='L294'>
+<a name='L295'>    <i><font color='green'>/* Construct the codes of the static literal tree */</font></i>
+<a name='L296'>    <b>for</b> (bits = 0; bits &lt;= <a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a>; bits++) bl_count[bits] = 0;
+<a name='L297'>    n = 0;
+<a name='L298'>    <b>while</b> (n &lt;= 143) static_ltree[n++].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = 8, bl_count[8]++;
+<a name='L299'>    <b>while</b> (n &lt;= 255) static_ltree[n++].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = 9, bl_count[9]++;
+<a name='L300'>    <b>while</b> (n &lt;= 279) static_ltree[n++].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = 7, bl_count[7]++;
+<a name='L301'>    <b>while</b> (n &lt;= 287) static_ltree[n++].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = 8, bl_count[8]++;
+<a name='L302'>    <i><font color='green'>/* Codes 286 and 287 do not exist, but we must include them in the</font></i>
+<a name='L303'><i><font color='green'>     * tree construction to get a canonical Huffman tree (longest code</font></i>
+<a name='L304'><i><font color='green'>     * all ones)</font></i>
+<a name='L305'><i><font color='green'>     */</font></i>
+<a name='L306'>    <a href='../S/2761.html#L581' title='Defined at 581 in Modules/zlib/trees.c.'>gen_codes</a>((<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)static_ltree, <a href='../S/2738.html#L36' title='Defined at 36 in Modules/zlib/deflate.h.'>L_CODES</a>+1, bl_count);
+<a name='L307'>
+<a name='L308'>    <i><font color='green'>/* The static distance tree is trivial: */</font></i>
+<a name='L309'>    <b>for</b> (n = 0; n &lt; <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>; n++) <font color='red'>{</font>
+<a name='L310'>        static_dtree[n].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = 5;
+<a name='L311'>        static_dtree[n].<a href='../S/2738.html#L74' title='Defined at 74 in Modules/zlib/deflate.h.'>Code</a> = <a href='../S/2761.html#L1171' title='Defined at 1171 in Modules/zlib/trees.c.'>bi_reverse</a>((<b>unsigned</b>)n, 5);
+<a name='L312'>    <font color='red'>}</font>
+<a name='L313'>    static_init_done = 1;
+<a name='L314'>
+<a name='L315'><font color='darkred'>#  ifdef</font> GEN_TREES_H
+<a name='L316'>    <a href='../S/2761.html#L333' title='Defined at 333 in Modules/zlib/trees.c.'>gen_trees_header</a>();
+<a name='L317'><font color='darkred'>#  endif</font>
+<a name='L318'><font color='darkred'>#endif</font> <i><font color='green'>/* defined(GEN_TREES_H) || !defined(STDC) */</font></i>
+<a name='L319'><font color='red'>}</font>
+<a name='L320'>
+<a name='L321'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L322'><i><font color='green'> * Genererate the file trees.h describing the static trees.</font></i>
+<a name='L323'><i><font color='green'> */</font></i>
+<a name='L324'><font color='darkred'>#ifdef</font> GEN_TREES_H
+<a name='L325'><font color='darkred'>#  ifndef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L326'><font color='darkred'>#    include</font> &lt;stdio.h&gt;
+<a name='L327'><font color='darkred'>#  endif</font>
+<a name='L328'>
+<a name='L329'><font color='darkred'>#  define</font> <a href='../R/4055.html' title='Multiple refered from 6 places.'>SEPARATOR</a>(i, last, width) \
+<a name='L330'>      ((i) == (last)? "\n};\n\n" :    \
+<a name='L331'>       ((i) % (width) == (width)-1 ? ",\n" : ", "))
+<a name='L332'>
+<a name='L333'><b>void</b> <a href='../R/8013.html' title='Multiple refered from 2 places.'>gen_trees_header</a>()
+<a name='L334'><font color='red'>{</font>
+<a name='L335'>    FILE *header = fopen("trees.h", "w");
+<a name='L336'>    <b>int</b> i;
+<a name='L337'>
+<a name='L338'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (header != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, "Can't open trees.h");
+<a name='L339'>    fprintf(header,
+<a name='L340'>            "/* header created automatically with -DGEN_TREES_H */\n\n");
+<a name='L341'>
+<a name='L342'>    fprintf(header, "local const ct_data static_ltree[L_CODES+2] = {\n");
+<a name='L343'>    <b>for</b> (i = 0; i &lt; <a href='../S/2738.html#L36' title='Defined at 36 in Modules/zlib/deflate.h.'>L_CODES</a>+2; i++) <font color='red'>{</font>
+<a name='L344'>        fprintf(header, "{{%3u},{%3u}}%s", static_ltree[i].<a href='../S/2738.html#L74' title='Defined at 74 in Modules/zlib/deflate.h.'>Code</a>,
+<a name='L345'>                static_ltree[i].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>, <a href='../S/2761.html#L329' title='Defined at 329 in Modules/zlib/trees.c.'>SEPARATOR</a>(i, <a href='../S/2738.html#L36' title='Defined at 36 in Modules/zlib/deflate.h.'>L_CODES</a>+1, 5));
+<a name='L346'>    <font color='red'>}</font>
+<a name='L347'>
+<a name='L348'>    fprintf(header, "local const ct_data static_dtree[D_CODES] = {\n");
+<a name='L349'>    <b>for</b> (i = 0; i &lt; <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>; i++) <font color='red'>{</font>
+<a name='L350'>        fprintf(header, "{{%2u},{%2u}}%s", static_dtree[i].<a href='../S/2738.html#L74' title='Defined at 74 in Modules/zlib/deflate.h.'>Code</a>,
+<a name='L351'>                static_dtree[i].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>, <a href='../S/2761.html#L329' title='Defined at 329 in Modules/zlib/trees.c.'>SEPARATOR</a>(i, <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>-1, 5));
+<a name='L352'>    <font color='red'>}</font>
+<a name='L353'>
+<a name='L354'>    fprintf(header, "const uch ZLIB_INTERNAL _dist_code[DIST_CODE_LEN] = {\n");
+<a name='L355'>    <b>for</b> (i = 0; i &lt; <a href='../S/2761.html#L86' title='Defined at 86 in Modules/zlib/trees.c.'>DIST_CODE_LEN</a>; i++) <font color='red'>{</font>
+<a name='L356'>        fprintf(header, "%2u%s", <a href='../S/2764.html#L20' title='Defined at 20 in Modules/zlib/zconf.h.'>_dist_code</a>[i],
+<a name='L357'>                <a href='../S/2761.html#L329' title='Defined at 329 in Modules/zlib/trees.c.'>SEPARATOR</a>(i, <a href='../S/2761.html#L86' title='Defined at 86 in Modules/zlib/trees.c.'>DIST_CODE_LEN</a>-1, 20));
+<a name='L358'>    <font color='red'>}</font>
+<a name='L359'>
+<a name='L360'>    fprintf(header,
+<a name='L361'>        "const uch ZLIB_INTERNAL _length_code[MAX_MATCH-MIN_MATCH+1]= {\n");
+<a name='L362'>    <b>for</b> (i = 0; i &lt; <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>-<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>+1; i++) <font color='red'>{</font>
+<a name='L363'>        fprintf(header, "%2u%s", <a href='../S/2764.html#L21' title='Defined at 21 in Modules/zlib/zconf.h.'>_length_code</a>[i],
+<a name='L364'>                <a href='../S/2761.html#L329' title='Defined at 329 in Modules/zlib/trees.c.'>SEPARATOR</a>(i, <a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>-<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>, 20));
+<a name='L365'>    <font color='red'>}</font>
+<a name='L366'>
+<a name='L367'>    fprintf(header, "local const int base_length[LENGTH_CODES] = {\n");
+<a name='L368'>    <b>for</b> (i = 0; i &lt; <a href='../S/2738.html#L30' title='Defined at 30 in Modules/zlib/deflate.h.'>LENGTH_CODES</a>; i++) <font color='red'>{</font>
+<a name='L369'>        fprintf(header, "%1u%s", base_length[i],
+<a name='L370'>                <a href='../S/2761.html#L329' title='Defined at 329 in Modules/zlib/trees.c.'>SEPARATOR</a>(i, <a href='../S/2738.html#L30' title='Defined at 30 in Modules/zlib/deflate.h.'>LENGTH_CODES</a>-1, 20));
+<a name='L371'>    <font color='red'>}</font>
+<a name='L372'>
+<a name='L373'>    fprintf(header, "local const int base_dist[D_CODES] = {\n");
+<a name='L374'>    <b>for</b> (i = 0; i &lt; <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>; i++) <font color='red'>{</font>
+<a name='L375'>        fprintf(header, "%5u%s", base_dist[i],
+<a name='L376'>                <a href='../S/2761.html#L329' title='Defined at 329 in Modules/zlib/trees.c.'>SEPARATOR</a>(i, <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>-1, 10));
+<a name='L377'>    <font color='red'>}</font>
+<a name='L378'>
+<a name='L379'>    fclose(header);
+<a name='L380'><font color='red'>}</font>
+<a name='L381'><font color='darkred'>#endif</font> <i><font color='green'>/* GEN_TREES_H */</font></i>
+<a name='L382'>
+<a name='L383'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L384'><i><font color='green'> * Initialize the tree data structures for a new zlib stream.</font></i>
+<a name='L385'><i><font color='green'> */</font></i>
+<a name='L386'><b>void</b> <a href='../D/5928.html' title='Multiple defined in 6 places.'>ZLIB_INTERNAL</a> <a href='../R/5872.html' title='Multiple refered from 2 places.'>_tr_init</a>(s)
+<a name='L387'>    deflate_state *s;
+<a name='L388'><font color='red'>{</font>
+<a name='L389'>    <a href='../S/2761.html#L239' title='Defined at 239 in Modules/zlib/trees.c.'>tr_static_init</a>();
+<a name='L390'>
+<a name='L391'>    s-&gt;l_desc.dyn_tree = s-&gt;dyn_ltree;
+<a name='L392'>    s-&gt;l_desc.stat_desc = &amp;static_l_desc;
+<a name='L393'>
+<a name='L394'>    s-&gt;d_desc.dyn_tree = s-&gt;dyn_dtree;
+<a name='L395'>    s-&gt;d_desc.stat_desc = &amp;static_d_desc;
+<a name='L396'>
+<a name='L397'>    s-&gt;bl_desc.dyn_tree = s-&gt;bl_tree;
+<a name='L398'>    s-&gt;bl_desc.stat_desc = &amp;static_bl_desc;
+<a name='L399'>
+<a name='L400'>    s-&gt;bi_buf = 0;
+<a name='L401'>    s-&gt;bi_valid = 0;
+<a name='L402'>    s-&gt;last_eob_len = 8; <i><font color='green'>/* enough lookahead for inflate */</font></i>
+<a name='L403'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L404'>    s-&gt;compressed_len = 0L;
+<a name='L405'>    s-&gt;bits_sent = 0L;
+<a name='L406'><font color='darkred'>#endif</font>
+<a name='L407'>
+<a name='L408'>    <i><font color='green'>/* Initialize the first block of the first file: */</font></i>
+<a name='L409'>    <a href='../S/2761.html#L415' title='Defined at 415 in Modules/zlib/trees.c.'>init_block</a>(s);
+<a name='L410'><font color='red'>}</font>
+<a name='L411'>
+<a name='L412'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L413'><i><font color='green'> * Initialize a new block.</font></i>
+<a name='L414'><i><font color='green'> */</font></i>
+<a name='L415'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/8380.html' title='Multiple refered from 3 places.'>init_block</a>(s)
+<a name='L416'>    deflate_state *s;
+<a name='L417'><font color='red'>{</font>
+<a name='L418'>    <b>int</b> n; <i><font color='green'>/* iterates over tree elements */</font></i>
+<a name='L419'>
+<a name='L420'>    <i><font color='green'>/* Initialize the trees. */</font></i>
+<a name='L421'>    <b>for</b> (n = 0; n &lt; <a href='../S/2738.html#L36' title='Defined at 36 in Modules/zlib/deflate.h.'>L_CODES</a>;  n++) s-&gt;dyn_ltree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> = 0;
+<a name='L422'>    <b>for</b> (n = 0; n &lt; <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>;  n++) s-&gt;dyn_dtree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> = 0;
+<a name='L423'>    <b>for</b> (n = 0; n &lt; <a href='../S/2738.html#L42' title='Defined at 42 in Modules/zlib/deflate.h.'>BL_CODES</a>; n++) s-&gt;bl_tree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> = 0;
+<a name='L424'>
+<a name='L425'>    s-&gt;dyn_ltree[<a href='../S/2761.html#L50' title='Defined at 50 in Modules/zlib/trees.c.'>END_BLOCK</a>].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> = 1;
+<a name='L426'>    s-&gt;opt_len = s-&gt;static_len = 0L;
+<a name='L427'>    s-&gt;last_lit = s-&gt;matches = 0;
+<a name='L428'><font color='red'>}</font>
+<a name='L429'>
+<a name='L430'><font color='darkred'>#define</font> <a href='../R/4195.html' title='Multiple refered from 7 places.'>SMALLEST</a> 1
+<a name='L431'><i><font color='green'>/* Index within the heap array of least frequent node in the Huffman tree */</font></i>
+<a name='L432'>
+<a name='L433'>
+<a name='L434'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L435'><i><font color='green'> * Remove the smallest element from the heap and recreate the heap with</font></i>
+<a name='L436'><i><font color='green'> * one less element. Updates heap and heap_len.</font></i>
+<a name='L437'><i><font color='green'> */</font></i>
+<a name='L438'><font color='darkred'>#define</font> <a href='../S/2761.html#L673' title='Refered from 673 in Modules/zlib/trees.c.'>pqremove</a>(s, tree, top) \
+<a name='L439'><font color='red'>{</font>\
+<a name='L440'>    top = s-&gt;heap[<a href='../S/2761.html#L430' title='Defined at 430 in Modules/zlib/trees.c.'>SMALLEST</a>]; \
+<a name='L441'>    s-&gt;heap[<a href='../S/2761.html#L430' title='Defined at 430 in Modules/zlib/trees.c.'>SMALLEST</a>] = s-&gt;heap[s-&gt;heap_len--]; \
+<a name='L442'>    <a href='../S/2761.html#L459' title='Defined at 459 in Modules/zlib/trees.c.'>pqdownheap</a>(s, tree, <a href='../S/2761.html#L430' title='Defined at 430 in Modules/zlib/trees.c.'>SMALLEST</a>); \
+<a name='L443'><font color='red'>}</font>
+<a name='L444'>
+<a name='L445'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L446'><i><font color='green'> * Compares to subtrees, using the tree depth as tie breaker when</font></i>
+<a name='L447'><i><font color='green'> * the subtrees have equal frequency. This minimizes the worst case length.</font></i>
+<a name='L448'><i><font color='green'> */</font></i>
+<a name='L449'><font color='darkred'>#define</font> <a href='../R/10368.html' title='Multiple refered from 2 places.'>smaller</a>(tree, n, m, depth) \
+<a name='L450'>   (tree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> &lt; tree[m].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> || \
+<a name='L451'>   (tree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> == tree[m].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> &amp;&amp; depth[n] &lt;= depth[m]))
+<a name='L452'>
+<a name='L453'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L454'><i><font color='green'> * Restore the heap property by moving down the tree starting at node k,</font></i>
+<a name='L455'><i><font color='green'> * exchanging a node with the smallest of its two sons if necessary, stopping</font></i>
+<a name='L456'><i><font color='green'> * when the heap property is re-established (each father smaller than its</font></i>
+<a name='L457'><i><font color='green'> * two sons).</font></i>
+<a name='L458'><i><font color='green'> */</font></i>
+<a name='L459'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/9696.html' title='Multiple refered from 4 places.'>pqdownheap</a>(s, tree, k)
+<a name='L460'>    deflate_state *s;
+<a name='L461'>    ct_data *tree;  <i><font color='green'>/* the tree to restore */</font></i>
+<a name='L462'>    <b>int</b> k;               <i><font color='green'>/* node to move down */</font></i>
+<a name='L463'><font color='red'>{</font>
+<a name='L464'>    <b>int</b> v = s-&gt;heap[k];
+<a name='L465'>    <b>int</b> j = k &lt;&lt; 1;  <i><font color='green'>/* left son of k */</font></i>
+<a name='L466'>    <b>while</b> (j &lt;= s-&gt;heap_len) <font color='red'>{</font>
+<a name='L467'>        <i><font color='green'>/* Set j to the smallest of the two sons: */</font></i>
+<a name='L468'>        <b>if</b> (j &lt; s-&gt;heap_len &amp;&amp;
+<a name='L469'>            <a href='../S/2761.html#L449' title='Defined at 449 in Modules/zlib/trees.c.'>smaller</a>(tree, s-&gt;heap[j+1], s-&gt;heap[j], s-&gt;depth)) <font color='red'>{</font>
+<a name='L470'>            j++;
+<a name='L471'>        <font color='red'>}</font>
+<a name='L472'>        <i><font color='green'>/* Exit if v is smaller than both sons */</font></i>
+<a name='L473'>        <b>if</b> (<a href='../S/2761.html#L449' title='Defined at 449 in Modules/zlib/trees.c.'>smaller</a>(tree, v, s-&gt;heap[j], s-&gt;depth)) <b>break</b>;
+<a name='L474'>
+<a name='L475'>        <i><font color='green'>/* Exchange v with the smallest son */</font></i>
+<a name='L476'>        s-&gt;heap[k] = s-&gt;heap[j];  k = j;
+<a name='L477'>
+<a name='L478'>        <i><font color='green'>/* And continue down the tree, setting j to the left son of k */</font></i>
+<a name='L479'>        j &lt;&lt;= 1;
+<a name='L480'>    <font color='red'>}</font>
+<a name='L481'>    s-&gt;heap[k] = v;
+<a name='L482'><font color='red'>}</font>
+<a name='L483'>
+<a name='L484'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L485'><i><font color='green'> * Compute the optimal bit lengths for a tree and update the total bit length</font></i>
+<a name='L486'><i><font color='green'> * for the current block.</font></i>
+<a name='L487'><i><font color='green'> * IN assertion: the fields freq and dad are set, heap[heap_max] and</font></i>
+<a name='L488'><i><font color='green'> *    above are the tree nodes sorted by increasing frequency.</font></i>
+<a name='L489'><i><font color='green'> * OUT assertions: the field len is set to the optimal bit length, the</font></i>
+<a name='L490'><i><font color='green'> *     array bl_count contains the frequencies for each bit length.</font></i>
+<a name='L491'><i><font color='green'> *     The length opt_len is updated; static_len is also updated if stree is</font></i>
+<a name='L492'><i><font color='green'> *     not null.</font></i>
+<a name='L493'><i><font color='green'> */</font></i>
+<a name='L494'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/8001.html' title='Multiple refered from 2 places.'>gen_bitlen</a>(s, desc)
+<a name='L495'>    deflate_state *s;
+<a name='L496'>    tree_desc *desc;    <i><font color='green'>/* the tree descriptor */</font></i>
+<a name='L497'><font color='red'>{</font>
+<a name='L498'>    <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *tree        = desc-&gt;dyn_tree;
+<a name='L499'>    <b>int</b> max_code         = desc-&gt;max_code;
+<a name='L500'>    <b>const</b> <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *stree = desc-&gt;stat_desc-&gt;static_tree;
+<a name='L501'>    <b>const</b> <a href='../D/9268.html' title='Multiple defined in 4 places.'>intf</a> *extra    = desc-&gt;stat_desc-&gt;extra_bits;
+<a name='L502'>    <b>int</b> base             = desc-&gt;stat_desc-&gt;extra_base;
+<a name='L503'>    <b>int</b> max_length       = desc-&gt;stat_desc-&gt;max_length;
+<a name='L504'>    <b>int</b> h;              <i><font color='green'>/* heap index */</font></i>
+<a name='L505'>    <b>int</b> n, m;           <i><font color='green'>/* iterate over the tree elements */</font></i>
+<a name='L506'>    <b>int</b> bits;           <i><font color='green'>/* bit length */</font></i>
+<a name='L507'>    <b>int</b> xbits;          <i><font color='green'>/* extra bits */</font></i>
+<a name='L508'>    <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> f;              <i><font color='green'>/* frequency */</font></i>
+<a name='L509'>    <b>int</b> <a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a> = 0;   <i><font color='green'>/* number of elements with bit length too large */</font></i>
+<a name='L510'>
+<a name='L511'>    <b>for</b> (bits = 0; bits &lt;= <a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a>; bits++) s-&gt;bl_count[bits] = 0;
+<a name='L512'>
+<a name='L513'>    <i><font color='green'>/* In a first pass, compute the optimal bit lengths (which may</font></i>
+<a name='L514'><i><font color='green'>     * overflow in the case of the bit length tree).</font></i>
+<a name='L515'><i><font color='green'>     */</font></i>
+<a name='L516'>    tree[s-&gt;heap[s-&gt;heap_max]].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = 0; <i><font color='green'>/* root of the heap */</font></i>
+<a name='L517'>
+<a name='L518'>    <b>for</b> (h = s-&gt;heap_max+1; h &lt; <a href='../S/2738.html#L45' title='Defined at 45 in Modules/zlib/deflate.h.'>HEAP_SIZE</a>; h++) <font color='red'>{</font>
+<a name='L519'>        n = s-&gt;heap[h];
+<a name='L520'>        bits = tree[tree[n].<a href='../S/2738.html#L75' title='Defined at 75 in Modules/zlib/deflate.h.'>Dad</a>].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> + 1;
+<a name='L521'>        <b>if</b> (bits &gt; max_length) bits = max_length, <a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a>++;
+<a name='L522'>        tree[n].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)bits;
+<a name='L523'>        <i><font color='green'>/* We overwrite tree[n].Dad which is no longer needed */</font></i>
+<a name='L524'>
+<a name='L525'>        <b>if</b> (n &gt; max_code) <b>continue</b>; <i><font color='green'>/* not a leaf node */</font></i>
+<a name='L526'>
+<a name='L527'>        s-&gt;bl_count[bits]++;
+<a name='L528'>        xbits = 0;
+<a name='L529'>        <b>if</b> (n &gt;= base) xbits = extra[n-base];
+<a name='L530'>        f = tree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>;
+<a name='L531'>        s-&gt;opt_len += (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)f * (bits + xbits);
+<a name='L532'>        <b>if</b> (stree) s-&gt;static_len += (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)f * (stree[n].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> + xbits);
+<a name='L533'>    <font color='red'>}</font>
+<a name='L534'>    <b>if</b> (<a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a> == 0) <b>return</b>;
+<a name='L535'>
+<a name='L536'>    <a href='../D/5310.html' title='Multiple defined in 2 places.'>Trace</a>((stderr,"\nbit length overflow\n"));
+<a name='L537'>    <i><font color='green'>/* This happens for example on obj2 and pic of the Calgary corpus */</font></i>
+<a name='L538'>
+<a name='L539'>    <i><font color='green'>/* Find the first bit length which could increase: */</font></i>
+<a name='L540'>    <b>do</b> <font color='red'>{</font>
+<a name='L541'>        bits = max_length-1;
+<a name='L542'>        <b>while</b> (s-&gt;bl_count[bits] == 0) bits--;
+<a name='L543'>        s-&gt;bl_count[bits]--;      <i><font color='green'>/* move one leaf down the tree */</font></i>
+<a name='L544'>        s-&gt;bl_count[bits+1] += 2; <i><font color='green'>/* move one overflow item as its brother */</font></i>
+<a name='L545'>        s-&gt;bl_count[max_length]--;
+<a name='L546'>        <i><font color='green'>/* The brother of the overflow item also moves one step up,</font></i>
+<a name='L547'><i><font color='green'>         * but this does not affect bl_count[max_length]</font></i>
+<a name='L548'><i><font color='green'>         */</font></i>
+<a name='L549'>        <a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a> -= 2;
+<a name='L550'>    <font color='red'>}</font> <b>while</b> (<a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a> &gt; 0);
+<a name='L551'>
+<a name='L552'>    <i><font color='green'>/* Now recompute all bit lengths, scanning in increasing frequency.</font></i>
+<a name='L553'><i><font color='green'>     * h is still equal to HEAP_SIZE. (It is simpler to reconstruct all</font></i>
+<a name='L554'><i><font color='green'>     * lengths instead of fixing only the wrong ones. This idea is taken</font></i>
+<a name='L555'><i><font color='green'>     * from 'ar' written by Haruhiko Okumura.)</font></i>
+<a name='L556'><i><font color='green'>     */</font></i>
+<a name='L557'>    <b>for</b> (bits = max_length; bits != 0; bits--) <font color='red'>{</font>
+<a name='L558'>        n = s-&gt;bl_count[bits];
+<a name='L559'>        <b>while</b> (n != 0) <font color='red'>{</font>
+<a name='L560'>            m = s-&gt;heap[--h];
+<a name='L561'>            <b>if</b> (m &gt; max_code) <b>continue</b>;
+<a name='L562'>            <b>if</b> ((<b>unsigned</b>) tree[m].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> != (<b>unsigned</b>) bits) <font color='red'>{</font>
+<a name='L563'>                <a href='../D/5310.html' title='Multiple defined in 2 places.'>Trace</a>((stderr,"code %d bits %d-&gt;%d\n", m, tree[m].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>, bits));
+<a name='L564'>                s-&gt;opt_len += ((<b>long</b>)bits - (<b>long</b>)tree[m].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>)
+<a name='L565'>                              *(<b>long</b>)tree[m].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>;
+<a name='L566'>                tree[m].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)bits;
+<a name='L567'>            <font color='red'>}</font>
+<a name='L568'>            n--;
+<a name='L569'>        <font color='red'>}</font>
+<a name='L570'>    <font color='red'>}</font>
+<a name='L571'><font color='red'>}</font>
+<a name='L572'>
+<a name='L573'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L574'><i><font color='green'> * Generate the codes for a given tree and bit counts (which need not be</font></i>
+<a name='L575'><i><font color='green'> * optimal).</font></i>
+<a name='L576'><i><font color='green'> * IN assertion: the array bl_count contains the bit length statistics for</font></i>
+<a name='L577'><i><font color='green'> * the given tree and the field len is set for all tree elements.</font></i>
+<a name='L578'><i><font color='green'> * OUT assertion: the field code is set for all tree elements of non</font></i>
+<a name='L579'><i><font color='green'> *     zero code length.</font></i>
+<a name='L580'><i><font color='green'> */</font></i>
+<a name='L581'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/8003.html' title='Multiple refered from 3 places.'>gen_codes</a> (tree, max_code, bl_count)
+<a name='L582'>    ct_data *tree;             <i><font color='green'>/* the tree to decorate */</font></i>
+<a name='L583'>    <b>int</b> max_code;              <i><font color='green'>/* largest code with non zero frequency */</font></i>
+<a name='L584'>    ushf *bl_count;            <i><font color='green'>/* number of codes at each bit length */</font></i>
+<a name='L585'><font color='red'>{</font>
+<a name='L586'>    <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> next_code[<a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a>+1]; <i><font color='green'>/* next code value for each bit length */</font></i>
+<a name='L587'>    <a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = 0;              <i><font color='green'>/* running code value */</font></i>
+<a name='L588'>    <b>int</b> bits;                  <i><font color='green'>/* bit index */</font></i>
+<a name='L589'>    <b>int</b> n;                     <i><font color='green'>/* code index */</font></i>
+<a name='L590'>
+<a name='L591'>    <i><font color='green'>/* The distribution counts are first used to generate the code values</font></i>
+<a name='L592'><i><font color='green'>     * without bit reversal.</font></i>
+<a name='L593'><i><font color='green'>     */</font></i>
+<a name='L594'>    <b>for</b> (bits = 1; bits &lt;= <a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a>; bits++) <font color='red'>{</font>
+<a name='L595'>        next_code[bits] = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> + bl_count[bits-1]) &lt;&lt; 1;
+<a name='L596'>    <font color='red'>}</font>
+<a name='L597'>    <i><font color='green'>/* Check that the bit counts in bl_count are consistent. The last code</font></i>
+<a name='L598'><i><font color='green'>     * must be all ones.</font></i>
+<a name='L599'><i><font color='green'>     */</font></i>
+<a name='L600'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> + bl_count[<a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a>]-1 == (1&lt;&lt;<a href='../S/2738.html#L48' title='Defined at 48 in Modules/zlib/deflate.h.'>MAX_BITS</a>)-1,
+<a name='L601'>            "inconsistent bit counts");
+<a name='L602'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr,"\ngen_codes: max_code %d ", max_code));
+<a name='L603'>
+<a name='L604'>    <b>for</b> (n = 0;  n &lt;= max_code; n++) <font color='red'>{</font>
+<a name='L605'>        <b>int</b> len = tree[n].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>;
+<a name='L606'>        <b>if</b> (len == 0) <b>continue</b>;
+<a name='L607'>        <i><font color='green'>/* Now reverse the bits */</font></i>
+<a name='L608'>        tree[n].<a href='../S/2738.html#L74' title='Defined at 74 in Modules/zlib/deflate.h.'>Code</a> = <a href='../S/2761.html#L1171' title='Defined at 1171 in Modules/zlib/trees.c.'>bi_reverse</a>(next_code[len]++, len);
+<a name='L609'>
+<a name='L610'>        <a href='../D/5312.html' title='Multiple defined in 2 places.'>Tracecv</a>(tree != static_ltree, (stderr,"\nn %3d %c l %2d c %4x (%x) ",
+<a name='L611'>             n, (isgraph(n) ? n : ' '), len, tree[n].<a href='../S/2738.html#L74' title='Defined at 74 in Modules/zlib/deflate.h.'>Code</a>, next_code[len]-1));
+<a name='L612'>    <font color='red'>}</font>
+<a name='L613'><font color='red'>}</font>
+<a name='L614'>
+<a name='L615'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L616'><i><font color='green'> * Construct one Huffman tree and assigns the code bit strings and lengths.</font></i>
+<a name='L617'><i><font color='green'> * Update the total bit length for the current block.</font></i>
+<a name='L618'><i><font color='green'> * IN assertion: the field freq is set for all tree elements.</font></i>
+<a name='L619'><i><font color='green'> * OUT assertions: the fields len and code are set to the optimal bit length</font></i>
+<a name='L620'><i><font color='green'> *     and corresponding code. The length opt_len is updated; static_len is</font></i>
+<a name='L621'><i><font color='green'> *     also updated if stree is not null. The field max_code is set.</font></i>
+<a name='L622'><i><font color='green'> */</font></i>
+<a name='L623'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/6349.html' title='Multiple refered from 4 places.'>build_tree</a>(s, desc)
+<a name='L624'>    deflate_state *s;
+<a name='L625'>    tree_desc *desc; <i><font color='green'>/* the tree descriptor */</font></i>
+<a name='L626'><font color='red'>{</font>
+<a name='L627'>    <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *tree         = desc-&gt;dyn_tree;
+<a name='L628'>    <b>const</b> <a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *stree  = desc-&gt;stat_desc-&gt;static_tree;
+<a name='L629'>    <b>int</b> elems             = desc-&gt;stat_desc-&gt;elems;
+<a name='L630'>    <b>int</b> n, m;          <i><font color='green'>/* iterate over heap elements */</font></i>
+<a name='L631'>    <b>int</b> max_code = -1; <i><font color='green'>/* largest code with non zero frequency */</font></i>
+<a name='L632'>    <b>int</b> <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;          <i><font color='green'>/* new node being created */</font></i>
+<a name='L633'>
+<a name='L634'>    <i><font color='green'>/* Construct the initial heap, with least frequent element in</font></i>
+<a name='L635'><i><font color='green'>     * heap[SMALLEST]. The sons of heap[n] are heap[2*n] and heap[2*n+1].</font></i>
+<a name='L636'><i><font color='green'>     * heap[0] is not used.</font></i>
+<a name='L637'><i><font color='green'>     */</font></i>
+<a name='L638'>    s-&gt;heap_len = 0, s-&gt;heap_max = <a href='../S/2738.html#L45' title='Defined at 45 in Modules/zlib/deflate.h.'>HEAP_SIZE</a>;
+<a name='L639'>
+<a name='L640'>    <b>for</b> (n = 0; n &lt; elems; n++) <font color='red'>{</font>
+<a name='L641'>        <b>if</b> (tree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> != 0) <font color='red'>{</font>
+<a name='L642'>            s-&gt;heap[++(s-&gt;heap_len)] = max_code = n;
+<a name='L643'>            s-&gt;depth[n] = 0;
+<a name='L644'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L645'>            tree[n].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = 0;
+<a name='L646'>        <font color='red'>}</font>
+<a name='L647'>    <font color='red'>}</font>
+<a name='L648'>
+<a name='L649'>    <i><font color='green'>/* The pkzip format requires that at least one distance code exists,</font></i>
+<a name='L650'><i><font color='green'>     * and that at least one bit should be sent even if there is only one</font></i>
+<a name='L651'><i><font color='green'>     * possible code. So to avoid special checks later on we force at least</font></i>
+<a name='L652'><i><font color='green'>     * two codes of non zero frequency.</font></i>
+<a name='L653'><i><font color='green'>     */</font></i>
+<a name='L654'>    <b>while</b> (s-&gt;heap_len &lt; 2) <font color='red'>{</font>
+<a name='L655'>        <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = s-&gt;heap[++(s-&gt;heap_len)] = (max_code &lt; 2 ? ++max_code : 0);
+<a name='L656'>        tree[<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> = 1;
+<a name='L657'>        s-&gt;depth[<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>] = 0;
+<a name='L658'>        s-&gt;opt_len--; <b>if</b> (stree) s-&gt;static_len -= stree[<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>;
+<a name='L659'>        <i><font color='green'>/* node is 0 or 1 so it does not have extra bits */</font></i>
+<a name='L660'>    <font color='red'>}</font>
+<a name='L661'>    desc-&gt;max_code = max_code;
+<a name='L662'>
+<a name='L663'>    <i><font color='green'>/* The elements heap[heap_len/2+1 .. heap_len] are leaves of the tree,</font></i>
+<a name='L664'><i><font color='green'>     * establish sub-heaps of increasing lengths:</font></i>
+<a name='L665'><i><font color='green'>     */</font></i>
+<a name='L666'>    <b>for</b> (n = s-&gt;heap_len/2; n &gt;= 1; n--) <a href='../S/2761.html#L459' title='Defined at 459 in Modules/zlib/trees.c.'>pqdownheap</a>(s, tree, n);
+<a name='L667'>
+<a name='L668'>    <i><font color='green'>/* Construct the Huffman tree by repeatedly combining the least two</font></i>
+<a name='L669'><i><font color='green'>     * frequent nodes.</font></i>
+<a name='L670'><i><font color='green'>     */</font></i>
+<a name='L671'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> = elems;              <i><font color='green'>/* next internal node of the tree */</font></i>
+<a name='L672'>    <b>do</b> <font color='red'>{</font>
+<a name='L673'>        <a href='../S/2761.html#L438' title='Defined at 438 in Modules/zlib/trees.c.'>pqremove</a>(s, tree, n);  <i><font color='green'>/* n = node of least frequency */</font></i>
+<a name='L674'>        m = s-&gt;heap[<a href='../S/2761.html#L430' title='Defined at 430 in Modules/zlib/trees.c.'>SMALLEST</a>]; <i><font color='green'>/* m = node of next least frequency */</font></i>
+<a name='L675'>
+<a name='L676'>        s-&gt;heap[--(s-&gt;heap_max)] = n; <i><font color='green'>/* keep the nodes sorted by frequency */</font></i>
+<a name='L677'>        s-&gt;heap[--(s-&gt;heap_max)] = m;
+<a name='L678'>
+<a name='L679'>        <i><font color='green'>/* Create a new node father of n and m */</font></i>
+<a name='L680'>        tree[<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> = tree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> + tree[m].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>;
+<a name='L681'>        s-&gt;depth[<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>] = (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)((s-&gt;depth[n] &gt;= s-&gt;depth[m] ?
+<a name='L682'>                                s-&gt;depth[n] : s-&gt;depth[m]) + 1);
+<a name='L683'>        tree[n].<a href='../S/2738.html#L75' title='Defined at 75 in Modules/zlib/deflate.h.'>Dad</a> = tree[m].<a href='../S/2738.html#L75' title='Defined at 75 in Modules/zlib/deflate.h.'>Dad</a> = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>;
+<a name='L684'><font color='darkred'>#ifdef</font> DUMP_BL_TREE
+<a name='L685'>        <b>if</b> (tree == s-&gt;bl_tree) <font color='red'>{</font>
+<a name='L686'>            fprintf(stderr,"\nnode %d(%d), sons %d(%d) %d(%d)",
+<a name='L687'>                    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>, tree[<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>, n, tree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>, m, tree[m].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>);
+<a name='L688'>        <font color='red'>}</font>
+<a name='L689'><font color='darkred'>#endif</font>
+<a name='L690'>        <i><font color='green'>/* and insert the new node in the heap */</font></i>
+<a name='L691'>        s-&gt;heap[<a href='../S/2761.html#L430' title='Defined at 430 in Modules/zlib/trees.c.'>SMALLEST</a>] = <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>++;
+<a name='L692'>        <a href='../S/2761.html#L459' title='Defined at 459 in Modules/zlib/trees.c.'>pqdownheap</a>(s, tree, <a href='../S/2761.html#L430' title='Defined at 430 in Modules/zlib/trees.c.'>SMALLEST</a>);
+<a name='L693'>
+<a name='L694'>    <font color='red'>}</font> <b>while</b> (s-&gt;heap_len &gt;= 2);
+<a name='L695'>
+<a name='L696'>    s-&gt;heap[--(s-&gt;heap_max)] = s-&gt;heap[<a href='../S/2761.html#L430' title='Defined at 430 in Modules/zlib/trees.c.'>SMALLEST</a>];
+<a name='L697'>
+<a name='L698'>    <i><font color='green'>/* At this point, the fields freq and dad are set. We can now</font></i>
+<a name='L699'><i><font color='green'>     * generate the bit lengths.</font></i>
+<a name='L700'><i><font color='green'>     */</font></i>
+<a name='L701'>    <a href='../S/2761.html#L494' title='Defined at 494 in Modules/zlib/trees.c.'>gen_bitlen</a>(s, (<a href='../S/2738.html#L84' title='Defined at 84 in Modules/zlib/deflate.h.'>tree_desc</a> *)desc);
+<a name='L702'>
+<a name='L703'>    <i><font color='green'>/* The field len is now set, we can generate the bit codes */</font></i>
+<a name='L704'>    <a href='../S/2761.html#L581' title='Defined at 581 in Modules/zlib/trees.c.'>gen_codes</a> ((<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)tree, max_code, s-&gt;bl_count);
+<a name='L705'><font color='red'>}</font>
+<a name='L706'>
+<a name='L707'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L708'><i><font color='green'> * Scan a literal or distance tree to determine the frequencies of the codes</font></i>
+<a name='L709'><i><font color='green'> * in the bit length tree.</font></i>
+<a name='L710'><i><font color='green'> */</font></i>
+<a name='L711'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/10120.html' title='Multiple refered from 3 places.'>scan_tree</a> (s, tree, max_code)
+<a name='L712'>    deflate_state *s;
+<a name='L713'>    ct_data *tree;   <i><font color='green'>/* the tree to be scanned */</font></i>
+<a name='L714'>    <b>int</b> max_code;    <i><font color='green'>/* and its largest code of non zero frequency */</font></i>
+<a name='L715'><font color='red'>{</font>
+<a name='L716'>    <b>int</b> n;                     <i><font color='green'>/* iterates over all tree elements */</font></i>
+<a name='L717'>    <b>int</b> prevlen = -1;          <i><font color='green'>/* last emitted length */</font></i>
+<a name='L718'>    <b>int</b> curlen;                <i><font color='green'>/* length of current code */</font></i>
+<a name='L719'>    <b>int</b> nextlen = tree[0].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>; <i><font color='green'>/* length of next code */</font></i>
+<a name='L720'>    <b>int</b> count = 0;             <i><font color='green'>/* repeat count of the current code */</font></i>
+<a name='L721'>    <b>int</b> max_count = 7;         <i><font color='green'>/* max repeat count */</font></i>
+<a name='L722'>    <b>int</b> min_count = 4;         <i><font color='green'>/* min repeat count */</font></i>
+<a name='L723'>
+<a name='L724'>    <b>if</b> (nextlen == 0) max_count = 138, min_count = 3;
+<a name='L725'>    tree[max_code+1].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)0xffff; <i><font color='green'>/* guard */</font></i>
+<a name='L726'>
+<a name='L727'>    <b>for</b> (n = 0; n &lt;= max_code; n++) <font color='red'>{</font>
+<a name='L728'>        curlen = nextlen; nextlen = tree[n+1].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>;
+<a name='L729'>        <b>if</b> (++count &lt; max_count &amp;&amp; curlen == nextlen) <font color='red'>{</font>
+<a name='L730'>            <b>continue</b>;
+<a name='L731'>        <font color='red'>}</font> <b>else</b> <b>if</b> (count &lt; min_count) <font color='red'>{</font>
+<a name='L732'>            s-&gt;bl_tree[curlen].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> += count;
+<a name='L733'>        <font color='red'>}</font> <b>else</b> <b>if</b> (curlen != 0) <font color='red'>{</font>
+<a name='L734'>            <b>if</b> (curlen != prevlen) s-&gt;bl_tree[curlen].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>++;
+<a name='L735'>            s-&gt;bl_tree[<a href='../S/2761.html#L53' title='Defined at 53 in Modules/zlib/trees.c.'>REP_3_6</a>].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>++;
+<a name='L736'>        <font color='red'>}</font> <b>else</b> <b>if</b> (count &lt;= 10) <font color='red'>{</font>
+<a name='L737'>            s-&gt;bl_tree[<a href='../S/2761.html#L56' title='Defined at 56 in Modules/zlib/trees.c.'>REPZ_3_10</a>].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>++;
+<a name='L738'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L739'>            s-&gt;bl_tree[<a href='../S/2761.html#L59' title='Defined at 59 in Modules/zlib/trees.c.'>REPZ_11_138</a>].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>++;
+<a name='L740'>        <font color='red'>}</font>
+<a name='L741'>        count = 0; prevlen = curlen;
+<a name='L742'>        <b>if</b> (nextlen == 0) <font color='red'>{</font>
+<a name='L743'>            max_count = 138, min_count = 3;
+<a name='L744'>        <font color='red'>}</font> <b>else</b> <b>if</b> (curlen == nextlen) <font color='red'>{</font>
+<a name='L745'>            max_count = 6, min_count = 3;
+<a name='L746'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L747'>            max_count = 7, min_count = 4;
+<a name='L748'>        <font color='red'>}</font>
+<a name='L749'>    <font color='red'>}</font>
+<a name='L750'><font color='red'>}</font>
+<a name='L751'>
+<a name='L752'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L753'><i><font color='green'> * Send a literal or distance tree in compressed form, using the codes in</font></i>
+<a name='L754'><i><font color='green'> * bl_tree.</font></i>
+<a name='L755'><i><font color='green'> */</font></i>
+<a name='L756'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/10159.html' title='Multiple refered from 3 places.'>send_tree</a> (s, tree, max_code)
+<a name='L757'>    deflate_state *s;
+<a name='L758'>    ct_data *tree; <i><font color='green'>/* the tree to be scanned */</font></i>
+<a name='L759'>    <b>int</b> max_code;       <i><font color='green'>/* and its largest code of non zero frequency */</font></i>
+<a name='L760'><font color='red'>{</font>
+<a name='L761'>    <b>int</b> n;                     <i><font color='green'>/* iterates over all tree elements */</font></i>
+<a name='L762'>    <b>int</b> prevlen = -1;          <i><font color='green'>/* last emitted length */</font></i>
+<a name='L763'>    <b>int</b> curlen;                <i><font color='green'>/* length of current code */</font></i>
+<a name='L764'>    <b>int</b> nextlen = tree[0].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>; <i><font color='green'>/* length of next code */</font></i>
+<a name='L765'>    <b>int</b> count = 0;             <i><font color='green'>/* repeat count of the current code */</font></i>
+<a name='L766'>    <b>int</b> max_count = 7;         <i><font color='green'>/* max repeat count */</font></i>
+<a name='L767'>    <b>int</b> min_count = 4;         <i><font color='green'>/* min repeat count */</font></i>
+<a name='L768'>
+<a name='L769'>    <i><font color='green'>/* tree[max_code+1].Len = -1; */</font></i>  <i><font color='green'>/* guard already set */</font></i>
+<a name='L770'>    <b>if</b> (nextlen == 0) max_count = 138, min_count = 3;
+<a name='L771'>
+<a name='L772'>    <b>for</b> (n = 0; n &lt;= max_code; n++) <font color='red'>{</font>
+<a name='L773'>        curlen = nextlen; nextlen = tree[n+1].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>;
+<a name='L774'>        <b>if</b> (++count &lt; max_count &amp;&amp; curlen == nextlen) <font color='red'>{</font>
+<a name='L775'>            <b>continue</b>;
+<a name='L776'>        <font color='red'>}</font> <b>else</b> <b>if</b> (count &lt; min_count) <font color='red'>{</font>
+<a name='L777'>            <b>do</b> <font color='red'>{</font> <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, curlen, s-&gt;bl_tree); <font color='red'>}</font> <b>while</b> (--count != 0);
+<a name='L778'>
+<a name='L779'>        <font color='red'>}</font> <b>else</b> <b>if</b> (curlen != 0) <font color='red'>{</font>
+<a name='L780'>            <b>if</b> (curlen != prevlen) <font color='red'>{</font>
+<a name='L781'>                <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, curlen, s-&gt;bl_tree); count--;
+<a name='L782'>            <font color='red'>}</font>
+<a name='L783'>            <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(count &gt;= 3 &amp;&amp; count &lt;= 6, " 3_6?");
+<a name='L784'>            <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2761.html#L53' title='Defined at 53 in Modules/zlib/trees.c.'>REP_3_6</a>, s-&gt;bl_tree); <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, count-3, 2);
+<a name='L785'>
+<a name='L786'>        <font color='red'>}</font> <b>else</b> <b>if</b> (count &lt;= 10) <font color='red'>{</font>
+<a name='L787'>            <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2761.html#L56' title='Defined at 56 in Modules/zlib/trees.c.'>REPZ_3_10</a>, s-&gt;bl_tree); <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, count-3, 3);
+<a name='L788'>
+<a name='L789'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L790'>            <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2761.html#L59' title='Defined at 59 in Modules/zlib/trees.c.'>REPZ_11_138</a>, s-&gt;bl_tree); <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, count-11, 7);
+<a name='L791'>        <font color='red'>}</font>
+<a name='L792'>        count = 0; prevlen = curlen;
+<a name='L793'>        <b>if</b> (nextlen == 0) <font color='red'>{</font>
+<a name='L794'>            max_count = 138, min_count = 3;
+<a name='L795'>        <font color='red'>}</font> <b>else</b> <b>if</b> (curlen == nextlen) <font color='red'>{</font>
+<a name='L796'>            max_count = 6, min_count = 3;
+<a name='L797'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L798'>            max_count = 7, min_count = 4;
+<a name='L799'>        <font color='red'>}</font>
+<a name='L800'>    <font color='red'>}</font>
+<a name='L801'><font color='red'>}</font>
+<a name='L802'>
+<a name='L803'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L804'><i><font color='green'> * Construct the Huffman tree for the bit lengths and return the index in</font></i>
+<a name='L805'><i><font color='green'> * bl_order of the last bit length code to send.</font></i>
+<a name='L806'><i><font color='green'> */</font></i>
+<a name='L807'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> <a href='../R/6341.html' title='Multiple refered from 2 places.'>build_bl_tree</a>(s)
+<a name='L808'>    deflate_state *s;
+<a name='L809'><font color='red'>{</font>
+<a name='L810'>    <b>int</b> max_blindex;  <i><font color='green'>/* index of last bit length code of non zero freq */</font></i>
+<a name='L811'>
+<a name='L812'>    <i><font color='green'>/* Determine the bit length frequencies for literal and distance trees */</font></i>
+<a name='L813'>    <a href='../S/2761.html#L711' title='Defined at 711 in Modules/zlib/trees.c.'>scan_tree</a>(s, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)s-&gt;dyn_ltree, s-&gt;l_desc.max_code);
+<a name='L814'>    <a href='../S/2761.html#L711' title='Defined at 711 in Modules/zlib/trees.c.'>scan_tree</a>(s, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)s-&gt;dyn_dtree, s-&gt;d_desc.max_code);
+<a name='L815'>
+<a name='L816'>    <i><font color='green'>/* Build the bit length tree: */</font></i>
+<a name='L817'>    <a href='../S/2761.html#L623' title='Defined at 623 in Modules/zlib/trees.c.'>build_tree</a>(s, (<a href='../S/2738.html#L84' title='Defined at 84 in Modules/zlib/deflate.h.'>tree_desc</a> *)(&amp;(s-&gt;bl_desc)));
+<a name='L818'>    <i><font color='green'>/* opt_len now includes the length of the tree representations, except</font></i>
+<a name='L819'><i><font color='green'>     * the lengths of the bit lengths codes and the 5+5+4 bits for the counts.</font></i>
+<a name='L820'><i><font color='green'>     */</font></i>
+<a name='L821'>
+<a name='L822'>    <i><font color='green'>/* Determine the number of bit length codes to send. The pkzip format</font></i>
+<a name='L823'><i><font color='green'>     * requires that at least 4 bit length codes be sent. (appnote.txt says</font></i>
+<a name='L824'><i><font color='green'>     * 3 but the actual value used is 4.)</font></i>
+<a name='L825'><i><font color='green'>     */</font></i>
+<a name='L826'>    <b>for</b> (max_blindex = <a href='../S/2738.html#L42' title='Defined at 42 in Modules/zlib/deflate.h.'>BL_CODES</a>-1; max_blindex &gt;= 3; max_blindex--) <font color='red'>{</font>
+<a name='L827'>        <b>if</b> (s-&gt;bl_tree[bl_order[max_blindex]].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a> != 0) <b>break</b>;
+<a name='L828'>    <font color='red'>}</font>
+<a name='L829'>    <i><font color='green'>/* Update opt_len to include the bit length tree and counts */</font></i>
+<a name='L830'>    s-&gt;opt_len += 3*(max_blindex+1) + 5+5+4;
+<a name='L831'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\ndyn trees: dyn %ld, stat %ld",
+<a name='L832'>            s-&gt;opt_len, s-&gt;static_len));
+<a name='L833'>
+<a name='L834'>    <b>return</b> max_blindex;
+<a name='L835'><font color='red'>}</font>
+<a name='L836'>
+<a name='L837'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L838'><i><font color='green'> * Send the header for a block using dynamic Huffman trees: the counts, the</font></i>
+<a name='L839'><i><font color='green'> * lengths of the bit length codes, the literal tree and the distance tree.</font></i>
+<a name='L840'><i><font color='green'> * IN assertion: lcodes &gt;= 257, dcodes &gt;= 1, blcodes &gt;= 4.</font></i>
+<a name='L841'><i><font color='green'> */</font></i>
+<a name='L842'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/10156.html' title='Multiple refered from 2 places.'>send_all_trees</a>(s, lcodes, dcodes, blcodes)
+<a name='L843'>    deflate_state *s;
+<a name='L844'>    <b>int</b> lcodes, dcodes, blcodes; <i><font color='green'>/* number of codes for each tree */</font></i>
+<a name='L845'><font color='red'>{</font>
+<a name='L846'>    <b>int</b> rank;                    <i><font color='green'>/* index in bl_order */</font></i>
+<a name='L847'>
+<a name='L848'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (lcodes &gt;= 257 &amp;&amp; dcodes &gt;= 1 &amp;&amp; blcodes &gt;= 4, "not enough codes");
+<a name='L849'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (lcodes &lt;= <a href='../S/2738.html#L36' title='Defined at 36 in Modules/zlib/deflate.h.'>L_CODES</a> &amp;&amp; dcodes &lt;= <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a> &amp;&amp; blcodes &lt;= <a href='../S/2738.html#L42' title='Defined at 42 in Modules/zlib/deflate.h.'>BL_CODES</a>,
+<a name='L850'>            "too many codes");
+<a name='L851'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\nbl counts: "));
+<a name='L852'>    <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, lcodes-257, 5); <i><font color='green'>/* not +255 as stated in appnote.txt */</font></i>
+<a name='L853'>    <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, dcodes-1,   5);
+<a name='L854'>    <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, blcodes-4,  4); <i><font color='green'>/* not -3 as stated in appnote.txt */</font></i>
+<a name='L855'>    <b>for</b> (rank = 0; rank &lt; blcodes; rank++) <font color='red'>{</font>
+<a name='L856'>        <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\nbl code %2d ", bl_order[rank]));
+<a name='L857'>        <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, s-&gt;bl_tree[bl_order[rank]].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>, 3);
+<a name='L858'>    <font color='red'>}</font>
+<a name='L859'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\nbl tree: sent %ld", s-&gt;bits_sent));
+<a name='L860'>
+<a name='L861'>    <a href='../S/2761.html#L756' title='Defined at 756 in Modules/zlib/trees.c.'>send_tree</a>(s, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)s-&gt;dyn_ltree, lcodes-1); <i><font color='green'>/* literal tree */</font></i>
+<a name='L862'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\nlit tree: sent %ld", s-&gt;bits_sent));
+<a name='L863'>
+<a name='L864'>    <a href='../S/2761.html#L756' title='Defined at 756 in Modules/zlib/trees.c.'>send_tree</a>(s, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)s-&gt;dyn_dtree, dcodes-1); <i><font color='green'>/* distance tree */</font></i>
+<a name='L865'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\ndist tree: sent %ld", s-&gt;bits_sent));
+<a name='L866'><font color='red'>}</font>
+<a name='L867'>
+<a name='L868'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L869'><i><font color='green'> * Send a stored block</font></i>
+<a name='L870'><i><font color='green'> */</font></i>
+<a name='L871'><b>void</b> <a href='../D/5928.html' title='Multiple defined in 6 places.'>ZLIB_INTERNAL</a> <a href='../R/5873.html' title='Multiple refered from 3 places.'>_tr_stored_block</a>(s, buf, stored_len, last)
+<a name='L872'>    deflate_state *s;
+<a name='L873'>    charf *buf;       <i><font color='green'>/* input block */</font></i>
+<a name='L874'>    ulg stored_len;   <i><font color='green'>/* length of input block */</font></i>
+<a name='L875'>    <b>int</b> last;         <i><font color='green'>/* one if this is the last block for a file */</font></i>
+<a name='L876'><font color='red'>{</font>
+<a name='L877'>    <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, (<a href='../S/2773.html#L66' title='Defined at 66 in Modules/zlib/zutil.h.'>STORED_BLOCK</a>&lt;&lt;1)+last, 3);    <i><font color='green'>/* send block type */</font></i>
+<a name='L878'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L879'>    s-&gt;compressed_len = (s-&gt;compressed_len + 3 + 7) &amp; (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)~7L;
+<a name='L880'>    s-&gt;compressed_len += (stored_len + 4) &lt;&lt; 3;
+<a name='L881'><font color='darkred'>#endif</font>
+<a name='L882'>    <a href='../S/2761.html#L1222' title='Defined at 1222 in Modules/zlib/trees.c.'>copy_block</a>(s, buf, (<b>unsigned</b>)stored_len, 1); <i><font color='green'>/* with header */</font></i>
+<a name='L883'><font color='red'>}</font>
+<a name='L884'>
+<a name='L885'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L886'><i><font color='green'> * Send one empty static block to give enough lookahead for inflate.</font></i>
+<a name='L887'><i><font color='green'> * This takes 10 bits, of which 7 may remain in the bit buffer.</font></i>
+<a name='L888'><i><font color='green'> * The current inflate code requires 9 bits of lookahead. If the</font></i>
+<a name='L889'><i><font color='green'> * last two codes for the previous block (real code plus EOB) were coded</font></i>
+<a name='L890'><i><font color='green'> * on 5 bits or less, inflate may have only 5+3 bits of lookahead to decode</font></i>
+<a name='L891'><i><font color='green'> * the last real code. In this case we send two empty static blocks instead</font></i>
+<a name='L892'><i><font color='green'> * of one. (There are no problems if the previous block is stored or fixed.)</font></i>
+<a name='L893'><i><font color='green'> * To simplify the code, we assume the worst case of last real code encoded</font></i>
+<a name='L894'><i><font color='green'> * on one bit only.</font></i>
+<a name='L895'><i><font color='green'> */</font></i>
+<a name='L896'><b>void</b> <a href='../D/5928.html' title='Multiple defined in 6 places.'>ZLIB_INTERNAL</a> <a href='../R/5870.html' title='Multiple refered from 2 places.'>_tr_align</a>(s)
+<a name='L897'>    deflate_state *s;
+<a name='L898'><font color='red'>{</font>
+<a name='L899'>    <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, <a href='../S/2773.html#L67' title='Defined at 67 in Modules/zlib/zutil.h.'>STATIC_TREES</a>&lt;&lt;1, 3);
+<a name='L900'>    <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2761.html#L50' title='Defined at 50 in Modules/zlib/trees.c.'>END_BLOCK</a>, static_ltree);
+<a name='L901'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L902'>    s-&gt;compressed_len += 10L; <i><font color='green'>/* 3 for block type, 7 for EOB */</font></i>
+<a name='L903'><font color='darkred'>#endif</font>
+<a name='L904'>    <a href='../S/2761.html#L1186' title='Defined at 1186 in Modules/zlib/trees.c.'>bi_flush</a>(s);
+<a name='L905'>    <i><font color='green'>/* Of the 10 bits for the empty block, we have already sent</font></i>
+<a name='L906'><i><font color='green'>     * (10 - bi_valid) bits. The lookahead for the last real code (before</font></i>
+<a name='L907'><i><font color='green'>     * the EOB of the previous block) was thus at least one plus the length</font></i>
+<a name='L908'><i><font color='green'>     * of the EOB plus what we have just sent of the empty static block.</font></i>
+<a name='L909'><i><font color='green'>     */</font></i>
+<a name='L910'>    <b>if</b> (1 + s-&gt;last_eob_len + 10 - s-&gt;bi_valid &lt; 9) <font color='red'>{</font>
+<a name='L911'>        <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, <a href='../S/2773.html#L67' title='Defined at 67 in Modules/zlib/zutil.h.'>STATIC_TREES</a>&lt;&lt;1, 3);
+<a name='L912'>        <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2761.html#L50' title='Defined at 50 in Modules/zlib/trees.c.'>END_BLOCK</a>, static_ltree);
+<a name='L913'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L914'>        s-&gt;compressed_len += 10L;
+<a name='L915'><font color='darkred'>#endif</font>
+<a name='L916'>        <a href='../S/2761.html#L1186' title='Defined at 1186 in Modules/zlib/trees.c.'>bi_flush</a>(s);
+<a name='L917'>    <font color='red'>}</font>
+<a name='L918'>    s-&gt;last_eob_len = 7;
+<a name='L919'><font color='red'>}</font>
+<a name='L920'>
+<a name='L921'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L922'><i><font color='green'> * Determine the best encoding for the current block: dynamic trees, static</font></i>
+<a name='L923'><i><font color='green'> * trees or store, and output the encoded block to the zip file.</font></i>
+<a name='L924'><i><font color='green'> */</font></i>
+<a name='L925'><b>void</b> <a href='../D/5928.html' title='Multiple defined in 6 places.'>ZLIB_INTERNAL</a> <a href='../R/5871.html' title='Multiple refered from 2 places.'>_tr_flush_block</a>(s, buf, stored_len, last)
+<a name='L926'>    deflate_state *s;
+<a name='L927'>    charf *buf;       <i><font color='green'>/* input block, or NULL if too old */</font></i>
+<a name='L928'>    ulg stored_len;   <i><font color='green'>/* length of input block */</font></i>
+<a name='L929'>    <b>int</b> last;         <i><font color='green'>/* one if this is the last block for a file */</font></i>
+<a name='L930'><font color='red'>{</font>
+<a name='L931'>    <a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a> opt_lenb, static_lenb; <i><font color='green'>/* opt_len and static_len in bytes */</font></i>
+<a name='L932'>    <b>int</b> max_blindex = 0;  <i><font color='green'>/* index of last bit length code of non zero freq */</font></i>
+<a name='L933'>
+<a name='L934'>    <i><font color='green'>/* Build the Huffman trees unless a stored block is forced */</font></i>
+<a name='L935'>    <b>if</b> (s-&gt;level &gt; 0) <font color='red'>{</font>
+<a name='L936'>
+<a name='L937'>        <i><font color='green'>/* Check if the file is binary or text */</font></i>
+<a name='L938'>        <b>if</b> (s-&gt;strm-&gt;data_type == <a href='../S/2769.html#L202' title='Defined at 202 in Modules/zlib/zlib.h.'>Z_UNKNOWN</a>)
+<a name='L939'>            s-&gt;strm-&gt;data_type = <a href='../S/2761.html#L1137' title='Defined at 1137 in Modules/zlib/trees.c.'>detect_data_type</a>(s);
+<a name='L940'>
+<a name='L941'>        <i><font color='green'>/* Construct the literal and distance trees */</font></i>
+<a name='L942'>        <a href='../S/2761.html#L623' title='Defined at 623 in Modules/zlib/trees.c.'>build_tree</a>(s, (<a href='../S/2738.html#L84' title='Defined at 84 in Modules/zlib/deflate.h.'>tree_desc</a> *)(&amp;(s-&gt;l_desc)));
+<a name='L943'>        <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\nlit data: dyn %ld, stat %ld", s-&gt;opt_len,
+<a name='L944'>                s-&gt;static_len));
+<a name='L945'>
+<a name='L946'>        <a href='../S/2761.html#L623' title='Defined at 623 in Modules/zlib/trees.c.'>build_tree</a>(s, (<a href='../S/2738.html#L84' title='Defined at 84 in Modules/zlib/deflate.h.'>tree_desc</a> *)(&amp;(s-&gt;d_desc)));
+<a name='L947'>        <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\ndist data: dyn %ld, stat %ld", s-&gt;opt_len,
+<a name='L948'>                s-&gt;static_len));
+<a name='L949'>        <i><font color='green'>/* At this point, opt_len and static_len are the total bit lengths of</font></i>
+<a name='L950'><i><font color='green'>         * the compressed block data, excluding the tree representations.</font></i>
+<a name='L951'><i><font color='green'>         */</font></i>
+<a name='L952'>
+<a name='L953'>        <i><font color='green'>/* Build the bit length tree for the above two trees, and get the index</font></i>
+<a name='L954'><i><font color='green'>         * in bl_order of the last bit length code to send.</font></i>
+<a name='L955'><i><font color='green'>         */</font></i>
+<a name='L956'>        max_blindex = <a href='../S/2761.html#L807' title='Defined at 807 in Modules/zlib/trees.c.'>build_bl_tree</a>(s);
+<a name='L957'>
+<a name='L958'>        <i><font color='green'>/* Determine the best encoding. Compute the block lengths in bytes. */</font></i>
+<a name='L959'>        opt_lenb = (s-&gt;opt_len+3+7)&gt;&gt;3;
+<a name='L960'>        static_lenb = (s-&gt;static_len+3+7)&gt;&gt;3;
+<a name='L961'>
+<a name='L962'>        <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "\nopt %lu(%lu) stat %lu(%lu) stored %lu lit %u ",
+<a name='L963'>                opt_lenb, s-&gt;opt_len, static_lenb, s-&gt;static_len, stored_len,
+<a name='L964'>                s-&gt;last_lit));
+<a name='L965'>
+<a name='L966'>        <b>if</b> (static_lenb &lt;= opt_lenb) opt_lenb = static_lenb;
+<a name='L967'>
+<a name='L968'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L969'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>(buf != (<b>char</b>*)0, "lost buf");
+<a name='L970'>        opt_lenb = static_lenb = stored_len + 5; <i><font color='green'>/* force a stored block */</font></i>
+<a name='L971'>    <font color='red'>}</font>
+<a name='L972'>
+<a name='L973'><font color='darkred'>#ifdef</font> FORCE_STORED
+<a name='L974'>    <b>if</b> (buf != (<b>char</b>*)0) <font color='red'>{</font> <i><font color='green'>/* force stored block */</font></i>
+<a name='L975'><font color='darkred'>#else</font>
+<a name='L976'>    <b>if</b> (stored_len+4 &lt;= opt_lenb &amp;&amp; buf != (<b>char</b>*)0) <font color='red'>{</font>
+<a name='L977'>                       <i><font color='green'>/* 4: two words for the lengths */</font></i>
+<a name='L978'><font color='darkred'>#endif</font>
+<a name='L979'>        <i><font color='green'>/* The test buf != NULL is only necessary if LIT_BUFSIZE &gt; WSIZE.</font></i>
+<a name='L980'><i><font color='green'>         * Otherwise we can't have processed more than WSIZE input bytes since</font></i>
+<a name='L981'><i><font color='green'>         * the last block flush, because compression would have been</font></i>
+<a name='L982'><i><font color='green'>         * successful. If LIT_BUFSIZE &lt;= WSIZE, it is never too late to</font></i>
+<a name='L983'><i><font color='green'>         * transform a block into a stored block.</font></i>
+<a name='L984'><i><font color='green'>         */</font></i>
+<a name='L985'>        <a href='../D/6622.html' title='Multiple defined in 2 places.'>_tr_stored_block</a>(s, buf, stored_len, last);
+<a name='L986'>
+<a name='L987'><font color='darkred'>#ifdef</font> FORCE_STATIC
+<a name='L988'>    <font color='red'>}</font> <b>else</b> <b>if</b> (static_lenb &gt;= 0) <font color='red'>{</font> <i><font color='green'>/* force static trees */</font></i>
+<a name='L989'><font color='darkred'>#else</font>
+<a name='L990'>    <font color='red'>}</font> <b>else</b> <b>if</b> (s-&gt;strategy == <a href='../S/2769.html#L195' title='Defined at 195 in Modules/zlib/zlib.h.'>Z_FIXED</a> || static_lenb == opt_lenb) <font color='red'>{</font>
+<a name='L991'><font color='darkred'>#endif</font>
+<a name='L992'>        <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, (<a href='../S/2773.html#L67' title='Defined at 67 in Modules/zlib/zutil.h.'>STATIC_TREES</a>&lt;&lt;1)+last, 3);
+<a name='L993'>        <a href='../S/2761.html#L1076' title='Defined at 1076 in Modules/zlib/trees.c.'>compress_block</a>(s, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)static_ltree, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)static_dtree);
+<a name='L994'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L995'>        s-&gt;compressed_len += 3 + s-&gt;static_len;
+<a name='L996'><font color='darkred'>#endif</font>
+<a name='L997'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L998'>        <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, (<a href='../S/2773.html#L68' title='Defined at 68 in Modules/zlib/zutil.h.'>DYN_TREES</a>&lt;&lt;1)+last, 3);
+<a name='L999'>        <a href='../S/2761.html#L842' title='Defined at 842 in Modules/zlib/trees.c.'>send_all_trees</a>(s, s-&gt;l_desc.max_code+1, s-&gt;d_desc.max_code+1,
+<a name='L1000'>                       max_blindex+1);
+<a name='L1001'>        <a href='../S/2761.html#L1076' title='Defined at 1076 in Modules/zlib/trees.c.'>compress_block</a>(s, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)s-&gt;dyn_ltree, (<a href='../S/2738.html#L71' title='Defined at 71 in Modules/zlib/deflate.h.'>ct_data</a> *)s-&gt;dyn_dtree);
+<a name='L1002'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L1003'>        s-&gt;compressed_len += 3 + s-&gt;opt_len;
+<a name='L1004'><font color='darkred'>#endif</font>
+<a name='L1005'>    <font color='red'>}</font>
+<a name='L1006'>    <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (s-&gt;compressed_len == s-&gt;bits_sent, "bad compressed size");
+<a name='L1007'>    <i><font color='green'>/* The above check is made mod 2^32, for files larger than 512 MB</font></i>
+<a name='L1008'><i><font color='green'>     * and uLong implemented on 32 bits.</font></i>
+<a name='L1009'><i><font color='green'>     */</font></i>
+<a name='L1010'>    <a href='../S/2761.html#L415' title='Defined at 415 in Modules/zlib/trees.c.'>init_block</a>(s);
+<a name='L1011'>
+<a name='L1012'>    <b>if</b> (last) <font color='red'>{</font>
+<a name='L1013'>        <a href='../S/2761.html#L1203' title='Defined at 1203 in Modules/zlib/trees.c.'>bi_windup</a>(s);
+<a name='L1014'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L1015'>        s-&gt;compressed_len += 7;  <i><font color='green'>/* align on byte boundary */</font></i>
+<a name='L1016'><font color='darkred'>#endif</font>
+<a name='L1017'>    <font color='red'>}</font>
+<a name='L1018'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr,"\ncomprlen %lu(%lu) ", s-&gt;compressed_len&gt;&gt;3,
+<a name='L1019'>           s-&gt;compressed_len-7*last));
+<a name='L1020'><font color='red'>}</font>
+<a name='L1021'>
+<a name='L1022'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1023'><i><font color='green'> * Save the match info and tally the frequency counts. Return true if</font></i>
+<a name='L1024'><i><font color='green'> * the current block must be flushed.</font></i>
+<a name='L1025'><i><font color='green'> */</font></i>
+<a name='L1026'><b>int</b> <a href='../D/5928.html' title='Multiple defined in 6 places.'>ZLIB_INTERNAL</a> <a href='../R/5874.html' title='Multiple refered from 3 places.'>_tr_tally</a> (s, dist, lc)
+<a name='L1027'>    deflate_state *s;
+<a name='L1028'>    <b>unsigned</b> dist;  <i><font color='green'>/* distance of matched string */</font></i>
+<a name='L1029'>    <b>unsigned</b> lc;    <i><font color='green'>/* match length-MIN_MATCH or unmatched char (if dist==0) */</font></i>
+<a name='L1030'><font color='red'>{</font>
+<a name='L1031'>    s-&gt;d_buf[s-&gt;last_lit] = (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)dist;
+<a name='L1032'>    s-&gt;l_buf[s-&gt;last_lit++] = (<a href='../S/2773.html#L37' title='Defined at 37 in Modules/zlib/zutil.h.'>uch</a>)lc;
+<a name='L1033'>    <b>if</b> (dist == 0) <font color='red'>{</font>
+<a name='L1034'>        <i><font color='green'>/* lc is the unmatched char */</font></i>
+<a name='L1035'>        s-&gt;dyn_ltree[lc].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>++;
+<a name='L1036'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1037'>        s-&gt;matches++;
+<a name='L1038'>        <i><font color='green'>/* Here, lc is the match length - MIN_MATCH */</font></i>
+<a name='L1039'>        dist--;             <i><font color='green'>/* dist = match distance - 1 */</font></i>
+<a name='L1040'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>((<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)dist &lt; (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)<a href='../S/2738.html#L283' title='Defined at 283 in Modules/zlib/deflate.h.'>MAX_DIST</a>(s) &amp;&amp;
+<a name='L1041'>               (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)lc &lt;= (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)(<a href='../S/2773.html#L72' title='Defined at 72 in Modules/zlib/zutil.h.'>MAX_MATCH</a>-<a href='../S/2773.html#L71' title='Defined at 71 in Modules/zlib/zutil.h.'>MIN_MATCH</a>) &amp;&amp;
+<a name='L1042'>               (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)<a href='../S/2738.html#L301' title='Defined at 301 in Modules/zlib/deflate.h.'>d_code</a>(dist) &lt; (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)<a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>,  "_tr_tally: bad match");
+<a name='L1043'>
+<a name='L1044'>        s-&gt;dyn_ltree[<a href='../S/2764.html#L21' title='Defined at 21 in Modules/zlib/zconf.h.'>_length_code</a>[lc]+<a href='../S/2738.html#L33' title='Defined at 33 in Modules/zlib/deflate.h.'>LITERALS</a>+1].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>++;
+<a name='L1045'>        s-&gt;dyn_dtree[<a href='../S/2738.html#L301' title='Defined at 301 in Modules/zlib/deflate.h.'>d_code</a>(dist)].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a>++;
+<a name='L1046'>    <font color='red'>}</font>
+<a name='L1047'>
+<a name='L1048'><font color='darkred'>#ifdef</font> TRUNCATE_BLOCK
+<a name='L1049'>    <i><font color='green'>/* Try to guess if it is profitable to stop the current block here */</font></i>
+<a name='L1050'>    <b>if</b> ((s-&gt;last_lit &amp; 0x1fff) == 0 &amp;&amp; s-&gt;level &gt; 2) <font color='red'>{</font>
+<a name='L1051'>        <i><font color='green'>/* Compute an upper bound for the compressed length */</font></i>
+<a name='L1052'>        <a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a> out_length = (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;last_lit*8L;
+<a name='L1053'>        <a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a> in_length = (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)((<b>long</b>)s-&gt;strstart - s-&gt;block_start);
+<a name='L1054'>        <b>int</b> dcode;
+<a name='L1055'>        <b>for</b> (dcode = 0; dcode &lt; <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>; dcode++) <font color='red'>{</font>
+<a name='L1056'>            out_length += (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)s-&gt;dyn_dtree[dcode].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> *
+<a name='L1057'>                (5L+extra_dbits[dcode]);
+<a name='L1058'>        <font color='red'>}</font>
+<a name='L1059'>        out_length &gt;&gt;= 3;
+<a name='L1060'>        <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr,"\nlast_lit %u, in %ld, out ~%ld(%ld%%) ",
+<a name='L1061'>               s-&gt;last_lit, in_length, out_length,
+<a name='L1062'>               100L - out_length*100L/in_length));
+<a name='L1063'>        <b>if</b> (s-&gt;matches &lt; s-&gt;last_lit/2 &amp;&amp; out_length &lt; in_length/2) <b>return</b> 1;
+<a name='L1064'>    <font color='red'>}</font>
+<a name='L1065'><font color='darkred'>#endif</font>
+<a name='L1066'>    <b>return</b> (s-&gt;last_lit == s-&gt;lit_bufsize-1);
+<a name='L1067'>    <i><font color='green'>/* We avoid equality with lit_bufsize because of wraparound at 64K</font></i>
+<a name='L1068'><i><font color='green'>     * on 16 bit machines and because stored blocks are restricted to</font></i>
+<a name='L1069'><i><font color='green'>     * 64K-1 bytes.</font></i>
+<a name='L1070'><i><font color='green'>     */</font></i>
+<a name='L1071'><font color='red'>}</font>
+<a name='L1072'>
+<a name='L1073'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1074'><i><font color='green'> * Send the block data compressed using the given Huffman trees</font></i>
+<a name='L1075'><i><font color='green'> */</font></i>
+<a name='L1076'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/6946.html' title='Multiple refered from 3 places.'>compress_block</a>(s, ltree, dtree)
+<a name='L1077'>    deflate_state *s;
+<a name='L1078'>    ct_data *ltree; <i><font color='green'>/* literal tree */</font></i>
+<a name='L1079'>    ct_data *dtree; <i><font color='green'>/* distance tree */</font></i>
+<a name='L1080'><font color='red'>{</font>
+<a name='L1081'>    <b>unsigned</b> dist;      <i><font color='green'>/* distance of matched string */</font></i>
+<a name='L1082'>    <b>int</b> lc;             <i><font color='green'>/* match length or unmatched char (if dist == 0) */</font></i>
+<a name='L1083'>    <b>unsigned</b> lx = 0;    <i><font color='green'>/* running index in l_buf */</font></i>
+<a name='L1084'>    <b>unsigned</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;      <i><font color='green'>/* the code to send */</font></i>
+<a name='L1085'>    <b>int</b> extra;          <i><font color='green'>/* number of extra bits to send */</font></i>
+<a name='L1086'>
+<a name='L1087'>    <b>if</b> (s-&gt;last_lit != 0) <b>do</b> <font color='red'>{</font>
+<a name='L1088'>        dist = s-&gt;d_buf[lx];
+<a name='L1089'>        lc = s-&gt;l_buf[lx++];
+<a name='L1090'>        <b>if</b> (dist == 0) <font color='red'>{</font>
+<a name='L1091'>            <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, lc, ltree); <i><font color='green'>/* send a literal byte */</font></i>
+<a name='L1092'>            <a href='../D/5312.html' title='Multiple defined in 2 places.'>Tracecv</a>(isgraph(lc), (stderr," '%c' ", lc));
+<a name='L1093'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1094'>            <i><font color='green'>/* Here, lc is the match length - MIN_MATCH */</font></i>
+<a name='L1095'>            <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2764.html#L21' title='Defined at 21 in Modules/zlib/zconf.h.'>_length_code</a>[lc];
+<a name='L1096'>            <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>+<a href='../S/2738.html#L33' title='Defined at 33 in Modules/zlib/deflate.h.'>LITERALS</a>+1, ltree); <i><font color='green'>/* send the length code */</font></i>
+<a name='L1097'>            extra = extra_lbits[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>];
+<a name='L1098'>            <b>if</b> (extra != 0) <font color='red'>{</font>
+<a name='L1099'>                lc -= base_length[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>];
+<a name='L1100'>                <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, lc, extra);       <i><font color='green'>/* send the extra length bits */</font></i>
+<a name='L1101'>            <font color='red'>}</font>
+<a name='L1102'>            dist--; <i><font color='green'>/* dist is now the match distance - 1 */</font></i>
+<a name='L1103'>            <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2738.html#L301' title='Defined at 301 in Modules/zlib/deflate.h.'>d_code</a>(dist);
+<a name='L1104'>            <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> &lt; <a href='../S/2738.html#L39' title='Defined at 39 in Modules/zlib/deflate.h.'>D_CODES</a>, "bad d_code");
+<a name='L1105'>
+<a name='L1106'>            <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>, dtree);       <i><font color='green'>/* send the distance code */</font></i>
+<a name='L1107'>            extra = extra_dbits[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>];
+<a name='L1108'>            <b>if</b> (extra != 0) <font color='red'>{</font>
+<a name='L1109'>                dist -= base_dist[<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>];
+<a name='L1110'>                <a href='../D/11017.html' title='Multiple defined in 2 places.'>send_bits</a>(s, dist, extra);   <i><font color='green'>/* send the extra distance bits */</font></i>
+<a name='L1111'>            <font color='red'>}</font>
+<a name='L1112'>        <font color='red'>}</font> <i><font color='green'>/* literal or match pair ? */</font></i>
+<a name='L1113'>
+<a name='L1114'>        <i><font color='green'>/* Check that the overlay between pending_buf and d_buf+l_buf is ok: */</font></i>
+<a name='L1115'>        <a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>((<a href='../D/11918.html' title='Multiple defined in 4 places.'>uInt</a>)(s-&gt;pending) &lt; s-&gt;lit_bufsize + 2*lx,
+<a name='L1116'>               "pendingBuf overflow");
+<a name='L1117'>
+<a name='L1118'>    <font color='red'>}</font> <b>while</b> (lx &lt; s-&gt;last_lit);
+<a name='L1119'>
+<a name='L1120'>    <a href='../D/11018.html' title='Multiple defined in 2 places.'>send_code</a>(s, <a href='../S/2761.html#L50' title='Defined at 50 in Modules/zlib/trees.c.'>END_BLOCK</a>, ltree);
+<a name='L1121'>    s-&gt;last_eob_len = ltree[<a href='../S/2761.html#L50' title='Defined at 50 in Modules/zlib/trees.c.'>END_BLOCK</a>].<a href='../S/2738.html#L76' title='Defined at 76 in Modules/zlib/deflate.h.'>Len</a>;
+<a name='L1122'><font color='red'>}</font>
+<a name='L1123'>
+<a name='L1124'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1125'><i><font color='green'> * Check if the data type is TEXT or BINARY, using the following algorithm:</font></i>
+<a name='L1126'><i><font color='green'> * - TEXT if the two conditions below are satisfied:</font></i>
+<a name='L1127'><i><font color='green'> *    a) There are no non-portable control characters belonging to the</font></i>
+<a name='L1128'><i><font color='green'> *       "black list" (0..6, 14..25, 28..31).</font></i>
+<a name='L1129'><i><font color='green'> *    b) There is at least one printable character belonging to the</font></i>
+<a name='L1130'><i><font color='green'> *       "white list" (9 {TAB}, 10 {LF}, 13 {CR}, 32..255).</font></i>
+<a name='L1131'><i><font color='green'> * - BINARY otherwise.</font></i>
+<a name='L1132'><i><font color='green'> * - The following partially-portable control characters form a</font></i>
+<a name='L1133'><i><font color='green'> *   "gray list" that is ignored in this detection algorithm:</font></i>
+<a name='L1134'><i><font color='green'> *   (7 {BEL}, 8 {BS}, 11 {VT}, 12 {FF}, 26 {SUB}, 27 {ESC}).</font></i>
+<a name='L1135'><i><font color='green'> * IN assertion: the fields Freq of dyn_ltree are set.</font></i>
+<a name='L1136'><i><font color='green'> */</font></i>
+<a name='L1137'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> <a href='../R/7316.html' title='Multiple refered from 2 places.'>detect_data_type</a>(s)
+<a name='L1138'>    deflate_state *s;
+<a name='L1139'><font color='red'>{</font>
+<a name='L1140'>    <i><font color='green'>/* black_mask is the bit mask of black-listed bytes</font></i>
+<a name='L1141'><i><font color='green'>     * set bits 0..6, 14..25, and 28..31</font></i>
+<a name='L1142'><i><font color='green'>     * 0xf3ffc07f = binary 11110011111111111100000001111111</font></i>
+<a name='L1143'><i><font color='green'>     */</font></i>
+<a name='L1144'>    <b>unsigned</b> <b>long</b> black_mask = 0xf3ffc07fUL;
+<a name='L1145'>    <b>int</b> n;
+<a name='L1146'>
+<a name='L1147'>    <i><font color='green'>/* Check for non-textual ("black-listed") bytes. */</font></i>
+<a name='L1148'>    <b>for</b> (n = 0; n &lt;= 31; n++, black_mask &gt;&gt;= 1)
+<a name='L1149'>        <b>if</b> ((black_mask &amp; 1) &amp;&amp; (s-&gt;dyn_ltree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> != 0))
+<a name='L1150'>            <b>return</b> <a href='../S/2769.html#L199' title='Defined at 199 in Modules/zlib/zlib.h.'>Z_BINARY</a>;
+<a name='L1151'>
+<a name='L1152'>    <i><font color='green'>/* Check for textual ("white-listed") bytes. */</font></i>
+<a name='L1153'>    <b>if</b> (s-&gt;dyn_ltree[9].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> != 0 || s-&gt;dyn_ltree[10].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> != 0
+<a name='L1154'>            || s-&gt;dyn_ltree[13].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> != 0)
+<a name='L1155'>        <b>return</b> <a href='../S/2769.html#L200' title='Defined at 200 in Modules/zlib/zlib.h.'>Z_TEXT</a>;
+<a name='L1156'>    <b>for</b> (n = 32; n &lt; <a href='../S/2738.html#L33' title='Defined at 33 in Modules/zlib/deflate.h.'>LITERALS</a>; n++)
+<a name='L1157'>        <b>if</b> (s-&gt;dyn_ltree[n].<a href='../S/2738.html#L73' title='Defined at 73 in Modules/zlib/deflate.h.'>Freq</a> != 0)
+<a name='L1158'>            <b>return</b> <a href='../S/2769.html#L200' title='Defined at 200 in Modules/zlib/zlib.h.'>Z_TEXT</a>;
+<a name='L1159'>
+<a name='L1160'>    <i><font color='green'>/* There are no "black-listed" or "white-listed" bytes:</font></i>
+<a name='L1161'><i><font color='green'>     * this stream either is empty or has tolerated ("gray-listed") bytes only.</font></i>
+<a name='L1162'><i><font color='green'>     */</font></i>
+<a name='L1163'>    <b>return</b> <a href='../S/2769.html#L199' title='Defined at 199 in Modules/zlib/zlib.h.'>Z_BINARY</a>;
+<a name='L1164'><font color='red'>}</font>
+<a name='L1165'>
+<a name='L1166'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1167'><i><font color='green'> * Reverse the first len bits of a code, using straightforward code (a faster</font></i>
+<a name='L1168'><i><font color='green'> * method would use a table)</font></i>
+<a name='L1169'><i><font color='green'> * IN assertion: 1 &lt;= len &lt;= 15</font></i>
+<a name='L1170'><i><font color='green'> */</font></i>
+<a name='L1171'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <a href='../R/6211.html' title='Multiple refered from 3 places.'>bi_reverse</a>(code, len)
+<a name='L1172'>    <b>unsigned</b> code; <i><font color='green'>/* the value to invert */</font></i>
+<a name='L1173'>    <b>int</b> len;       <i><font color='green'>/* its bit length */</font></i>
+<a name='L1174'><font color='red'>{</font>
+<a name='L1175'>    <b>register</b> <b>unsigned</b> res = 0;
+<a name='L1176'>    <b>do</b> <font color='red'>{</font>
+<a name='L1177'>        res |= <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> &amp; 1;
+<a name='L1178'>        <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> &gt;&gt;= 1, res &lt;&lt;= 1;
+<a name='L1179'>    <font color='red'>}</font> <b>while</b> (--len &gt; 0);
+<a name='L1180'>    <b>return</b> res &gt;&gt; 1;
+<a name='L1181'><font color='red'>}</font>
+<a name='L1182'>
+<a name='L1183'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1184'><i><font color='green'> * Flush the bit buffer, keeping at most 7 bits in it.</font></i>
+<a name='L1185'><i><font color='green'> */</font></i>
+<a name='L1186'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/6210.html' title='Multiple refered from 3 places.'>bi_flush</a>(s)
+<a name='L1187'>    deflate_state *s;
+<a name='L1188'><font color='red'>{</font>
+<a name='L1189'>    <b>if</b> (s-&gt;bi_valid == 16) <font color='red'>{</font>
+<a name='L1190'>        <a href='../S/2761.html#L181' title='Defined at 181 in Modules/zlib/trees.c.'>put_short</a>(s, s-&gt;bi_buf);
+<a name='L1191'>        s-&gt;bi_buf = 0;
+<a name='L1192'>        s-&gt;bi_valid = 0;
+<a name='L1193'>    <font color='red'>}</font> <b>else</b> <b>if</b> (s-&gt;bi_valid &gt;= 8) <font color='red'>{</font>
+<a name='L1194'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)s-&gt;bi_buf);
+<a name='L1195'>        s-&gt;bi_buf &gt;&gt;= 8;
+<a name='L1196'>        s-&gt;bi_valid -= 8;
+<a name='L1197'>    <font color='red'>}</font>
+<a name='L1198'><font color='red'>}</font>
+<a name='L1199'>
+<a name='L1200'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1201'><i><font color='green'> * Flush the bit buffer and align the output on a byte boundary</font></i>
+<a name='L1202'><i><font color='green'> */</font></i>
+<a name='L1203'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/6212.html' title='Multiple refered from 3 places.'>bi_windup</a>(s)
+<a name='L1204'>    deflate_state *s;
+<a name='L1205'><font color='red'>{</font>
+<a name='L1206'>    <b>if</b> (s-&gt;bi_valid &gt; 8) <font color='red'>{</font>
+<a name='L1207'>        <a href='../S/2761.html#L181' title='Defined at 181 in Modules/zlib/trees.c.'>put_short</a>(s, s-&gt;bi_buf);
+<a name='L1208'>    <font color='red'>}</font> <b>else</b> <b>if</b> (s-&gt;bi_valid &gt; 0) <font color='red'>{</font>
+<a name='L1209'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, (<a href='../D/458.html' title='Multiple defined in 4 places.'>Byte</a>)s-&gt;bi_buf);
+<a name='L1210'>    <font color='red'>}</font>
+<a name='L1211'>    s-&gt;bi_buf = 0;
+<a name='L1212'>    s-&gt;bi_valid = 0;
+<a name='L1213'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L1214'>    s-&gt;bits_sent = (s-&gt;bits_sent+7) &amp; ~7;
+<a name='L1215'><font color='darkred'>#endif</font>
+<a name='L1216'><font color='red'>}</font>
+<a name='L1217'>
+<a name='L1218'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L1219'><i><font color='green'> * Copy a stored block, storing first the length and its</font></i>
+<a name='L1220'><i><font color='green'> * one's complement if requested.</font></i>
+<a name='L1221'><i><font color='green'> */</font></i>
+<a name='L1222'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/7014.html' title='Multiple refered from 2 places.'>copy_block</a>(s, buf, len, header)
+<a name='L1223'>    deflate_state *s;
+<a name='L1224'>    charf    *buf;    <i><font color='green'>/* the input data */</font></i>
+<a name='L1225'>    <b>unsigned</b> len;     <i><font color='green'>/* its length */</font></i>
+<a name='L1226'>    <b>int</b>      header;  <i><font color='green'>/* true if block header must be written */</font></i>
+<a name='L1227'><font color='red'>{</font>
+<a name='L1228'>    <a href='../S/2761.html#L1203' title='Defined at 1203 in Modules/zlib/trees.c.'>bi_windup</a>(s);        <i><font color='green'>/* align on byte boundary */</font></i>
+<a name='L1229'>    s-&gt;last_eob_len = 8; <i><font color='green'>/* enough lookahead for inflate */</font></i>
+<a name='L1230'>
+<a name='L1231'>    <b>if</b> (header) <font color='red'>{</font>
+<a name='L1232'>        <a href='../S/2761.html#L181' title='Defined at 181 in Modules/zlib/trees.c.'>put_short</a>(s, (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)len);
+<a name='L1233'>        <a href='../S/2761.html#L181' title='Defined at 181 in Modules/zlib/trees.c.'>put_short</a>(s, (<a href='../S/2773.html#L39' title='Defined at 39 in Modules/zlib/zutil.h.'>ush</a>)~len);
+<a name='L1234'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L1235'>        s-&gt;bits_sent += 2*16;
+<a name='L1236'><font color='darkred'>#endif</font>
+<a name='L1237'>    <font color='red'>}</font>
+<a name='L1238'><font color='darkred'>#ifdef</font> <a href='../D/728.html' title='Multiple defined in 2 places.'>DEBUG</a>
+<a name='L1239'>    s-&gt;bits_sent += (<a href='../S/2773.html#L41' title='Defined at 41 in Modules/zlib/zutil.h.'>ulg</a>)len&lt;&lt;3;
+<a name='L1240'><font color='darkred'>#endif</font>
+<a name='L1241'>    <b>while</b> (len--) <font color='red'>{</font>
+<a name='L1242'>        <a href='../S/2738.html#L275' title='Defined at 275 in Modules/zlib/deflate.h.'>put_byte</a>(s, *buf++);
+<a name='L1243'>    <font color='red'>}</font>
+<a name='L1244'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L193'>[^]</a><a href='#L1222'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

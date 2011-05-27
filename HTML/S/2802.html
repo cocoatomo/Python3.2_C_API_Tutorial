@@ -1,0 +1,476 @@
+<html>
+<head>
+<title>Objects/moduleobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/moduleobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L30'>[^]</a><a href='#L381'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L30' title='Defined at 30.'>PyModule_New</a>
+<li><a href='#L60' title='Defined at 60.'>PyModule_Create2</a>
+<li><a href='#L159' title='Defined at 159.'>PyModule_GetDict</a>
+<li><a href='#L173' title='Defined at 173.'>PyModule_GetName</a>
+<li><a href='#L193' title='Defined at 193.'>PyModule_GetFilenameObject</a>
+<li><a href='#L214' title='Defined at 214.'>PyModule_GetFilename</a>
+<li><a href='#L227' title='Defined at 227.'>PyModule_GetDef</a>
+<li><a href='#L237' title='Defined at 237.'>PyModule_GetState</a>
+<li><a href='#L247' title='Defined at 247.'>_PyModule_Clear</a>
+<li><a href='#L311' title='Defined at 311.'>module_init</a>
+<li><a href='#L333' title='Defined at 333.'>module_dealloc</a>
+<li><a href='#L348' title='Defined at 348.'>module_repr</a>
+<li><a href='#L369' title='Defined at 369.'>module_traverse</a>
+<li><a href='#L381' title='Defined at 381.'>module_clear</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Module object implementation */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L6'>
+<a name='L7'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> max_module_number;
+<a name='L8'>
+<a name='L9'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L10'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L11'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *md_dict;
+<a name='L12'>    <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> *md_def;
+<a name='L13'>    <b>void</b> *md_state;
+<a name='L14'><font color='red'>}</font> <a href='../R/3189.html' title='Multiple refered from 14 places.'>PyModuleObject</a>;
+<a name='L15'>
+<a name='L16'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> module_members[] = <font color='red'>{</font>
+<a name='L17'>    <font color='red'>{</font>"__dict__", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a>, md_dict), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L18'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L19'><font color='red'>}</font>;
+<a name='L20'>
+<a name='L21'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> moduledef_type = <font color='red'>{</font>
+<a name='L22'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L23'>    "moduledef",                                <i><font color='green'>/* tp_name */</font></i>
+<a name='L24'>    <b>sizeof</b>(<b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a>),                 <i><font color='green'>/* tp_size */</font></i>
+<a name='L25'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L26'><font color='red'>}</font>;
+<a name='L27'>
+<a name='L28'>
+<a name='L29'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L30'><a href='../R/3199.html' title='Multiple refered from 5 places.'>PyModule_New</a>(<b>const</b> <b>char</b> *name)
+<a name='L31'><font color='red'>{</font>
+<a name='L32'>    <a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *m;
+<a name='L33'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *nameobj;
+<a name='L34'>    m = PyObject_GC_New(<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a>, &amp;PyModule_Type);
+<a name='L35'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L36'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L37'>    m-&gt;md_def = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L38'>    m-&gt;md_state = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L39'>    nameobj = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(name);
+<a name='L40'>    m-&gt;md_dict = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L41'>    <b>if</b> (m-&gt;md_dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || nameobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L42'>        <b>goto</b> fail;
+<a name='L43'>    <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(m-&gt;md_dict, "__name__", nameobj) != 0)
+<a name='L44'>        <b>goto</b> fail;
+<a name='L45'>    <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(m-&gt;md_dict, "__doc__", Py_None) != 0)
+<a name='L46'>        <b>goto</b> fail;
+<a name='L47'>    <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(m-&gt;md_dict, "__package__", Py_None) != 0)
+<a name='L48'>        <b>goto</b> fail;
+<a name='L49'>    Py_DECREF(nameobj);
+<a name='L50'>    <a href='../D/3618.html' title='Multiple defined in 2 places.'>PyObject_GC_Track</a>(m);
+<a name='L51'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)m;
+<a name='L52'>
+<a name='L53'> fail:
+<a name='L54'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(nameobj);
+<a name='L55'>    Py_DECREF(m);
+<a name='L56'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L57'><font color='red'>}</font>
+<a name='L58'>
+<a name='L59'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L60'>PyModule_Create2(<b>struct</b> PyModuleDef* module, <b>int</b> module_api_version)
+<a name='L61'><font color='red'>{</font>
+<a name='L62'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d, *v, *n;
+<a name='L63'>    <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> *ml;
+<a name='L64'>    <b>const</b> <b>char</b>* name;
+<a name='L65'>    <a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *m;
+<a name='L66'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *interp = <a href='../S/3134.html#L368' title='Defined at 368 in Python/pystate.c.'>PyThreadState_Get</a>()-&gt;interp;
+<a name='L67'>    <b>if</b> (interp-&gt;modules == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L68'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("Python import machinery not initialized");
+<a name='L69'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;moduledef_type) &lt; 0)
+<a name='L70'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L71'>    <b>if</b> (module-&gt;m_base.m_index == 0) <font color='red'>{</font>
+<a name='L72'>        max_module_number++;
+<a name='L73'>        <a href='../D/4223.html' title='Multiple defined in 2 places.'>Py_REFCNT</a>(module) = 1;
+<a name='L74'>        <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(module) = &amp;moduledef_type;
+<a name='L75'>        module-&gt;m_base.m_index = max_module_number;
+<a name='L76'>    <font color='red'>}</font>
+<a name='L77'>    name = module-&gt;m_name;
+<a name='L78'>    <b>if</b> (module_api_version != PYTHON_API_VERSION &amp;&amp; module_api_version != PYTHON_ABI_VERSION) <font color='red'>{</font>
+<a name='L79'>        <b>int</b> err;
+<a name='L80'>        err = <a href='../S/3087.html#L732' title='Defined at 732 in Python/_warnings.c.'>PyErr_WarnFormat</a>(PyExc_RuntimeWarning, 1,
+<a name='L81'>            "Python C API version mismatch for module %.100s: "
+<a name='L82'>            "This Python has API version %d, module %.100s has version %d.",
+<a name='L83'>             name,
+<a name='L84'>             PYTHON_API_VERSION, name, module_api_version);
+<a name='L85'>        <b>if</b> (err)
+<a name='L86'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L87'>    <font color='red'>}</font>
+<a name='L88'>    <i><font color='green'>/* Make sure name is fully qualified.</font></i>
+<a name='L89'><i><font color='green'></font></i>
+<a name='L90'><i><font color='green'>       This is a bit of a hack: when the shared library is loaded,</font></i>
+<a name='L91'><i><font color='green'>       the module name is "package.module", but the module calls</font></i>
+<a name='L92'><i><font color='green'>       PyModule_Create*() with just "module" for the name.  The shared</font></i>
+<a name='L93'><i><font color='green'>       library loader squirrels away the true name of the module in</font></i>
+<a name='L94'><i><font color='green'>       _Py_PackageContext, and PyModule_Create*() will substitute this</font></i>
+<a name='L95'><i><font color='green'>       (if the name actually matches).</font></i>
+<a name='L96'><i><font color='green'>    */</font></i>
+<a name='L97'>    <b>if</b> (_Py_PackageContext != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L98'>        <b>char</b> *p = strrchr(_Py_PackageContext, '.');
+<a name='L99'>        <b>if</b> (p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; strcmp(module-&gt;m_name, p+1) == 0) <font color='red'>{</font>
+<a name='L100'>            name = _Py_PackageContext;
+<a name='L101'>            _Py_PackageContext = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L102'>        <font color='red'>}</font>
+<a name='L103'>    <font color='red'>}</font>
+<a name='L104'>    <b>if</b> ((m = (<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a>*)<a href='../S/2802.html#L30' title='Defined at 30 in Objects/moduleobject.c.'>PyModule_New</a>(name)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L105'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L106'>
+<a name='L107'>    <b>if</b> (module-&gt;m_size &gt; 0) <font color='red'>{</font>
+<a name='L108'>        m-&gt;md_state = PyMem_MALLOC(module-&gt;m_size);
+<a name='L109'>        <b>if</b> (!m-&gt;md_state) <font color='red'>{</font>
+<a name='L110'>            <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L111'>            Py_DECREF(m);
+<a name='L112'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L113'>        <font color='red'>}</font>
+<a name='L114'>        memset(m-&gt;md_state, 0, module-&gt;m_size);
+<a name='L115'>    <font color='red'>}</font>
+<a name='L116'>
+<a name='L117'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)m);
+<a name='L118'>    <b>if</b> (module-&gt;m_methods != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L119'>        n = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(name);
+<a name='L120'>        <b>if</b> (n == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L121'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L122'>        <b>for</b> (ml = module-&gt;m_methods; ml-&gt;ml_name != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; ml++) <font color='red'>{</font>
+<a name='L123'>            <b>if</b> ((ml-&gt;ml_flags &amp; METH_CLASS) ||
+<a name='L124'>                (ml-&gt;ml_flags &amp; METH_STATIC)) <font color='red'>{</font>
+<a name='L125'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L126'>                                "module functions cannot set"
+<a name='L127'>                                " METH_CLASS or METH_STATIC");
+<a name='L128'>                Py_DECREF(n);
+<a name='L129'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L130'>            <font color='red'>}</font>
+<a name='L131'>            v = <a href='../S/2801.html#L17' title='Defined at 17 in Objects/methodobject.c.'>PyCFunction_NewEx</a>(ml, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)m, n);
+<a name='L132'>            <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L133'>                Py_DECREF(n);
+<a name='L134'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L135'>            <font color='red'>}</font>
+<a name='L136'>            <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, ml-&gt;ml_name, v) != 0) <font color='red'>{</font>
+<a name='L137'>                Py_DECREF(v);
+<a name='L138'>                Py_DECREF(n);
+<a name='L139'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L140'>            <font color='red'>}</font>
+<a name='L141'>            Py_DECREF(v);
+<a name='L142'>        <font color='red'>}</font>
+<a name='L143'>        Py_DECREF(n);
+<a name='L144'>    <font color='red'>}</font>
+<a name='L145'>    <b>if</b> (module-&gt;m_doc != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L146'>        v = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(module-&gt;m_doc);
+<a name='L147'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "__doc__", v) != 0) <font color='red'>{</font>
+<a name='L148'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(v);
+<a name='L149'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L150'>        <font color='red'>}</font>
+<a name='L151'>        Py_DECREF(v);
+<a name='L152'>    <font color='red'>}</font>
+<a name='L153'>    m-&gt;md_def = module;
+<a name='L154'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)m;
+<a name='L155'><font color='red'>}</font>
+<a name='L156'>
+<a name='L157'>
+<a name='L158'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L159'><a href='../R/3194.html' title='Multiple refered from 53 places.'>PyModule_GetDict</a>(PyObject *m)
+<a name='L160'><font color='red'>{</font>
+<a name='L161'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d;
+<a name='L162'>    <b>if</b> (!PyModule_Check(m)) <font color='red'>{</font>
+<a name='L163'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L164'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L165'>    <font color='red'>}</font>
+<a name='L166'>    d = ((<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *)m) -&gt; md_dict;
+<a name='L167'>    <b>if</b> (d == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L168'>        ((<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *)m) -&gt; md_dict = d = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L169'>    <b>return</b> d;
+<a name='L170'><font color='red'>}</font>
+<a name='L171'>
+<a name='L172'><b>const</b> <b>char</b> *
+<a name='L173'><a href='../R/3196.html' title='Multiple refered from 5 places.'>PyModule_GetName</a>(PyObject *m)
+<a name='L174'><font color='red'>{</font>
+<a name='L175'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d;
+<a name='L176'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *nameobj;
+<a name='L177'>    <b>if</b> (!PyModule_Check(m)) <font color='red'>{</font>
+<a name='L178'>        <a href='../S/3106.html#L326' title='Defined at 326 in Python/errors.c.'>PyErr_BadArgument</a>();
+<a name='L179'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L180'>    <font color='red'>}</font>
+<a name='L181'>    d = ((<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *)m)-&gt;md_dict;
+<a name='L182'>    <b>if</b> (d == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L183'>        (nameobj = <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(d, "__name__")) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L184'>        !PyUnicode_Check(nameobj))
+<a name='L185'>    <font color='red'>{</font>
+<a name='L186'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError, "nameless module");
+<a name='L187'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L188'>    <font color='red'>}</font>
+<a name='L189'>    <b>return</b> <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(nameobj);
+<a name='L190'><font color='red'>}</font>
+<a name='L191'>
+<a name='L192'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L193'><a href='../R/3195.html' title='Multiple refered from 2 places.'>PyModule_GetFilenameObject</a>(PyObject *m)
+<a name='L194'><font color='red'>{</font>
+<a name='L195'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d;
+<a name='L196'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *fileobj;
+<a name='L197'>    <b>if</b> (!PyModule_Check(m)) <font color='red'>{</font>
+<a name='L198'>        <a href='../S/3106.html#L326' title='Defined at 326 in Python/errors.c.'>PyErr_BadArgument</a>();
+<a name='L199'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L200'>    <font color='red'>}</font>
+<a name='L201'>    d = ((<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *)m)-&gt;md_dict;
+<a name='L202'>    <b>if</b> (d == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L203'>        (fileobj = <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(d, "__file__")) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L204'>        !PyUnicode_Check(fileobj))
+<a name='L205'>    <font color='red'>{</font>
+<a name='L206'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError, "module filename missing");
+<a name='L207'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L208'>    <font color='red'>}</font>
+<a name='L209'>    Py_INCREF(fileobj);
+<a name='L210'>    <b>return</b> fileobj;
+<a name='L211'><font color='red'>}</font>
+<a name='L212'>
+<a name='L213'><b>const</b> <b>char</b> *
+<a name='L214'>PyModule_GetFilename(PyObject *m)
+<a name='L215'><font color='red'>{</font>
+<a name='L216'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *fileobj;
+<a name='L217'>    <b>char</b> *utf8;
+<a name='L218'>    fileobj = <a href='../S/2802.html#L193' title='Defined at 193 in Objects/moduleobject.c.'>PyModule_GetFilenameObject</a>(m);
+<a name='L219'>    <b>if</b> (fileobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L220'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L221'>    utf8 = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(fileobj);
+<a name='L222'>    Py_DECREF(fileobj);
+<a name='L223'>    <b>return</b> utf8;
+<a name='L224'><font color='red'>}</font>
+<a name='L225'>
+<a name='L226'><a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a>*
+<a name='L227'><a href='../R/3193.html' title='Multiple refered from 2 places.'>PyModule_GetDef</a>(PyObject* m)
+<a name='L228'><font color='red'>{</font>
+<a name='L229'>    <b>if</b> (!PyModule_Check(m)) <font color='red'>{</font>
+<a name='L230'>        <a href='../S/3106.html#L326' title='Defined at 326 in Python/errors.c.'>PyErr_BadArgument</a>();
+<a name='L231'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L232'>    <font color='red'>}</font>
+<a name='L233'>    <b>return</b> ((<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *)m)-&gt;md_def;
+<a name='L234'><font color='red'>}</font>
+<a name='L235'>
+<a name='L236'><b>void</b>*
+<a name='L237'><a href='../R/3197.html' title='Multiple refered from 2 places.'>PyModule_GetState</a>(PyObject* m)
+<a name='L238'><font color='red'>{</font>
+<a name='L239'>    <b>if</b> (!PyModule_Check(m)) <font color='red'>{</font>
+<a name='L240'>        <a href='../S/3106.html#L326' title='Defined at 326 in Python/errors.c.'>PyErr_BadArgument</a>();
+<a name='L241'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L242'>    <font color='red'>}</font>
+<a name='L243'>    <b>return</b> ((<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *)m)-&gt;md_state;
+<a name='L244'><font color='red'>}</font>
+<a name='L245'>
+<a name='L246'><b>void</b>
+<a name='L247'><a href='../R/5451.html' title='Multiple refered from 6 places.'>_PyModule_Clear</a>(PyObject *m)
+<a name='L248'><font color='red'>{</font>
+<a name='L249'>    <i><font color='green'>/* To make the execution order of destructors for global</font></i>
+<a name='L250'><i><font color='green'>       objects a bit more predictable, we first zap all objects</font></i>
+<a name='L251'><i><font color='green'>       whose name starts with a single underscore, before we clear</font></i>
+<a name='L252'><i><font color='green'>       the entire dictionary.  We zap them by replacing them with</font></i>
+<a name='L253'><i><font color='green'>       None, rather than deleting them from the dictionary, to</font></i>
+<a name='L254'><i><font color='green'>       avoid rehashing the dictionary (to some extent). */</font></i>
+<a name='L255'>
+<a name='L256'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos;
+<a name='L257'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L258'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d;
+<a name='L259'>
+<a name='L260'>    d = ((<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a> *)m)-&gt;md_dict;
+<a name='L261'>    <b>if</b> (d == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L262'>        <b>return</b>;
+<a name='L263'>
+<a name='L264'>    <i><font color='green'>/* First, clear only names starting with a single underscore */</font></i>
+<a name='L265'>    pos = 0;
+<a name='L266'>    <b>while</b> (<a href='../S/2787.html#L954' title='Defined at 954 in Objects/dictobject.c.'>PyDict_Next</a>(d, &amp;pos, &amp;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, &amp;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)) <font color='red'>{</font>
+<a name='L267'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> != Py_None &amp;&amp; PyUnicode_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)) <font color='red'>{</font>
+<a name='L268'>            <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *u = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L269'>            <b>if</b> (u[0] == '_' &amp;&amp; u[1] != '_') <font color='red'>{</font>
+<a name='L270'>                <b>if</b> (Py_VerboseFlag &gt; 1) <font color='red'>{</font>
+<a name='L271'>                    <b>const</b> <b>char</b> *s = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L272'>                    <b>if</b> (s != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L273'>                        <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("#   clear[1] %s\n", s);
+<a name='L274'>                    <b>else</b>
+<a name='L275'>                        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L276'>                <font color='red'>}</font>
+<a name='L277'>                <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(d, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, Py_None);
+<a name='L278'>            <font color='red'>}</font>
+<a name='L279'>        <font color='red'>}</font>
+<a name='L280'>    <font color='red'>}</font>
+<a name='L281'>
+<a name='L282'>    <i><font color='green'>/* Next, clear all names except for __builtins__ */</font></i>
+<a name='L283'>    pos = 0;
+<a name='L284'>    <b>while</b> (<a href='../S/2787.html#L954' title='Defined at 954 in Objects/dictobject.c.'>PyDict_Next</a>(d, &amp;pos, &amp;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, &amp;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)) <font color='red'>{</font>
+<a name='L285'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> != Py_None &amp;&amp; PyUnicode_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)) <font color='red'>{</font>
+<a name='L286'>            <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *u = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L287'>            <b>if</b> (u[0] != '_'
+<a name='L288'>                || <a href='../D/3968.html' title='Multiple defined in 3 places.'>PyUnicode_CompareWithASCIIString</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, "__builtins__") != 0)
+<a name='L289'>            <font color='red'>{</font>
+<a name='L290'>                <b>if</b> (Py_VerboseFlag &gt; 1) <font color='red'>{</font>
+<a name='L291'>                    <b>const</b> <b>char</b> *s = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L292'>                    <b>if</b> (s != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L293'>                        <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("#   clear[2] %s\n", s);
+<a name='L294'>                    <b>else</b>
+<a name='L295'>                        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L296'>                <font color='red'>}</font>
+<a name='L297'>                <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(d, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, Py_None);
+<a name='L298'>            <font color='red'>}</font>
+<a name='L299'>        <font color='red'>}</font>
+<a name='L300'>    <font color='red'>}</font>
+<a name='L301'>
+<a name='L302'>    <i><font color='green'>/* Note: we leave __builtins__ in place, so that destructors</font></i>
+<a name='L303'><i><font color='green'>       of non-global objects defined in this module can still use</font></i>
+<a name='L304'><i><font color='green'>       builtins, in particularly 'None'. */</font></i>
+<a name='L305'>
+<a name='L306'><font color='red'>}</font>
+<a name='L307'>
+<a name='L308'><i><font color='green'>/* Methods */</font></i>
+<a name='L309'>
+<a name='L310'><b>static</b> <b>int</b>
+<a name='L311'><a href='../S/2802.html#L436' title='Refered from 436 in Objects/moduleobject.c.'>module_init</a>(PyModuleObject *m, PyObject *args, PyObject *kwds)
+<a name='L312'><font color='red'>{</font>
+<a name='L313'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"name", "doc", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L314'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict, *name = Py_None, *doc = Py_None;
+<a name='L315'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "U|O:module.__init__",
+<a name='L316'>                                     kwlist, &amp;name, &amp;doc))
+<a name='L317'>        <b>return</b> -1;
+<a name='L318'>    dict = m-&gt;md_dict;
+<a name='L319'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L320'>        dict = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L321'>        <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L322'>            <b>return</b> -1;
+<a name='L323'>        m-&gt;md_dict = dict;
+<a name='L324'>    <font color='red'>}</font>
+<a name='L325'>    <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "__name__", name) &lt; 0)
+<a name='L326'>        <b>return</b> -1;
+<a name='L327'>    <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, "__doc__", doc) &lt; 0)
+<a name='L328'>        <b>return</b> -1;
+<a name='L329'>    <b>return</b> 0;
+<a name='L330'><font color='red'>}</font>
+<a name='L331'>
+<a name='L332'><b>static</b> <b>void</b>
+<a name='L333'><a href='../S/2802.html#L404' title='Refered from 404 in Objects/moduleobject.c.'>module_dealloc</a>(PyModuleObject *m)
+<a name='L334'><font color='red'>{</font>
+<a name='L335'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(m);
+<a name='L336'>    <b>if</b> (m-&gt;md_def &amp;&amp; m-&gt;md_def-&gt;m_free)
+<a name='L337'>        m-&gt;md_def-&gt;m_free(m);
+<a name='L338'>    <b>if</b> (m-&gt;md_dict != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L339'>        <a href='../S/2802.html#L247' title='Defined at 247 in Objects/moduleobject.c.'>_PyModule_Clear</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)m);
+<a name='L340'>        Py_DECREF(m-&gt;md_dict);
+<a name='L341'>    <font color='red'>}</font>
+<a name='L342'>    <b>if</b> (m-&gt;md_state != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L343'>        PyMem_FREE(m-&gt;md_state);
+<a name='L344'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(m)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)m);
+<a name='L345'><font color='red'>}</font>
+<a name='L346'>
+<a name='L347'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L348'><a href='../S/2802.html#L409' title='Refered from 409 in Objects/moduleobject.c.'>module_repr</a>(PyModuleObject *m)
+<a name='L349'><font color='red'>{</font>
+<a name='L350'>    <b>const</b> <b>char</b> *name;
+<a name='L351'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *filename, *repr;
+<a name='L352'>
+<a name='L353'>    name = <a href='../S/2802.html#L173' title='Defined at 173 in Objects/moduleobject.c.'>PyModule_GetName</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)m);
+<a name='L354'>    <b>if</b> (name == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L355'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L356'>        name = "?";
+<a name='L357'>    <font color='red'>}</font>
+<a name='L358'>    filename = <a href='../S/2802.html#L193' title='Defined at 193 in Objects/moduleobject.c.'>PyModule_GetFilenameObject</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)m);
+<a name='L359'>    <b>if</b> (filename == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L360'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L361'>        <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;module '%s' (built-in)&gt;", name);
+<a name='L362'>    <font color='red'>}</font>
+<a name='L363'>    repr = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;module '%s' from '%U'&gt;", name, filename);
+<a name='L364'>    Py_DECREF(filename);
+<a name='L365'>    <b>return</b> repr;
+<a name='L366'><font color='red'>}</font>
+<a name='L367'>
+<a name='L368'><b>static</b> <b>int</b>
+<a name='L369'><a href='../S/2802.html#L422' title='Refered from 422 in Objects/moduleobject.c.'>module_traverse</a>(PyModuleObject *m, visitproc visit, <b>void</b> *arg)
+<a name='L370'><font color='red'>{</font>
+<a name='L371'>    <b>if</b> (m-&gt;md_def &amp;&amp; m-&gt;md_def-&gt;m_traverse) <font color='red'>{</font>
+<a name='L372'>        <b>int</b> res = m-&gt;md_def-&gt;m_traverse((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)m, visit, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L373'>        <b>if</b> (res)
+<a name='L374'>            <b>return</b> res;
+<a name='L375'>    <font color='red'>}</font>
+<a name='L376'>    Py_VISIT(m-&gt;md_dict);
+<a name='L377'>    <b>return</b> 0;
+<a name='L378'><font color='red'>}</font>
+<a name='L379'>
+<a name='L380'><b>static</b> <b>int</b>
+<a name='L381'><a href='../S/2802.html#L423' title='Refered from 423 in Objects/moduleobject.c.'>module_clear</a>(PyModuleObject *m)
+<a name='L382'><font color='red'>{</font>
+<a name='L383'>    <b>if</b> (m-&gt;md_def &amp;&amp; m-&gt;md_def-&gt;m_clear) <font color='red'>{</font>
+<a name='L384'>        <b>int</b> res = m-&gt;md_def-&gt;m_clear((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)m);
+<a name='L385'>        <b>if</b> (res)
+<a name='L386'>            <b>return</b> res;
+<a name='L387'>    <font color='red'>}</font>
+<a name='L388'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(m-&gt;md_dict);
+<a name='L389'>    <b>return</b> 0;
+<a name='L390'><font color='red'>}</font>
+<a name='L391'>
+<a name='L392'>
+<a name='L393'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_doc,
+<a name='L394'>"module(name[, doc])\n\
+<a name='L395'>\n\
+<a name='L396'>Create a module object.\n\
+<a name='L397'>The name must be a string; the optional doc argument can have any type.");
+<a name='L398'>
+<a name='L399'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyModule_Type = <font color='red'>{</font>
+<a name='L400'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L401'>    "module",                                   <i><font color='green'>/* tp_name */</font></i>
+<a name='L402'>    <b>sizeof</b>(<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a>),                     <i><font color='green'>/* tp_size */</font></i>
+<a name='L403'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L404'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2802.html#L333' title='Defined at 333 in Objects/moduleobject.c.'>module_dealloc</a>,                 <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L405'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L406'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L407'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L408'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L409'>    (reprfunc)<a href='../S/2802.html#L348' title='Defined at 348 in Objects/moduleobject.c.'>module_repr</a>,                      <i><font color='green'>/* tp_repr */</font></i>
+<a name='L410'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L411'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L412'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L413'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L414'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L415'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L416'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L417'>    <a href='../S/2803.html#L1130' title='Defined at 1130 in Objects/object.c.'>PyObject_GenericSetAttr</a>,                    <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L418'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L419'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC |
+<a name='L420'>        Py_TPFLAGS_BASETYPE,                    <i><font color='green'>/* tp_flags */</font></i>
+<a name='L421'>    module_doc,                                 <i><font color='green'>/* tp_doc */</font></i>
+<a name='L422'>    (traverseproc)<a href='../S/2802.html#L369' title='Defined at 369 in Objects/moduleobject.c.'>module_traverse</a>,              <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L423'>    (inquiry)<a href='../S/2802.html#L381' title='Defined at 381 in Objects/moduleobject.c.'>module_clear</a>,                      <i><font color='green'>/* tp_clear */</font></i>
+<a name='L424'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L425'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L426'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L427'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L428'>    0,                                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L429'>    module_members,                             <i><font color='green'>/* tp_members */</font></i>
+<a name='L430'>    0,                                          <i><font color='green'>/* tp_getset */</font></i>
+<a name='L431'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L432'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L433'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L434'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L435'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2802.html#L14' title='Defined at 14 in Objects/moduleobject.c.'>PyModuleObject</a>, md_dict),          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L436'>    (initproc)<a href='../S/2802.html#L311' title='Defined at 311 in Objects/moduleobject.c.'>module_init</a>,                      <i><font color='green'>/* tp_init */</font></i>
+<a name='L437'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,                        <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L438'>    <a href='../S/2824.html#L730' title='Defined at 730 in Objects/typeobject.c.'>PyType_GenericNew</a>,                          <i><font color='green'>/* tp_new */</font></i>
+<a name='L439'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>,                            <i><font color='green'>/* tp_free */</font></i>
+<a name='L440'><font color='red'>}</font>;
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L30'>[^]</a><a href='#L381'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

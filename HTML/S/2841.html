@@ -1,0 +1,228 @@
+<html>
+<head>
+<title>Parser/myreadline.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3401.html'>Parser</a>/myreadline.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L153'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L36' title='Defined at 36.'>my_fgets</a>
+<li><a href='#L102' title='Defined at 102.'>PyOS_StdioReadline</a>
+<li><a href='#L153' title='Defined at 153.'>PyOS_Readline</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Readline interface for tokenizer.c and [raw_]input() in bltinmodule.c.</font></i>
+<a name='L3'><i><font color='green'>   By default, or when stdin is not a tty device, we have a super</font></i>
+<a name='L4'><i><font color='green'>   simple my_readline function using fgets.</font></i>
+<a name='L5'><i><font color='green'>   Optionally, we can use the GNU readline library.</font></i>
+<a name='L6'><i><font color='green'>   my_readline() has a different return value from GNU readline():</font></i>
+<a name='L7'><i><font color='green'>   - NULL if an interrupt occurred or if an error occurred</font></i>
+<a name='L8'><i><font color='green'>   - a malloc'ed empty string if EOF was read</font></i>
+<a name='L9'><i><font color='green'>   - a malloc'ed string ending in \n normally</font></i>
+<a name='L10'><i><font color='green'>*/</font></i>
+<a name='L11'>
+<a name='L12'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L13'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L14'><font color='darkred'>#define</font> WIN32_LEAN_AND_MEAN
+<a name='L15'><font color='darkred'>#include</font> "windows.h"
+<a name='L16'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L17'>
+<a name='L18'><font color='darkred'>#ifdef</font> __VMS
+<a name='L19'><b>extern</b> <b>char</b>* vms__StdioReadline(FILE *sys_stdin, FILE *sys_stdout, <b>char</b> *prompt);
+<a name='L20'><font color='darkred'>#endif</font>
+<a name='L21'>
+<a name='L22'>
+<a name='L23'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a>* _PyOS_ReadlineTState;
+<a name='L24'>
+<a name='L25'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L26'><font color='darkred'>#include</font> "<a href='572.html'>pythread.h</a>"
+<a name='L27'><b>static</b> <a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a> _PyOS_ReadlineLock = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L28'><font color='darkred'>#endif</font>
+<a name='L29'>
+<a name='L30'><b>int</b> (*PyOS_InputHook)(<b>void</b>) = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L31'>
+<a name='L32'><i><font color='green'>/* This function restarts a fgets() after an EINTR error occurred</font></i>
+<a name='L33'><i><font color='green'>   except if PyOS_InterruptOccurred() returns true. */</font></i>
+<a name='L34'>
+<a name='L35'><b>static</b> <b>int</b>
+<a name='L36'><a href='../R/9167.html' title='Multiple refered from 2 places.'>my_fgets</a>(<b>char</b> *buf, <b>int</b> len, FILE *fp)
+<a name='L37'><font color='red'>{</font>
+<a name='L38'>    <b>char</b> *p;
+<a name='L39'>    <b>if</b> (PyOS_InputHook != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L40'>        (<b>void</b>)(PyOS_InputHook)();
+<a name='L41'>    errno = 0;
+<a name='L42'>    p = fgets(buf, len, fp);
+<a name='L43'>    <b>if</b> (p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L44'>        <b>return</b> 0; <i><font color='green'>/* No error */</font></i>
+<a name='L45'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L46'>    <i><font color='green'>/* In the case of a Ctrl+C or some other external event</font></i>
+<a name='L47'><i><font color='green'>       interrupting the operation:</font></i>
+<a name='L48'><i><font color='green'>       Win2k/NT: ERROR_OPERATION_ABORTED is the most recent Win32</font></i>
+<a name='L49'><i><font color='green'>       error code (and feof() returns TRUE).</font></i>
+<a name='L50'><i><font color='green'>       Win9x: Ctrl+C seems to have no effect on fgets() returning</font></i>
+<a name='L51'><i><font color='green'>       early - the signal handler is called, but the fgets()</font></i>
+<a name='L52'><i><font color='green'>       only returns "normally" (ie, when Enter hit or feof())</font></i>
+<a name='L53'><i><font color='green'>    */</font></i>
+<a name='L54'>    <b>if</b> (GetLastError()==ERROR_OPERATION_ABORTED) <font color='red'>{</font>
+<a name='L55'>        <i><font color='green'>/* Signals come asynchronously, so we sleep a brief</font></i>
+<a name='L56'><i><font color='green'>           moment before checking if the handler has been</font></i>
+<a name='L57'><i><font color='green'>           triggered (we cant just return 1 before the</font></i>
+<a name='L58'><i><font color='green'>           signal handler has been called, as the later</font></i>
+<a name='L59'><i><font color='green'>           signal may be treated as a separate interrupt).</font></i>
+<a name='L60'><i><font color='green'>        */</font></i>
+<a name='L61'>        <a href='../S/2618.html#L307' title='Defined at 307 in Modules/_tkinter.c.'>Sleep</a>(1);
+<a name='L62'>        <b>if</b> (<a href='../D/3581.html' title='Multiple defined in 5 places.'>PyOS_InterruptOccurred</a>()) <font color='red'>{</font>
+<a name='L63'>            <b>return</b> 1; <i><font color='green'>/* Interrupt */</font></i>
+<a name='L64'>        <font color='red'>}</font>
+<a name='L65'>        <i><font color='green'>/* Either the sleep wasn't long enough (need a</font></i>
+<a name='L66'><i><font color='green'>           short loop retrying?) or not interrupted at all</font></i>
+<a name='L67'><i><font color='green'>           (in which case we should revisit the whole thing!)</font></i>
+<a name='L68'><i><font color='green'>           Logging some warning would be nice.  assert is not</font></i>
+<a name='L69'><i><font color='green'>           viable as under the debugger, the various dialogs</font></i>
+<a name='L70'><i><font color='green'>           mean the condition is not true.</font></i>
+<a name='L71'><i><font color='green'>        */</font></i>
+<a name='L72'>    <font color='red'>}</font>
+<a name='L73'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WINDOWS */</font></i>
+<a name='L74'>    <b>if</b> (feof(fp)) <font color='red'>{</font>
+<a name='L75'>        <b>return</b> -1; <i><font color='green'>/* EOF */</font></i>
+<a name='L76'>    <font color='red'>}</font>
+<a name='L77'><font color='darkred'>#ifdef</font> EINTR
+<a name='L78'>    <b>if</b> (errno == EINTR) <font color='red'>{</font>
+<a name='L79'>        <b>int</b> s;
+<a name='L80'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L81'>        <a href='../S/3091.html#L435' title='Defined at 435 in Python/ceval.c.'>PyEval_RestoreThread</a>(_PyOS_ReadlineTState);
+<a name='L82'><font color='darkred'>#endif</font>
+<a name='L83'>        s = <a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>();
+<a name='L84'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L85'>        <a href='../S/3091.html#L422' title='Defined at 422 in Python/ceval.c.'>PyEval_SaveThread</a>();
+<a name='L86'><font color='darkred'>#endif</font>
+<a name='L87'>        <b>if</b> (s &lt; 0) <font color='red'>{</font>
+<a name='L88'>            <b>return</b> 1;
+<a name='L89'>        <font color='red'>}</font>
+<a name='L90'>    <font color='red'>}</font>
+<a name='L91'><font color='darkred'>#endif</font>
+<a name='L92'>    <b>if</b> (<a href='../D/3581.html' title='Multiple defined in 5 places.'>PyOS_InterruptOccurred</a>()) <font color='red'>{</font>
+<a name='L93'>        <b>return</b> 1; <i><font color='green'>/* Interrupt */</font></i>
+<a name='L94'>    <font color='red'>}</font>
+<a name='L95'>    <b>return</b> -2; <i><font color='green'>/* Error */</font></i>
+<a name='L96'><font color='red'>}</font>
+<a name='L97'>
+<a name='L98'>
+<a name='L99'><i><font color='green'>/* Readline implementation using fgets() */</font></i>
+<a name='L100'>
+<a name='L101'><b>char</b> *
+<a name='L102'><a href='../R/3233.html' title='Multiple refered from 2 places.'>PyOS_StdioReadline</a>(FILE *sys_stdin, FILE *sys_stdout, <b>char</b> *prompt)
+<a name='L103'><font color='red'>{</font>
+<a name='L104'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> n;
+<a name='L105'>    <b>char</b> *p;
+<a name='L106'>    n = 100;
+<a name='L107'>    <b>if</b> ((p = (<b>char</b> *)PyMem_MALLOC(n)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L108'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L109'>    fflush(sys_stdout);
+<a name='L110'>    <b>if</b> (prompt)
+<a name='L111'>        fprintf(stderr, "%s", prompt);
+<a name='L112'>    fflush(stderr);
+<a name='L113'>    <b>switch</b> (<a href='../S/2841.html#L36' title='Defined at 36 in Parser/myreadline.c.'>my_fgets</a>(p, (<b>int</b>)n, sys_stdin)) <font color='red'>{</font>
+<a name='L114'>    <b>case</b> 0: <i><font color='green'>/* Normal case */</font></i>
+<a name='L115'>        <b>break</b>;
+<a name='L116'>    <b>case</b> 1: <i><font color='green'>/* Interrupt */</font></i>
+<a name='L117'>        PyMem_FREE(p);
+<a name='L118'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L119'>    <b>case</b> -1: <i><font color='green'>/* EOF */</font></i>
+<a name='L120'>    <b>case</b> -2: <i><font color='green'>/* Error */</font></i>
+<a name='L121'>    <b>default</b>: <i><font color='green'>/* Shouldn't happen */</font></i>
+<a name='L122'>        *p = '\0';
+<a name='L123'>        <b>break</b>;
+<a name='L124'>    <font color='red'>}</font>
+<a name='L125'>    n = strlen(p);
+<a name='L126'>    <b>while</b> (n &gt; 0 &amp;&amp; p[n-1] != '\n') <font color='red'>{</font>
+<a name='L127'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> incr = n+2;
+<a name='L128'>        p = (<b>char</b> *)PyMem_REALLOC(p, n + incr);
+<a name='L129'>        <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L130'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L131'>        <b>if</b> (incr &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>) <font color='red'>{</font>
+<a name='L132'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError, "input line too long");
+<a name='L133'>        <font color='red'>}</font>
+<a name='L134'>        <b>if</b> (<a href='../S/2841.html#L36' title='Defined at 36 in Parser/myreadline.c.'>my_fgets</a>(p+n, (<b>int</b>)incr, sys_stdin) != 0)
+<a name='L135'>            <b>break</b>;
+<a name='L136'>        n += strlen(p+n);
+<a name='L137'>    <font color='red'>}</font>
+<a name='L138'>    <b>return</b> (<b>char</b> *)PyMem_REALLOC(p, n+1);
+<a name='L139'><font color='red'>}</font>
+<a name='L140'>
+<a name='L141'>
+<a name='L142'><i><font color='green'>/* By initializing this function pointer, systems embedding Python can</font></i>
+<a name='L143'><i><font color='green'>   override the readline function.</font></i>
+<a name='L144'><i><font color='green'></font></i>
+<a name='L145'><i><font color='green'>   Note: Python expects in return a buffer allocated with PyMem_Malloc. */</font></i>
+<a name='L146'>
+<a name='L147'><b>char</b> *(*PyOS_ReadlineFunctionPointer)(FILE *, FILE *, <b>char</b> *);
+<a name='L148'>
+<a name='L149'>
+<a name='L150'><i><font color='green'>/* Interface used by tokenizer.c and bltinmodule.c */</font></i>
+<a name='L151'>
+<a name='L152'><b>char</b> *
+<a name='L153'><a href='../R/3232.html' title='Multiple refered from 3 places.'>PyOS_Readline</a>(FILE *sys_stdin, FILE *sys_stdout, <b>char</b> *prompt)
+<a name='L154'><font color='red'>{</font>
+<a name='L155'>    <b>char</b> *rv;
+<a name='L156'>
+<a name='L157'>    <b>if</b> (_PyOS_ReadlineTState == <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>()) <font color='red'>{</font>
+<a name='L158'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L159'>                        "can't re-enter readline");
+<a name='L160'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L161'>    <font color='red'>}</font>
+<a name='L162'>
+<a name='L163'>
+<a name='L164'>    <b>if</b> (PyOS_ReadlineFunctionPointer == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L165'><font color='darkred'>#ifdef</font> __VMS
+<a name='L166'>        PyOS_ReadlineFunctionPointer = vms__StdioReadline;
+<a name='L167'><font color='darkred'>#else</font>
+<a name='L168'>        PyOS_ReadlineFunctionPointer = <a href='../S/2841.html#L102' title='Defined at 102 in Parser/myreadline.c.'>PyOS_StdioReadline</a>;
+<a name='L169'><font color='darkred'>#endif</font>
+<a name='L170'>    <font color='red'>}</font>
+<a name='L171'>
+<a name='L172'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L173'>    <b>if</b> (_PyOS_ReadlineLock == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L174'>        _PyOS_ReadlineLock = <a href='../D/3848.html' title='Multiple defined in 11 places.'>PyThread_allocate_lock</a>();
+<a name='L175'>    <font color='red'>}</font>
+<a name='L176'><font color='darkred'>#endif</font>
+<a name='L177'>
+<a name='L178'>    _PyOS_ReadlineTState = <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>();
+<a name='L179'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L180'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L181'>    <a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(_PyOS_ReadlineLock, 1);
+<a name='L182'><font color='darkred'>#endif</font>
+<a name='L183'>
+<a name='L184'>    <i><font color='green'>/* This is needed to handle the unlikely case that the</font></i>
+<a name='L185'><i><font color='green'>     * interpreter is in interactive mode *and* stdin/out are not</font></i>
+<a name='L186'><i><font color='green'>     * a tty.  This can happen, for example if python is run like</font></i>
+<a name='L187'><i><font color='green'>     * this: python -i &lt; test1.py</font></i>
+<a name='L188'><i><font color='green'>     */</font></i>
+<a name='L189'>    <b>if</b> (!isatty (<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a> (sys_stdin)) || !isatty (<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a> (sys_stdout)))
+<a name='L190'>        rv = <a href='../S/2841.html#L102' title='Defined at 102 in Parser/myreadline.c.'>PyOS_StdioReadline</a> (sys_stdin, sys_stdout, prompt);
+<a name='L191'>    <b>else</b>
+<a name='L192'>        rv = (*PyOS_ReadlineFunctionPointer)(sys_stdin, sys_stdout,
+<a name='L193'>                                             prompt);
+<a name='L194'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L195'>
+<a name='L196'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L197'>    <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(_PyOS_ReadlineLock);
+<a name='L198'><font color='darkred'>#endif</font>
+<a name='L199'>
+<a name='L200'>    _PyOS_ReadlineTState = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L201'>
+<a name='L202'>    <b>return</b> rv;
+<a name='L203'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L153'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

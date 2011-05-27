@@ -1,0 +1,648 @@
+<html>
+<head>
+<title>Modules/_ctypes/libffi/src/closures.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3354.html'>_ctypes</a>/<a href='../files/3356.html'>libffi</a>/<a href='../files/3358.html'>src</a>/closures.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L128'>[^]</a><a href='#L604'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L128' title='Defined at 128.'>selinux_enabled_check</a>
+<li><a href='#L224' title='Defined at 224.'>open_temp_exec_file_name</a>
+<li><a href='#L236' title='Defined at 236.'>open_temp_exec_file_dir</a>
+<li><a href='#L254' title='Defined at 254.'>open_temp_exec_file_env</a>
+<li><a href='#L270' title='Defined at 270.'>open_temp_exec_file_mnt</a>
+<li><a href='#L339' title='Defined at 339.'>open_temp_exec_file_opts_next</a>
+<li><a href='#L359' title='Defined at 359.'>open_temp_exec_file</a>
+<li><a href='#L386' title='Defined at 386.'>dlmmap_locked</a>
+<li><a href='#L442' title='Defined at 442.'>dlmmap</a>
+<li><a href='#L484' title='Defined at 484.'>dlmunmap</a>
+<li><a href='#L512' title='Defined at 512.'>segment_holding_code</a>
+<li><a href='#L531' title='Defined at 531.'>ffi_closure_alloc</a>
+<li><a href='#L555' title='Defined at 555.'>ffi_closure_free</a>
+<li><a href='#L571' title='Defined at 571.'>main</a>
+<li><a href='#L595' title='Defined at 595.'>ffi_closure_alloc</a>
+<li><a href='#L604' title='Defined at 604.'>ffi_closure_free</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* -----------------------------------------------------------------------</font></i>
+<a name='L2'><i><font color='green'>   closures.c - Copyright (c) 2007  Red Hat, Inc.</font></i>
+<a name='L3'><i><font color='green'>   Copyright (C) 2007, 2009 Free Software Foundation, Inc</font></i>
+<a name='L4'><i><font color='green'></font></i>
+<a name='L5'><i><font color='green'>   Code to allocate and deallocate memory for closures.</font></i>
+<a name='L6'><i><font color='green'></font></i>
+<a name='L7'><i><font color='green'>   Permission is hereby granted, free of charge, to any person obtaining</font></i>
+<a name='L8'><i><font color='green'>   a copy of this software and associated documentation files (the</font></i>
+<a name='L9'><i><font color='green'>   ``Software''), to deal in the Software without restriction, including</font></i>
+<a name='L10'><i><font color='green'>   without limitation the rights to use, copy, modify, merge, publish,</font></i>
+<a name='L11'><i><font color='green'>   distribute, sublicense, and/or sell copies of the Software, and to</font></i>
+<a name='L12'><i><font color='green'>   permit persons to whom the Software is furnished to do so, subject to</font></i>
+<a name='L13'><i><font color='green'>   the following conditions:</font></i>
+<a name='L14'><i><font color='green'></font></i>
+<a name='L15'><i><font color='green'>   The above copyright notice and this permission notice shall be included</font></i>
+<a name='L16'><i><font color='green'>   in all copies or substantial portions of the Software.</font></i>
+<a name='L17'><i><font color='green'></font></i>
+<a name='L18'><i><font color='green'>   THE SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND,</font></i>
+<a name='L19'><i><font color='green'>   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF</font></i>
+<a name='L20'><i><font color='green'>   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND</font></i>
+<a name='L21'><i><font color='green'>   NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT</font></i>
+<a name='L22'><i><font color='green'>   HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,</font></i>
+<a name='L23'><i><font color='green'>   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,</font></i>
+<a name='L24'><i><font color='green'>   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER</font></i>
+<a name='L25'><i><font color='green'>   DEALINGS IN THE SOFTWARE.</font></i>
+<a name='L26'><i><font color='green'>   ----------------------------------------------------------------------- */</font></i>
+<a name='L27'>
+<a name='L28'><font color='darkred'>#if</font> <b>defined</b> __linux__ &amp;&amp; !<b>defined</b> <a href='../D/6000.html' title='Multiple defined in 2 places.'>_GNU_SOURCE</a>
+<a name='L29'><font color='darkred'>#define</font> <a href='../S/2312.html#L28' title='Refered from 28 in Modules/_ctypes/libffi/src/closures.c.'>_GNU_SOURCE</a> 1
+<a name='L30'><font color='darkred'>#endif</font>
+<a name='L31'>
+<a name='L32'><font color='darkred'>#include</font> &lt;<a href='../I/325.html'>ffi.h</a>&gt;
+<a name='L33'><font color='darkred'>#include</font> &lt;<a href='../I/119.html'>ffi_common.h</a>&gt;
+<a name='L34'>
+<a name='L35'><font color='darkred'>#ifndef</font> <a href='../D/1156.html' title='Multiple defined in 2 places.'>FFI_MMAP_EXEC_WRIT</a>
+<a name='L36'><font color='darkred'># if</font> __gnu_linux__
+<a name='L37'><i><font color='green'>/* This macro indicates it may be forbidden to map anonymous memory</font></i>
+<a name='L38'><i><font color='green'>   with both write and execute permission.  Code compiled when this</font></i>
+<a name='L39'><i><font color='green'>   option is defined will attempt to map such pages once, but if it</font></i>
+<a name='L40'><i><font color='green'>   fails, it falls back to creating a temporary file in a writable and</font></i>
+<a name='L41'><i><font color='green'>   executable filesystem and mapping pages from it into separate</font></i>
+<a name='L42'><i><font color='green'>   locations in the virtual memory space, one location writable and</font></i>
+<a name='L43'><i><font color='green'>   another executable.  */</font></i>
+<a name='L44'><font color='darkred'>#  define</font> <a href='../R/1050.html' title='Multiple refered from 4 places.'>FFI_MMAP_EXEC_WRIT</a> 1
+<a name='L45'><font color='darkred'>#  define</font> <a href='../R/1381.html' title='Multiple refered from 3 places.'>HAVE_MNTENT</a> 1
+<a name='L46'><font color='darkred'># endif</font>
+<a name='L47'><font color='darkred'># if</font> <b>defined</b>(X86_WIN32) || <b>defined</b>(X86_WIN64)
+<a name='L48'><i><font color='green'>/* Windows systems may have Data Execution Protection (DEP) enabled, </font></i>
+<a name='L49'><i><font color='green'>   which requires the use of VirtualMalloc/VirtualFree to alloc/free</font></i>
+<a name='L50'><i><font color='green'>   executable memory. */</font></i>
+<a name='L51'><font color='darkred'>#  define</font> <a href='../R/1050.html' title='Multiple refered from 4 places.'>FFI_MMAP_EXEC_WRIT</a> 1
+<a name='L52'><font color='darkred'># endif</font>
+<a name='L53'><font color='darkred'>#endif</font>
+<a name='L54'>
+<a name='L55'><font color='darkred'>#if</font> <a href='../D/1156.html' title='Multiple defined in 2 places.'>FFI_MMAP_EXEC_WRIT</a> &amp;&amp; !<b>defined</b> <a href='../S/2312.html#L60' title='Defined at 60 in Modules/_ctypes/libffi/src/closures.c.'>FFI_MMAP_EXEC_SELINUX</a>
+<a name='L56'><font color='darkred'># ifdef</font> __linux__
+<a name='L57'><i><font color='green'>/* When defined to 1 check for SELinux and if SELinux is active,</font></i>
+<a name='L58'><i><font color='green'>   don't attempt PROT_EXEC|PROT_WRITE mapping at all, as that</font></i>
+<a name='L59'><i><font color='green'>   might cause audit messages.  */</font></i>
+<a name='L60'><font color='darkred'>#  define</font> <a href='../R/1049.html' title='Multiple refered from 2 places.'>FFI_MMAP_EXEC_SELINUX</a> 1
+<a name='L61'><font color='darkred'># endif</font>
+<a name='L62'><font color='darkred'>#endif</font>
+<a name='L63'>
+<a name='L64'><font color='darkred'>#if</font> <a href='../D/1125.html' title='Multiple defined in 22 places.'>FFI_CLOSURES</a>
+<a name='L65'>
+<a name='L66'><font color='darkred'># if</font> <a href='../D/1156.html' title='Multiple defined in 2 places.'>FFI_MMAP_EXEC_WRIT</a>
+<a name='L67'>
+<a name='L68'><font color='darkred'>#define</font> <a href='../R/4773.html' title='Multiple refered from 6 places.'>USE_LOCKS</a> 1
+<a name='L69'><font color='darkred'>#define</font> <a href='../S/2317.html#L641' title='Refered from 641 in Modules/_ctypes/libffi/src/dlmalloc.c.'>USE_DL_PREFIX</a> 1
+<a name='L70'><font color='darkred'>#ifdef</font> __GNUC__
+<a name='L71'><font color='darkred'>#ifndef</font> <a href='../D/5382.html' title='Multiple defined in 3 places.'>USE_BUILTIN_FFS</a>
+<a name='L72'><font color='darkred'>#define</font> <a href='../R/4761.html' title='Multiple refered from 4 places.'>USE_BUILTIN_FFS</a> 1
+<a name='L73'><font color='darkred'>#endif</font>
+<a name='L74'><font color='darkred'>#endif</font>
+<a name='L75'>
+<a name='L76'><i><font color='green'>/* We need to use mmap, not sbrk.  */</font></i>
+<a name='L77'><font color='darkred'>#define</font> <a href='../R/1382.html' title='Multiple refered from 10 places.'>HAVE_MORECORE</a> 0
+<a name='L78'>
+<a name='L79'><i><font color='green'>/* We could, in theory, support mremap, but it wouldn't buy us anything.  */</font></i>
+<a name='L80'><font color='darkred'>#define</font> <a href='../R/1383.html' title='Multiple refered from 3 places.'>HAVE_MREMAP</a> 0
+<a name='L81'>
+<a name='L82'><i><font color='green'>/* We have no use for this, so save some code and data.  */</font></i>
+<a name='L83'><font color='darkred'>#define</font> <a href='../R/2113.html' title='Multiple refered from 7 places.'>NO_MALLINFO</a> 1
+<a name='L84'>
+<a name='L85'><i><font color='green'>/* We need all allocations to be in regular segments, otherwise we</font></i>
+<a name='L86'><i><font color='green'>   lose track of the corresponding code address.  */</font></i>
+<a name='L87'><font color='darkred'>#define</font> <a href='../R/706.html' title='Multiple refered from 2 places.'>DEFAULT_MMAP_THRESHOLD</a> <a href='../S/2317.html#L475' title='Defined at 475 in Modules/_ctypes/libffi/src/dlmalloc.c.'>MAX_SIZE_T</a>
+<a name='L88'>
+<a name='L89'><i><font color='green'>/* Don't allocate more than a page unless needed.  */</font></i>
+<a name='L90'><font color='darkred'>#define</font> <a href='../R/703.html' title='Multiple refered from 3 places.'>DEFAULT_GRANULARITY</a> ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)<a href='../D/9692.html' title='Multiple defined in 9 places.'>malloc_getpagesize</a>)
+<a name='L91'>
+<a name='L92'><font color='darkred'>#if</font> FFI_CLOSURE_TEST
+<a name='L93'><i><font color='green'>/* Don't release single pages, to avoid a worst-case scenario of</font></i>
+<a name='L94'><i><font color='green'>   continuously allocating and releasing single pages, but release</font></i>
+<a name='L95'><i><font color='green'>   pairs of pages, which should do just as well given that allocations</font></i>
+<a name='L96'><i><font color='green'>   are likely to be small.  */</font></i>
+<a name='L97'><font color='darkred'>#define</font> <a href='../R/708.html' title='Multiple refered from 2 places.'>DEFAULT_TRIM_THRESHOLD</a> ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)<a href='../D/9692.html' title='Multiple defined in 9 places.'>malloc_getpagesize</a>)
+<a name='L98'><font color='darkred'>#endif</font>
+<a name='L99'>
+<a name='L100'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L101'><font color='darkred'>#include</font> &lt;sys/stat.h&gt;
+<a name='L102'><font color='darkred'>#include</font> &lt;fcntl.h&gt;
+<a name='L103'><font color='darkred'>#include</font> &lt;errno.h&gt;
+<a name='L104'><font color='darkred'>#ifndef</font> _MSC_VER
+<a name='L105'><font color='darkred'>#include</font> &lt;unistd.h&gt;
+<a name='L106'><font color='darkred'>#endif</font>
+<a name='L107'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L108'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L109'><font color='darkred'>#if</font> !<b>defined</b>(X86_WIN32) &amp;&amp; !<b>defined</b>(X86_WIN64)
+<a name='L110'><font color='darkred'>#ifdef</font> <a href='../S/2312.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/closures.c.'>HAVE_MNTENT</a>
+<a name='L111'><font color='darkred'>#include</font> &lt;mntent.h&gt;
+<a name='L112'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_MNTENT */</font></i>
+<a name='L113'><font color='darkred'>#include</font> &lt;sys/param.h&gt;
+<a name='L114'><font color='darkred'>#include</font> &lt;pthread.h&gt;
+<a name='L115'>
+<a name='L116'><i><font color='green'>/* We don't want sys/mman.h to be included after we redefine mmap and</font></i>
+<a name='L117'><i><font color='green'>   dlmunmap.  */</font></i>
+<a name='L118'><font color='darkred'>#include</font> &lt;sys/mman.h&gt;
+<a name='L119'><font color='darkred'>#define</font> <a href='../S/2317.html#L1176' title='Refered from 1176 in Modules/_ctypes/libffi/src/dlmalloc.c.'>LACKS_SYS_MMAN_H</a> 1
+<a name='L120'>
+<a name='L121'><font color='darkred'>#if</font> <a href='../S/2312.html#L60' title='Defined at 60 in Modules/_ctypes/libffi/src/closures.c.'>FFI_MMAP_EXEC_SELINUX</a>
+<a name='L122'><font color='darkred'>#include</font> &lt;sys/statfs.h&gt;
+<a name='L123'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L124'>
+<a name='L125'><b>static</b> <b>int</b> selinux_enabled = -1;
+<a name='L126'>
+<a name='L127'><b>static</b> <b>int</b>
+<a name='L128'><a href='../S/2312.html#L162' title='Refered from 162 in Modules/_ctypes/libffi/src/closures.c.'>selinux_enabled_check</a> (<b>void</b>)
+<a name='L129'><font color='red'>{</font>
+<a name='L130'>  <b>struct</b> statfs sfs;
+<a name='L131'>  FILE *f;
+<a name='L132'>  <b>char</b> *buf = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L133'>  <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> len = 0;
+<a name='L134'>
+<a name='L135'>  <b>if</b> (statfs ("/selinux", &amp;sfs) &gt;= 0
+<a name='L136'>      &amp;&amp; (<b>unsigned</b> <b>int</b>) sfs.f_type == 0xf97cff8cU)
+<a name='L137'>    <b>return</b> 1;
+<a name='L138'>  f = fopen ("/proc/mounts", "r");
+<a name='L139'>  <b>if</b> (f == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L140'>    <b>return</b> 0;
+<a name='L141'>  <b>while</b> (getline (&amp;buf, &amp;len, f) &gt;= 0)
+<a name='L142'>    <font color='red'>{</font>
+<a name='L143'>      <b>char</b> *p = strchr (buf, ' ');
+<a name='L144'>      <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L145'>        <b>break</b>;
+<a name='L146'>      p = strchr (p + 1, ' ');
+<a name='L147'>      <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L148'>        <b>break</b>;
+<a name='L149'>      <b>if</b> (strncmp (p + 1, "selinuxfs ", 10) != 0)
+<a name='L150'>        <font color='red'>{</font>
+<a name='L151'>          free (buf);
+<a name='L152'>          fclose (f);
+<a name='L153'>          <b>return</b> 1;
+<a name='L154'>        <font color='red'>}</font>
+<a name='L155'>    <font color='red'>}</font>
+<a name='L156'>  free (buf);
+<a name='L157'>  fclose (f);
+<a name='L158'>  <b>return</b> 0;
+<a name='L159'><font color='red'>}</font>
+<a name='L160'>
+<a name='L161'><font color='darkred'>#define</font> <a href='../S/2312.html#L456' title='Refered from 456 in Modules/_ctypes/libffi/src/closures.c.'>is_selinux_enabled</a>() (selinux_enabled &gt;= 0 ? selinux_enabled \
+<a name='L162'>                              : (selinux_enabled = <a href='../S/2312.html#L128' title='Defined at 128 in Modules/_ctypes/libffi/src/closures.c.'>selinux_enabled_check</a> ()))
+<a name='L163'>
+<a name='L164'><font color='darkred'>#else</font>
+<a name='L165'>
+<a name='L166'><font color='darkred'>#define</font> <a href='../S/2312.html#L456' title='Refered from 456 in Modules/_ctypes/libffi/src/closures.c.'>is_selinux_enabled</a>() 0
+<a name='L167'>
+<a name='L168'><font color='darkred'>#endif</font> <i><font color='green'>/* !FFI_MMAP_EXEC_SELINUX */</font></i>
+<a name='L169'>
+<a name='L170'><font color='darkred'>#elif</font> <b>defined</b> (__CYGWIN__)
+<a name='L171'>
+<a name='L172'><font color='darkred'>#include</font> &lt;sys/mman.h&gt;
+<a name='L173'>
+<a name='L174'><i><font color='green'>/* Cygwin is Linux-like, but not quite that Linux-like.  */</font></i>
+<a name='L175'><font color='darkred'>#define</font> <a href='../S/2312.html#L456' title='Refered from 456 in Modules/_ctypes/libffi/src/closures.c.'>is_selinux_enabled</a>() 0
+<a name='L176'>
+<a name='L177'><font color='darkred'>#endif</font> <i><font color='green'>/* !defined(X86_WIN32) &amp;&amp; !defined(X86_WIN64) */</font></i>
+<a name='L178'>
+<a name='L179'><i><font color='green'>/* Declare all functions defined in dlmalloc.c as static.  */</font></i>
+<a name='L180'><b>static</b> <b>void</b> *<a href='../D/8185.html' title='Multiple defined in 2 places.'>dlmalloc</a>(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>);
+<a name='L181'><b>static</b> <b>void</b> <a href='../D/8181.html' title='Multiple defined in 2 places.'>dlfree</a>(<b>void</b>*);
+<a name='L182'><b>static</b> <b>void</b> *<a href='../D/8178.html' title='Multiple defined in 2 places.'>dlcalloc</a>(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L183'><b>static</b> <b>void</b> *dlrealloc(<b>void</b> *, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L184'><b>static</b> <b>void</b> *dlmemalign(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L185'><b>static</b> <b>void</b> *dlvalloc(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L186'><b>static</b> <b>int</b> dlmallopt(<b>int</b>, <b>int</b>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L187'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> dlmalloc_footprint(<b>void</b>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L188'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> dlmalloc_max_footprint(<b>void</b>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L189'><b>static</b> <b>void</b>** dlindependent_calloc(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>, <b>void</b>**) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L190'><b>static</b> <b>void</b>** dlindependent_comalloc(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>*, <b>void</b>**) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L191'><b>static</b> <b>void</b> *dlpvalloc(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L192'><b>static</b> <b>int</b> dlmalloc_trim(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L193'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> dlmalloc_usable_size(<b>void</b>*) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L194'><b>static</b> <b>void</b> dlmalloc_stats(<b>void</b>) <a href='../D/2086.html' title='Multiple defined in 2 places.'>MAYBE_UNUSED</a>;
+<a name='L195'>
+<a name='L196'><font color='darkred'>#if</font> !(<b>defined</b>(X86_WIN32) || <b>defined</b>(X86_WIN64)) || <b>defined</b> (__CYGWIN__)
+<a name='L197'><i><font color='green'>/* Use these for mmap and munmap within dlmalloc.c.  */</font></i>
+<a name='L198'><b>static</b> <b>void</b> *dlmmap(<b>void</b> *, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>, <b>int</b>, <b>int</b>, <b>int</b>, <a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a>);
+<a name='L199'><b>static</b> <b>int</b> dlmunmap(<b>void</b> *, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>);
+<a name='L200'><font color='darkred'>#endif</font> <i><font color='green'>/* !(defined(X86_WIN32) || defined(X86_WIN64)) || defined (__CYGWIN__) */</font></i>
+<a name='L201'>
+<a name='L202'><font color='darkred'>#define</font> mmap dlmmap
+<a name='L203'><font color='darkred'>#define</font> munmap dlmunmap
+<a name='L204'>
+<a name='L205'><font color='darkred'>#include</font> "dlmalloc.c"
+<a name='L206'>
+<a name='L207'><font color='darkred'>#undef</font> mmap
+<a name='L208'><font color='darkred'>#undef</font> munmap
+<a name='L209'>
+<a name='L210'><font color='darkred'>#if</font> !(<b>defined</b>(X86_WIN32) || <b>defined</b>(X86_WIN64)) || <b>defined</b> (__CYGWIN__)
+<a name='L211'>
+<a name='L212'><i><font color='green'>/* A mutex used to synchronize access to *exec* variables in this file.  */</font></i>
+<a name='L213'><b>static</b> pthread_mutex_t open_temp_exec_file_mutex = PTHREAD_MUTEX_INITIALIZER;
+<a name='L214'>
+<a name='L215'><i><font color='green'>/* A file descriptor of a temporary file from which we'll map</font></i>
+<a name='L216'><i><font color='green'>   executable pages.  */</font></i>
+<a name='L217'><b>static</b> <b>int</b> execfd = -1;
+<a name='L218'>
+<a name='L219'><i><font color='green'>/* The amount of space already allocated from the temporary file.  */</font></i>
+<a name='L220'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> execsize = 0;
+<a name='L221'>
+<a name='L222'><i><font color='green'>/* Open a temporary file name, and immediately unlink it.  */</font></i>
+<a name='L223'><b>static</b> <b>int</b>
+<a name='L224'><a href='../S/2312.html#L248' title='Refered from 248 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_name</a> (<b>char</b> *name)
+<a name='L225'><font color='red'>{</font>
+<a name='L226'>  <b>int</b> fd = mkstemp (name);
+<a name='L227'>
+<a name='L228'>  <b>if</b> (fd != -1)
+<a name='L229'>    <a href='../D/12052.html' title='Multiple defined in 2 places.'>unlink</a> (name);
+<a name='L230'>
+<a name='L231'>  <b>return</b> fd;
+<a name='L232'><font color='red'>}</font>
+<a name='L233'>
+<a name='L234'><i><font color='green'>/* Open a temporary file in the named directory.  */</font></i>
+<a name='L235'><b>static</b> <b>int</b>
+<a name='L236'><a href='../R/9380.html' title='Multiple refered from 5 places.'>open_temp_exec_file_dir</a> (<b>const</b> <b>char</b> *dir)
+<a name='L237'><font color='red'>{</font>
+<a name='L238'>  <b>static</b> <b>const</b> <b>char</b> suffix[] = "/ffiXXXXXX";
+<a name='L239'>  <b>int</b> lendir = strlen (dir);
+<a name='L240'>  <b>char</b> *tempname = __builtin_alloca (lendir + <b>sizeof</b> (suffix));
+<a name='L241'>
+<a name='L242'>  <b>if</b> (!tempname)
+<a name='L243'>    <b>return</b> -1;
+<a name='L244'>
+<a name='L245'>  <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a> (tempname, dir, lendir);
+<a name='L246'>  <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a> (tempname + lendir, suffix, <b>sizeof</b> (suffix));
+<a name='L247'>
+<a name='L248'>  <b>return</b> <a href='../S/2312.html#L224' title='Defined at 224 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_name</a> (tempname);
+<a name='L249'><font color='red'>}</font>
+<a name='L250'>
+<a name='L251'><i><font color='green'>/* Open a temporary file in the directory in the named environment</font></i>
+<a name='L252'><i><font color='green'>   variable.  */</font></i>
+<a name='L253'><b>static</b> <b>int</b>
+<a name='L254'><a href='../R/9381.html' title='Multiple refered from 2 places.'>open_temp_exec_file_env</a> (<b>const</b> <b>char</b> *envvar)
+<a name='L255'><font color='red'>{</font>
+<a name='L256'>  <b>const</b> <b>char</b> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2906.html#L99' title='Defined at 99 in PC/pyconfig.h.'>getenv</a> (envvar);
+<a name='L257'>
+<a name='L258'>  <b>if</b> (!<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)
+<a name='L259'>    <b>return</b> -1;
+<a name='L260'>
+<a name='L261'>  <b>return</b> <a href='../S/2312.html#L236' title='Defined at 236 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_dir</a> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L262'><font color='red'>}</font>
+<a name='L263'>
+<a name='L264'><font color='darkred'>#ifdef</font> <a href='../S/2312.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/closures.c.'>HAVE_MNTENT</a>
+<a name='L265'><i><font color='green'>/* Open a temporary file in an executable and writable mount point</font></i>
+<a name='L266'><i><font color='green'>   listed in the mounts file.  Subsequent calls with the same mounts</font></i>
+<a name='L267'><i><font color='green'>   keep searching for mount points in the same file.  Providing NULL</font></i>
+<a name='L268'><i><font color='green'>   as the mounts file closes the file.  */</font></i>
+<a name='L269'><b>static</b> <b>int</b>
+<a name='L270'><a href='../R/9382.html' title='Multiple refered from 2 places.'>open_temp_exec_file_mnt</a> (<b>const</b> <b>char</b> *mounts)
+<a name='L271'><font color='red'>{</font>
+<a name='L272'>  <b>static</b> <b>const</b> <b>char</b> *last_mounts;
+<a name='L273'>  <b>static</b> FILE *last_mntent;
+<a name='L274'>
+<a name='L275'>  <b>if</b> (mounts != last_mounts)
+<a name='L276'>    <font color='red'>{</font>
+<a name='L277'>      <b>if</b> (last_mntent)
+<a name='L278'>        endmntent (last_mntent);
+<a name='L279'>
+<a name='L280'>      last_mounts = mounts;
+<a name='L281'>
+<a name='L282'>      <b>if</b> (mounts)
+<a name='L283'>        last_mntent = setmntent (mounts, "r");
+<a name='L284'>      <b>else</b>
+<a name='L285'>        last_mntent = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L286'>    <font color='red'>}</font>
+<a name='L287'>
+<a name='L288'>  <b>if</b> (!last_mntent)
+<a name='L289'>    <b>return</b> -1;
+<a name='L290'>
+<a name='L291'>  <b>for</b> (;;)
+<a name='L292'>    <font color='red'>{</font>
+<a name='L293'>      <b>int</b> fd;
+<a name='L294'>      <b>struct</b> mntent mnt;
+<a name='L295'>      <b>char</b> buf[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> * 3];
+<a name='L296'>
+<a name='L297'>      <b>if</b> (getmntent_r (last_mntent, &amp;mnt, buf, <b>sizeof</b> (buf)))
+<a name='L298'>        <b>return</b> -1;
+<a name='L299'>
+<a name='L300'>      <b>if</b> (hasmntopt (&amp;mnt, "ro")
+<a name='L301'>          || hasmntopt (&amp;mnt, "noexec")
+<a name='L302'>          || access (mnt.mnt_dir, <a href='../S/2696.html#L1782' title='Defined at 1782 in Modules/posixmodule.c.'>W_OK</a>))
+<a name='L303'>        <b>continue</b>;
+<a name='L304'>
+<a name='L305'>      fd = <a href='../S/2312.html#L236' title='Defined at 236 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_dir</a> (mnt.mnt_dir);
+<a name='L306'>
+<a name='L307'>      <b>if</b> (fd != -1)
+<a name='L308'>        <b>return</b> fd;
+<a name='L309'>    <font color='red'>}</font>
+<a name='L310'><font color='red'>}</font>
+<a name='L311'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_MNTENT */</font></i>
+<a name='L312'>
+<a name='L313'><i><font color='green'>/* Instructions to look for a location to hold a temporary file that</font></i>
+<a name='L314'><i><font color='green'>   can be mapped in for execution.  */</font></i>
+<a name='L315'><b>static</b> <b>struct</b>
+<a name='L316'><font color='red'>{</font>
+<a name='L317'>  <b>int</b> (*func)(<b>const</b> <b>char</b> *);
+<a name='L318'>  <b>const</b> <b>char</b> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L319'>  <b>int</b> repeat;
+<a name='L320'><font color='red'>}</font> open_temp_exec_file_opts[] = <font color='red'>{</font>
+<a name='L321'>  <font color='red'>{</font> <a href='../S/2312.html#L254' title='Defined at 254 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_env</a>, "TMPDIR", 0 <font color='red'>}</font>,
+<a name='L322'>  <font color='red'>{</font> <a href='../S/2312.html#L236' title='Defined at 236 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_dir</a>, "/tmp", 0 <font color='red'>}</font>,
+<a name='L323'>  <font color='red'>{</font> <a href='../S/2312.html#L236' title='Defined at 236 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_dir</a>, "/var/tmp", 0 <font color='red'>}</font>,
+<a name='L324'>  <font color='red'>{</font> <a href='../S/2312.html#L236' title='Defined at 236 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_dir</a>, "/dev/shm", 0 <font color='red'>}</font>,
+<a name='L325'>  <font color='red'>{</font> <a href='../S/2312.html#L254' title='Defined at 254 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_env</a>, "HOME", 0 <font color='red'>}</font>,
+<a name='L326'><font color='darkred'>#ifdef</font> <a href='../S/2312.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/closures.c.'>HAVE_MNTENT</a>
+<a name='L327'>  <font color='red'>{</font> <a href='../S/2312.html#L270' title='Defined at 270 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_mnt</a>, "/etc/mtab", 1 <font color='red'>}</font>,
+<a name='L328'>  <font color='red'>{</font> <a href='../S/2312.html#L270' title='Defined at 270 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_mnt</a>, "/proc/mounts", 1 <font color='red'>}</font>,
+<a name='L329'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_MNTENT */</font></i>
+<a name='L330'><font color='red'>}</font>;
+<a name='L331'>
+<a name='L332'><i><font color='green'>/* Current index into open_temp_exec_file_opts.  */</font></i>
+<a name='L333'><b>static</b> <b>int</b> open_temp_exec_file_opts_idx = 0;
+<a name='L334'>
+<a name='L335'><i><font color='green'>/* Reset a current multi-call func, then advances to the next entry.</font></i>
+<a name='L336'><i><font color='green'>   If we're at the last, go back to the first and return nonzero,</font></i>
+<a name='L337'><i><font color='green'>   otherwise return zero.  */</font></i>
+<a name='L338'><b>static</b> <b>int</b>
+<a name='L339'><a href='../R/9384.html' title='Multiple refered from 2 places.'>open_temp_exec_file_opts_next</a> (<b>void</b>)
+<a name='L340'><font color='red'>{</font>
+<a name='L341'>  <b>if</b> (open_temp_exec_file_opts[open_temp_exec_file_opts_idx].repeat)
+<a name='L342'>    open_temp_exec_file_opts[open_temp_exec_file_opts_idx].func (<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L343'>
+<a name='L344'>  open_temp_exec_file_opts_idx++;
+<a name='L345'>  <b>if</b> (open_temp_exec_file_opts_idx
+<a name='L346'>      == (<b>sizeof</b> (open_temp_exec_file_opts)
+<a name='L347'>          / <b>sizeof</b> (*open_temp_exec_file_opts)))
+<a name='L348'>    <font color='red'>{</font>
+<a name='L349'>      open_temp_exec_file_opts_idx = 0;
+<a name='L350'>      <b>return</b> 1;
+<a name='L351'>    <font color='red'>}</font>
+<a name='L352'>
+<a name='L353'>  <b>return</b> 0;
+<a name='L354'><font color='red'>}</font>
+<a name='L355'>
+<a name='L356'><i><font color='green'>/* Return a file descriptor of a temporary zero-sized file in a</font></i>
+<a name='L357'><i><font color='green'>   writable and exexutable filesystem.  */</font></i>
+<a name='L358'><b>static</b> <b>int</b>
+<a name='L359'><a href='../S/2312.html#L394' title='Refered from 394 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file</a> (<b>void</b>)
+<a name='L360'><font color='red'>{</font>
+<a name='L361'>  <b>int</b> fd;
+<a name='L362'>
+<a name='L363'>  <b>do</b>
+<a name='L364'>    <font color='red'>{</font>
+<a name='L365'>      fd = open_temp_exec_file_opts[open_temp_exec_file_opts_idx].func
+<a name='L366'>        (open_temp_exec_file_opts[open_temp_exec_file_opts_idx].<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L367'>
+<a name='L368'>      <b>if</b> (!open_temp_exec_file_opts[open_temp_exec_file_opts_idx].repeat
+<a name='L369'>          || fd == -1)
+<a name='L370'>        <font color='red'>{</font>
+<a name='L371'>          <b>if</b> (<a href='../S/2312.html#L339' title='Defined at 339 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_opts_next</a> ())
+<a name='L372'>            <b>break</b>;
+<a name='L373'>        <font color='red'>}</font>
+<a name='L374'>    <font color='red'>}</font>
+<a name='L375'>  <b>while</b> (fd == -1);
+<a name='L376'>
+<a name='L377'>  <b>return</b> fd;
+<a name='L378'><font color='red'>}</font>
+<a name='L379'>
+<a name='L380'><i><font color='green'>/* Map in a chunk of memory from the temporary exec file into separate</font></i>
+<a name='L381'><i><font color='green'>   locations in the virtual memory address space, one writable and one</font></i>
+<a name='L382'><i><font color='green'>   executable.  Returns the address of the writable portion, after</font></i>
+<a name='L383'><i><font color='green'>   storing an offset to the corresponding executable portion at the</font></i>
+<a name='L384'><i><font color='green'>   last word of the requested chunk.  */</font></i>
+<a name='L385'><b>static</b> <b>void</b> *
+<a name='L386'><a href='../R/7411.html' title='Multiple refered from 2 places.'>dlmmap_locked</a> (<b>void</b> *start, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> length, <b>int</b> prot, <b>int</b> flags, <a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a> offset)
+<a name='L387'><font color='red'>{</font>
+<a name='L388'>  <b>void</b> *ptr;
+<a name='L389'>
+<a name='L390'>  <b>if</b> (execfd == -1)
+<a name='L391'>    <font color='red'>{</font>
+<a name='L392'>      open_temp_exec_file_opts_idx = 0;
+<a name='L393'>    retry_open:
+<a name='L394'>      execfd = <a href='../S/2312.html#L359' title='Defined at 359 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file</a> ();
+<a name='L395'>      <b>if</b> (execfd == -1)
+<a name='L396'>        <b>return</b> <a href='../S/2317.html#L1277' title='Defined at 1277 in Modules/_ctypes/libffi/src/dlmalloc.c.'>MFAIL</a>;
+<a name='L397'>    <font color='red'>}</font>
+<a name='L398'>
+<a name='L399'>  offset = execsize;
+<a name='L400'>
+<a name='L401'>  <b>if</b> (ftruncate (execfd, offset + length))
+<a name='L402'>    <b>return</b> <a href='../S/2317.html#L1277' title='Defined at 1277 in Modules/_ctypes/libffi/src/dlmalloc.c.'>MFAIL</a>;
+<a name='L403'>
+<a name='L404'>  <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp;= ~(MAP_PRIVATE | <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>);
+<a name='L405'>  <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= MAP_SHARED;
+<a name='L406'>
+<a name='L407'>  ptr = mmap (<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, length, (prot &amp; ~PROT_WRITE) | PROT_EXEC,
+<a name='L408'>              <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, execfd, offset);
+<a name='L409'>  <b>if</b> (ptr == <a href='../S/2317.html#L1277' title='Defined at 1277 in Modules/_ctypes/libffi/src/dlmalloc.c.'>MFAIL</a>)
+<a name='L410'>    <font color='red'>{</font>
+<a name='L411'>      <b>if</b> (!offset)
+<a name='L412'>        <font color='red'>{</font>
+<a name='L413'>          close (execfd);
+<a name='L414'>          <b>goto</b> retry_open;
+<a name='L415'>        <font color='red'>}</font>
+<a name='L416'>      ftruncate (execfd, offset);
+<a name='L417'>      <b>return</b> <a href='../S/2317.html#L1277' title='Defined at 1277 in Modules/_ctypes/libffi/src/dlmalloc.c.'>MFAIL</a>;
+<a name='L418'>    <font color='red'>}</font>
+<a name='L419'>  <b>else</b> <b>if</b> (!offset
+<a name='L420'>           &amp;&amp; open_temp_exec_file_opts[open_temp_exec_file_opts_idx].repeat)
+<a name='L421'>    <a href='../S/2312.html#L339' title='Defined at 339 in Modules/_ctypes/libffi/src/closures.c.'>open_temp_exec_file_opts_next</a> ();
+<a name='L422'>
+<a name='L423'>  start = mmap (start, length, prot, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, execfd, offset);
+<a name='L424'>
+<a name='L425'>  <b>if</b> (start == <a href='../S/2317.html#L1277' title='Defined at 1277 in Modules/_ctypes/libffi/src/dlmalloc.c.'>MFAIL</a>)
+<a name='L426'>    <font color='red'>{</font>
+<a name='L427'>      munmap (ptr, length);
+<a name='L428'>      ftruncate (execfd, offset);
+<a name='L429'>      <b>return</b> start;
+<a name='L430'>    <font color='red'>}</font>
+<a name='L431'>
+<a name='L432'>  <a href='../S/2317.html#L1886' title='Defined at 1886 in Modules/_ctypes/libffi/src/dlmalloc.c.'>mmap_exec_offset</a> ((<b>char</b> *)start, length) = (<b>char</b>*)ptr - (<b>char</b>*)start;
+<a name='L433'>
+<a name='L434'>  execsize += length;
+<a name='L435'>
+<a name='L436'>  <b>return</b> start;
+<a name='L437'><font color='red'>}</font>
+<a name='L438'>
+<a name='L439'><i><font color='green'>/* Map in a writable and executable chunk of memory if possible.</font></i>
+<a name='L440'><i><font color='green'>   Failing that, fall back to dlmmap_locked.  */</font></i>
+<a name='L441'><b>static</b> <b>void</b> *
+<a name='L442'>dlmmap (<b>void</b> *start, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> length, <b>int</b> prot,
+<a name='L443'>        <b>int</b> flags, <b>int</b> fd, <a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a> offset)
+<a name='L444'><font color='red'>{</font>
+<a name='L445'>  <b>void</b> *ptr;
+<a name='L446'>
+<a name='L447'>  <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (start == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; length % <a href='../D/9692.html' title='Multiple defined in 9 places.'>malloc_getpagesize</a> == 0
+<a name='L448'>          &amp;&amp; prot == (PROT_READ | PROT_WRITE)
+<a name='L449'>          &amp;&amp; <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> == (MAP_PRIVATE | <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>)
+<a name='L450'>          &amp;&amp; fd == -1 &amp;&amp; offset == 0);
+<a name='L451'>
+<a name='L452'><font color='darkred'>#if</font> FFI_CLOSURE_TEST
+<a name='L453'>  printf ("mapping in %zi\n", length);
+<a name='L454'><font color='darkred'>#endif</font>
+<a name='L455'>
+<a name='L456'>  <b>if</b> (execfd == -1 &amp;&amp; !<a href='../D/9325.html' title='Multiple defined in 3 places.'>is_selinux_enabled</a> ())
+<a name='L457'>    <font color='red'>{</font>
+<a name='L458'>      ptr = mmap (start, length, prot | PROT_EXEC, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, fd, offset);
+<a name='L459'>
+<a name='L460'>      <b>if</b> (ptr != <a href='../S/2317.html#L1277' title='Defined at 1277 in Modules/_ctypes/libffi/src/dlmalloc.c.'>MFAIL</a> || (errno != EPERM &amp;&amp; errno != EACCES))
+<a name='L461'>        <i><font color='green'>/* Cool, no need to mess with separate segments.  */</font></i>
+<a name='L462'>        <b>return</b> ptr;
+<a name='L463'>
+<a name='L464'>      <i><font color='green'>/* If MREMAP_DUP is ever introduced and implemented, try mmap</font></i>
+<a name='L465'><i><font color='green'>         with ((prot &amp; ~PROT_WRITE) | PROT_EXEC) and mremap with</font></i>
+<a name='L466'><i><font color='green'>         MREMAP_DUP and prot at this point.  */</font></i>
+<a name='L467'>    <font color='red'>}</font>
+<a name='L468'>
+<a name='L469'>  <b>if</b> (execsize == 0 || execfd == -1)
+<a name='L470'>    <font color='red'>{</font>
+<a name='L471'>      pthread_mutex_lock (&amp;open_temp_exec_file_mutex);
+<a name='L472'>      ptr = <a href='../S/2312.html#L386' title='Defined at 386 in Modules/_ctypes/libffi/src/closures.c.'>dlmmap_locked</a> (start, length, prot, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, offset);
+<a name='L473'>      pthread_mutex_unlock (&amp;open_temp_exec_file_mutex);
+<a name='L474'>
+<a name='L475'>      <b>return</b> ptr;
+<a name='L476'>    <font color='red'>}</font>
+<a name='L477'>
+<a name='L478'>  <b>return</b> <a href='../S/2312.html#L386' title='Defined at 386 in Modules/_ctypes/libffi/src/closures.c.'>dlmmap_locked</a> (start, length, prot, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>, offset);
+<a name='L479'><font color='red'>}</font>
+<a name='L480'>
+<a name='L481'><i><font color='green'>/* Release memory at the given address, as well as the corresponding</font></i>
+<a name='L482'><i><font color='green'>   executable page if it's separate.  */</font></i>
+<a name='L483'><b>static</b> <b>int</b>
+<a name='L484'>dlmunmap (<b>void</b> *start, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> length)
+<a name='L485'><font color='red'>{</font>
+<a name='L486'>  <i><font color='green'>/* We don't bother decreasing execsize or truncating the file, since</font></i>
+<a name='L487'><i><font color='green'>     we can't quite tell whether we're unmapping the end of the file.</font></i>
+<a name='L488'><i><font color='green'>     We don't expect frequent deallocation anyway.  If we did, we</font></i>
+<a name='L489'><i><font color='green'>     could locate pages in the file by writing to the pages being</font></i>
+<a name='L490'><i><font color='green'>     deallocated and checking that the file contents change.</font></i>
+<a name='L491'><i><font color='green'>     Yuck.  */</font></i>
+<a name='L492'>  <a href='../S/2317.html#L1925' title='Defined at 1925 in Modules/_ctypes/libffi/src/dlmalloc.c.'>msegmentptr</a> seg = <a href='../S/2317.html#L2098' title='Defined at 2098 in Modules/_ctypes/libffi/src/dlmalloc.c.'>segment_holding</a> (<a href='../S/2317.html#L2056' title='Defined at 2056 in Modules/_ctypes/libffi/src/dlmalloc.c.'>gm</a>, start);
+<a name='L493'>  <b>void</b> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L494'>
+<a name='L495'><font color='darkred'>#if</font> FFI_CLOSURE_TEST
+<a name='L496'>  printf ("unmapping %zi\n", length);
+<a name='L497'><font color='darkred'>#endif</font>
+<a name='L498'>
+<a name='L499'>  <b>if</b> (seg &amp;&amp; (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2317.html#L1893' title='Defined at 1893 in Modules/_ctypes/libffi/src/dlmalloc.c.'>add_segment_exec_offset</a> (start, seg)) != start)
+<a name='L500'>    <font color='red'>{</font>
+<a name='L501'>      <b>int</b> ret = munmap (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>, length);
+<a name='L502'>      <b>if</b> (ret)
+<a name='L503'>        <b>return</b> ret;
+<a name='L504'>    <font color='red'>}</font>
+<a name='L505'>
+<a name='L506'>  <b>return</b> munmap (start, length);
+<a name='L507'><font color='red'>}</font>
+<a name='L508'>
+<a name='L509'><font color='darkred'>#if</font> FFI_CLOSURE_FREE_CODE
+<a name='L510'><i><font color='green'>/* Return segment holding given code address.  */</font></i>
+<a name='L511'><b>static</b> <a href='../S/2317.html#L1925' title='Defined at 1925 in Modules/_ctypes/libffi/src/dlmalloc.c.'>msegmentptr</a>
+<a name='L512'><a href='../S/2312.html#L558' title='Refered from 558 in Modules/_ctypes/libffi/src/closures.c.'>segment_holding_code</a> (mstate m, <b>char</b>* addr)
+<a name='L513'><font color='red'>{</font>
+<a name='L514'>  <a href='../S/2317.html#L1925' title='Defined at 1925 in Modules/_ctypes/libffi/src/dlmalloc.c.'>msegmentptr</a> sp = &amp;m-&gt;seg;
+<a name='L515'>  <b>for</b> (;;) <font color='red'>{</font>
+<a name='L516'>    <b>if</b> (addr &gt;= <a href='../S/2317.html#L1893' title='Defined at 1893 in Modules/_ctypes/libffi/src/dlmalloc.c.'>add_segment_exec_offset</a> (sp-&gt;base, sp)
+<a name='L517'>        &amp;&amp; addr &lt; <a href='../S/2317.html#L1893' title='Defined at 1893 in Modules/_ctypes/libffi/src/dlmalloc.c.'>add_segment_exec_offset</a> (sp-&gt;base, sp) + sp-&gt;size)
+<a name='L518'>      <b>return</b> sp;
+<a name='L519'>    <b>if</b> ((sp = sp-&gt;next) == 0)
+<a name='L520'>      <b>return</b> 0;
+<a name='L521'>  <font color='red'>}</font>
+<a name='L522'><font color='red'>}</font>
+<a name='L523'><font color='darkred'>#endif</font>
+<a name='L524'>
+<a name='L525'><font color='darkred'>#endif</font> <i><font color='green'>/* !(defined(X86_WIN32) || defined(X86_WIN64)) || defined (__CYGWIN__) */</font></i>
+<a name='L526'>
+<a name='L527'><i><font color='green'>/* Allocate a chunk of memory with the given size.  Returns a pointer</font></i>
+<a name='L528'><i><font color='green'>   to the writable address, and sets *CODE to the executable</font></i>
+<a name='L529'><i><font color='green'>   corresponding virtual address.  */</font></i>
+<a name='L530'><b>void</b> *
+<a name='L531'><a href='../R/7692.html' title='Multiple refered from 89 places.'>ffi_closure_alloc</a> (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size, <b>void</b> **code)
+<a name='L532'><font color='red'>{</font>
+<a name='L533'>  <b>void</b> *ptr;
+<a name='L534'>
+<a name='L535'>  <b>if</b> (!<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>)
+<a name='L536'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L537'>
+<a name='L538'>  ptr = <a href='../D/8185.html' title='Multiple defined in 2 places.'>dlmalloc</a> (size);
+<a name='L539'>
+<a name='L540'>  <b>if</b> (ptr)
+<a name='L541'>    <font color='red'>{</font>
+<a name='L542'>      <a href='../S/2317.html#L1925' title='Defined at 1925 in Modules/_ctypes/libffi/src/dlmalloc.c.'>msegmentptr</a> seg = <a href='../S/2317.html#L2098' title='Defined at 2098 in Modules/_ctypes/libffi/src/dlmalloc.c.'>segment_holding</a> (<a href='../S/2317.html#L2056' title='Defined at 2056 in Modules/_ctypes/libffi/src/dlmalloc.c.'>gm</a>, ptr);
+<a name='L543'>
+<a name='L544'>      *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2317.html#L1893' title='Defined at 1893 in Modules/_ctypes/libffi/src/dlmalloc.c.'>add_segment_exec_offset</a> (ptr, seg);
+<a name='L545'>    <font color='red'>}</font>
+<a name='L546'>
+<a name='L547'>  <b>return</b> ptr;
+<a name='L548'><font color='red'>}</font>
+<a name='L549'>
+<a name='L550'><i><font color='green'>/* Release a chunk of memory allocated with ffi_closure_alloc.  If</font></i>
+<a name='L551'><i><font color='green'>   FFI_CLOSURE_FREE_CODE is nonzero, the given address can be the</font></i>
+<a name='L552'><i><font color='green'>   writable or the executable address given.  Otherwise, only the</font></i>
+<a name='L553'><i><font color='green'>   writable address can be provided here.  */</font></i>
+<a name='L554'><b>void</b>
+<a name='L555'><a href='../R/7694.html' title='Multiple refered from 3 places.'>ffi_closure_free</a> (<b>void</b> *ptr)
+<a name='L556'><font color='red'>{</font>
+<a name='L557'><font color='darkred'>#if</font> FFI_CLOSURE_FREE_CODE
+<a name='L558'>  <a href='../S/2317.html#L1925' title='Defined at 1925 in Modules/_ctypes/libffi/src/dlmalloc.c.'>msegmentptr</a> seg = <a href='../S/2312.html#L512' title='Defined at 512 in Modules/_ctypes/libffi/src/closures.c.'>segment_holding_code</a> (<a href='../S/2317.html#L2056' title='Defined at 2056 in Modules/_ctypes/libffi/src/dlmalloc.c.'>gm</a>, ptr);
+<a name='L559'>
+<a name='L560'>  <b>if</b> (seg)
+<a name='L561'>    ptr = <a href='../S/2317.html#L1894' title='Defined at 1894 in Modules/_ctypes/libffi/src/dlmalloc.c.'>sub_segment_exec_offset</a> (ptr, seg);
+<a name='L562'><font color='darkred'>#endif</font>
+<a name='L563'>
+<a name='L564'>  <a href='../D/8181.html' title='Multiple defined in 2 places.'>dlfree</a> (ptr);
+<a name='L565'><font color='red'>}</font>
+<a name='L566'>
+<a name='L567'>
+<a name='L568'><font color='darkred'>#if</font> FFI_CLOSURE_TEST
+<a name='L569'><i><font color='green'>/* Do some internal sanity testing to make sure allocation and</font></i>
+<a name='L570'><i><font color='green'>   deallocation of pages are working as intended.  */</font></i>
+<a name='L571'><b>int</b> <a href='../R/8830.html' title='Multiple refered from 2 places.'>main</a> ()
+<a name='L572'><font color='red'>{</font>
+<a name='L573'>  <b>void</b> *p[3];
+<a name='L574'><font color='darkred'>#define</font> <a href='../R/1231.html' title='Multiple refered from 6 places.'>GET</a>(idx, len) <b>do</b> <font color='red'>{</font> p[idx] = <a href='../D/8185.html' title='Multiple defined in 2 places.'>dlmalloc</a> (len); printf ("allocated %zi for p[%i]\n", (len), (idx)); <font color='red'>}</font> <b>while</b> (0)
+<a name='L575'><font color='darkred'>#define</font> <a href='../R/2322.html' title='Multiple refered from 6 places.'>PUT</a>(idx) <b>do</b> <font color='red'>{</font> printf ("freeing p[%i]\n", (idx)); <a href='../D/8181.html' title='Multiple defined in 2 places.'>dlfree</a> (p[idx]); <font color='red'>}</font> <b>while</b> (0)
+<a name='L576'>  <a href='../D/1373.html' title='Multiple defined in 2 places.'>GET</a> (0, <a href='../D/9692.html' title='Multiple defined in 9 places.'>malloc_getpagesize</a> / 2);
+<a name='L577'>  <a href='../D/1373.html' title='Multiple defined in 2 places.'>GET</a> (1, 2 * <a href='../D/9692.html' title='Multiple defined in 9 places.'>malloc_getpagesize</a> - 64 * <b>sizeof</b> (<b>void</b>*));
+<a name='L578'>  <a href='../D/2558.html' title='Multiple defined in 2 places.'>PUT</a> (1);
+<a name='L579'>  <a href='../D/1373.html' title='Multiple defined in 2 places.'>GET</a> (1, 2 * <a href='../D/9692.html' title='Multiple defined in 9 places.'>malloc_getpagesize</a>);
+<a name='L580'>  <a href='../D/1373.html' title='Multiple defined in 2 places.'>GET</a> (2, <a href='../D/9692.html' title='Multiple defined in 9 places.'>malloc_getpagesize</a> / 2);
+<a name='L581'>  <a href='../D/2558.html' title='Multiple defined in 2 places.'>PUT</a> (1);
+<a name='L582'>  <a href='../D/2558.html' title='Multiple defined in 2 places.'>PUT</a> (0);
+<a name='L583'>  <a href='../D/2558.html' title='Multiple defined in 2 places.'>PUT</a> (2);
+<a name='L584'>  <b>return</b> 0;
+<a name='L585'><font color='red'>}</font>
+<a name='L586'><font color='darkred'>#endif</font> <i><font color='green'>/* FFI_CLOSURE_TEST */</font></i>
+<a name='L587'><font color='darkred'># else</font> <i><font color='green'>/* ! FFI_MMAP_EXEC_WRIT */</font></i>
+<a name='L588'>
+<a name='L589'><i><font color='green'>/* On many systems, memory returned by malloc is writable and</font></i>
+<a name='L590'><i><font color='green'>   executable, so just use it.  */</font></i>
+<a name='L591'>
+<a name='L592'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L593'>
+<a name='L594'><b>void</b> *
+<a name='L595'><a href='../R/7692.html' title='Multiple refered from 89 places.'>ffi_closure_alloc</a> (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size, <b>void</b> **code)
+<a name='L596'><font color='red'>{</font>
+<a name='L597'>  <b>if</b> (!<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>)
+<a name='L598'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L599'>
+<a name='L600'>  <b>return</b> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = malloc (size);
+<a name='L601'><font color='red'>}</font>
+<a name='L602'>
+<a name='L603'><b>void</b>
+<a name='L604'><a href='../R/7694.html' title='Multiple refered from 3 places.'>ffi_closure_free</a> (<b>void</b> *ptr)
+<a name='L605'><font color='red'>{</font>
+<a name='L606'>  free (ptr);
+<a name='L607'><font color='red'>}</font>
+<a name='L608'>
+<a name='L609'><font color='darkred'># endif</font> <i><font color='green'>/* ! FFI_MMAP_EXEC_WRIT */</font></i>
+<a name='L610'><font color='darkred'>#endif</font> <i><font color='green'>/* FFI_CLOSURES */</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L128'>[^]</a><a href='#L604'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

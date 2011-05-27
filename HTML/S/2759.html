@@ -1,0 +1,471 @@
+<html>
+<head>
+<title>Modules/zlib/minigzip.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3390.html'>zlib</a>/minigzip.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L76'>[^]</a><a href='#L349'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L76' title='Defined at 76.'>strwinerror</a>
+<li><a href='#L115' title='Defined at 115.'>pwinerror</a>
+<li><a href='#L156' title='Defined at 156.'>error</a>
+<li><a href='#L167' title='Defined at 167.'>gz_compress</a>
+<li><a href='#L200' title='Defined at 200.'>gz_compress_mmap</a>
+<li><a href='#L235' title='Defined at 235.'>gz_uncompress</a>
+<li><a href='#L262' title='Defined at 262.'>file_compress</a>
+<li><a href='#L297' title='Defined at 297.'>file_uncompress</a>
+<li><a href='#L349' title='Defined at 349.'>main</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* minigzip.c -- simulate gzip using the zlib compression library</font></i>
+<a name='L2'><i><font color='green'> * Copyright (C) 1995-2006, 2010 Jean-loup Gailly.</font></i>
+<a name='L3'><i><font color='green'> * For conditions of distribution and use, see copyright notice in zlib.h</font></i>
+<a name='L4'><i><font color='green'> */</font></i>
+<a name='L5'>
+<a name='L6'><i><font color='green'>/*</font></i>
+<a name='L7'><i><font color='green'> * minigzip is a minimal implementation of the gzip utility. This is</font></i>
+<a name='L8'><i><font color='green'> * only an example of using zlib and isn't meant to replace the</font></i>
+<a name='L9'><i><font color='green'> * full-featured gzip. No attempt is made to deal with file systems</font></i>
+<a name='L10'><i><font color='green'> * limiting names to 14 or 8+3 characters, etc... Error checking is</font></i>
+<a name='L11'><i><font color='green'> * very limited. So use minigzip only for testing; use gzip for the</font></i>
+<a name='L12'><i><font color='green'> * real thing. On MSDOS, use only on file names without extension</font></i>
+<a name='L13'><i><font color='green'> * or in pipe mode.</font></i>
+<a name='L14'><i><font color='green'> */</font></i>
+<a name='L15'>
+<a name='L16'><i><font color='green'>/* @(#) $Id$ */</font></i>
+<a name='L17'>
+<a name='L18'><font color='darkred'>#include</font> "<a href='2769.html'>zlib.h</a>"
+<a name='L19'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L20'>
+<a name='L21'><font color='darkred'>#ifdef</font> <a href='../D/4951.html' title='Multiple defined in 12 places.'>STDC</a>
+<a name='L22'><font color='darkred'>#  include</font> &lt;string.h&gt;
+<a name='L23'><font color='darkred'>#  include</font> &lt;stdlib.h&gt;
+<a name='L24'><font color='darkred'>#endif</font>
+<a name='L25'>
+<a name='L26'><font color='darkred'>#ifdef</font> USE_MMAP
+<a name='L27'><font color='darkred'>#  include</font> &lt;sys/types.h&gt;
+<a name='L28'><font color='darkred'>#  include</font> &lt;sys/mman.h&gt;
+<a name='L29'><font color='darkred'>#  include</font> &lt;sys/stat.h&gt;
+<a name='L30'><font color='darkred'>#endif</font>
+<a name='L31'>
+<a name='L32'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/2178.html' title='Multiple defined in 2 places.'>MSDOS</a>) || <b>defined</b>(<a href='../D/2426.html' title='Multiple defined in 2 places.'>OS2</a>) || <b>defined</b>(<a href='../D/5523.html' title='Multiple defined in 3 places.'>WIN32</a>) || <b>defined</b>(__CYGWIN__)
+<a name='L33'><font color='darkred'>#  include</font> &lt;fcntl.h&gt;
+<a name='L34'><font color='darkred'>#  include</font> &lt;io.h&gt;
+<a name='L35'><font color='darkred'>#  ifdef</font> UNDER_CE
+<a name='L36'><font color='darkred'>#    include</font> &lt;stdlib.h&gt;
+<a name='L37'><font color='darkred'>#  endif</font>
+<a name='L38'><font color='darkred'>#  define</font> <a href='../R/4071.html' title='Multiple refered from 3 places.'>SET_BINARY_MODE</a>(file) setmode(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(file), O_BINARY)
+<a name='L39'><font color='darkred'>#else</font>
+<a name='L40'><font color='darkred'>#  define</font> <a href='../R/4071.html' title='Multiple refered from 3 places.'>SET_BINARY_MODE</a>(file)
+<a name='L41'><font color='darkred'>#endif</font>
+<a name='L42'>
+<a name='L43'><font color='darkred'>#ifdef</font> VMS
+<a name='L44'><font color='darkred'>#  define</font> <a href='../R/11166.html' title='Multiple refered from 9 places.'>unlink</a> delete
+<a name='L45'><font color='darkred'>#  define</font> <a href='../R/1281.html' title='Multiple refered from 7 places.'>GZ_SUFFIX</a> "-gz"
+<a name='L46'><font color='darkred'>#endif</font>
+<a name='L47'><font color='darkred'>#ifdef</font> RISCOS
+<a name='L48'><font color='darkred'>#  define</font> <a href='../R/11166.html' title='Multiple refered from 9 places.'>unlink</a> remove
+<a name='L49'><font color='darkred'>#  define</font> <a href='../R/1281.html' title='Multiple refered from 7 places.'>GZ_SUFFIX</a> "-gz"
+<a name='L50'><font color='darkred'>#  define</font> <a href='../R/7779.html' title='Multiple refered from 44 places.'>fileno</a>(file) file-&gt;__file
+<a name='L51'><font color='darkred'>#endif</font>
+<a name='L52'><font color='darkred'>#if</font> <b>defined</b>(__MWERKS__) &amp;&amp; __dest_os != __be_os &amp;&amp; __dest_os != __win32_os
+<a name='L53'><font color='darkred'>#  include</font> &lt;unix.h&gt; <i><font color='green'>/* for fileno */</font></i>
+<a name='L54'><font color='darkred'>#endif</font>
+<a name='L55'>
+<a name='L56'><font color='darkred'>#if</font> !<b>defined</b>(<a href='../S/2764.html#L360' title='Defined at 360 in Modules/zlib/zconf.h.'>Z_HAVE_UNISTD_H</a>) &amp;&amp; !<b>defined</b>(<a href='../S/2764.html#L374' title='Defined at 374 in Modules/zlib/zconf.h.'>_LARGEFILE64_SOURCE</a>)
+<a name='L57'><font color='darkred'>#ifndef</font> <a href='../D/5523.html' title='Multiple defined in 3 places.'>WIN32</a> <i><font color='green'>/* unlink already in stdio.h for WIN32 */</font></i>
+<a name='L58'>  <b>extern</b> <b>int</b> <a href='../D/12052.html' title='Multiple defined in 2 places.'>unlink</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>const</b> <b>char</b> *));
+<a name='L59'><font color='darkred'>#endif</font>
+<a name='L60'><font color='darkred'>#endif</font>
+<a name='L61'>
+<a name='L62'><font color='darkred'>#if</font> <b>defined</b>(UNDER_CE)
+<a name='L63'><font color='darkred'>#  include</font> &lt;windows.h&gt;
+<a name='L64'><font color='darkred'>#  define</font> <a href='../R/9522.html' title='Multiple refered from 46 places.'>perror</a>(s) <a href='../S/2759.html#L115' title='Defined at 115 in Modules/zlib/minigzip.c.'>pwinerror</a>(s)
+<a name='L65'>
+<a name='L66'><i><font color='green'>/* Map the Windows error number in ERROR to a locale-dependent error</font></i>
+<a name='L67'><i><font color='green'>   message string and return a pointer to it.  Typically, the values</font></i>
+<a name='L68'><i><font color='green'>   for ERROR come from GetLastError.</font></i>
+<a name='L69'><i><font color='green'></font></i>
+<a name='L70'><i><font color='green'>   The string pointed to shall not be modified by the application,</font></i>
+<a name='L71'><i><font color='green'>   but may be overwritten by a subsequent call to strwinerror</font></i>
+<a name='L72'><i><font color='green'></font></i>
+<a name='L73'><i><font color='green'>   The strwinerror function does not change the current setting</font></i>
+<a name='L74'><i><font color='green'>   of GetLastError.  */</font></i>
+<a name='L75'>
+<a name='L76'><b>static</b> <b>char</b> *<a href='../R/10607.html' title='Multiple refered from 2 places.'>strwinerror</a> (error)
+<a name='L77'>     DWORD error;
+<a name='L78'><font color='red'>{</font>
+<a name='L79'>    <b>static</b> <b>char</b> buf[1024];
+<a name='L80'>
+<a name='L81'>    wchar_t *msgbuf;
+<a name='L82'>    DWORD lasterr = GetLastError();
+<a name='L83'>    DWORD chars = FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM
+<a name='L84'>        | FORMAT_MESSAGE_ALLOCATE_BUFFER,
+<a name='L85'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L86'>        <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>,
+<a name='L87'>        0, <i><font color='green'>/* Default language */</font></i>
+<a name='L88'>        (LPVOID)&amp;msgbuf,
+<a name='L89'>        0,
+<a name='L90'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L91'>    <b>if</b> (chars != 0) <font color='red'>{</font>
+<a name='L92'>        <i><font color='green'>/* If there is an \r\n appended, zap it.  */</font></i>
+<a name='L93'>        <b>if</b> (chars &gt;= 2
+<a name='L94'>            &amp;&amp; msgbuf[chars - 2] == '\r' &amp;&amp; msgbuf[chars - 1] == '\n') <font color='red'>{</font>
+<a name='L95'>            chars -= 2;
+<a name='L96'>            msgbuf[chars] = 0;
+<a name='L97'>        <font color='red'>}</font>
+<a name='L98'>
+<a name='L99'>        <b>if</b> (chars &gt; <b>sizeof</b> (buf) - 1) <font color='red'>{</font>
+<a name='L100'>            chars = <b>sizeof</b> (buf) - 1;
+<a name='L101'>            msgbuf[chars] = 0;
+<a name='L102'>        <font color='red'>}</font>
+<a name='L103'>
+<a name='L104'>        wcstombs(buf, msgbuf, chars + 1);
+<a name='L105'>        LocalFree(msgbuf);
+<a name='L106'>    <font color='red'>}</font>
+<a name='L107'>    <b>else</b> <font color='red'>{</font>
+<a name='L108'>        sprintf(buf, "unknown win32 error (%ld)", <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>);
+<a name='L109'>    <font color='red'>}</font>
+<a name='L110'>
+<a name='L111'>    SetLastError(lasterr);
+<a name='L112'>    <b>return</b> buf;
+<a name='L113'><font color='red'>}</font>
+<a name='L114'>
+<a name='L115'><b>static</b> <b>void</b> <a href='../S/2759.html#L64' title='Refered from 64 in Modules/zlib/minigzip.c.'>pwinerror</a> (s)
+<a name='L116'>    <b>const</b> <b>char</b> *s;
+<a name='L117'><font color='red'>{</font>
+<a name='L118'>    <b>if</b> (s &amp;&amp; *s)
+<a name='L119'>        fprintf(stderr, "%s: %s\n", s, <a href='../S/2759.html#L76' title='Defined at 76 in Modules/zlib/minigzip.c.'>strwinerror</a>(GetLastError ()));
+<a name='L120'>    <b>else</b>
+<a name='L121'>        fprintf(stderr, "%s\n", <a href='../S/2759.html#L76' title='Defined at 76 in Modules/zlib/minigzip.c.'>strwinerror</a>(GetLastError ()));
+<a name='L122'><font color='red'>}</font>
+<a name='L123'>
+<a name='L124'><font color='darkred'>#endif</font> <i><font color='green'>/* UNDER_CE */</font></i>
+<a name='L125'>
+<a name='L126'><font color='darkred'>#ifndef</font> <a href='../D/1424.html' title='Multiple defined in 3 places.'>GZ_SUFFIX</a>
+<a name='L127'><font color='darkred'>#  define</font> <a href='../R/1281.html' title='Multiple refered from 7 places.'>GZ_SUFFIX</a> ".gz"
+<a name='L128'><font color='darkred'>#endif</font>
+<a name='L129'><font color='darkred'>#define</font> <a href='../S/2759.html#L313' title='Refered from 313 in Modules/zlib/minigzip.c.'>SUFFIX_LEN</a> (<b>sizeof</b>(<a href='../D/1424.html' title='Multiple defined in 3 places.'>GZ_SUFFIX</a>)-1)
+<a name='L130'>
+<a name='L131'><font color='darkred'>#define</font> <a href='../R/328.html' title='Multiple refered from 2 places.'>BUFLEN</a>      16384
+<a name='L132'><font color='darkred'>#define</font> <a href='../R/1873.html' title='Multiple refered from 2 places.'>MAX_NAME_LEN</a> 1024
+<a name='L133'>
+<a name='L134'><font color='darkred'>#ifdef</font> <a href='../D/2045.html' title='Multiple defined in 2 places.'>MAXSEG_64K</a>
+<a name='L135'><font color='darkred'>#  define</font> <a href='../R/8737.html' title='Multiple refered from 182 places.'>local</a> <b>static</b>
+<a name='L136'>   <i><font color='green'>/* Needed for systems with limitation on stack size. */</font></i>
+<a name='L137'><font color='darkred'>#else</font>
+<a name='L138'><font color='darkred'>#  define</font> <a href='../R/8737.html' title='Multiple refered from 182 places.'>local</a>
+<a name='L139'><font color='darkred'>#endif</font>
+<a name='L140'>
+<a name='L141'><b>char</b> *prog;
+<a name='L142'>
+<a name='L143'><b>void</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>            <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>const</b> <b>char</b> *msg));
+<a name='L144'><b>void</b> <a href='../S/2759.html#L167' title='Defined at 167 in Modules/zlib/minigzip.c.'>gz_compress</a>      <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((FILE   *in, gzFile out));
+<a name='L145'><font color='darkred'>#ifdef</font> USE_MMAP
+<a name='L146'><b>int</b>  <a href='../S/2759.html#L200' title='Defined at 200 in Modules/zlib/minigzip.c.'>gz_compress_mmap</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((FILE   *in, gzFile out));
+<a name='L147'><font color='darkred'>#endif</font>
+<a name='L148'><b>void</b> <a href='../S/2759.html#L235' title='Defined at 235 in Modules/zlib/minigzip.c.'>gz_uncompress</a>    <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((gzFile in, FILE   *out));
+<a name='L149'><b>void</b> <a href='../S/2759.html#L262' title='Defined at 262 in Modules/zlib/minigzip.c.'>file_compress</a>    <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>char</b>  *file, <b>char</b> *mode));
+<a name='L150'><b>void</b> <a href='../S/2759.html#L297' title='Defined at 297 in Modules/zlib/minigzip.c.'>file_uncompress</a>  <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>char</b>  *file));
+<a name='L151'><b>int</b>  <a href='../D/9659.html' title='Multiple defined in 138 places.'>main</a>             <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>int</b> argc, <b>char</b> *argv[]));
+<a name='L152'>
+<a name='L153'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L154'><i><font color='green'> * Display error message and exit</font></i>
+<a name='L155'><i><font color='green'> */</font></i>
+<a name='L156'><b>void</b> <a href='../R/7602.html' title='Multiple refered from 1145 places.'>error</a>(msg)
+<a name='L157'>    <b>const</b> <b>char</b> *msg;
+<a name='L158'><font color='red'>{</font>
+<a name='L159'>    fprintf(stderr, "%s: %s\n", prog, msg);
+<a name='L160'>    exit(1);
+<a name='L161'><font color='red'>}</font>
+<a name='L162'>
+<a name='L163'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L164'><i><font color='green'> * Compress input to output then close both files.</font></i>
+<a name='L165'><i><font color='green'> */</font></i>
+<a name='L166'>
+<a name='L167'><b>void</b> <a href='../R/8194.html' title='Multiple refered from 4 places.'>gz_compress</a>(in, out)
+<a name='L168'>    FILE   *in;
+<a name='L169'>    gzFile out;
+<a name='L170'><font color='red'>{</font>
+<a name='L171'>    <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>char</b> buf[<a href='../S/2759.html#L131' title='Defined at 131 in Modules/zlib/minigzip.c.'>BUFLEN</a>];
+<a name='L172'>    <b>int</b> len;
+<a name='L173'>    <b>int</b> err;
+<a name='L174'>
+<a name='L175'><font color='darkred'>#ifdef</font> USE_MMAP
+<a name='L176'>    <i><font color='green'>/* Try first compressing with mmap. If mmap fails (minigzip used in a</font></i>
+<a name='L177'><i><font color='green'>     * pipe), use the normal fread loop.</font></i>
+<a name='L178'><i><font color='green'>     */</font></i>
+<a name='L179'>    <b>if</b> (<a href='../S/2759.html#L200' title='Defined at 200 in Modules/zlib/minigzip.c.'>gz_compress_mmap</a>(in, out) == <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>) <b>return</b>;
+<a name='L180'><font color='darkred'>#endif</font>
+<a name='L181'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L182'>        len = (<b>int</b>)fread(buf, 1, <b>sizeof</b>(buf), in);
+<a name='L183'>        <b>if</b> (ferror(in)) <font color='red'>{</font>
+<a name='L184'>            <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>("fread");
+<a name='L185'>            exit(1);
+<a name='L186'>        <font color='red'>}</font>
+<a name='L187'>        <b>if</b> (len == 0) <b>break</b>;
+<a name='L188'>
+<a name='L189'>        <b>if</b> (<a href='../D/9045.html' title='Multiple defined in 3 places.'>gzwrite</a>(out, buf, (<b>unsigned</b>)len) != len) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(<a href='../D/9026.html' title='Multiple defined in 3 places.'>gzerror</a>(out, &amp;err));
+<a name='L190'>    <font color='red'>}</font>
+<a name='L191'>    fclose(in);
+<a name='L192'>    <b>if</b> (<a href='../D/9020.html' title='Multiple defined in 3 places.'>gzclose</a>(out) != <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("failed gzclose");
+<a name='L193'><font color='red'>}</font>
+<a name='L194'>
+<a name='L195'><font color='darkred'>#ifdef</font> USE_MMAP <i><font color='green'>/* MMAP version, Miguel Albrecht &lt;malbrech@eso.org&gt; */</font></i>
+<a name='L196'>
+<a name='L197'><i><font color='green'>/* Try compressing the input file at once using mmap. Return Z_OK if</font></i>
+<a name='L198'><i><font color='green'> * if success, Z_ERRNO otherwise.</font></i>
+<a name='L199'><i><font color='green'> */</font></i>
+<a name='L200'><b>int</b> <a href='../R/8195.html' title='Multiple refered from 2 places.'>gz_compress_mmap</a>(in, out)
+<a name='L201'>    FILE   *in;
+<a name='L202'>    gzFile out;
+<a name='L203'><font color='red'>{</font>
+<a name='L204'>    <b>int</b> len;
+<a name='L205'>    <b>int</b> err;
+<a name='L206'>    <b>int</b> ifd = <a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(in);
+<a name='L207'>    caddr_t buf;    <i><font color='green'>/* mmap'ed buffer for the entire input file */</font></i>
+<a name='L208'>    <a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a> buf_len;  <i><font color='green'>/* length of the input file */</font></i>
+<a name='L209'>    <b>struct</b> stat sb;
+<a name='L210'>
+<a name='L211'>    <i><font color='green'>/* Determine the size of the file, needed for mmap: */</font></i>
+<a name='L212'>    <b>if</b> (fstat(ifd, &amp;sb) &lt; 0) <b>return</b> <a href='../S/2769.html#L176' title='Defined at 176 in Modules/zlib/zlib.h.'>Z_ERRNO</a>;
+<a name='L213'>    buf_len = sb.st_size;
+<a name='L214'>    <b>if</b> (buf_len &lt;= 0) <b>return</b> <a href='../S/2769.html#L176' title='Defined at 176 in Modules/zlib/zlib.h.'>Z_ERRNO</a>;
+<a name='L215'>
+<a name='L216'>    <i><font color='green'>/* Now do the actual mmap: */</font></i>
+<a name='L217'>    buf = mmap((caddr_t) 0, buf_len, PROT_READ, MAP_SHARED, ifd, (<a href='../D/10193.html' title='Multiple defined in 2 places.'>off_t</a>)0);
+<a name='L218'>    <b>if</b> (buf == (caddr_t)(-1)) <b>return</b> <a href='../S/2769.html#L176' title='Defined at 176 in Modules/zlib/zlib.h.'>Z_ERRNO</a>;
+<a name='L219'>
+<a name='L220'>    <i><font color='green'>/* Compress the whole file at once: */</font></i>
+<a name='L221'>    len = <a href='../D/9045.html' title='Multiple defined in 3 places.'>gzwrite</a>(out, (<b>char</b> *)buf, (<b>unsigned</b>)buf_len);
+<a name='L222'>
+<a name='L223'>    <b>if</b> (len != (<b>int</b>)buf_len) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(<a href='../D/9026.html' title='Multiple defined in 3 places.'>gzerror</a>(out, &amp;err));
+<a name='L224'>
+<a name='L225'>    munmap(buf, buf_len);
+<a name='L226'>    fclose(in);
+<a name='L227'>    <b>if</b> (<a href='../D/9020.html' title='Multiple defined in 3 places.'>gzclose</a>(out) != <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("failed gzclose");
+<a name='L228'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L229'><font color='red'>}</font>
+<a name='L230'><font color='darkred'>#endif</font> <i><font color='green'>/* USE_MMAP */</font></i>
+<a name='L231'>
+<a name='L232'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L233'><i><font color='green'> * Uncompress input to output then close both files.</font></i>
+<a name='L234'><i><font color='green'> */</font></i>
+<a name='L235'><b>void</b> <a href='../R/8213.html' title='Multiple refered from 4 places.'>gz_uncompress</a>(in, out)
+<a name='L236'>    gzFile in;
+<a name='L237'>    FILE   *out;
+<a name='L238'><font color='red'>{</font>
+<a name='L239'>    <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>char</b> buf[<a href='../S/2759.html#L131' title='Defined at 131 in Modules/zlib/minigzip.c.'>BUFLEN</a>];
+<a name='L240'>    <b>int</b> len;
+<a name='L241'>    <b>int</b> err;
+<a name='L242'>
+<a name='L243'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L244'>        len = <a href='../D/9037.html' title='Multiple defined in 3 places.'>gzread</a>(in, buf, <b>sizeof</b>(buf));
+<a name='L245'>        <b>if</b> (len &lt; 0) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a> (<a href='../D/9026.html' title='Multiple defined in 3 places.'>gzerror</a>(in, &amp;err));
+<a name='L246'>        <b>if</b> (len == 0) <b>break</b>;
+<a name='L247'>
+<a name='L248'>        <b>if</b> ((<b>int</b>)fwrite(buf, 1, (<b>unsigned</b>)len, out) != len) <font color='red'>{</font>
+<a name='L249'>            <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("failed fwrite");
+<a name='L250'>        <font color='red'>}</font>
+<a name='L251'>    <font color='red'>}</font>
+<a name='L252'>    <b>if</b> (fclose(out)) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("failed fclose");
+<a name='L253'>
+<a name='L254'>    <b>if</b> (<a href='../D/9020.html' title='Multiple defined in 3 places.'>gzclose</a>(in) != <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("failed gzclose");
+<a name='L255'><font color='red'>}</font>
+<a name='L256'>
+<a name='L257'>
+<a name='L258'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L259'><i><font color='green'> * Compress the given file: create a corresponding .gz file and remove the</font></i>
+<a name='L260'><i><font color='green'> * original.</font></i>
+<a name='L261'><i><font color='green'> */</font></i>
+<a name='L262'><b>void</b> <a href='../R/7753.html' title='Multiple refered from 2 places.'>file_compress</a>(file, mode)
+<a name='L263'>    <b>char</b>  *file;
+<a name='L264'>    <b>char</b>  *mode;
+<a name='L265'><font color='red'>{</font>
+<a name='L266'>    <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>char</b> outfile[<a href='../S/2759.html#L132' title='Defined at 132 in Modules/zlib/minigzip.c.'>MAX_NAME_LEN</a>];
+<a name='L267'>    FILE  *in;
+<a name='L268'>    <a href='../D/8993.html' title='Multiple defined in 2 places.'>gzFile</a> out;
+<a name='L269'>
+<a name='L270'>    <b>if</b> (strlen(file) + strlen(<a href='../D/1424.html' title='Multiple defined in 3 places.'>GZ_SUFFIX</a>) &gt;= <b>sizeof</b>(outfile)) <font color='red'>{</font>
+<a name='L271'>        fprintf(stderr, "%s: filename too long\n", prog);
+<a name='L272'>        exit(1);
+<a name='L273'>    <font color='red'>}</font>
+<a name='L274'>
+<a name='L275'>    strcpy(outfile, file);
+<a name='L276'>    strcat(outfile, <a href='../D/1424.html' title='Multiple defined in 3 places.'>GZ_SUFFIX</a>);
+<a name='L277'>
+<a name='L278'>    in = fopen(file, "rb");
+<a name='L279'>    <b>if</b> (in == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L280'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>(file);
+<a name='L281'>        exit(1);
+<a name='L282'>    <font color='red'>}</font>
+<a name='L283'>    out = <a href='../D/9032.html' title='Multiple defined in 4 places.'>gzopen</a>(outfile, mode);
+<a name='L284'>    <b>if</b> (out == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L285'>        fprintf(stderr, "%s: can't gzopen %s\n", prog, outfile);
+<a name='L286'>        exit(1);
+<a name='L287'>    <font color='red'>}</font>
+<a name='L288'>    <a href='../S/2759.html#L167' title='Defined at 167 in Modules/zlib/minigzip.c.'>gz_compress</a>(in, out);
+<a name='L289'>
+<a name='L290'>    <a href='../D/12052.html' title='Multiple defined in 2 places.'>unlink</a>(file);
+<a name='L291'><font color='red'>}</font>
+<a name='L292'>
+<a name='L293'>
+<a name='L294'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L295'><i><font color='green'> * Uncompress the given file and remove the original.</font></i>
+<a name='L296'><i><font color='green'> */</font></i>
+<a name='L297'><b>void</b> <a href='../R/7755.html' title='Multiple refered from 2 places.'>file_uncompress</a>(file)
+<a name='L298'>    <b>char</b>  *file;
+<a name='L299'><font color='red'>{</font>
+<a name='L300'>    <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>char</b> buf[<a href='../S/2759.html#L132' title='Defined at 132 in Modules/zlib/minigzip.c.'>MAX_NAME_LEN</a>];
+<a name='L301'>    <b>char</b> *infile, *outfile;
+<a name='L302'>    FILE  *out;
+<a name='L303'>    <a href='../D/8993.html' title='Multiple defined in 2 places.'>gzFile</a> in;
+<a name='L304'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> len = strlen(file);
+<a name='L305'>
+<a name='L306'>    <b>if</b> (len + strlen(<a href='../D/1424.html' title='Multiple defined in 3 places.'>GZ_SUFFIX</a>) &gt;= <b>sizeof</b>(buf)) <font color='red'>{</font>
+<a name='L307'>        fprintf(stderr, "%s: filename too long\n", prog);
+<a name='L308'>        exit(1);
+<a name='L309'>    <font color='red'>}</font>
+<a name='L310'>
+<a name='L311'>    strcpy(buf, file);
+<a name='L312'>
+<a name='L313'>    <b>if</b> (len &gt; <a href='../S/2759.html#L129' title='Defined at 129 in Modules/zlib/minigzip.c.'>SUFFIX_LEN</a> &amp;&amp; strcmp(file+len-<a href='../S/2759.html#L129' title='Defined at 129 in Modules/zlib/minigzip.c.'>SUFFIX_LEN</a>, <a href='../D/1424.html' title='Multiple defined in 3 places.'>GZ_SUFFIX</a>) == 0) <font color='red'>{</font>
+<a name='L314'>        infile = file;
+<a name='L315'>        outfile = buf;
+<a name='L316'>        outfile[len-3] = '\0';
+<a name='L317'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L318'>        outfile = file;
+<a name='L319'>        infile = buf;
+<a name='L320'>        strcat(infile, <a href='../D/1424.html' title='Multiple defined in 3 places.'>GZ_SUFFIX</a>);
+<a name='L321'>    <font color='red'>}</font>
+<a name='L322'>    in = <a href='../D/9032.html' title='Multiple defined in 4 places.'>gzopen</a>(infile, "rb");
+<a name='L323'>    <b>if</b> (in == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L324'>        fprintf(stderr, "%s: can't gzopen %s\n", prog, infile);
+<a name='L325'>        exit(1);
+<a name='L326'>    <font color='red'>}</font>
+<a name='L327'>    out = fopen(outfile, "wb");
+<a name='L328'>    <b>if</b> (out == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L329'>        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>(file);
+<a name='L330'>        exit(1);
+<a name='L331'>    <font color='red'>}</font>
+<a name='L332'>
+<a name='L333'>    <a href='../S/2759.html#L235' title='Defined at 235 in Modules/zlib/minigzip.c.'>gz_uncompress</a>(in, out);
+<a name='L334'>
+<a name='L335'>    <a href='../D/12052.html' title='Multiple defined in 2 places.'>unlink</a>(infile);
+<a name='L336'><font color='red'>}</font>
+<a name='L337'>
+<a name='L338'>
+<a name='L339'><i><font color='green'>/* ===========================================================================</font></i>
+<a name='L340'><i><font color='green'> * Usage:  minigzip [-c] [-d] [-f] [-h] [-r] [-1 to -9] [files...]</font></i>
+<a name='L341'><i><font color='green'> *   -c : write to standard output</font></i>
+<a name='L342'><i><font color='green'> *   -d : decompress</font></i>
+<a name='L343'><i><font color='green'> *   -f : compress with Z_FILTERED</font></i>
+<a name='L344'><i><font color='green'> *   -h : compress with Z_HUFFMAN_ONLY</font></i>
+<a name='L345'><i><font color='green'> *   -r : compress with Z_RLE</font></i>
+<a name='L346'><i><font color='green'> *   -1 to -9 : compression level</font></i>
+<a name='L347'><i><font color='green'> */</font></i>
+<a name='L348'>
+<a name='L349'><b>int</b> <a href='../R/8830.html' title='Multiple refered from 2 places.'>main</a>(argc, argv)
+<a name='L350'>    <b>int</b> argc;
+<a name='L351'>    <b>char</b> *argv[];
+<a name='L352'><font color='red'>{</font>
+<a name='L353'>    <b>int</b> copyout = 0;
+<a name='L354'>    <b>int</b> uncompr = 0;
+<a name='L355'>    <a href='../D/8993.html' title='Multiple defined in 2 places.'>gzFile</a> file;
+<a name='L356'>    <b>char</b> *bname, outmode[20];
+<a name='L357'>
+<a name='L358'>    strcpy(outmode, "wb6 ");
+<a name='L359'>
+<a name='L360'>    prog = argv[0];
+<a name='L361'>    bname = strrchr(argv[0], '/');
+<a name='L362'>    <b>if</b> (bname)
+<a name='L363'>      bname++;
+<a name='L364'>    <b>else</b>
+<a name='L365'>      bname = argv[0];
+<a name='L366'>    argc--, argv++;
+<a name='L367'>
+<a name='L368'>    <b>if</b> (!strcmp(bname, "gunzip"))
+<a name='L369'>      uncompr = 1;
+<a name='L370'>    <b>else</b> <b>if</b> (!strcmp(bname, "zcat"))
+<a name='L371'>      copyout = uncompr = 1;
+<a name='L372'>
+<a name='L373'>    <b>while</b> (argc &gt; 0) <font color='red'>{</font>
+<a name='L374'>      <b>if</b> (strcmp(*argv, "-c") == 0)
+<a name='L375'>        copyout = 1;
+<a name='L376'>      <b>else</b> <b>if</b> (strcmp(*argv, "-d") == 0)
+<a name='L377'>        uncompr = 1;
+<a name='L378'>      <b>else</b> <b>if</b> (strcmp(*argv, "-f") == 0)
+<a name='L379'>        outmode[3] = 'f';
+<a name='L380'>      <b>else</b> <b>if</b> (strcmp(*argv, "-h") == 0)
+<a name='L381'>        outmode[3] = 'h';
+<a name='L382'>      <b>else</b> <b>if</b> (strcmp(*argv, "-r") == 0)
+<a name='L383'>        outmode[3] = 'R';
+<a name='L384'>      <b>else</b> <b>if</b> ((*argv)[0] == '-' &amp;&amp; (*argv)[1] &gt;= '1' &amp;&amp; (*argv)[1] &lt;= '9' &amp;&amp;
+<a name='L385'>               (*argv)[2] == 0)
+<a name='L386'>        outmode[2] = (*argv)[1];
+<a name='L387'>      <b>else</b>
+<a name='L388'>        <b>break</b>;
+<a name='L389'>      argc--, argv++;
+<a name='L390'>    <font color='red'>}</font>
+<a name='L391'>    <b>if</b> (outmode[3] == ' ')
+<a name='L392'>        outmode[3] = 0;
+<a name='L393'>    <b>if</b> (argc == 0) <font color='red'>{</font>
+<a name='L394'>        <a href='../D/4613.html' title='Multiple defined in 2 places.'>SET_BINARY_MODE</a>(stdin);
+<a name='L395'>        <a href='../D/4613.html' title='Multiple defined in 2 places.'>SET_BINARY_MODE</a>(stdout);
+<a name='L396'>        <b>if</b> (uncompr) <font color='red'>{</font>
+<a name='L397'>            file = <a href='../D/9024.html' title='Multiple defined in 3 places.'>gzdopen</a>(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(stdin), "rb");
+<a name='L398'>            <b>if</b> (file == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("can't gzdopen stdin");
+<a name='L399'>            <a href='../S/2759.html#L235' title='Defined at 235 in Modules/zlib/minigzip.c.'>gz_uncompress</a>(file, stdout);
+<a name='L400'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L401'>            file = <a href='../D/9024.html' title='Multiple defined in 3 places.'>gzdopen</a>(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(stdout), outmode);
+<a name='L402'>            <b>if</b> (file == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("can't gzdopen stdout");
+<a name='L403'>            <a href='../S/2759.html#L167' title='Defined at 167 in Modules/zlib/minigzip.c.'>gz_compress</a>(stdin, file);
+<a name='L404'>        <font color='red'>}</font>
+<a name='L405'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L406'>        <b>if</b> (copyout) <font color='red'>{</font>
+<a name='L407'>            <a href='../D/4613.html' title='Multiple defined in 2 places.'>SET_BINARY_MODE</a>(stdout);
+<a name='L408'>        <font color='red'>}</font>
+<a name='L409'>        <b>do</b> <font color='red'>{</font>
+<a name='L410'>            <b>if</b> (uncompr) <font color='red'>{</font>
+<a name='L411'>                <b>if</b> (copyout) <font color='red'>{</font>
+<a name='L412'>                    file = <a href='../D/9032.html' title='Multiple defined in 4 places.'>gzopen</a>(*argv, "rb");
+<a name='L413'>                    <b>if</b> (file == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L414'>                        fprintf(stderr, "%s: can't gzopen %s\n", prog, *argv);
+<a name='L415'>                    <b>else</b>
+<a name='L416'>                        <a href='../S/2759.html#L235' title='Defined at 235 in Modules/zlib/minigzip.c.'>gz_uncompress</a>(file, stdout);
+<a name='L417'>                <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L418'>                    <a href='../S/2759.html#L297' title='Defined at 297 in Modules/zlib/minigzip.c.'>file_uncompress</a>(*argv);
+<a name='L419'>                <font color='red'>}</font>
+<a name='L420'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L421'>                <b>if</b> (copyout) <font color='red'>{</font>
+<a name='L422'>                    FILE * in = fopen(*argv, "rb");
+<a name='L423'>
+<a name='L424'>                    <b>if</b> (in == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L425'>                        <a href='../S/2759.html#L64' title='Defined at 64 in Modules/zlib/minigzip.c.'>perror</a>(*argv);
+<a name='L426'>                    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L427'>                        file = <a href='../D/9024.html' title='Multiple defined in 3 places.'>gzdopen</a>(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(stdout), outmode);
+<a name='L428'>                        <b>if</b> (file == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>("can't gzdopen stdout");
+<a name='L429'>
+<a name='L430'>                        <a href='../S/2759.html#L167' title='Defined at 167 in Modules/zlib/minigzip.c.'>gz_compress</a>(in, file);
+<a name='L431'>                    <font color='red'>}</font>
+<a name='L432'>
+<a name='L433'>                <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L434'>                    <a href='../S/2759.html#L262' title='Defined at 262 in Modules/zlib/minigzip.c.'>file_compress</a>(*argv, outmode);
+<a name='L435'>                <font color='red'>}</font>
+<a name='L436'>            <font color='red'>}</font>
+<a name='L437'>        <font color='red'>}</font> <b>while</b> (argv++, --argc);
+<a name='L438'>    <font color='red'>}</font>
+<a name='L439'>    <b>return</b> 0;
+<a name='L440'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L76'>[^]</a><a href='#L349'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

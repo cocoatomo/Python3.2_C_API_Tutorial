@@ -1,0 +1,353 @@
+<html>
+<head>
+<title>Modules/zlib/inftrees.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3390.html'>zlib</a>/inftrees.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L32'>[^]</a>[v][top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L32' title='Defined at 32.'>inflate_table</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* inftrees.c -- generate Huffman trees for efficient decoding</font></i>
+<a name='L2'><i><font color='green'> * Copyright (C) 1995-2010 Mark Adler</font></i>
+<a name='L3'><i><font color='green'> * For conditions of distribution and use, see copyright notice in zlib.h</font></i>
+<a name='L4'><i><font color='green'> */</font></i>
+<a name='L5'>
+<a name='L6'><font color='darkred'>#include</font> "<a href='2773.html'>zutil.h</a>"
+<a name='L7'><font color='darkred'>#include</font> "<a href='2755.html'>inftrees.h</a>"
+<a name='L8'>
+<a name='L9'><font color='darkred'>#define</font> <a href='../R/1835.html' title='Multiple refered from 6 places.'>MAXBITS</a> 15
+<a name='L10'>
+<a name='L11'><b>const</b> <b>char</b> <a href='../S/2764.html#L98' title='Defined at 98 in Modules/zlib/zconf.h.'>inflate_copyright</a>[] =
+<a name='L12'>   " inflate 1.2.5 Copyright 1995-2010 Mark Adler ";
+<a name='L13'><i><font color='green'>/*</font></i>
+<a name='L14'><i><font color='green'>  If you use the zlib library in a product, an acknowledgment is welcome</font></i>
+<a name='L15'><i><font color='green'>  in the documentation of your product. If for some reason you cannot</font></i>
+<a name='L16'><i><font color='green'>  include such an acknowledgment, I would appreciate that you keep this</font></i>
+<a name='L17'><i><font color='green'>  copyright string in the executable of your product.</font></i>
+<a name='L18'><i><font color='green'> */</font></i>
+<a name='L19'>
+<a name='L20'><i><font color='green'>/*</font></i>
+<a name='L21'><i><font color='green'>   Build a set of tables to decode the provided canonical Huffman code.</font></i>
+<a name='L22'><i><font color='green'>   The code lengths are lens[0..codes-1].  The result starts at *table,</font></i>
+<a name='L23'><i><font color='green'>   whose indices are 0..2^bits-1.  work is a writable array of at least</font></i>
+<a name='L24'><i><font color='green'>   lens shorts, which is used as a work area.  type is the type of code</font></i>
+<a name='L25'><i><font color='green'>   to be generated, CODES, LENS, or DISTS.  On return, zero is success,</font></i>
+<a name='L26'><i><font color='green'>   -1 is an invalid code, and +1 means that ENOUGH isn't enough.  table</font></i>
+<a name='L27'><i><font color='green'>   on return points to the next available entry's address.  bits is the</font></i>
+<a name='L28'><i><font color='green'>   requested root table index bits, and on return it is the actual root</font></i>
+<a name='L29'><i><font color='green'>   table index bits.  It will differ if the request is greater than the</font></i>
+<a name='L30'><i><font color='green'>   longest code or if it is less than the shortest code.</font></i>
+<a name='L31'><i><font color='green'> */</font></i>
+<a name='L32'><b>int</b> <a href='../D/5928.html' title='Multiple defined in 6 places.'>ZLIB_INTERNAL</a> <a href='../R/8371.html' title='Multiple refered from 11 places.'>inflate_table</a>(type, lens, codes, table, bits, work)
+<a name='L33'>codetype type;
+<a name='L34'><b>unsigned</b> <b>short</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *lens;
+<a name='L35'><b>unsigned</b> codes;
+<a name='L36'>code <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> * <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *table;
+<a name='L37'><b>unsigned</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *bits;
+<a name='L38'><b>unsigned</b> <b>short</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *work;
+<a name='L39'><font color='red'>{</font>
+<a name='L40'>    <b>unsigned</b> len;               <i><font color='green'>/* a code's length in bits */</font></i>
+<a name='L41'>    <b>unsigned</b> sym;               <i><font color='green'>/* index of code symbols */</font></i>
+<a name='L42'>    <b>unsigned</b> <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a>, <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>;          <i><font color='green'>/* minimum and maximum code lengths */</font></i>
+<a name='L43'>    <b>unsigned</b> root;              <i><font color='green'>/* number of index bits for root table */</font></i>
+<a name='L44'>    <b>unsigned</b> curr;              <i><font color='green'>/* number of index bits for current table */</font></i>
+<a name='L45'>    <b>unsigned</b> drop;              <i><font color='green'>/* code bits to drop for sub-table */</font></i>
+<a name='L46'>    <b>int</b> left;                   <i><font color='green'>/* number of prefix codes available */</font></i>
+<a name='L47'>    <b>unsigned</b> used;              <i><font color='green'>/* code entries in table used */</font></i>
+<a name='L48'>    <b>unsigned</b> huff;              <i><font color='green'>/* Huffman code */</font></i>
+<a name='L49'>    <b>unsigned</b> incr;              <i><font color='green'>/* for incrementing code, index */</font></i>
+<a name='L50'>    <b>unsigned</b> <a href='../S/2814.html#L51' title='Defined at 51 in Objects/stringlib/localeutil.h.'>fill</a>;              <i><font color='green'>/* index for replicating entries */</font></i>
+<a name='L51'>    <b>unsigned</b> low;               <i><font color='green'>/* low bits for current root entry */</font></i>
+<a name='L52'>    <b>unsigned</b> mask;              <i><font color='green'>/* mask for low root bits */</font></i>
+<a name='L53'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> here;                  <i><font color='green'>/* table entry for duplication */</font></i>
+<a name='L54'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *next;             <i><font color='green'>/* next available space in table */</font></i>
+<a name='L55'>    <b>const</b> <b>unsigned</b> <b>short</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *base;     <i><font color='green'>/* base value table to use */</font></i>
+<a name='L56'>    <b>const</b> <b>unsigned</b> <b>short</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *extra;    <i><font color='green'>/* extra bits table to use */</font></i>
+<a name='L57'>    <b>int</b> end;                    <i><font color='green'>/* use base and extra for symbol &gt; end */</font></i>
+<a name='L58'>    <b>unsigned</b> <b>short</b> count[<a href='../S/2754.html#L9' title='Defined at 9 in Modules/zlib/inftrees.c.'>MAXBITS</a>+1];    <i><font color='green'>/* number of codes of each length */</font></i>
+<a name='L59'>    <b>unsigned</b> <b>short</b> offs[<a href='../S/2754.html#L9' title='Defined at 9 in Modules/zlib/inftrees.c.'>MAXBITS</a>+1];     <i><font color='green'>/* offsets in table for each length */</font></i>
+<a name='L60'>    <b>static</b> <b>const</b> <b>unsigned</b> <b>short</b> lbase[31] = <font color='red'>{</font> <i><font color='green'>/* Length codes 257..285 base */</font></i>
+<a name='L61'>        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
+<a name='L62'>        35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258, 0, 0<font color='red'>}</font>;
+<a name='L63'>    <b>static</b> <b>const</b> <b>unsigned</b> <b>short</b> lext[31] = <font color='red'>{</font> <i><font color='green'>/* Length codes 257..285 extra */</font></i>
+<a name='L64'>        16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18, 18,
+<a name='L65'>        19, 19, 19, 19, 20, 20, 20, 20, 21, 21, 21, 21, 16, 73, 195<font color='red'>}</font>;
+<a name='L66'>    <b>static</b> <b>const</b> <b>unsigned</b> <b>short</b> dbase[32] = <font color='red'>{</font> <i><font color='green'>/* Distance codes 0..29 base */</font></i>
+<a name='L67'>        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+<a name='L68'>        257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
+<a name='L69'>        8193, 12289, 16385, 24577, 0, 0<font color='red'>}</font>;
+<a name='L70'>    <b>static</b> <b>const</b> <b>unsigned</b> <b>short</b> dext[32] = <font color='red'>{</font> <i><font color='green'>/* Distance codes 0..29 extra */</font></i>
+<a name='L71'>        16, 16, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 21, 21, 22, 22,
+<a name='L72'>        23, 23, 24, 24, 25, 25, 26, 26, 27, 27,
+<a name='L73'>        28, 28, 29, 29, 64, 64<font color='red'>}</font>;
+<a name='L74'>
+<a name='L75'>    <i><font color='green'>/*</font></i>
+<a name='L76'><i><font color='green'>       Process a set of code lengths to create a canonical Huffman code.  The</font></i>
+<a name='L77'><i><font color='green'>       code lengths are lens[0..codes-1].  Each length corresponds to the</font></i>
+<a name='L78'><i><font color='green'>       symbols 0..codes-1.  The Huffman code is generated by first sorting the</font></i>
+<a name='L79'><i><font color='green'>       symbols by length from short to long, and retaining the symbol order</font></i>
+<a name='L80'><i><font color='green'>       for codes with equal lengths.  Then the code starts with all zero bits</font></i>
+<a name='L81'><i><font color='green'>       for the first code of the shortest length, and the codes are integer</font></i>
+<a name='L82'><i><font color='green'>       increments for the same length, and zeros are appended as the length</font></i>
+<a name='L83'><i><font color='green'>       increases.  For the deflate format, these bits are stored backwards</font></i>
+<a name='L84'><i><font color='green'>       from their more natural integer increment ordering, and so when the</font></i>
+<a name='L85'><i><font color='green'>       decoding tables are built in the large loop below, the integer codes</font></i>
+<a name='L86'><i><font color='green'>       are incremented backwards.</font></i>
+<a name='L87'><i><font color='green'></font></i>
+<a name='L88'><i><font color='green'>       This routine assumes, but does not check, that all of the entries in</font></i>
+<a name='L89'><i><font color='green'>       lens[] are in the range 0..MAXBITS.  The caller must assure this.</font></i>
+<a name='L90'><i><font color='green'>       1..MAXBITS is interpreted as that code length.  zero means that that</font></i>
+<a name='L91'><i><font color='green'>       symbol does not occur in this code.</font></i>
+<a name='L92'><i><font color='green'></font></i>
+<a name='L93'><i><font color='green'>       The codes are sorted by computing a count of codes for each length,</font></i>
+<a name='L94'><i><font color='green'>       creating from that a table of starting indices for each length in the</font></i>
+<a name='L95'><i><font color='green'>       sorted table, and then entering the symbols in order in the sorted</font></i>
+<a name='L96'><i><font color='green'>       table.  The sorted table is work[], with that space being provided by</font></i>
+<a name='L97'><i><font color='green'>       the caller.</font></i>
+<a name='L98'><i><font color='green'></font></i>
+<a name='L99'><i><font color='green'>       The length counts are used for other purposes as well, i.e. finding</font></i>
+<a name='L100'><i><font color='green'>       the minimum and maximum length codes, determining if there are any</font></i>
+<a name='L101'><i><font color='green'>       codes at all, checking for a valid set of lengths, and looking ahead</font></i>
+<a name='L102'><i><font color='green'>       at length counts to determine sub-table sizes when building the</font></i>
+<a name='L103'><i><font color='green'>       decoding tables.</font></i>
+<a name='L104'><i><font color='green'>     */</font></i>
+<a name='L105'>
+<a name='L106'>    <i><font color='green'>/* accumulate lengths for codes (assumes lens[] all in 0..MAXBITS) */</font></i>
+<a name='L107'>    <b>for</b> (len = 0; len &lt;= <a href='../S/2754.html#L9' title='Defined at 9 in Modules/zlib/inftrees.c.'>MAXBITS</a>; len++)
+<a name='L108'>        count[len] = 0;
+<a name='L109'>    <b>for</b> (sym = 0; sym &lt; codes; sym++)
+<a name='L110'>        count[lens[sym]]++;
+<a name='L111'>
+<a name='L112'>    <i><font color='green'>/* bound code lengths, force root to be within code lengths */</font></i>
+<a name='L113'>    root = *bits;
+<a name='L114'>    <b>for</b> (<a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a> = <a href='../S/2754.html#L9' title='Defined at 9 in Modules/zlib/inftrees.c.'>MAXBITS</a>; <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a> &gt;= 1; <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>--)
+<a name='L115'>        <b>if</b> (count[<a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>] != 0) <b>break</b>;
+<a name='L116'>    <b>if</b> (root &gt; <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>) root = <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>;
+<a name='L117'>    <b>if</b> (<a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a> == 0) <font color='red'>{</font>                     <i><font color='green'>/* no symbols to code at all */</font></i>
+<a name='L118'>        here.op = (<b>unsigned</b> <b>char</b>)64;    <i><font color='green'>/* invalid code marker */</font></i>
+<a name='L119'>        here.bits = (<b>unsigned</b> <b>char</b>)1;
+<a name='L120'>        here.val = (<b>unsigned</b> <b>short</b>)0;
+<a name='L121'>        *(*table)++ = here;             <i><font color='green'>/* make a table to force an error */</font></i>
+<a name='L122'>        *(*table)++ = here;
+<a name='L123'>        *bits = 1;
+<a name='L124'>        <b>return</b> 0;     <i><font color='green'>/* no symbols, but wait for decoding to report error */</font></i>
+<a name='L125'>    <font color='red'>}</font>
+<a name='L126'>    <b>for</b> (<a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a> = 1; <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a> &lt; <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>; <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a>++)
+<a name='L127'>        <b>if</b> (count[<a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a>] != 0) <b>break</b>;
+<a name='L128'>    <b>if</b> (root &lt; <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a>) root = <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a>;
+<a name='L129'>
+<a name='L130'>    <i><font color='green'>/* check for an over-subscribed or incomplete set of lengths */</font></i>
+<a name='L131'>    left = 1;
+<a name='L132'>    <b>for</b> (len = 1; len &lt;= <a href='../S/2754.html#L9' title='Defined at 9 in Modules/zlib/inftrees.c.'>MAXBITS</a>; len++) <font color='red'>{</font>
+<a name='L133'>        left &lt;&lt;= 1;
+<a name='L134'>        left -= count[len];
+<a name='L135'>        <b>if</b> (left &lt; 0) <b>return</b> -1;        <i><font color='green'>/* over-subscribed */</font></i>
+<a name='L136'>    <font color='red'>}</font>
+<a name='L137'>    <b>if</b> (left &gt; 0 &amp;&amp; (type == <a href='../S/2755.html#L55' title='Defined at 55 in Modules/zlib/inftrees.h.'>CODES</a> || <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a> != 1))
+<a name='L138'>        <b>return</b> -1;                      <i><font color='green'>/* incomplete set */</font></i>
+<a name='L139'>
+<a name='L140'>    <i><font color='green'>/* generate offsets into symbol table for each length for sorting */</font></i>
+<a name='L141'>    offs[1] = 0;
+<a name='L142'>    <b>for</b> (len = 1; len &lt; <a href='../S/2754.html#L9' title='Defined at 9 in Modules/zlib/inftrees.c.'>MAXBITS</a>; len++)
+<a name='L143'>        offs[len + 1] = offs[len] + count[len];
+<a name='L144'>
+<a name='L145'>    <i><font color='green'>/* sort symbols by length, by symbol order within each length */</font></i>
+<a name='L146'>    <b>for</b> (sym = 0; sym &lt; codes; sym++)
+<a name='L147'>        <b>if</b> (lens[sym] != 0) work[offs[lens[sym]]++] = (<b>unsigned</b> <b>short</b>)sym;
+<a name='L148'>
+<a name='L149'>    <i><font color='green'>/*</font></i>
+<a name='L150'><i><font color='green'>       Create and fill in decoding tables.  In this loop, the table being</font></i>
+<a name='L151'><i><font color='green'>       filled is at next and has curr index bits.  The code being used is huff</font></i>
+<a name='L152'><i><font color='green'>       with length len.  That code is converted to an index by dropping drop</font></i>
+<a name='L153'><i><font color='green'>       bits off of the bottom.  For codes where len is less than drop + curr,</font></i>
+<a name='L154'><i><font color='green'>       those top drop + curr - len bits are incremented through all values to</font></i>
+<a name='L155'><i><font color='green'>       fill the table with replicated entries.</font></i>
+<a name='L156'><i><font color='green'></font></i>
+<a name='L157'><i><font color='green'>       root is the number of index bits for the root table.  When len exceeds</font></i>
+<a name='L158'><i><font color='green'>       root, sub-tables are created pointed to by the root entry with an index</font></i>
+<a name='L159'><i><font color='green'>       of the low root bits of huff.  This is saved in low to check for when a</font></i>
+<a name='L160'><i><font color='green'>       new sub-table should be started.  drop is zero when the root table is</font></i>
+<a name='L161'><i><font color='green'>       being filled, and drop is root when sub-tables are being filled.</font></i>
+<a name='L162'><i><font color='green'></font></i>
+<a name='L163'><i><font color='green'>       When a new sub-table is needed, it is necessary to look ahead in the</font></i>
+<a name='L164'><i><font color='green'>       code lengths to determine what size sub-table is needed.  The length</font></i>
+<a name='L165'><i><font color='green'>       counts are used for this, and so count[] is decremented as codes are</font></i>
+<a name='L166'><i><font color='green'>       entered in the tables.</font></i>
+<a name='L167'><i><font color='green'></font></i>
+<a name='L168'><i><font color='green'>       used keeps track of how many table entries have been allocated from the</font></i>
+<a name='L169'><i><font color='green'>       provided *table space.  It is checked for LENS and DIST tables against</font></i>
+<a name='L170'><i><font color='green'>       the constants ENOUGH_LENS and ENOUGH_DISTS to guard against changes in</font></i>
+<a name='L171'><i><font color='green'>       the initial root table size constants.  See the comments in inftrees.h</font></i>
+<a name='L172'><i><font color='green'>       for more information.</font></i>
+<a name='L173'><i><font color='green'></font></i>
+<a name='L174'><i><font color='green'>       sym increments through all symbols, and the loop terminates when</font></i>
+<a name='L175'><i><font color='green'>       all codes of length max, i.e. all codes, have been processed.  This</font></i>
+<a name='L176'><i><font color='green'>       routine permits incomplete codes, so another loop after this one fills</font></i>
+<a name='L177'><i><font color='green'>       in the rest of the decoding tables with invalid code markers.</font></i>
+<a name='L178'><i><font color='green'>     */</font></i>
+<a name='L179'>
+<a name='L180'>    <i><font color='green'>/* set up for code type */</font></i>
+<a name='L181'>    <b>switch</b> (type) <font color='red'>{</font>
+<a name='L182'>    <b>case</b> <a href='../S/2755.html#L55' title='Defined at 55 in Modules/zlib/inftrees.h.'>CODES</a>:
+<a name='L183'>        base = extra = work;    <i><font color='green'>/* dummy value--not used */</font></i>
+<a name='L184'>        end = 19;
+<a name='L185'>        <b>break</b>;
+<a name='L186'>    <b>case</b> <a href='../S/2755.html#L56' title='Defined at 56 in Modules/zlib/inftrees.h.'>LENS</a>:
+<a name='L187'>        base = lbase;
+<a name='L188'>        base -= 257;
+<a name='L189'>        extra = lext;
+<a name='L190'>        extra -= 257;
+<a name='L191'>        end = 256;
+<a name='L192'>        <b>break</b>;
+<a name='L193'>    <b>default</b>:            <i><font color='green'>/* DISTS */</font></i>
+<a name='L194'>        base = dbase;
+<a name='L195'>        extra = dext;
+<a name='L196'>        end = -1;
+<a name='L197'>    <font color='red'>}</font>
+<a name='L198'>
+<a name='L199'>    <i><font color='green'>/* initialize state for loop */</font></i>
+<a name='L200'>    huff = 0;                   <i><font color='green'>/* starting code */</font></i>
+<a name='L201'>    sym = 0;                    <i><font color='green'>/* starting code symbol */</font></i>
+<a name='L202'>    len = <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a>;                  <i><font color='green'>/* starting code length */</font></i>
+<a name='L203'>    next = *table;              <i><font color='green'>/* current table to fill in */</font></i>
+<a name='L204'>    curr = root;                <i><font color='green'>/* current table index bits */</font></i>
+<a name='L205'>    drop = 0;                   <i><font color='green'>/* current bits to drop from code for index */</font></i>
+<a name='L206'>    low = (<b>unsigned</b>)(-1);       <i><font color='green'>/* trigger new sub-table when len &gt; root */</font></i>
+<a name='L207'>    used = 1U &lt;&lt; root;          <i><font color='green'>/* use root table entries */</font></i>
+<a name='L208'>    mask = used - 1;            <i><font color='green'>/* mask for comparing low */</font></i>
+<a name='L209'>
+<a name='L210'>    <i><font color='green'>/* check available table space */</font></i>
+<a name='L211'>    <b>if</b> ((type == <a href='../S/2755.html#L56' title='Defined at 56 in Modules/zlib/inftrees.h.'>LENS</a> &amp;&amp; used &gt;= <a href='../S/2755.html#L49' title='Defined at 49 in Modules/zlib/inftrees.h.'>ENOUGH_LENS</a>) ||
+<a name='L212'>        (type == <a href='../S/2755.html#L57' title='Defined at 57 in Modules/zlib/inftrees.h.'>DISTS</a> &amp;&amp; used &gt;= <a href='../S/2755.html#L50' title='Defined at 50 in Modules/zlib/inftrees.h.'>ENOUGH_DISTS</a>))
+<a name='L213'>        <b>return</b> 1;
+<a name='L214'>
+<a name='L215'>    <i><font color='green'>/* process all codes and make table entries */</font></i>
+<a name='L216'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L217'>        <i><font color='green'>/* create table entry */</font></i>
+<a name='L218'>        here.bits = (<b>unsigned</b> <b>char</b>)(len - drop);
+<a name='L219'>        <b>if</b> ((<b>int</b>)(work[sym]) &lt; end) <font color='red'>{</font>
+<a name='L220'>            here.op = (<b>unsigned</b> <b>char</b>)0;
+<a name='L221'>            here.val = work[sym];
+<a name='L222'>        <font color='red'>}</font>
+<a name='L223'>        <b>else</b> <b>if</b> ((<b>int</b>)(work[sym]) &gt; end) <font color='red'>{</font>
+<a name='L224'>            here.op = (<b>unsigned</b> <b>char</b>)(extra[work[sym]]);
+<a name='L225'>            here.val = base[work[sym]];
+<a name='L226'>        <font color='red'>}</font>
+<a name='L227'>        <b>else</b> <font color='red'>{</font>
+<a name='L228'>            here.op = (<b>unsigned</b> <b>char</b>)(32 + 64);         <i><font color='green'>/* end of block */</font></i>
+<a name='L229'>            here.val = 0;
+<a name='L230'>        <font color='red'>}</font>
+<a name='L231'>
+<a name='L232'>        <i><font color='green'>/* replicate for those indices with low len bits equal to huff */</font></i>
+<a name='L233'>        incr = 1U &lt;&lt; (len - drop);
+<a name='L234'>        <a href='../S/2814.html#L51' title='Defined at 51 in Objects/stringlib/localeutil.h.'>fill</a> = 1U &lt;&lt; curr;
+<a name='L235'>        <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a> = <a href='../S/2814.html#L51' title='Defined at 51 in Objects/stringlib/localeutil.h.'>fill</a>;                 <i><font color='green'>/* save offset to next table */</font></i>
+<a name='L236'>        <b>do</b> <font color='red'>{</font>
+<a name='L237'>            <a href='../S/2814.html#L51' title='Defined at 51 in Objects/stringlib/localeutil.h.'>fill</a> -= incr;
+<a name='L238'>            next[(huff &gt;&gt; drop) + <a href='../S/2814.html#L51' title='Defined at 51 in Objects/stringlib/localeutil.h.'>fill</a>] = here;
+<a name='L239'>        <font color='red'>}</font> <b>while</b> (<a href='../S/2814.html#L51' title='Defined at 51 in Objects/stringlib/localeutil.h.'>fill</a> != 0);
+<a name='L240'>
+<a name='L241'>        <i><font color='green'>/* backwards increment the len-bit code huff */</font></i>
+<a name='L242'>        incr = 1U &lt;&lt; (len - 1);
+<a name='L243'>        <b>while</b> (huff &amp; incr)
+<a name='L244'>            incr &gt;&gt;= 1;
+<a name='L245'>        <b>if</b> (incr != 0) <font color='red'>{</font>
+<a name='L246'>            huff &amp;= incr - 1;
+<a name='L247'>            huff += incr;
+<a name='L248'>        <font color='red'>}</font>
+<a name='L249'>        <b>else</b>
+<a name='L250'>            huff = 0;
+<a name='L251'>
+<a name='L252'>        <i><font color='green'>/* go to next symbol, update count, len */</font></i>
+<a name='L253'>        sym++;
+<a name='L254'>        <b>if</b> (--(count[len]) == 0) <font color='red'>{</font>
+<a name='L255'>            <b>if</b> (len == <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>) <b>break</b>;
+<a name='L256'>            len = lens[work[sym]];
+<a name='L257'>        <font color='red'>}</font>
+<a name='L258'>
+<a name='L259'>        <i><font color='green'>/* create new sub-table if needed */</font></i>
+<a name='L260'>        <b>if</b> (len &gt; root &amp;&amp; (huff &amp; mask) != low) <font color='red'>{</font>
+<a name='L261'>            <i><font color='green'>/* if first time, transition to sub-tables */</font></i>
+<a name='L262'>            <b>if</b> (drop == 0)
+<a name='L263'>                drop = root;
+<a name='L264'>
+<a name='L265'>            <i><font color='green'>/* increment past last table */</font></i>
+<a name='L266'>            next += <a href='../S/2252.html#L7' title='Defined at 7 in Modules/_ctypes/ctypes.h.'>min</a>;            <i><font color='green'>/* here min is 1 &lt;&lt; curr */</font></i>
+<a name='L267'>
+<a name='L268'>            <i><font color='green'>/* determine length of next table */</font></i>
+<a name='L269'>            curr = len - drop;
+<a name='L270'>            left = (<b>int</b>)(1 &lt;&lt; curr);
+<a name='L271'>            <b>while</b> (curr + drop &lt; <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>) <font color='red'>{</font>
+<a name='L272'>                left -= count[curr + drop];
+<a name='L273'>                <b>if</b> (left &lt;= 0) <b>break</b>;
+<a name='L274'>                curr++;
+<a name='L275'>                left &lt;&lt;= 1;
+<a name='L276'>            <font color='red'>}</font>
+<a name='L277'>
+<a name='L278'>            <i><font color='green'>/* check for enough space */</font></i>
+<a name='L279'>            used += 1U &lt;&lt; curr;
+<a name='L280'>            <b>if</b> ((type == <a href='../S/2755.html#L56' title='Defined at 56 in Modules/zlib/inftrees.h.'>LENS</a> &amp;&amp; used &gt;= <a href='../S/2755.html#L49' title='Defined at 49 in Modules/zlib/inftrees.h.'>ENOUGH_LENS</a>) ||
+<a name='L281'>                (type == <a href='../S/2755.html#L57' title='Defined at 57 in Modules/zlib/inftrees.h.'>DISTS</a> &amp;&amp; used &gt;= <a href='../S/2755.html#L50' title='Defined at 50 in Modules/zlib/inftrees.h.'>ENOUGH_DISTS</a>))
+<a name='L282'>                <b>return</b> 1;
+<a name='L283'>
+<a name='L284'>            <i><font color='green'>/* point entry in root table to sub-table */</font></i>
+<a name='L285'>            low = huff &amp; mask;
+<a name='L286'>            (*table)[low].op = (<b>unsigned</b> <b>char</b>)curr;
+<a name='L287'>            (*table)[low].bits = (<b>unsigned</b> <b>char</b>)root;
+<a name='L288'>            (*table)[low].val = (<b>unsigned</b> <b>short</b>)(next - *table);
+<a name='L289'>        <font color='red'>}</font>
+<a name='L290'>    <font color='red'>}</font>
+<a name='L291'>
+<a name='L292'>    <i><font color='green'>/*</font></i>
+<a name='L293'><i><font color='green'>       Fill in rest of table for incomplete codes.  This loop is similar to the</font></i>
+<a name='L294'><i><font color='green'>       loop above in incrementing huff for table indices.  It is assumed that</font></i>
+<a name='L295'><i><font color='green'>       len is equal to curr + drop, so there is no loop needed to increment</font></i>
+<a name='L296'><i><font color='green'>       through high index bits.  When the current sub-table is filled, the loop</font></i>
+<a name='L297'><i><font color='green'>       drops back to the root table to fill in any remaining entries there.</font></i>
+<a name='L298'><i><font color='green'>     */</font></i>
+<a name='L299'>    here.op = (<b>unsigned</b> <b>char</b>)64;                <i><font color='green'>/* invalid code marker */</font></i>
+<a name='L300'>    here.bits = (<b>unsigned</b> <b>char</b>)(len - drop);
+<a name='L301'>    here.val = (<b>unsigned</b> <b>short</b>)0;
+<a name='L302'>    <b>while</b> (huff != 0) <font color='red'>{</font>
+<a name='L303'>        <i><font color='green'>/* when done with sub-table, drop back to root table */</font></i>
+<a name='L304'>        <b>if</b> (drop != 0 &amp;&amp; (huff &amp; mask) != low) <font color='red'>{</font>
+<a name='L305'>            drop = 0;
+<a name='L306'>            len = root;
+<a name='L307'>            next = *table;
+<a name='L308'>            here.bits = (<b>unsigned</b> <b>char</b>)len;
+<a name='L309'>        <font color='red'>}</font>
+<a name='L310'>
+<a name='L311'>        <i><font color='green'>/* put invalid code marker in table */</font></i>
+<a name='L312'>        next[huff &gt;&gt; drop] = here;
+<a name='L313'>
+<a name='L314'>        <i><font color='green'>/* backwards increment the len-bit code huff */</font></i>
+<a name='L315'>        incr = 1U &lt;&lt; (len - 1);
+<a name='L316'>        <b>while</b> (huff &amp; incr)
+<a name='L317'>            incr &gt;&gt;= 1;
+<a name='L318'>        <b>if</b> (incr != 0) <font color='red'>{</font>
+<a name='L319'>            huff &amp;= incr - 1;
+<a name='L320'>            huff += incr;
+<a name='L321'>        <font color='red'>}</font>
+<a name='L322'>        <b>else</b>
+<a name='L323'>            huff = 0;
+<a name='L324'>    <font color='red'>}</font>
+<a name='L325'>
+<a name='L326'>    <i><font color='green'>/* set return parameters */</font></i>
+<a name='L327'>    *table += used;
+<a name='L328'>    *bits = root;
+<a name='L329'>    <b>return</b> 0;
+<a name='L330'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;][^]<a href='#L32'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

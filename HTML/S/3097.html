@@ -1,0 +1,211 @@
+<html>
+<head>
+<title>Python/dynamic_annotations.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/dynamic_annotations.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L48'>[^]</a><a href='#L144'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L48' title='Defined at 48.'>AnnotateRWLockCreate</a>
+<li><a href='#L50' title='Defined at 50.'>AnnotateRWLockDestroy</a>
+<li><a href='#L52' title='Defined at 52.'>AnnotateRWLockAcquired</a>
+<li><a href='#L54' title='Defined at 54.'>AnnotateRWLockReleased</a>
+<li><a href='#L56' title='Defined at 56.'>AnnotateBarrierInit</a>
+<li><a href='#L59' title='Defined at 59.'>AnnotateBarrierWaitBefore</a>
+<li><a href='#L61' title='Defined at 61.'>AnnotateBarrierWaitAfter</a>
+<li><a href='#L63' title='Defined at 63.'>AnnotateBarrierDestroy</a>
+<li><a href='#L66' title='Defined at 66.'>AnnotateCondVarWait</a>
+<li><a href='#L69' title='Defined at 69.'>AnnotateCondVarSignal</a>
+<li><a href='#L71' title='Defined at 71.'>AnnotateCondVarSignalAll</a>
+<li><a href='#L73' title='Defined at 73.'>AnnotatePublishMemoryRange</a>
+<li><a href='#L76' title='Defined at 76.'>AnnotateUnpublishMemoryRange</a>
+<li><a href='#L79' title='Defined at 79.'>AnnotatePCQCreate</a>
+<li><a href='#L81' title='Defined at 81.'>AnnotatePCQDestroy</a>
+<li><a href='#L83' title='Defined at 83.'>AnnotatePCQPut</a>
+<li><a href='#L85' title='Defined at 85.'>AnnotatePCQGet</a>
+<li><a href='#L87' title='Defined at 87.'>AnnotateNewMemory</a>
+<li><a href='#L90' title='Defined at 90.'>AnnotateExpectRace</a>
+<li><a href='#L93' title='Defined at 93.'>AnnotateBenignRace</a>
+<li><a href='#L96' title='Defined at 96.'>AnnotateBenignRaceSized</a>
+<li><a href='#L100' title='Defined at 100.'>AnnotateMutexIsUsedAsCondVar</a>
+<li><a href='#L102' title='Defined at 102.'>AnnotateTraceMemory</a>
+<li><a href='#L104' title='Defined at 104.'>AnnotateThreadName</a>
+<li><a href='#L106' title='Defined at 106.'>AnnotateIgnoreReadsBegin</a>
+<li><a href='#L107' title='Defined at 107.'>AnnotateIgnoreReadsEnd</a>
+<li><a href='#L108' title='Defined at 108.'>AnnotateIgnoreWritesBegin</a>
+<li><a href='#L109' title='Defined at 109.'>AnnotateIgnoreWritesEnd</a>
+<li><a href='#L110' title='Defined at 110.'>AnnotateIgnoreSyncBegin</a>
+<li><a href='#L111' title='Defined at 111.'>AnnotateIgnoreSyncEnd</a>
+<li><a href='#L112' title='Defined at 112.'>AnnotateEnableRaceDetection</a>
+<li><a href='#L113' title='Defined at 113.'>AnnotateNoOp</a>
+<li><a href='#L115' title='Defined at 115.'>AnnotateFlushState</a>
+<li><a href='#L117' title='Defined at 117.'>GetRunningOnValgrind</a>
+<li><a href='#L144' title='Defined at 144.'>RunningOnValgrind</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Copyright (c) 2008-2009, Google Inc.</font></i>
+<a name='L2'><i><font color='green'> * All rights reserved.</font></i>
+<a name='L3'><i><font color='green'> *</font></i>
+<a name='L4'><i><font color='green'> * Redistribution and use in source and binary forms, with or without</font></i>
+<a name='L5'><i><font color='green'> * modification, are permitted provided that the following conditions are</font></i>
+<a name='L6'><i><font color='green'> * met:</font></i>
+<a name='L7'><i><font color='green'> *</font></i>
+<a name='L8'><i><font color='green'> *     * Redistributions of source code must retain the above copyright</font></i>
+<a name='L9'><i><font color='green'> * notice, this list of conditions and the following disclaimer.</font></i>
+<a name='L10'><i><font color='green'> *     * Neither the name of Google Inc. nor the names of its</font></i>
+<a name='L11'><i><font color='green'> * contributors may be used to endorse or promote products derived from</font></i>
+<a name='L12'><i><font color='green'> * this software without specific prior written permission.</font></i>
+<a name='L13'><i><font color='green'> *</font></i>
+<a name='L14'><i><font color='green'> * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS</font></i>
+<a name='L15'><i><font color='green'> * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT</font></i>
+<a name='L16'><i><font color='green'> * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR</font></i>
+<a name='L17'><i><font color='green'> * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT</font></i>
+<a name='L18'><i><font color='green'> * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,</font></i>
+<a name='L19'><i><font color='green'> * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT</font></i>
+<a name='L20'><i><font color='green'> * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,</font></i>
+<a name='L21'><i><font color='green'> * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY</font></i>
+<a name='L22'><i><font color='green'> * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT</font></i>
+<a name='L23'><i><font color='green'> * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE</font></i>
+<a name='L24'><i><font color='green'> * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.</font></i>
+<a name='L25'><i><font color='green'> *</font></i>
+<a name='L26'><i><font color='green'> * ---</font></i>
+<a name='L27'><i><font color='green'> * Author: Kostya Serebryany</font></i>
+<a name='L28'><i><font color='green'> */</font></i>
+<a name='L29'>
+<a name='L30'><font color='darkred'>#ifdef</font> _MSC_VER
+<a name='L31'><font color='darkred'># include</font> &lt;windows.h&gt;
+<a name='L32'><font color='darkred'>#endif</font>
+<a name='L33'>
+<a name='L34'><font color='darkred'>#ifdef</font> __cplusplus
+<a name='L35'><font color='darkred'># error</font> "This file should be built as pure C to avoid name mangling"
+<a name='L36'><font color='darkred'>#endif</font>
+<a name='L37'>
+<a name='L38'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L39'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L40'>
+<a name='L41'><font color='darkred'>#include</font> "<a href='519.html'>dynamic_annotations.h</a>"
+<a name='L42'>
+<a name='L43'><i><font color='green'>/* Each function is empty and called (via a macro) only in debug mode.</font></i>
+<a name='L44'><i><font color='green'>   The arguments are captured by dynamic tools at runtime. */</font></i>
+<a name='L45'>
+<a name='L46'><font color='darkred'>#if</font> <a href='../S/519.html#L60' title='Defined at 60 in Include/dynamic_annotations.h.'>DYNAMIC_ANNOTATIONS_ENABLED</a> == 1
+<a name='L47'>
+<a name='L48'><b>void</b> <a href='../R/181.html' title='Multiple refered from 2 places.'>AnnotateRWLockCreate</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L49'>                          <b>const</b> <b>volatile</b> <b>void</b> *lock)<font color='red'>{</font><font color='red'>}</font>
+<a name='L50'><b>void</b> <a href='../R/182.html' title='Multiple refered from 2 places.'>AnnotateRWLockDestroy</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L51'>                           <b>const</b> <b>volatile</b> <b>void</b> *lock)<font color='red'>{</font><font color='red'>}</font>
+<a name='L52'><b>void</b> <a href='../R/180.html' title='Multiple refered from 2 places.'>AnnotateRWLockAcquired</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L53'>                            <b>const</b> <b>volatile</b> <b>void</b> *lock, <b>long</b> is_w)<font color='red'>{</font><font color='red'>}</font>
+<a name='L54'><b>void</b> <a href='../R/183.html' title='Multiple refered from 2 places.'>AnnotateRWLockReleased</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L55'>                            <b>const</b> <b>volatile</b> <b>void</b> *lock, <b>long</b> is_w)<font color='red'>{</font><font color='red'>}</font>
+<a name='L56'><b>void</b> <a href='../R/155.html' title='Multiple refered from 2 places.'>AnnotateBarrierInit</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L57'>                         <b>const</b> <b>volatile</b> <b>void</b> *barrier, <b>long</b> count,
+<a name='L58'>                         <b>long</b> reinitialization_allowed) <font color='red'>{</font><font color='red'>}</font>
+<a name='L59'><b>void</b> <a href='../R/157.html' title='Multiple refered from 2 places.'>AnnotateBarrierWaitBefore</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L60'>                               <b>const</b> <b>volatile</b> <b>void</b> *barrier) <font color='red'>{</font><font color='red'>}</font>
+<a name='L61'><b>void</b> <a href='../R/156.html' title='Multiple refered from 2 places.'>AnnotateBarrierWaitAfter</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L62'>                              <b>const</b> <b>volatile</b> <b>void</b> *barrier) <font color='red'>{</font><font color='red'>}</font>
+<a name='L63'><b>void</b> <a href='../R/154.html' title='Multiple refered from 2 places.'>AnnotateBarrierDestroy</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L64'>                            <b>const</b> <b>volatile</b> <b>void</b> *barrier) <font color='red'>{</font><font color='red'>}</font>
+<a name='L65'>
+<a name='L66'><b>void</b> <a href='../R/162.html' title='Multiple refered from 3 places.'>AnnotateCondVarWait</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L67'>                         <b>const</b> <b>volatile</b> <b>void</b> *cv,
+<a name='L68'>                         <b>const</b> <b>volatile</b> <b>void</b> *lock)<font color='red'>{</font><font color='red'>}</font>
+<a name='L69'><b>void</b> <a href='../R/160.html' title='Multiple refered from 2 places.'>AnnotateCondVarSignal</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L70'>                           <b>const</b> <b>volatile</b> <b>void</b> *cv)<font color='red'>{</font><font color='red'>}</font>
+<a name='L71'><b>void</b> <a href='../R/161.html' title='Multiple refered from 2 places.'>AnnotateCondVarSignalAll</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L72'>                              <b>const</b> <b>volatile</b> <b>void</b> *cv)<font color='red'>{</font><font color='red'>}</font>
+<a name='L73'><b>void</b> <a href='../R/179.html' title='Multiple refered from 2 places.'>AnnotatePublishMemoryRange</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L74'>                                <b>const</b> <b>volatile</b> <b>void</b> *address,
+<a name='L75'>                                <b>long</b> size)<font color='red'>{</font><font color='red'>}</font>
+<a name='L76'><b>void</b> <a href='../S/519.html#L402' title='Refered from 402 in Include/dynamic_annotations.h.'>AnnotateUnpublishMemoryRange</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L77'>                                  <b>const</b> <b>volatile</b> <b>void</b> *address,
+<a name='L78'>                                  <b>long</b> size)<font color='red'>{</font><font color='red'>}</font>
+<a name='L79'><b>void</b> <a href='../R/175.html' title='Multiple refered from 2 places.'>AnnotatePCQCreate</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L80'>                       <b>const</b> <b>volatile</b> <b>void</b> *pcq)<font color='red'>{</font><font color='red'>}</font>
+<a name='L81'><b>void</b> <a href='../R/176.html' title='Multiple refered from 2 places.'>AnnotatePCQDestroy</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L82'>                        <b>const</b> <b>volatile</b> <b>void</b> *pcq)<font color='red'>{</font><font color='red'>}</font>
+<a name='L83'><b>void</b> <a href='../R/178.html' title='Multiple refered from 2 places.'>AnnotatePCQPut</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L84'>                    <b>const</b> <b>volatile</b> <b>void</b> *pcq)<font color='red'>{</font><font color='red'>}</font>
+<a name='L85'><b>void</b> <a href='../R/177.html' title='Multiple refered from 2 places.'>AnnotatePCQGet</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L86'>                    <b>const</b> <b>volatile</b> <b>void</b> *pcq)<font color='red'>{</font><font color='red'>}</font>
+<a name='L87'><b>void</b> <a href='../R/173.html' title='Multiple refered from 2 places.'>AnnotateNewMemory</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L88'>                       <b>const</b> <b>volatile</b> <b>void</b> *mem,
+<a name='L89'>                       <b>long</b> size)<font color='red'>{</font><font color='red'>}</font>
+<a name='L90'><b>void</b> <a href='../R/164.html' title='Multiple refered from 2 places.'>AnnotateExpectRace</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L91'>                        <b>const</b> <b>volatile</b> <b>void</b> *mem,
+<a name='L92'>                        <b>const</b> <b>char</b> *description)<font color='red'>{</font><font color='red'>}</font>
+<a name='L93'><b>void</b> <a href='../S/519.html#L419' title='Refered from 419 in Include/dynamic_annotations.h.'>AnnotateBenignRace</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L94'>                        <b>const</b> <b>volatile</b> <b>void</b> *mem,
+<a name='L95'>                        <b>const</b> <b>char</b> *description)<font color='red'>{</font><font color='red'>}</font>
+<a name='L96'><b>void</b> <a href='../R/159.html' title='Multiple refered from 3 places.'>AnnotateBenignRaceSized</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L97'>                             <b>const</b> <b>volatile</b> <b>void</b> *mem,
+<a name='L98'>                             <b>long</b> size,
+<a name='L99'>                             <b>const</b> <b>char</b> *description) <font color='red'>{</font><font color='red'>}</font>
+<a name='L100'><b>void</b> <a href='../R/172.html' title='Multiple refered from 2 places.'>AnnotateMutexIsUsedAsCondVar</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L101'>                                  <b>const</b> <b>volatile</b> <b>void</b> *mu)<font color='red'>{</font><font color='red'>}</font>
+<a name='L102'><b>void</b> <a href='../R/185.html' title='Multiple refered from 2 places.'>AnnotateTraceMemory</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L103'>                         <b>const</b> <b>volatile</b> <b>void</b> *arg)<font color='red'>{</font><font color='red'>}</font>
+<a name='L104'><b>void</b> <a href='../R/184.html' title='Multiple refered from 2 places.'>AnnotateThreadName</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L105'>                        <b>const</b> <b>char</b> *name)<font color='red'>{</font><font color='red'>}</font>
+<a name='L106'><b>void</b> <a href='../R/166.html' title='Multiple refered from 2 places.'>AnnotateIgnoreReadsBegin</a>(<b>const</b> <b>char</b> *file, <b>int</b> line)<font color='red'>{</font><font color='red'>}</font>
+<a name='L107'><b>void</b> <a href='../R/167.html' title='Multiple refered from 2 places.'>AnnotateIgnoreReadsEnd</a>(<b>const</b> <b>char</b> *file, <b>int</b> line)<font color='red'>{</font><font color='red'>}</font>
+<a name='L108'><b>void</b> <a href='../R/170.html' title='Multiple refered from 2 places.'>AnnotateIgnoreWritesBegin</a>(<b>const</b> <b>char</b> *file, <b>int</b> line)<font color='red'>{</font><font color='red'>}</font>
+<a name='L109'><b>void</b> <a href='../R/171.html' title='Multiple refered from 2 places.'>AnnotateIgnoreWritesEnd</a>(<b>const</b> <b>char</b> *file, <b>int</b> line)<font color='red'>{</font><font color='red'>}</font>
+<a name='L110'><b>void</b> <a href='../S/519.html#L238' title='Refered from 238 in Include/dynamic_annotations.h.'>AnnotateIgnoreSyncBegin</a>(<b>const</b> <b>char</b> *file, <b>int</b> line)<font color='red'>{</font><font color='red'>}</font>
+<a name='L111'><b>void</b> <a href='../S/519.html#L242' title='Refered from 242 in Include/dynamic_annotations.h.'>AnnotateIgnoreSyncEnd</a>(<b>const</b> <b>char</b> *file, <b>int</b> line)<font color='red'>{</font><font color='red'>}</font>
+<a name='L112'><b>void</b> <a href='../R/163.html' title='Multiple refered from 2 places.'>AnnotateEnableRaceDetection</a>(<b>const</b> <b>char</b> *file, <b>int</b> line, <b>int</b> enable)<font color='red'>{</font><font color='red'>}</font>
+<a name='L113'><b>void</b> <a href='../R/174.html' title='Multiple refered from 2 places.'>AnnotateNoOp</a>(<b>const</b> <b>char</b> *file, <b>int</b> line,
+<a name='L114'>                  <b>const</b> <b>volatile</b> <b>void</b> *arg)<font color='red'>{</font><font color='red'>}</font>
+<a name='L115'><b>void</b> <a href='../R/165.html' title='Multiple refered from 2 places.'>AnnotateFlushState</a>(<b>const</b> <b>char</b> *file, <b>int</b> line)<font color='red'>{</font><font color='red'>}</font>
+<a name='L116'>
+<a name='L117'><b>static</b> <b>int</b> <a href='../S/3097.html#L150' title='Refered from 150 in Python/dynamic_annotations.c.'>GetRunningOnValgrind</a>(<b>void</b>) <font color='red'>{</font>
+<a name='L118'><font color='darkred'>#ifdef</font> RUNNING_ON_VALGRIND
+<a name='L119'>  <b>if</b> (RUNNING_ON_VALGRIND) <b>return</b> 1;
+<a name='L120'><font color='darkred'>#endif</font>
+<a name='L121'>
+<a name='L122'><font color='darkred'>#ifndef</font> _MSC_VER
+<a name='L123'>  <b>char</b> *running_on_valgrind_str = <a href='../S/2906.html#L99' title='Defined at 99 in PC/pyconfig.h.'>getenv</a>("RUNNING_ON_VALGRIND");
+<a name='L124'>  <b>if</b> (running_on_valgrind_str) <font color='red'>{</font>
+<a name='L125'>    <b>return</b> strcmp(running_on_valgrind_str, "0") != 0;
+<a name='L126'>  <font color='red'>}</font>
+<a name='L127'><font color='darkred'>#else</font>
+<a name='L128'>  <i><font color='green'>/* Visual Studio issues warnings if we use getenv,</font></i>
+<a name='L129'><i><font color='green'>   * so we use GetEnvironmentVariableA instead.</font></i>
+<a name='L130'><i><font color='green'>   */</font></i>
+<a name='L131'>  <b>char</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>[100] = "1";
+<a name='L132'>  <b>int</b> res = GetEnvironmentVariableA("RUNNING_ON_VALGRIND",
+<a name='L133'>                                    <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, <b>sizeof</b>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>));
+<a name='L134'>  <i><font color='green'>/* value will remain "1" if res == 0 or res &gt;= sizeof(value). The latter</font></i>
+<a name='L135'><i><font color='green'>   * can happen only if the given value is long, in this case it can't be "0".</font></i>
+<a name='L136'><i><font color='green'>   */</font></i>
+<a name='L137'>  <b>if</b> (res &gt; 0 &amp;&amp; !strcmp(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, "0"))
+<a name='L138'>    <b>return</b> 1;
+<a name='L139'><font color='darkred'>#endif</font>
+<a name='L140'>  <b>return</b> 0;
+<a name='L141'><font color='red'>}</font>
+<a name='L142'>
+<a name='L143'><i><font color='green'>/* See the comments in dynamic_annotations.h */</font></i>
+<a name='L144'><b>int</b> <a href='../S/519.html#L456' title='Refered from 456 in Include/dynamic_annotations.h.'>RunningOnValgrind</a>(<b>void</b>) <font color='red'>{</font>
+<a name='L145'>  <b>static</b> <b>volatile</b> <b>int</b> running_on_valgrind = -1;
+<a name='L146'>  <i><font color='green'>/* C doesn't have thread-safe initialization of statics, and we</font></i>
+<a name='L147'><i><font color='green'>     don't want to depend on pthread_once here, so hack it. */</font></i>
+<a name='L148'>  <b>int</b> local_running_on_valgrind = running_on_valgrind;
+<a name='L149'>  <b>if</b> (local_running_on_valgrind == -1)
+<a name='L150'>    running_on_valgrind = local_running_on_valgrind = <a href='../S/3097.html#L117' title='Defined at 117 in Python/dynamic_annotations.c.'>GetRunningOnValgrind</a>();
+<a name='L151'>  <b>return</b> local_running_on_valgrind;
+<a name='L152'><font color='red'>}</font>
+<a name='L153'>
+<a name='L154'><font color='darkred'>#endif</font>  <i><font color='green'>/* DYNAMIC_ANNOTATIONS_ENABLED == 1 */</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L48'>[^]</a><a href='#L144'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

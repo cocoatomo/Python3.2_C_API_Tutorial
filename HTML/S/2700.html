@@ -1,0 +1,1244 @@
+<html>
+<head>
+<title>Modules/readline.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/readline.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L76'>[^]</a><a href='#L1156'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L76' title='Defined at 76.'>parse_and_bind</a>
+<li><a href='#L100' title='Defined at 100.'>read_init_file</a>
+<li><a href='#L126' title='Defined at 126.'>read_history_file</a>
+<li><a href='#L153' title='Defined at 153.'>write_history_file</a>
+<li><a href='#L185' title='Defined at 185.'>set_history_length</a>
+<li><a href='#L204' title='Defined at 204.'>get_history_length</a>
+<li><a href='#L218' title='Defined at 218.'>set_hook</a>
+<li><a href='#L256' title='Defined at 256.'>set_completion_display_matches_hook</a>
+<li><a href='#L283' title='Defined at 283.'>set_startup_hook</a>
+<li><a href='#L300' title='Defined at 300.'>set_pre_input_hook</a>
+<li><a href='#L325' title='Defined at 325.'>get_completion_type</a>
+<li><a href='#L338' title='Defined at 338.'>get_begidx</a>
+<li><a href='#L352' title='Defined at 352.'>get_endidx</a>
+<li><a href='#L366' title='Defined at 366.'>set_completer_delims</a>
+<li><a href='#L392' title='Defined at 392.'>_py_free_history_entry</a>
+<li><a href='#L403' title='Defined at 403.'>_py_free_history_entry</a>
+<li><a href='#L415' title='Defined at 415.'>py_remove_history</a>
+<li><a href='#L444' title='Defined at 444.'>py_replace_history</a>
+<li><a href='#L478' title='Defined at 478.'>py_add_history</a>
+<li><a href='#L497' title='Defined at 497.'>get_completer_delims</a>
+<li><a href='#L510' title='Defined at 510.'>set_completer</a>
+<li><a href='#L524' title='Defined at 524.'>get_completer</a>
+<li><a href='#L544' title='Defined at 544.'>_py_get_history_length</a>
+<li><a href='#L560' title='Defined at 560.'>get_history_item</a>
+<li><a href='#L603' title='Defined at 603.'>get_current_history_length</a>
+<li><a href='#L616' title='Defined at 616.'>get_line_buffer</a>
+<li><a href='#L631' title='Defined at 631.'>py_clear_history</a>
+<li><a href='#L646' title='Defined at 646.'>insert_text</a>
+<li><a href='#L663' title='Defined at 663.'>redisplay</a>
+<li><a href='#L729' title='Defined at 729.'>on_hook</a>
+<li><a href='#L762' title='Defined at 762.'>on_startup_hook</a>
+<li><a href='#L769' title='Defined at 769.'>on_pre_input_hook</a>
+<li><a href='#L780' title='Defined at 780.'>on_completion_display_matches_hook</a>
+<li><a href='#L825' title='Defined at 825.'>on_completion</a>
+<li><a href='#L865' title='Defined at 865.'>flex_complete</a>
+<li><a href='#L884' title='Defined at 884.'>setup_readline</a>
+<li><a href='#L948' title='Defined at 948.'>rlhandler</a>
+<li><a href='#L957' title='Defined at 957.'>readline_until_enter_or_signal</a>
+<li><a href='#L1024' title='Defined at 1024.'>onintr</a>
+<li><a href='#L1031' title='Defined at 1031.'>readline_until_enter_or_signal</a>
+<li><a href='#L1058' title='Defined at 1058.'>call_readline</a>
+<li><a href='#L1156' title='Defined at 1156.'>PyInit_readline</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* This module makes GNU readline available to Python.  It has ideas</font></i>
+<a name='L2'><i><font color='green'> * contributed by Lee Busby, LLNL, and William Magro, Cornell Theory</font></i>
+<a name='L3'><i><font color='green'> * Center.  The completer interface was inspired by Lele Gaifax.  More</font></i>
+<a name='L4'><i><font color='green'> * recently, it was largely rewritten by Guido van Rossum.</font></i>
+<a name='L5'><i><font color='green'> */</font></i>
+<a name='L6'>
+<a name='L7'><i><font color='green'>/* Standard definitions */</font></i>
+<a name='L8'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L9'><font color='darkred'>#include</font> &lt;setjmp.h&gt;
+<a name='L10'><font color='darkred'>#include</font> &lt;signal.h&gt;
+<a name='L11'><font color='darkred'>#include</font> &lt;errno.h&gt;
+<a name='L12'><font color='darkred'>#include</font> &lt;sys/time.h&gt;
+<a name='L13'>
+<a name='L14'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/1552.html' title='Multiple defined in 2 places.'>HAVE_SETLOCALE</a>)
+<a name='L15'><i><font color='green'>/* GNU readline() mistakenly sets the LC_CTYPE locale.</font></i>
+<a name='L16'><i><font color='green'> * This is evil.  Only the user or the app's main() should do this!</font></i>
+<a name='L17'><i><font color='green'> * We must save and restore the locale around the rl_initialize() call.</font></i>
+<a name='L18'><i><font color='green'> */</font></i>
+<a name='L19'><font color='darkred'>#define</font> <a href='../R/4024.html' title='Multiple refered from 3 places.'>SAVE_LOCALE</a>
+<a name='L20'><font color='darkred'>#include</font> &lt;locale.h&gt;
+<a name='L21'><font color='darkred'>#endif</font>
+<a name='L22'>
+<a name='L23'><font color='darkred'>#ifdef</font> <a href='../S/2700.html#L19' title='Defined at 19 in Modules/readline.c.'>SAVE_LOCALE</a>
+<a name='L24'><font color='darkred'>#  define</font> <a href='../R/3952.html' title='Multiple refered from 4 places.'>RESTORE_LOCALE</a>(sl) <font color='red'>{</font> setlocale(LC_CTYPE, sl); free(sl); <font color='red'>}</font>
+<a name='L25'><font color='darkred'>#else</font>
+<a name='L26'><font color='darkred'>#  define</font> <a href='../R/3952.html' title='Multiple refered from 4 places.'>RESTORE_LOCALE</a>(sl)
+<a name='L27'><font color='darkred'>#endif</font>
+<a name='L28'>
+<a name='L29'><i><font color='green'>/* GNU readline definitions */</font></i>
+<a name='L30'><font color='darkred'>#undef</font> HAVE_CONFIG_H <i><font color='green'>/* Else readline/chardefs.h includes strings.h */</font></i>
+<a name='L31'><font color='darkred'>#include</font> &lt;readline/readline.h&gt;
+<a name='L32'><font color='darkred'>#include</font> &lt;readline/history.h&gt;
+<a name='L33'>
+<a name='L34'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_MATCHES
+<a name='L35'><font color='darkred'>#define</font> <a href='../R/6912.html' title='Multiple refered from 3 places.'>completion_matches</a>(x, y) \
+<a name='L36'>    rl_completion_matches((x), ((rl_compentry_func_t *)(y)))
+<a name='L37'><font color='darkred'>#else</font>
+<a name='L38'><font color='darkred'>#if</font> <b>defined</b>(_RL_FUNCTION_TYPEDEF)
+<a name='L39'><b>extern</b> <b>char</b> **<a href='../S/2700.html#L35' title='Defined at 35 in Modules/readline.c.'>completion_matches</a>(<b>char</b> *, rl_compentry_func_t *);
+<a name='L40'><font color='darkred'>#else</font>
+<a name='L41'>
+<a name='L42'><font color='darkred'>#if</font> !<b>defined</b>(__APPLE__)
+<a name='L43'><b>extern</b> <b>char</b> **<a href='../S/2700.html#L35' title='Defined at 35 in Modules/readline.c.'>completion_matches</a>(<b>char</b> *, CPFunction *);
+<a name='L44'><font color='darkred'>#endif</font>
+<a name='L45'><font color='darkred'>#endif</font>
+<a name='L46'><font color='darkred'>#endif</font>
+<a name='L47'>
+<a name='L48'><font color='darkred'>#ifdef</font> __APPLE__
+<a name='L49'><i><font color='green'>/*</font></i>
+<a name='L50'><i><font color='green'> * It is possible to link the readline module to the readline</font></i>
+<a name='L51'><i><font color='green'> * emulation library of editline/libedit.</font></i>
+<a name='L52'><i><font color='green'> *</font></i>
+<a name='L53'><i><font color='green'> * On OSX this emulation library is not 100% API compatible</font></i>
+<a name='L54'><i><font color='green'> * with the "real" readline and cannot be detected at compile-time,</font></i>
+<a name='L55'><i><font color='green'> * hence we use a runtime check to detect if we're using libedit</font></i>
+<a name='L56'><i><font color='green'> *</font></i>
+<a name='L57'><i><font color='green'> * Currently there is one know API incompatibility:</font></i>
+<a name='L58'><i><font color='green'> * - 'get_history' has a 1-based index with GNU readline, and a 0-based</font></i>
+<a name='L59'><i><font color='green'> *   index with libedit's emulation.</font></i>
+<a name='L60'><i><font color='green'> * - Note that replace_history and remove_history use a 0-based index</font></i>
+<a name='L61'><i><font color='green'> *   with both implementation.</font></i>
+<a name='L62'><i><font color='green'> */</font></i>
+<a name='L63'><b>static</b> <b>int</b> using_libedit_emulation = 0;
+<a name='L64'><b>static</b> <b>const</b> <b>char</b> libedit_version_tag[] = "EditLine wrapper";
+<a name='L65'><font color='darkred'>#endif</font> <i><font color='green'>/* __APPLE__ */</font></i>
+<a name='L66'>
+<a name='L67'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_DISPLAY_MATCHES_HOOK
+<a name='L68'><b>static</b> <b>void</b>
+<a name='L69'><a href='../S/2700.html#L780' title='Defined at 780 in Modules/readline.c.'>on_completion_display_matches_hook</a>(<b>char</b> **matches,
+<a name='L70'>                                   <b>int</b> num_matches, <b>int</b> max_length);
+<a name='L71'><font color='darkred'>#endif</font>
+<a name='L72'>
+<a name='L73'><i><font color='green'>/* Exported function to send one line to readline's init file parser */</font></i>
+<a name='L74'>
+<a name='L75'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L76'><a href='../S/2700.html#L679' title='Refered from 679 in Modules/readline.c.'>parse_and_bind</a>(PyObject *self, PyObject *args)
+<a name='L77'><font color='red'>{</font>
+<a name='L78'>    <b>char</b> *s, *copy;
+<a name='L79'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:parse_and_bind", &amp;s))
+<a name='L80'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L81'>    <i><font color='green'>/* Make a copy -- rl_parse_and_bind() modifies its argument */</font></i>
+<a name='L82'>    <i><font color='green'>/* Bernard Herzog */</font></i>
+<a name='L83'>    copy = malloc(1 + strlen(s));
+<a name='L84'>    <b>if</b> (copy == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L85'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L86'>    strcpy(copy, s);
+<a name='L87'>    rl_parse_and_bind(copy);
+<a name='L88'>    free(copy); <i><font color='green'>/* Free the copy */</font></i>
+<a name='L89'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L90'><font color='red'>}</font>
+<a name='L91'>
+<a name='L92'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_parse_and_bind,
+<a name='L93'>"parse_and_bind(string) -&gt; None\n\
+<a name='L94'>Parse and execute single line of a readline init file.");
+<a name='L95'>
+<a name='L96'>
+<a name='L97'><i><font color='green'>/* Exported function to parse a readline init file */</font></i>
+<a name='L98'>
+<a name='L99'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L100'><a href='../S/2700.html#L683' title='Refered from 683 in Modules/readline.c.'>read_init_file</a>(PyObject *self, PyObject *args)
+<a name='L101'><font color='red'>{</font>
+<a name='L102'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *filename_obj = Py_None, *filename_bytes;
+<a name='L103'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|O:read_init_file", &amp;filename_obj))
+<a name='L104'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L105'>    <b>if</b> (filename_obj != Py_None) <font color='red'>{</font>
+<a name='L106'>        <b>if</b> (!<a href='../D/4003.html' title='Multiple defined in 3 places.'>PyUnicode_FSConverter</a>(filename_obj, &amp;filename_bytes))
+<a name='L107'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L108'>        errno = rl_read_init_file(<a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(filename_bytes));
+<a name='L109'>        Py_DECREF(filename_bytes);
+<a name='L110'>    <font color='red'>}</font> <b>else</b>
+<a name='L111'>        errno = rl_read_init_file(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L112'>    <b>if</b> (errno)
+<a name='L113'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L114'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L115'><font color='red'>}</font>
+<a name='L116'>
+<a name='L117'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_read_init_file,
+<a name='L118'>"read_init_file([filename]) -&gt; None\n\
+<a name='L119'>Parse a readline initialization file.\n\
+<a name='L120'>The default filename is the last filename used.");
+<a name='L121'>
+<a name='L122'>
+<a name='L123'><i><font color='green'>/* Exported function to load a readline history file */</font></i>
+<a name='L124'>
+<a name='L125'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L126'><a href='../S/2700.html#L684' title='Refered from 684 in Modules/readline.c.'>read_history_file</a>(PyObject *self, PyObject *args)
+<a name='L127'><font color='red'>{</font>
+<a name='L128'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *filename_obj = Py_None, *filename_bytes;
+<a name='L129'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|O:read_history_file", &amp;filename_obj))
+<a name='L130'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L131'>    <b>if</b> (filename_obj != Py_None) <font color='red'>{</font>
+<a name='L132'>        <b>if</b> (!<a href='../D/4003.html' title='Multiple defined in 3 places.'>PyUnicode_FSConverter</a>(filename_obj, &amp;filename_bytes))
+<a name='L133'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L134'>        errno = read_history(<a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(filename_bytes));
+<a name='L135'>        Py_DECREF(filename_bytes);
+<a name='L136'>    <font color='red'>}</font> <b>else</b>
+<a name='L137'>        errno = read_history(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L138'>    <b>if</b> (errno)
+<a name='L139'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L140'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L141'><font color='red'>}</font>
+<a name='L142'>
+<a name='L143'><b>static</b> <b>int</b> _history_length = -1; <i><font color='green'>/* do not truncate history by default */</font></i>
+<a name='L144'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_read_history_file,
+<a name='L145'>"read_history_file([filename]) -&gt; None\n\
+<a name='L146'>Load a readline history file.\n\
+<a name='L147'>The default filename is ~/.history.");
+<a name='L148'>
+<a name='L149'>
+<a name='L150'><i><font color='green'>/* Exported function to save a readline history file */</font></i>
+<a name='L151'>
+<a name='L152'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L153'><a href='../S/2700.html#L686' title='Refered from 686 in Modules/readline.c.'>write_history_file</a>(PyObject *self, PyObject *args)
+<a name='L154'><font color='red'>{</font>
+<a name='L155'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *filename_obj = Py_None, *filename_bytes;
+<a name='L156'>    <b>char</b> *filename;
+<a name='L157'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|O:write_history_file", &amp;filename_obj))
+<a name='L158'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L159'>    <b>if</b> (filename_obj != Py_None) <font color='red'>{</font>
+<a name='L160'>        <b>if</b> (!<a href='../D/4003.html' title='Multiple defined in 3 places.'>PyUnicode_FSConverter</a>(filename_obj, &amp;filename_bytes))
+<a name='L161'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L162'>        filename = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(filename_bytes);
+<a name='L163'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L164'>        filename_bytes = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L165'>        filename = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L166'>    <font color='red'>}</font>
+<a name='L167'>    errno = write_history(filename);
+<a name='L168'>    <b>if</b> (!errno &amp;&amp; _history_length &gt;= 0)
+<a name='L169'>        history_truncate_file(filename, _history_length);
+<a name='L170'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(filename_bytes);
+<a name='L171'>    <b>if</b> (errno)
+<a name='L172'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L173'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L174'><font color='red'>}</font>
+<a name='L175'>
+<a name='L176'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_write_history_file,
+<a name='L177'>"write_history_file([filename]) -&gt; None\n\
+<a name='L178'>Save a readline history file.\n\
+<a name='L179'>The default filename is ~/.history.");
+<a name='L180'>
+<a name='L181'>
+<a name='L182'><i><font color='green'>/* Set history length */</font></i>
+<a name='L183'>
+<a name='L184'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L185'><a href='../S/2700.html#L692' title='Refered from 692 in Modules/readline.c.'>set_history_length</a>(PyObject *self, PyObject *args)
+<a name='L186'><font color='red'>{</font>
+<a name='L187'>    <b>int</b> length = _history_length;
+<a name='L188'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:set_history_length", &amp;length))
+<a name='L189'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L190'>    _history_length = length;
+<a name='L191'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L192'><font color='red'>}</font>
+<a name='L193'>
+<a name='L194'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(set_history_length_doc,
+<a name='L195'>"set_history_length(length) -&gt; None\n\
+<a name='L196'>set the maximal number of items which will be written to\n\
+<a name='L197'>the history file. A negative length is used to inhibit\n\
+<a name='L198'>history truncation.");
+<a name='L199'>
+<a name='L200'>
+<a name='L201'><i><font color='green'>/* Get history length */</font></i>
+<a name='L202'>
+<a name='L203'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L204'><a href='../S/2700.html#L694' title='Refered from 694 in Modules/readline.c.'>get_history_length</a>(PyObject *self, PyObject *noarg)
+<a name='L205'><font color='red'>{</font>
+<a name='L206'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(_history_length);
+<a name='L207'><font color='red'>}</font>
+<a name='L208'>
+<a name='L209'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(get_history_length_doc,
+<a name='L210'>"get_history_length() -&gt; int\n\
+<a name='L211'>return the maximum number of items that will be written to\n\
+<a name='L212'>the history file.");
+<a name='L213'>
+<a name='L214'>
+<a name='L215'><i><font color='green'>/* Generic hook function setter */</font></i>
+<a name='L216'>
+<a name='L217'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L218'><a href='../R/10209.html' title='Multiple refered from 4 places.'>set_hook</a>(<b>const</b> <b>char</b> *funcname, PyObject **hook_var, PyObject *args)
+<a name='L219'><font color='red'>{</font>
+<a name='L220'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *function = Py_None;
+<a name='L221'>    <b>char</b> buf[80];
+<a name='L222'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf), "|O:set_%.50s", funcname);
+<a name='L223'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, buf, &amp;function))
+<a name='L224'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L225'>    <b>if</b> (function == Py_None) <font color='red'>{</font>
+<a name='L226'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(*hook_var);
+<a name='L227'>        *hook_var = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L228'>    <font color='red'>}</font>
+<a name='L229'>    <b>else</b> <b>if</b> (<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(function)) <font color='red'>{</font>
+<a name='L230'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp = *hook_var;
+<a name='L231'>        Py_INCREF(function);
+<a name='L232'>        *hook_var = function;
+<a name='L233'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tmp);
+<a name='L234'>    <font color='red'>}</font>
+<a name='L235'>    <b>else</b> <font color='red'>{</font>
+<a name='L236'>        <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L237'>                      "set_%.50s(func): argument not callable",
+<a name='L238'>                      funcname);
+<a name='L239'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError, buf);
+<a name='L240'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L241'>    <font color='red'>}</font>
+<a name='L242'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L243'><font color='red'>}</font>
+<a name='L244'>
+<a name='L245'>
+<a name='L246'><i><font color='green'>/* Exported functions to specify hook functions in Python */</font></i>
+<a name='L247'>
+<a name='L248'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *completion_display_matches_hook = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L249'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *startup_hook = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L250'>
+<a name='L251'><font color='darkred'>#ifdef</font> HAVE_RL_PRE_INPUT_HOOK
+<a name='L252'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *pre_input_hook = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L253'><font color='darkred'>#endif</font>
+<a name='L254'>
+<a name='L255'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L256'><a href='../S/2700.html#L711' title='Refered from 711 in Modules/readline.c.'>set_completion_display_matches_hook</a>(PyObject *self, PyObject *args)
+<a name='L257'><font color='red'>{</font>
+<a name='L258'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2700.html#L218' title='Defined at 218 in Modules/readline.c.'>set_hook</a>("completion_display_matches_hook",
+<a name='L259'>                    &amp;completion_display_matches_hook, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L260'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_DISPLAY_MATCHES_HOOK
+<a name='L261'>    <i><font color='green'>/* We cannot set this hook globally, since it replaces the</font></i>
+<a name='L262'><i><font color='green'>       default completion display. */</font></i>
+<a name='L263'>    rl_completion_display_matches_hook =
+<a name='L264'>        completion_display_matches_hook ?
+<a name='L265'><font color='darkred'>#if</font> <b>defined</b>(_RL_FUNCTION_TYPEDEF)
+<a name='L266'>        (rl_compdisp_func_t *)<a href='../S/2700.html#L780' title='Defined at 780 in Modules/readline.c.'>on_completion_display_matches_hook</a> : 0;
+<a name='L267'><font color='darkred'>#else</font>
+<a name='L268'>        (VFunction *)<a href='../S/2700.html#L780' title='Defined at 780 in Modules/readline.c.'>on_completion_display_matches_hook</a> : 0;
+<a name='L269'><font color='darkred'>#endif</font>
+<a name='L270'><font color='darkred'>#endif</font>
+<a name='L271'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L272'>
+<a name='L273'><font color='red'>}</font>
+<a name='L274'>
+<a name='L275'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_set_completion_display_matches_hook,
+<a name='L276'>"set_completion_display_matches_hook([function]) -&gt; None\n\
+<a name='L277'>Set or remove the completion display function.\n\
+<a name='L278'>The function is called as\n\
+<a name='L279'>  function(substitution, [matches], longest_match_length)\n\
+<a name='L280'>once each time matches need to be displayed.");
+<a name='L281'>
+<a name='L282'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L283'><a href='../S/2700.html#L713' title='Refered from 713 in Modules/readline.c.'>set_startup_hook</a>(PyObject *self, PyObject *args)
+<a name='L284'><font color='red'>{</font>
+<a name='L285'>    <b>return</b> <a href='../S/2700.html#L218' title='Defined at 218 in Modules/readline.c.'>set_hook</a>("startup_hook", &amp;startup_hook, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L286'><font color='red'>}</font>
+<a name='L287'>
+<a name='L288'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_set_startup_hook,
+<a name='L289'>"set_startup_hook([function]) -&gt; None\n\
+<a name='L290'>Set or remove the startup_hook function.\n\
+<a name='L291'>The function is called with no arguments just\n\
+<a name='L292'>before readline prints the first prompt.");
+<a name='L293'>
+<a name='L294'>
+<a name='L295'><font color='darkred'>#ifdef</font> HAVE_RL_PRE_INPUT_HOOK
+<a name='L296'>
+<a name='L297'><i><font color='green'>/* Set pre-input hook */</font></i>
+<a name='L298'>
+<a name='L299'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L300'><a href='../S/2700.html#L716' title='Refered from 716 in Modules/readline.c.'>set_pre_input_hook</a>(PyObject *self, PyObject *args)
+<a name='L301'><font color='red'>{</font>
+<a name='L302'>    <b>return</b> <a href='../S/2700.html#L218' title='Defined at 218 in Modules/readline.c.'>set_hook</a>("pre_input_hook", &amp;pre_input_hook, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L303'><font color='red'>}</font>
+<a name='L304'>
+<a name='L305'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_set_pre_input_hook,
+<a name='L306'>"set_pre_input_hook([function]) -&gt; None\n\
+<a name='L307'>Set or remove the pre_input_hook function.\n\
+<a name='L308'>The function is called with no arguments after the first prompt\n\
+<a name='L309'>has been printed and just before readline starts reading input\n\
+<a name='L310'>characters.");
+<a name='L311'>
+<a name='L312'><font color='darkred'>#endif</font>
+<a name='L313'>
+<a name='L314'>
+<a name='L315'><i><font color='green'>/* Exported function to specify a word completer in Python */</font></i>
+<a name='L316'>
+<a name='L317'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *completer = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L318'>
+<a name='L319'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *begidx = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L320'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *endidx = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L321'>
+<a name='L322'>
+<a name='L323'><i><font color='green'>/* Get the completion type for the scope of the tab-completion */</font></i>
+<a name='L324'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L325'><a href='../S/2700.html#L698' title='Refered from 698 in Modules/readline.c.'>get_completion_type</a>(PyObject *self, PyObject *noarg)
+<a name='L326'><font color='red'>{</font>
+<a name='L327'>  <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(rl_completion_type);
+<a name='L328'><font color='red'>}</font>
+<a name='L329'>
+<a name='L330'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_completion_type,
+<a name='L331'>"get_completion_type() -&gt; int\n\
+<a name='L332'>Get the type of completion being attempted.");
+<a name='L333'>
+<a name='L334'>
+<a name='L335'><i><font color='green'>/* Get the beginning index for the scope of the tab-completion */</font></i>
+<a name='L336'>
+<a name='L337'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L338'><a href='../S/2700.html#L700' title='Refered from 700 in Modules/readline.c.'>get_begidx</a>(PyObject *self, PyObject *noarg)
+<a name='L339'><font color='red'>{</font>
+<a name='L340'>    Py_INCREF(begidx);
+<a name='L341'>    <b>return</b> begidx;
+<a name='L342'><font color='red'>}</font>
+<a name='L343'>
+<a name='L344'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_begidx,
+<a name='L345'>"get_begidx() -&gt; int\n\
+<a name='L346'>get the beginning index of the readline tab-completion scope");
+<a name='L347'>
+<a name='L348'>
+<a name='L349'><i><font color='green'>/* Get the ending index for the scope of the tab-completion */</font></i>
+<a name='L350'>
+<a name='L351'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L352'><a href='../S/2700.html#L701' title='Refered from 701 in Modules/readline.c.'>get_endidx</a>(PyObject *self, PyObject *noarg)
+<a name='L353'><font color='red'>{</font>
+<a name='L354'>    Py_INCREF(endidx);
+<a name='L355'>    <b>return</b> endidx;
+<a name='L356'><font color='red'>}</font>
+<a name='L357'>
+<a name='L358'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_endidx,
+<a name='L359'>"get_endidx() -&gt; int\n\
+<a name='L360'>get the ending index of the readline tab-completion scope");
+<a name='L361'>
+<a name='L362'>
+<a name='L363'><i><font color='green'>/* Set the tab-completion word-delimiters that readline uses */</font></i>
+<a name='L364'>
+<a name='L365'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L366'><a href='../S/2700.html#L703' title='Refered from 703 in Modules/readline.c.'>set_completer_delims</a>(PyObject *self, PyObject *args)
+<a name='L367'><font color='red'>{</font>
+<a name='L368'>    <b>char</b> *break_chars;
+<a name='L369'>
+<a name='L370'>    <b>if</b>(!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:set_completer_delims", &amp;break_chars)) <font color='red'>{</font>
+<a name='L371'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L372'>    <font color='red'>}</font>
+<a name='L373'>    free((<b>void</b>*)rl_completer_word_break_characters);
+<a name='L374'>    rl_completer_word_break_characters = <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(break_chars);
+<a name='L375'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L376'><font color='red'>}</font>
+<a name='L377'>
+<a name='L378'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_set_completer_delims,
+<a name='L379'>"set_completer_delims(string) -&gt; None\n\
+<a name='L380'>set the readline word delimiters for tab-completion");
+<a name='L381'>
+<a name='L382'><i><font color='green'>/* _py_free_history_entry: Utility function to free a history entry. */</font></i>
+<a name='L383'>
+<a name='L384'><font color='darkred'>#if</font> <b>defined</b>(RL_READLINE_VERSION) &amp;&amp; RL_READLINE_VERSION &gt;= 0x0500
+<a name='L385'>
+<a name='L386'><i><font color='green'>/* Readline version &gt;= 5.0 introduced a timestamp field into the history entry</font></i>
+<a name='L387'><i><font color='green'>   structure; this needs to be freed to avoid a memory leak.  This version of</font></i>
+<a name='L388'><i><font color='green'>   readline also introduced the handy 'free_history_entry' function, which</font></i>
+<a name='L389'><i><font color='green'>   takes care of the timestamp. */</font></i>
+<a name='L390'>
+<a name='L391'><b>static</b> <b>void</b>
+<a name='L392'><a href='../R/5813.html' title='Multiple refered from 2 places.'>_py_free_history_entry</a>(HIST_ENTRY *entry)
+<a name='L393'><font color='red'>{</font>
+<a name='L394'>    histdata_t data = free_history_entry(entry);
+<a name='L395'>    free(data);
+<a name='L396'><font color='red'>}</font>
+<a name='L397'>
+<a name='L398'><font color='darkred'>#else</font>
+<a name='L399'>
+<a name='L400'><i><font color='green'>/* No free_history_entry function;  free everything manually. */</font></i>
+<a name='L401'>
+<a name='L402'><b>static</b> <b>void</b>
+<a name='L403'><a href='../R/5813.html' title='Multiple refered from 2 places.'>_py_free_history_entry</a>(HIST_ENTRY *entry)
+<a name='L404'><font color='red'>{</font>
+<a name='L405'>    <b>if</b> (entry-&gt;line)
+<a name='L406'>        free((<b>void</b> *)entry-&gt;line);
+<a name='L407'>    <b>if</b> (entry-&gt;data)
+<a name='L408'>        free(entry-&gt;data);
+<a name='L409'>    free(entry);
+<a name='L410'><font color='red'>}</font>
+<a name='L411'>
+<a name='L412'><font color='darkred'>#endif</font>
+<a name='L413'>
+<a name='L414'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L415'><a href='../S/2700.html#L706' title='Refered from 706 in Modules/readline.c.'>py_remove_history</a>(PyObject *self, PyObject *args)
+<a name='L416'><font color='red'>{</font>
+<a name='L417'>    <b>int</b> entry_number;
+<a name='L418'>    HIST_ENTRY *entry;
+<a name='L419'>
+<a name='L420'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:remove_history", &amp;entry_number))
+<a name='L421'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L422'>    <b>if</b> (entry_number &lt; 0) <font color='red'>{</font>
+<a name='L423'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L424'>                        "History index cannot be negative");
+<a name='L425'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L426'>    <font color='red'>}</font>
+<a name='L427'>    entry = remove_history(entry_number);
+<a name='L428'>    <b>if</b> (!entry) <font color='red'>{</font>
+<a name='L429'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L430'>                     "No history item at position %d",
+<a name='L431'>                      entry_number);
+<a name='L432'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L433'>    <font color='red'>}</font>
+<a name='L434'>    <i><font color='green'>/* free memory allocated for the history entry */</font></i>
+<a name='L435'>    <a href='../D/6560.html' title='Multiple defined in 2 places.'>_py_free_history_entry</a>(entry);
+<a name='L436'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L437'><font color='red'>}</font>
+<a name='L438'>
+<a name='L439'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_remove_history,
+<a name='L440'>"remove_history_item(pos) -&gt; None\n\
+<a name='L441'>remove history item given by its position");
+<a name='L442'>
+<a name='L443'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L444'><a href='../S/2700.html#L707' title='Refered from 707 in Modules/readline.c.'>py_replace_history</a>(PyObject *self, PyObject *args)
+<a name='L445'><font color='red'>{</font>
+<a name='L446'>    <b>int</b> entry_number;
+<a name='L447'>    <b>char</b> *line;
+<a name='L448'>    HIST_ENTRY *old_entry;
+<a name='L449'>
+<a name='L450'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "is:replace_history", &amp;entry_number,
+<a name='L451'>                          &amp;line)) <font color='red'>{</font>
+<a name='L452'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L453'>    <font color='red'>}</font>
+<a name='L454'>    <b>if</b> (entry_number &lt; 0) <font color='red'>{</font>
+<a name='L455'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L456'>                        "History index cannot be negative");
+<a name='L457'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L458'>    <font color='red'>}</font>
+<a name='L459'>    old_entry = replace_history_entry(entry_number, line, (<b>void</b> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L460'>    <b>if</b> (!old_entry) <font color='red'>{</font>
+<a name='L461'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L462'>                     "No history item at position %d",
+<a name='L463'>                     entry_number);
+<a name='L464'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L465'>    <font color='red'>}</font>
+<a name='L466'>    <i><font color='green'>/* free memory allocated for the old history entry */</font></i>
+<a name='L467'>    <a href='../D/6560.html' title='Multiple defined in 2 places.'>_py_free_history_entry</a>(old_entry);
+<a name='L468'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L469'><font color='red'>}</font>
+<a name='L470'>
+<a name='L471'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_replace_history,
+<a name='L472'>"replace_history_item(pos, line) -&gt; None\n\
+<a name='L473'>replaces history item given by its position with contents of line");
+<a name='L474'>
+<a name='L475'><i><font color='green'>/* Add a line to the history buffer */</font></i>
+<a name='L476'>
+<a name='L477'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L478'><a href='../S/2700.html#L705' title='Refered from 705 in Modules/readline.c.'>py_add_history</a>(PyObject *self, PyObject *args)
+<a name='L479'><font color='red'>{</font>
+<a name='L480'>    <b>char</b> *line;
+<a name='L481'>
+<a name='L482'>    <b>if</b>(!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:add_history", &amp;line)) <font color='red'>{</font>
+<a name='L483'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L484'>    <font color='red'>}</font>
+<a name='L485'>    add_history(line);
+<a name='L486'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L487'><font color='red'>}</font>
+<a name='L488'>
+<a name='L489'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_add_history,
+<a name='L490'>"add_history(string) -&gt; None\n\
+<a name='L491'>add a line to the history buffer");
+<a name='L492'>
+<a name='L493'>
+<a name='L494'><i><font color='green'>/* Get the tab-completion word-delimiters that readline uses */</font></i>
+<a name='L495'>
+<a name='L496'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L497'><a href='../S/2700.html#L708' title='Refered from 708 in Modules/readline.c.'>get_completer_delims</a>(PyObject *self, PyObject *noarg)
+<a name='L498'><font color='red'>{</font>
+<a name='L499'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(rl_completer_word_break_characters);
+<a name='L500'><font color='red'>}</font>
+<a name='L501'>
+<a name='L502'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_completer_delims,
+<a name='L503'>"get_completer_delims() -&gt; string\n\
+<a name='L504'>get the readline word delimiters for tab-completion");
+<a name='L505'>
+<a name='L506'>
+<a name='L507'><i><font color='green'>/* Set the completer function */</font></i>
+<a name='L508'>
+<a name='L509'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L510'><a href='../S/2700.html#L696' title='Refered from 696 in Modules/readline.c.'>set_completer</a>(PyObject *self, PyObject *args)
+<a name='L511'><font color='red'>{</font>
+<a name='L512'>    <b>return</b> <a href='../S/2700.html#L218' title='Defined at 218 in Modules/readline.c.'>set_hook</a>("completer", &amp;completer, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L513'><font color='red'>}</font>
+<a name='L514'>
+<a name='L515'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_set_completer,
+<a name='L516'>"set_completer([function]) -&gt; None\n\
+<a name='L517'>Set or remove the completer function.\n\
+<a name='L518'>The function is called as function(text, state),\n\
+<a name='L519'>for state in 0, 1, 2, ..., until it returns a non-string.\n\
+<a name='L520'>It should return the next possible completion starting with 'text'.");
+<a name='L521'>
+<a name='L522'>
+<a name='L523'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L524'><a href='../S/2700.html#L697' title='Refered from 697 in Modules/readline.c.'>get_completer</a>(PyObject *self, PyObject *noargs)
+<a name='L525'><font color='red'>{</font>
+<a name='L526'>    <b>if</b> (completer == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L527'>        <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L528'>    <font color='red'>}</font>
+<a name='L529'>    Py_INCREF(completer);
+<a name='L530'>    <b>return</b> completer;
+<a name='L531'><font color='red'>}</font>
+<a name='L532'>
+<a name='L533'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_completer,
+<a name='L534'>"get_completer() -&gt; function\n\
+<a name='L535'>\n\
+<a name='L536'>Returns current completer function.");
+<a name='L537'>
+<a name='L538'><i><font color='green'>/* Private function to get current length of history.  XXX It may be</font></i>
+<a name='L539'><i><font color='green'> * possible to replace this with a direct use of history_length instead,</font></i>
+<a name='L540'><i><font color='green'> * but it's not clear whether BSD's libedit keeps history_length up to date.</font></i>
+<a name='L541'><i><font color='green'> * See issue #8065.*/</font></i>
+<a name='L542'>
+<a name='L543'><b>static</b> <b>int</b>
+<a name='L544'><a href='../R/5814.html' title='Multiple refered from 3 places.'>_py_get_history_length</a>(<b>void</b>)
+<a name='L545'><font color='red'>{</font>
+<a name='L546'>    HISTORY_STATE *hist_st = history_get_history_state();
+<a name='L547'>    <b>int</b> length = hist_st-&gt;length;
+<a name='L548'>    <i><font color='green'>/* the history docs don't say so, but the address of hist_st changes each</font></i>
+<a name='L549'><i><font color='green'>       time history_get_history_state is called which makes me think it's</font></i>
+<a name='L550'><i><font color='green'>       freshly malloc'd memory...  on the other hand, the address of the last</font></i>
+<a name='L551'><i><font color='green'>       line stays the same as long as history isn't extended, so it appears to</font></i>
+<a name='L552'><i><font color='green'>       be malloc'd but managed by the history package... */</font></i>
+<a name='L553'>    free(hist_st);
+<a name='L554'>    <b>return</b> length;
+<a name='L555'><font color='red'>}</font>
+<a name='L556'>
+<a name='L557'><i><font color='green'>/* Exported function to get any element of history */</font></i>
+<a name='L558'>
+<a name='L559'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L560'><a href='../S/2700.html#L688' title='Refered from 688 in Modules/readline.c.'>get_history_item</a>(PyObject *self, PyObject *args)
+<a name='L561'><font color='red'>{</font>
+<a name='L562'>    <b>int</b> idx = 0;
+<a name='L563'>    HIST_ENTRY *hist_ent;
+<a name='L564'>
+<a name='L565'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:index", &amp;idx))
+<a name='L566'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L567'><font color='darkred'>#ifdef</font>  __APPLE__
+<a name='L568'>    <b>if</b> (using_libedit_emulation) <font color='red'>{</font>
+<a name='L569'>        <i><font color='green'>/* Libedit emulation uses 0-based indexes,</font></i>
+<a name='L570'><i><font color='green'>         * the real one uses 1-based indexes,</font></i>
+<a name='L571'><i><font color='green'>         * adjust the index to ensure that Python</font></i>
+<a name='L572'><i><font color='green'>         * code doesn't have to worry about the</font></i>
+<a name='L573'><i><font color='green'>         * difference.</font></i>
+<a name='L574'><i><font color='green'>         */</font></i>
+<a name='L575'>        <b>int</b> length = <a href='../S/2700.html#L544' title='Defined at 544 in Modules/readline.c.'>_py_get_history_length</a>();
+<a name='L576'>        idx --;
+<a name='L577'>
+<a name='L578'>        <i><font color='green'>/*</font></i>
+<a name='L579'><i><font color='green'>         * Apple's readline emulation crashes when</font></i>
+<a name='L580'><i><font color='green'>         * the index is out of range, therefore</font></i>
+<a name='L581'><i><font color='green'>         * test for that and fail gracefully.</font></i>
+<a name='L582'><i><font color='green'>         */</font></i>
+<a name='L583'>        <b>if</b> (idx &lt; 0 || idx &gt;= length) <font color='red'>{</font>
+<a name='L584'>            <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L585'>        <font color='red'>}</font>
+<a name='L586'>    <font color='red'>}</font>
+<a name='L587'><font color='darkred'>#endif</font> <i><font color='green'>/* __APPLE__ */</font></i>
+<a name='L588'>    <b>if</b> ((hist_ent = history_get(idx)))
+<a name='L589'>        <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(hist_ent-&gt;line);
+<a name='L590'>    <b>else</b> <font color='red'>{</font>
+<a name='L591'>        <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L592'>    <font color='red'>}</font>
+<a name='L593'><font color='red'>}</font>
+<a name='L594'>
+<a name='L595'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_history_item,
+<a name='L596'>"get_history_item() -&gt; string\n\
+<a name='L597'>return the current contents of history item at index.");
+<a name='L598'>
+<a name='L599'>
+<a name='L600'><i><font color='green'>/* Exported function to get current length of history */</font></i>
+<a name='L601'>
+<a name='L602'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L603'><a href='../S/2700.html#L690' title='Refered from 690 in Modules/readline.c.'>get_current_history_length</a>(PyObject *self, PyObject *noarg)
+<a name='L604'><font color='red'>{</font>
+<a name='L605'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)<a href='../S/2700.html#L544' title='Defined at 544 in Modules/readline.c.'>_py_get_history_length</a>());
+<a name='L606'><font color='red'>}</font>
+<a name='L607'>
+<a name='L608'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_current_history_length,
+<a name='L609'>"get_current_history_length() -&gt; integer\n\
+<a name='L610'>return the current (not the maximum) length of history.");
+<a name='L611'>
+<a name='L612'>
+<a name='L613'><i><font color='green'>/* Exported function to read the current line buffer */</font></i>
+<a name='L614'>
+<a name='L615'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L616'><a href='../S/2700.html#L680' title='Refered from 680 in Modules/readline.c.'>get_line_buffer</a>(PyObject *self, PyObject *noarg)
+<a name='L617'><font color='red'>{</font>
+<a name='L618'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(rl_line_buffer);
+<a name='L619'><font color='red'>}</font>
+<a name='L620'>
+<a name='L621'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_get_line_buffer,
+<a name='L622'>"get_line_buffer() -&gt; string\n\
+<a name='L623'>return the current contents of the line buffer.");
+<a name='L624'>
+<a name='L625'>
+<a name='L626'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_APPEND_CHARACTER
+<a name='L627'>
+<a name='L628'><i><font color='green'>/* Exported function to clear the current history */</font></i>
+<a name='L629'>
+<a name='L630'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L631'><a href='../S/2700.html#L720' title='Refered from 720 in Modules/readline.c.'>py_clear_history</a>(PyObject *self, PyObject *noarg)
+<a name='L632'><font color='red'>{</font>
+<a name='L633'>    clear_history();
+<a name='L634'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L635'><font color='red'>}</font>
+<a name='L636'>
+<a name='L637'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_clear_history,
+<a name='L638'>"clear_history() -&gt; None\n\
+<a name='L639'>Clear the current readline history.");
+<a name='L640'><font color='darkred'>#endif</font>
+<a name='L641'>
+<a name='L642'>
+<a name='L643'><i><font color='green'>/* Exported function to insert text into the line buffer */</font></i>
+<a name='L644'>
+<a name='L645'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L646'><a href='../S/2700.html#L681' title='Refered from 681 in Modules/readline.c.'>insert_text</a>(PyObject *self, PyObject *args)
+<a name='L647'><font color='red'>{</font>
+<a name='L648'>    <b>char</b> *s;
+<a name='L649'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s:insert_text", &amp;s))
+<a name='L650'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L651'>    rl_insert_text(s);
+<a name='L652'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L653'><font color='red'>}</font>
+<a name='L654'>
+<a name='L655'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_insert_text,
+<a name='L656'>"insert_text(string) -&gt; None\n\
+<a name='L657'>Insert text into the command line.");
+<a name='L658'>
+<a name='L659'>
+<a name='L660'><i><font color='green'>/* Redisplay the line buffer */</font></i>
+<a name='L661'>
+<a name='L662'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L663'><a href='../S/2700.html#L682' title='Refered from 682 in Modules/readline.c.'>redisplay</a>(PyObject *self, PyObject *noarg)
+<a name='L664'><font color='red'>{</font>
+<a name='L665'>    rl_redisplay();
+<a name='L666'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L667'><font color='red'>}</font>
+<a name='L668'>
+<a name='L669'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_redisplay,
+<a name='L670'>"redisplay() -&gt; None\n\
+<a name='L671'>Change what's displayed on the screen to reflect the current\n\
+<a name='L672'>contents of the line buffer.");
+<a name='L673'>
+<a name='L674'>
+<a name='L675'><i><font color='green'>/* Table of functions exported by the module */</font></i>
+<a name='L676'>
+<a name='L677'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> readline_methods[] =
+<a name='L678'><font color='red'>{</font>
+<a name='L679'>    <font color='red'>{</font>"parse_and_bind", <a href='../S/2700.html#L76' title='Defined at 76 in Modules/readline.c.'>parse_and_bind</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_parse_and_bind<font color='red'>}</font>,
+<a name='L680'>    <font color='red'>{</font>"get_line_buffer", <a href='../S/2700.html#L616' title='Defined at 616 in Modules/readline.c.'>get_line_buffer</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_get_line_buffer<font color='red'>}</font>,
+<a name='L681'>    <font color='red'>{</font>"insert_text", <a href='../S/2700.html#L646' title='Defined at 646 in Modules/readline.c.'>insert_text</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_insert_text<font color='red'>}</font>,
+<a name='L682'>    <font color='red'>{</font>"redisplay", <a href='../S/2700.html#L663' title='Defined at 663 in Modules/readline.c.'>redisplay</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_redisplay<font color='red'>}</font>,
+<a name='L683'>    <font color='red'>{</font>"read_init_file", <a href='../S/2700.html#L100' title='Defined at 100 in Modules/readline.c.'>read_init_file</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_read_init_file<font color='red'>}</font>,
+<a name='L684'>    <font color='red'>{</font>"read_history_file", <a href='../S/2700.html#L126' title='Defined at 126 in Modules/readline.c.'>read_history_file</a>,
+<a name='L685'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_read_history_file<font color='red'>}</font>,
+<a name='L686'>    <font color='red'>{</font>"write_history_file", <a href='../S/2700.html#L153' title='Defined at 153 in Modules/readline.c.'>write_history_file</a>,
+<a name='L687'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_write_history_file<font color='red'>}</font>,
+<a name='L688'>    <font color='red'>{</font>"get_history_item", <a href='../S/2700.html#L560' title='Defined at 560 in Modules/readline.c.'>get_history_item</a>,
+<a name='L689'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_get_history_item<font color='red'>}</font>,
+<a name='L690'>    <font color='red'>{</font>"get_current_history_length", (PyCFunction)<a href='../S/2700.html#L603' title='Defined at 603 in Modules/readline.c.'>get_current_history_length</a>,
+<a name='L691'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_get_current_history_length<font color='red'>}</font>,
+<a name='L692'>    <font color='red'>{</font>"set_history_length", <a href='../S/2700.html#L185' title='Defined at 185 in Modules/readline.c.'>set_history_length</a>,
+<a name='L693'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, set_history_length_doc<font color='red'>}</font>,
+<a name='L694'>    <font color='red'>{</font>"get_history_length", <a href='../S/2700.html#L204' title='Defined at 204 in Modules/readline.c.'>get_history_length</a>,
+<a name='L695'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, get_history_length_doc<font color='red'>}</font>,
+<a name='L696'>    <font color='red'>{</font>"set_completer", <a href='../S/2700.html#L510' title='Defined at 510 in Modules/readline.c.'>set_completer</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_set_completer<font color='red'>}</font>,
+<a name='L697'>    <font color='red'>{</font>"get_completer", <a href='../S/2700.html#L524' title='Defined at 524 in Modules/readline.c.'>get_completer</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_get_completer<font color='red'>}</font>,
+<a name='L698'>    <font color='red'>{</font>"get_completion_type", <a href='../S/2700.html#L325' title='Defined at 325 in Modules/readline.c.'>get_completion_type</a>,
+<a name='L699'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_get_completion_type<font color='red'>}</font>,
+<a name='L700'>    <font color='red'>{</font>"get_begidx", <a href='../S/2700.html#L338' title='Defined at 338 in Modules/readline.c.'>get_begidx</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_get_begidx<font color='red'>}</font>,
+<a name='L701'>    <font color='red'>{</font>"get_endidx", <a href='../S/2700.html#L352' title='Defined at 352 in Modules/readline.c.'>get_endidx</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_get_endidx<font color='red'>}</font>,
+<a name='L702'>
+<a name='L703'>    <font color='red'>{</font>"set_completer_delims", <a href='../S/2700.html#L366' title='Defined at 366 in Modules/readline.c.'>set_completer_delims</a>,
+<a name='L704'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_set_completer_delims<font color='red'>}</font>,
+<a name='L705'>    <font color='red'>{</font>"add_history", <a href='../S/2700.html#L478' title='Defined at 478 in Modules/readline.c.'>py_add_history</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_add_history<font color='red'>}</font>,
+<a name='L706'>    <font color='red'>{</font>"remove_history_item", <a href='../S/2700.html#L415' title='Defined at 415 in Modules/readline.c.'>py_remove_history</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_remove_history<font color='red'>}</font>,
+<a name='L707'>    <font color='red'>{</font>"replace_history_item", <a href='../S/2700.html#L444' title='Defined at 444 in Modules/readline.c.'>py_replace_history</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_replace_history<font color='red'>}</font>,
+<a name='L708'>    <font color='red'>{</font>"get_completer_delims", <a href='../S/2700.html#L497' title='Defined at 497 in Modules/readline.c.'>get_completer_delims</a>,
+<a name='L709'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_get_completer_delims<font color='red'>}</font>,
+<a name='L710'>
+<a name='L711'>    <font color='red'>{</font>"set_completion_display_matches_hook", <a href='../S/2700.html#L256' title='Defined at 256 in Modules/readline.c.'>set_completion_display_matches_hook</a>,
+<a name='L712'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_set_completion_display_matches_hook<font color='red'>}</font>,
+<a name='L713'>    <font color='red'>{</font>"set_startup_hook", <a href='../S/2700.html#L283' title='Defined at 283 in Modules/readline.c.'>set_startup_hook</a>,
+<a name='L714'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_set_startup_hook<font color='red'>}</font>,
+<a name='L715'><font color='darkred'>#ifdef</font> HAVE_RL_PRE_INPUT_HOOK
+<a name='L716'>    <font color='red'>{</font>"set_pre_input_hook", <a href='../S/2700.html#L300' title='Defined at 300 in Modules/readline.c.'>set_pre_input_hook</a>,
+<a name='L717'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, doc_set_pre_input_hook<font color='red'>}</font>,
+<a name='L718'><font color='darkred'>#endif</font>
+<a name='L719'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_APPEND_CHARACTER
+<a name='L720'>    <font color='red'>{</font>"clear_history", <a href='../S/2700.html#L631' title='Defined at 631 in Modules/readline.c.'>py_clear_history</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, doc_clear_history<font color='red'>}</font>,
+<a name='L721'><font color='darkred'>#endif</font>
+<a name='L722'>    <font color='red'>{</font>0, 0<font color='red'>}</font>
+<a name='L723'><font color='red'>}</font>;
+<a name='L724'>
+<a name='L725'>
+<a name='L726'><i><font color='green'>/* C function to call the Python hooks. */</font></i>
+<a name='L727'>
+<a name='L728'><b>static</b> <b>int</b>
+<a name='L729'><a href='../R/9370.html' title='Multiple refered from 2 places.'>on_hook</a>(PyObject *func)
+<a name='L730'><font color='red'>{</font>
+<a name='L731'>    <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = 0;
+<a name='L732'>    <b>if</b> (func != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L733'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *r;
+<a name='L734'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L735'>        PyGILState_STATE gilstate = <a href='../S/3134.html#L633' title='Defined at 633 in Python/pystate.c.'>PyGILState_Ensure</a>();
+<a name='L736'><font color='darkred'>#endif</font>
+<a name='L737'>        r = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(func, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L738'>        <b>if</b> (r == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L739'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L740'>        <b>if</b> (r == Py_None)
+<a name='L741'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = 0;
+<a name='L742'>        <b>else</b> <font color='red'>{</font>
+<a name='L743'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(r);
+<a name='L744'>            <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L745'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L746'>        <font color='red'>}</font>
+<a name='L747'>        Py_DECREF(r);
+<a name='L748'>        <b>goto</b> done;
+<a name='L749'>      <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L750'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L751'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r);
+<a name='L752'>      done:
+<a name='L753'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L754'>        <a href='../S/3134.html#L668' title='Defined at 668 in Python/pystate.c.'>PyGILState_Release</a>(gilstate);
+<a name='L755'><font color='darkred'>#endif</font>
+<a name='L756'>        <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L757'>    <font color='red'>}</font>
+<a name='L758'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L759'><font color='red'>}</font>
+<a name='L760'>
+<a name='L761'><b>static</b> <b>int</b>
+<a name='L762'><a href='../S/2700.html#L913' title='Refered from 913 in Modules/readline.c.'>on_startup_hook</a>(<b>void</b>)
+<a name='L763'><font color='red'>{</font>
+<a name='L764'>    <b>return</b> <a href='../S/2700.html#L729' title='Defined at 729 in Modules/readline.c.'>on_hook</a>(startup_hook);
+<a name='L765'><font color='red'>}</font>
+<a name='L766'>
+<a name='L767'><font color='darkred'>#ifdef</font> HAVE_RL_PRE_INPUT_HOOK
+<a name='L768'><b>static</b> <b>int</b>
+<a name='L769'><a href='../S/2700.html#L915' title='Refered from 915 in Modules/readline.c.'>on_pre_input_hook</a>(<b>void</b>)
+<a name='L770'><font color='red'>{</font>
+<a name='L771'>    <b>return</b> <a href='../S/2700.html#L729' title='Defined at 729 in Modules/readline.c.'>on_hook</a>(pre_input_hook);
+<a name='L772'><font color='red'>}</font>
+<a name='L773'><font color='darkred'>#endif</font>
+<a name='L774'>
+<a name='L775'>
+<a name='L776'><i><font color='green'>/* C function to call the Python completion_display_matches */</font></i>
+<a name='L777'>
+<a name='L778'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_DISPLAY_MATCHES_HOOK
+<a name='L779'><b>static</b> <b>void</b>
+<a name='L780'><a href='../R/9369.html' title='Multiple refered from 3 places.'>on_completion_display_matches_hook</a>(<b>char</b> **matches,
+<a name='L781'>                                   <b>int</b> num_matches, <b>int</b> max_length)
+<a name='L782'><font color='red'>{</font>
+<a name='L783'>    <b>int</b> i;
+<a name='L784'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *s=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *r=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L785'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L786'>    PyGILState_STATE gilstate = <a href='../S/3134.html#L633' title='Defined at 633 in Python/pystate.c.'>PyGILState_Ensure</a>();
+<a name='L787'><font color='darkred'>#endif</font>
+<a name='L788'>    m = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(num_matches);
+<a name='L789'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L790'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L791'>    <b>for</b> (i = 0; i &lt; num_matches; i++) <font color='red'>{</font>
+<a name='L792'>        s = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(matches[i+1]);
+<a name='L793'>        <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L794'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L795'>        <b>if</b> (<a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(m, i, s) == -1)
+<a name='L796'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L797'>    <font color='red'>}</font>
+<a name='L798'>    r = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(completion_display_matches_hook,
+<a name='L799'>                              "sOi", matches[0], m, max_length);
+<a name='L800'>
+<a name='L801'>    Py_DECREF(m); m=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L802'>
+<a name='L803'>    <b>if</b> (r == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L804'>        (r != Py_None &amp;&amp; <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(r) == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())) <font color='red'>{</font>
+<a name='L805'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L806'>    <font color='red'>}</font>
+<a name='L807'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r); r=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L808'>
+<a name='L809'>    <b>if</b> (0) <font color='red'>{</font>
+<a name='L810'>    <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L811'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L812'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(m);
+<a name='L813'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r);
+<a name='L814'>    <font color='red'>}</font>
+<a name='L815'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L816'>    <a href='../S/3134.html#L668' title='Defined at 668 in Python/pystate.c.'>PyGILState_Release</a>(gilstate);
+<a name='L817'><font color='darkred'>#endif</font>
+<a name='L818'><font color='red'>}</font>
+<a name='L819'>
+<a name='L820'><font color='darkred'>#endif</font>
+<a name='L821'>
+<a name='L822'><i><font color='green'>/* C function to call the Python completer. */</font></i>
+<a name='L823'>
+<a name='L824'><b>static</b> <b>char</b> *
+<a name='L825'><a href='../S/2700.html#L877' title='Refered from 877 in Modules/readline.c.'>on_completion</a>(<b>const</b> <b>char</b> *text, <b>int</b> state)
+<a name='L826'><font color='red'>{</font>
+<a name='L827'>    <b>char</b> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L828'>    <b>if</b> (completer != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L829'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *r;
+<a name='L830'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L831'>        PyGILState_STATE gilstate = <a href='../S/3134.html#L633' title='Defined at 633 in Python/pystate.c.'>PyGILState_Ensure</a>();
+<a name='L832'><font color='darkred'>#endif</font>
+<a name='L833'>        rl_attempted_completion_over = 1;
+<a name='L834'>        r = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(completer, "si", text, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L835'>        <b>if</b> (r == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L836'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L837'>        <b>if</b> (r == Py_None) <font color='red'>{</font>
+<a name='L838'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L839'>        <font color='red'>}</font>
+<a name='L840'>        <b>else</b> <font color='red'>{</font>
+<a name='L841'>            <b>char</b> *s = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(r);
+<a name='L842'>            <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L843'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L844'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(s);
+<a name='L845'>        <font color='red'>}</font>
+<a name='L846'>        Py_DECREF(r);
+<a name='L847'>        <b>goto</b> done;
+<a name='L848'>      <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L849'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L850'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(r);
+<a name='L851'>      done:
+<a name='L852'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L853'>        <a href='../S/3134.html#L668' title='Defined at 668 in Python/pystate.c.'>PyGILState_Release</a>(gilstate);
+<a name='L854'><font color='darkred'>#endif</font>
+<a name='L855'>        <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L856'>    <font color='red'>}</font>
+<a name='L857'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L858'><font color='red'>}</font>
+<a name='L859'>
+<a name='L860'>
+<a name='L861'><i><font color='green'>/* A more flexible constructor that saves the "begidx" and "endidx"</font></i>
+<a name='L862'><i><font color='green'> * before calling the normal completer */</font></i>
+<a name='L863'>
+<a name='L864'><b>static</b> <b>char</b> **
+<a name='L865'><a href='../S/2700.html#L918' title='Refered from 918 in Modules/readline.c.'>flex_complete</a>(<b>char</b> *text, <b>int</b> start, <b>int</b> end)
+<a name='L866'><font color='red'>{</font>
+<a name='L867'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_APPEND_CHARACTER
+<a name='L868'>    rl_completion_append_character ='\0';
+<a name='L869'><font color='darkred'>#endif</font>
+<a name='L870'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_SUPPRESS_APPEND
+<a name='L871'>    rl_completion_suppress_append = 0;
+<a name='L872'><font color='darkred'>#endif</font>
+<a name='L873'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(begidx);
+<a name='L874'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(endidx);
+<a name='L875'>    begidx = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>) start);
+<a name='L876'>    endidx = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>) end);
+<a name='L877'>    <b>return</b> <a href='../S/2700.html#L35' title='Defined at 35 in Modules/readline.c.'>completion_matches</a>(text, *<a href='../S/2700.html#L825' title='Defined at 825 in Modules/readline.c.'>on_completion</a>);
+<a name='L878'><font color='red'>}</font>
+<a name='L879'>
+<a name='L880'>
+<a name='L881'><i><font color='green'>/* Helper to initialize GNU readline properly. */</font></i>
+<a name='L882'>
+<a name='L883'><b>static</b> <b>void</b>
+<a name='L884'><a href='../S/2700.html#L1178' title='Refered from 1178 in Modules/readline.c.'>setup_readline</a>(<b>void</b>)
+<a name='L885'><font color='red'>{</font>
+<a name='L886'><font color='darkred'>#ifdef</font> <a href='../S/2700.html#L19' title='Defined at 19 in Modules/readline.c.'>SAVE_LOCALE</a>
+<a name='L887'>    <b>char</b> *saved_locale = <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(setlocale(LC_CTYPE, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>));
+<a name='L888'>    <b>if</b> (!saved_locale)
+<a name='L889'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("not enough memory to save locale");
+<a name='L890'><font color='darkred'>#endif</font>
+<a name='L891'>
+<a name='L892'><font color='darkred'>#ifdef</font> __APPLE__
+<a name='L893'>    <i><font color='green'>/* the libedit readline emulation resets key bindings etc </font></i>
+<a name='L894'><i><font color='green'>     * when calling rl_initialize.  So call it upfront</font></i>
+<a name='L895'><i><font color='green'>     */</font></i>
+<a name='L896'>    <b>if</b> (using_libedit_emulation)
+<a name='L897'>        rl_initialize();
+<a name='L898'><font color='darkred'>#endif</font> <i><font color='green'>/* __APPLE__ */</font></i>
+<a name='L899'>
+<a name='L900'>    using_history();
+<a name='L901'>
+<a name='L902'>    rl_readline_name = "python";
+<a name='L903'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/2567.html' title='Multiple defined in 2 places.'>PYOS_OS2</a>) &amp;&amp; <b>defined</b>(<a href='../S/2894.html#L13' title='Defined at 13 in PC/os2emx/pyconfig.h.'>PYCC_GCC</a>)
+<a name='L904'>    <i><font color='green'>/* Allow $if term= in .inputrc to work */</font></i>
+<a name='L905'>    rl_terminal_name = <a href='../S/2906.html#L99' title='Defined at 99 in PC/pyconfig.h.'>getenv</a>("TERM");
+<a name='L906'><font color='darkred'>#endif</font>
+<a name='L907'>    <i><font color='green'>/* Force rebind of TAB to insert-tab */</font></i>
+<a name='L908'>    rl_bind_key('\t', rl_insert);
+<a name='L909'>    <i><font color='green'>/* Bind both ESC-TAB and ESC-ESC to the completion function */</font></i>
+<a name='L910'>    rl_bind_key_in_map ('\t', rl_complete, emacs_meta_keymap);
+<a name='L911'>    rl_bind_key_in_map ('\033', rl_complete, emacs_meta_keymap);
+<a name='L912'>    <i><font color='green'>/* Set our hook functions */</font></i>
+<a name='L913'>    rl_startup_hook = (Function *)<a href='../S/2700.html#L762' title='Defined at 762 in Modules/readline.c.'>on_startup_hook</a>;
+<a name='L914'><font color='darkred'>#ifdef</font> HAVE_RL_PRE_INPUT_HOOK
+<a name='L915'>    rl_pre_input_hook = (Function *)<a href='../S/2700.html#L769' title='Defined at 769 in Modules/readline.c.'>on_pre_input_hook</a>;
+<a name='L916'><font color='darkred'>#endif</font>
+<a name='L917'>    <i><font color='green'>/* Set our completion function */</font></i>
+<a name='L918'>    rl_attempted_completion_function = (CPPFunction *)<a href='../S/2700.html#L865' title='Defined at 865 in Modules/readline.c.'>flex_complete</a>;
+<a name='L919'>    <i><font color='green'>/* Set Python word break characters */</font></i>
+<a name='L920'>    rl_completer_word_break_characters =
+<a name='L921'>        <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(" \t\n`~!@#$%^&amp;*()-=+[{]}\\|;:'\",&lt;&gt;/?");
+<a name='L922'>        <i><font color='green'>/* All nonalphanums except '.' */</font></i>
+<a name='L923'>
+<a name='L924'>    begidx = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0L);
+<a name='L925'>    endidx = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0L);
+<a name='L926'>    <i><font color='green'>/* Initialize (allows .inputrc to override)</font></i>
+<a name='L927'><i><font color='green'>     *</font></i>
+<a name='L928'><i><font color='green'>     * XXX: A bug in the readline-2.2 library causes a memory leak</font></i>
+<a name='L929'><i><font color='green'>     * inside this function.  Nothing we can do about it.</font></i>
+<a name='L930'><i><font color='green'>     */</font></i>
+<a name='L931'><font color='darkred'>#ifdef</font> __APPLE__
+<a name='L932'>    <b>if</b> (using_libedit_emulation)
+<a name='L933'>        rl_read_init_file(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L934'>    <b>else</b>
+<a name='L935'><font color='darkred'>#endif</font> <i><font color='green'>/* __APPLE__ */</font></i>
+<a name='L936'>        rl_initialize();
+<a name='L937'>    
+<a name='L938'>    <a href='../D/4482.html' title='Multiple defined in 2 places.'>RESTORE_LOCALE</a>(saved_locale)
+<a name='L939'><font color='red'>}</font>
+<a name='L940'>
+<a name='L941'><i><font color='green'>/* Wrapper around GNU readline that handles signals differently. */</font></i>
+<a name='L942'>
+<a name='L943'>
+<a name='L944'><font color='darkred'>#if</font> <b>defined</b>(HAVE_RL_CALLBACK) &amp;&amp; <b>defined</b>(<a href='../D/1550.html' title='Multiple defined in 2 places.'>HAVE_SELECT</a>)
+<a name='L945'>
+<a name='L946'><b>static</b>  <b>char</b> *completed_input_string;
+<a name='L947'><b>static</b> <b>void</b>
+<a name='L948'><a href='../S/2700.html#L967' title='Refered from 967 in Modules/readline.c.'>rlhandler</a>(<b>char</b> *text)
+<a name='L949'><font color='red'>{</font>
+<a name='L950'>    completed_input_string = text;
+<a name='L951'>    rl_callback_handler_remove();
+<a name='L952'><font color='red'>}</font>
+<a name='L953'>
+<a name='L954'><b>extern</b> <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a>* _PyOS_ReadlineTState;
+<a name='L955'>
+<a name='L956'><b>static</b> <b>char</b> *
+<a name='L957'><a href='../S/2700.html#L1079' title='Refered from 1079 in Modules/readline.c.'>readline_until_enter_or_signal</a>(<b>char</b> *prompt, <b>int</b> *signal)
+<a name='L958'><font color='red'>{</font>
+<a name='L959'>    <b>char</b> * not_done_reading = "";
+<a name='L960'>    fd_set selectset;
+<a name='L961'>
+<a name='L962'>    *signal = 0;
+<a name='L963'><font color='darkred'>#ifdef</font> HAVE_RL_CATCH_SIGNAL
+<a name='L964'>    rl_catch_signals = 0;
+<a name='L965'><font color='darkred'>#endif</font>
+<a name='L966'>
+<a name='L967'>    rl_callback_handler_install (prompt, <a href='../S/2700.html#L948' title='Defined at 948 in Modules/readline.c.'>rlhandler</a>);
+<a name='L968'>    FD_ZERO(&amp;selectset);
+<a name='L969'>
+<a name='L970'>    completed_input_string = not_done_reading;
+<a name='L971'>
+<a name='L972'>    <b>while</b> (completed_input_string == not_done_reading) <font color='red'>{</font>
+<a name='L973'>        <b>int</b> has_input = 0;
+<a name='L974'>
+<a name='L975'>        <b>while</b> (!has_input)
+<a name='L976'>        <font color='red'>{</font>               <b>struct</b> timeval timeout = <font color='red'>{</font>0, 100000<font color='red'>}</font>; <i><font color='green'>/* 0.1 seconds */</font></i>
+<a name='L977'>
+<a name='L978'>            <i><font color='green'>/* [Bug #1552726] Only limit the pause if an input hook has been</font></i>
+<a name='L979'><i><font color='green'>               defined.  */</font></i>
+<a name='L980'>            <b>struct</b> timeval *timeoutp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L981'>            <b>if</b> (PyOS_InputHook)
+<a name='L982'>                timeoutp = &amp;timeout;
+<a name='L983'>            FD_SET(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(rl_instream), &amp;selectset);
+<a name='L984'>            <i><font color='green'>/* select resets selectset if no input was available */</font></i>
+<a name='L985'>            has_input = select(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>(rl_instream) + 1, &amp;selectset,
+<a name='L986'>                               <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, timeoutp);
+<a name='L987'>            <b>if</b>(PyOS_InputHook) PyOS_InputHook();
+<a name='L988'>        <font color='red'>}</font>
+<a name='L989'>
+<a name='L990'>        <b>if</b>(has_input &gt; 0) <font color='red'>{</font>
+<a name='L991'>            rl_callback_read_char();
+<a name='L992'>        <font color='red'>}</font>
+<a name='L993'>        <b>else</b> <b>if</b> (errno == EINTR) <font color='red'>{</font>
+<a name='L994'>            <b>int</b> s;
+<a name='L995'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L996'>            <a href='../S/3091.html#L435' title='Defined at 435 in Python/ceval.c.'>PyEval_RestoreThread</a>(_PyOS_ReadlineTState);
+<a name='L997'><font color='darkred'>#endif</font>
+<a name='L998'>            s = <a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>();
+<a name='L999'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L1000'>            <a href='../S/3091.html#L422' title='Defined at 422 in Python/ceval.c.'>PyEval_SaveThread</a>();
+<a name='L1001'><font color='darkred'>#endif</font>
+<a name='L1002'>            <b>if</b> (s &lt; 0) <font color='red'>{</font>
+<a name='L1003'>                rl_free_line_state();
+<a name='L1004'>                rl_cleanup_after_signal();
+<a name='L1005'>                rl_callback_handler_remove();
+<a name='L1006'>                *signal = 1;
+<a name='L1007'>                completed_input_string = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1008'>            <font color='red'>}</font>
+<a name='L1009'>        <font color='red'>}</font>
+<a name='L1010'>    <font color='red'>}</font>
+<a name='L1011'>
+<a name='L1012'>    <b>return</b> completed_input_string;
+<a name='L1013'><font color='red'>}</font>
+<a name='L1014'>
+<a name='L1015'>
+<a name='L1016'><font color='darkred'>#else</font>
+<a name='L1017'>
+<a name='L1018'><i><font color='green'>/* Interrupt handler */</font></i>
+<a name='L1019'>
+<a name='L1020'><b>static</b> jmp_buf jbuf;
+<a name='L1021'>
+<a name='L1022'><i><font color='green'>/* ARGSUSED */</font></i>
+<a name='L1023'><b>static</b> <b>void</b>
+<a name='L1024'><a href='../S/2700.html#L1038' title='Refered from 1038 in Modules/readline.c.'>onintr</a>(<b>int</b> sig)
+<a name='L1025'><font color='red'>{</font>
+<a name='L1026'>    longjmp(jbuf, 1);
+<a name='L1027'><font color='red'>}</font>
+<a name='L1028'>
+<a name='L1029'>
+<a name='L1030'><b>static</b> <b>char</b> *
+<a name='L1031'><a href='../S/2700.html#L1079' title='Refered from 1079 in Modules/readline.c.'>readline_until_enter_or_signal</a>(<b>char</b> *prompt, <b>int</b> *signal)
+<a name='L1032'><font color='red'>{</font>
+<a name='L1033'>    PyOS_sighandler_t old_inthandler;
+<a name='L1034'>    <b>char</b> *p;
+<a name='L1035'>
+<a name='L1036'>    *signal = 0;
+<a name='L1037'>
+<a name='L1038'>    old_inthandler = <a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(SIGINT, <a href='../S/2700.html#L1024' title='Defined at 1024 in Modules/readline.c.'>onintr</a>);
+<a name='L1039'>    <b>if</b> (setjmp(jbuf)) <font color='red'>{</font>
+<a name='L1040'><font color='darkred'>#ifdef</font> HAVE_SIGRELSE
+<a name='L1041'>        <i><font color='green'>/* This seems necessary on SunOS 4.1 (Rasmus Hahn) */</font></i>
+<a name='L1042'>        sigrelse(SIGINT);
+<a name='L1043'><font color='darkred'>#endif</font>
+<a name='L1044'>        <a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(SIGINT, old_inthandler);
+<a name='L1045'>        *signal = 1;
+<a name='L1046'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1047'>    <font color='red'>}</font>
+<a name='L1048'>    rl_event_hook = PyOS_InputHook;
+<a name='L1049'>    p = readline(prompt);
+<a name='L1050'>    <a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(SIGINT, old_inthandler);
+<a name='L1051'>
+<a name='L1052'>    <b>return</b> p;
+<a name='L1053'><font color='red'>}</font>
+<a name='L1054'><font color='darkred'>#endif</font> <i><font color='green'>/*defined(HAVE_RL_CALLBACK) &amp;&amp; defined(HAVE_SELECT) */</font></i>
+<a name='L1055'>
+<a name='L1056'>
+<a name='L1057'><b>static</b> <b>char</b> *
+<a name='L1058'><a href='../S/2700.html#L1177' title='Refered from 1177 in Modules/readline.c.'>call_readline</a>(FILE *sys_stdin, FILE *sys_stdout, <b>char</b> *prompt)
+<a name='L1059'><font color='red'>{</font>
+<a name='L1060'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> n;
+<a name='L1061'>    <b>char</b> *p, *q;
+<a name='L1062'>    <b>int</b> signal;
+<a name='L1063'>
+<a name='L1064'><font color='darkred'>#ifdef</font> <a href='../S/2700.html#L19' title='Defined at 19 in Modules/readline.c.'>SAVE_LOCALE</a>
+<a name='L1065'>    <b>char</b> *saved_locale = <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(setlocale(LC_CTYPE, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>));
+<a name='L1066'>    <b>if</b> (!saved_locale)
+<a name='L1067'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("not enough memory to save locale");
+<a name='L1068'>    setlocale(LC_CTYPE, "");
+<a name='L1069'><font color='darkred'>#endif</font>
+<a name='L1070'>
+<a name='L1071'>    <b>if</b> (sys_stdin != rl_instream || sys_stdout != rl_outstream) <font color='red'>{</font>
+<a name='L1072'>        rl_instream = sys_stdin;
+<a name='L1073'>        rl_outstream = sys_stdout;
+<a name='L1074'><font color='darkred'>#ifdef</font> HAVE_RL_COMPLETION_APPEND_CHARACTER
+<a name='L1075'>        rl_prep_terminal (1);
+<a name='L1076'><font color='darkred'>#endif</font>
+<a name='L1077'>    <font color='red'>}</font>
+<a name='L1078'>
+<a name='L1079'>    p = <a href='../D/10825.html' title='Multiple defined in 2 places.'>readline_until_enter_or_signal</a>(prompt, &amp;signal);
+<a name='L1080'>
+<a name='L1081'>    <i><font color='green'>/* we got an interrupt signal */</font></i>
+<a name='L1082'>    <b>if</b> (signal) <font color='red'>{</font>
+<a name='L1083'>        <a href='../D/4482.html' title='Multiple defined in 2 places.'>RESTORE_LOCALE</a>(saved_locale)
+<a name='L1084'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1085'>    <font color='red'>}</font>
+<a name='L1086'>
+<a name='L1087'>    <i><font color='green'>/* We got an EOF, return a empty string. */</font></i>
+<a name='L1088'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1089'>        p = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(1);
+<a name='L1090'>        <b>if</b> (p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1091'>            *p = '\0';
+<a name='L1092'>        <a href='../D/4482.html' title='Multiple defined in 2 places.'>RESTORE_LOCALE</a>(saved_locale)
+<a name='L1093'>        <b>return</b> p;
+<a name='L1094'>    <font color='red'>}</font>
+<a name='L1095'>
+<a name='L1096'>    <i><font color='green'>/* we have a valid line */</font></i>
+<a name='L1097'>    n = strlen(p);
+<a name='L1098'>    <b>if</b> (n &gt; 0) <font color='red'>{</font>
+<a name='L1099'>        <b>const</b> <b>char</b> *line;
+<a name='L1100'>        <b>int</b> length = <a href='../S/2700.html#L544' title='Defined at 544 in Modules/readline.c.'>_py_get_history_length</a>();
+<a name='L1101'>        <b>if</b> (length &gt; 0)
+<a name='L1102'><font color='darkred'>#ifdef</font> __APPLE__
+<a name='L1103'>            <b>if</b> (using_libedit_emulation) <font color='red'>{</font>
+<a name='L1104'>                <i><font color='green'>/*</font></i>
+<a name='L1105'><i><font color='green'>                 * Libedit's emulation uses 0-based indexes,</font></i>
+<a name='L1106'><i><font color='green'>                 * the real readline uses 1-based indexes.</font></i>
+<a name='L1107'><i><font color='green'>                 */</font></i>
+<a name='L1108'>                line = (<b>const</b> <b>char</b> *)history_get(length - 1)-&gt;line;
+<a name='L1109'>            <font color='red'>}</font> <b>else</b>
+<a name='L1110'><font color='darkred'>#endif</font> <i><font color='green'>/* __APPLE__ */</font></i>
+<a name='L1111'>            line = (<b>const</b> <b>char</b> *)history_get(length)-&gt;line;
+<a name='L1112'>        <b>else</b>
+<a name='L1113'>            line = "";
+<a name='L1114'>        <b>if</b> (strcmp(p, line))
+<a name='L1115'>            add_history(p);
+<a name='L1116'>    <font color='red'>}</font>
+<a name='L1117'>    <i><font color='green'>/* Copy the malloc'ed buffer into a PyMem_Malloc'ed one and</font></i>
+<a name='L1118'><i><font color='green'>       release the original. */</font></i>
+<a name='L1119'>    q = p;
+<a name='L1120'>    p = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(n+2);
+<a name='L1121'>    <b>if</b> (p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1122'>        strncpy(p, q, n);
+<a name='L1123'>        p[n] = '\n';
+<a name='L1124'>        p[n+1] = '\0';
+<a name='L1125'>    <font color='red'>}</font>
+<a name='L1126'>    free(q);
+<a name='L1127'>    <a href='../D/4482.html' title='Multiple defined in 2 places.'>RESTORE_LOCALE</a>(saved_locale)
+<a name='L1128'>    <b>return</b> p;
+<a name='L1129'><font color='red'>}</font>
+<a name='L1130'>
+<a name='L1131'>
+<a name='L1132'><i><font color='green'>/* Initialize the module */</font></i>
+<a name='L1133'>
+<a name='L1134'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_module,
+<a name='L1135'>"Importing this module enables command line editing using GNU readline.");
+<a name='L1136'>
+<a name='L1137'><font color='darkred'>#ifdef</font> __APPLE__
+<a name='L1138'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(doc_module_le,
+<a name='L1139'>"Importing this module enables command line editing using libedit readline.");
+<a name='L1140'><font color='darkred'>#endif</font> <i><font color='green'>/* __APPLE__ */</font></i>
+<a name='L1141'>
+<a name='L1142'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> readlinemodule = <font color='red'>{</font>
+<a name='L1143'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L1144'>    "readline",
+<a name='L1145'>    doc_module,
+<a name='L1146'>    -1,
+<a name='L1147'>    readline_methods,
+<a name='L1148'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1149'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1150'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1151'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L1152'><font color='red'>}</font>;
+<a name='L1153'>
+<a name='L1154'>
+<a name='L1155'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L1156'>PyInit_readline(<b>void</b>)
+<a name='L1157'><font color='red'>{</font>
+<a name='L1158'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m;
+<a name='L1159'>
+<a name='L1160'><font color='darkred'>#ifdef</font> __APPLE__
+<a name='L1161'>    <b>if</b> (strncmp(rl_library_version, libedit_version_tag, strlen(libedit_version_tag)) == 0) <font color='red'>{</font>
+<a name='L1162'>        using_libedit_emulation = 1;
+<a name='L1163'>    <font color='red'>}</font>
+<a name='L1164'>
+<a name='L1165'>    <b>if</b> (using_libedit_emulation)
+<a name='L1166'>        readlinemodule.m_doc = doc_module_le;
+<a name='L1167'>
+<a name='L1168'><font color='darkred'>#endif</font> <i><font color='green'>/* __APPLE__ */</font></i>
+<a name='L1169'>
+<a name='L1170'>    m = PyModule_Create(&amp;readlinemodule);
+<a name='L1171'>
+<a name='L1172'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1173'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1174'>
+<a name='L1175'>
+<a name='L1176'>
+<a name='L1177'>    PyOS_ReadlineFunctionPointer = <a href='../S/2700.html#L1058' title='Defined at 1058 in Modules/readline.c.'>call_readline</a>;
+<a name='L1178'>    <a href='../S/2700.html#L884' title='Defined at 884 in Modules/readline.c.'>setup_readline</a>();
+<a name='L1179'>    <b>return</b> m;
+<a name='L1180'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L76'>[^]</a><a href='#L1156'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

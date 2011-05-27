@@ -1,0 +1,1005 @@
+<html>
+<head>
+<title>Objects/weakrefobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/weakrefobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L10'>[^]</a><a href='#L872'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L10' title='Defined at 10.'>_PyWeakref_GetWeakrefCount</a>
+<li><a href='#L23' title='Defined at 23.'>init_weakref</a>
+<li><a href='#L32' title='Defined at 32.'>new_weakref</a>
+<li><a href='#L51' title='Defined at 51.'>clear_weakref</a>
+<li><a href='#L90' title='Defined at 90.'>_PyWeakref_ClearRef</a>
+<li><a href='#L104' title='Defined at 104.'>weakref_dealloc</a>
+<li><a href='#L113' title='Defined at 113.'>gc_traverse</a>
+<li><a href='#L121' title='Defined at 121.'>gc_clear</a>
+<li><a href='#L129' title='Defined at 129.'>weakref_call</a>
+<li><a href='#L143' title='Defined at 143.'>weakref_hash</a>
+<li><a href='#L157' title='Defined at 157.'>weakref_repr</a>
+<li><a href='#L188' title='Defined at 188.'>weakref_richcompare</a>
+<li><a href='#L212' title='Defined at 212.'>get_basic_refs</a>
+<li><a href='#L237' title='Defined at 237.'>insert_after</a>
+<li><a href='#L250' title='Defined at 250.'>insert_head</a>
+<li><a href='#L262' title='Defined at 262.'>parse_weakref_init_args</a>
+<li><a href='#L270' title='Defined at 270.'>weakref___new__</a>
+<li><a href='#L324' title='Defined at 324.'>weakref___init__</a>
+<li><a href='#L381' title='Defined at 381.'>proxy_checkref</a>
+<li><a href='#L448' title='Defined at 448.'>WRAP_BINARY</a>
+<li><a href='#L465' title='Defined at 465.'>proxy_setattr</a>
+<li><a href='#L473' title='Defined at 473.'>proxy_richcompare</a>
+<li><a href='#L481' title='Defined at 481.'>WRAP_BINARY</a>
+<li><a href='#L524' title='Defined at 524.'>proxy_dealloc</a>
+<li><a href='#L535' title='Defined at 535.'>proxy_contains</a>
+<li><a href='#L546' title='Defined at 546.'>proxy_length</a>
+<li><a href='#L553' title='Defined at 553.'>WRAP_BINARY</a>
+<li><a href='#L570' title='Defined at 570.'>proxy_iter</a>
+<li><a href='#L578' title='Defined at 578.'>proxy_iternext</a>
+<li><a href='#L719' title='Defined at 719.'>PyWeakref_NewRef</a>
+<li><a href='#L778' title='Defined at 778.'>PyWeakref_NewProxy</a>
+<li><a href='#L842' title='Defined at 842.'>PyWeakref_GetObject</a>
+<li><a href='#L855' title='Defined at 855.'>handle_callback</a>
+<li><a href='#L872' title='Defined at 872.'>PyObject_ClearWeakRefs</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L2'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L3'>
+<a name='L4'>
+<a name='L5'><font color='darkred'>#define</font> <a href='../R/1262.html' title='Multiple refered from 7 places.'>GET_WEAKREFS_LISTPTR</a>(o) \
+<a name='L6'>        ((<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> **) <a href='../S/545.html#L332' title='Defined at 332 in Include/objimpl.h.'>PyObject_GET_WEAKREFS_LISTPTR</a>(o))
+<a name='L7'>
+<a name='L8'>
+<a name='L9'><a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L10'><a href='../R/5539.html' title='Multiple refered from 3 places.'>_PyWeakref_GetWeakrefCount</a>(PyWeakReference *head)
+<a name='L11'><font color='red'>{</font>
+<a name='L12'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count = 0;
+<a name='L13'>
+<a name='L14'>    <b>while</b> (head != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L15'>        ++count;
+<a name='L16'>        head = head-&gt;wr_next;
+<a name='L17'>    <font color='red'>}</font>
+<a name='L18'>    <b>return</b> count;
+<a name='L19'><font color='red'>}</font>
+<a name='L20'>
+<a name='L21'>
+<a name='L22'><b>static</b> <b>void</b>
+<a name='L23'><a href='../R/8392.html' title='Multiple refered from 4 places.'>init_weakref</a>(PyWeakReference *self, PyObject *ob, PyObject *callback)
+<a name='L24'><font color='red'>{</font>
+<a name='L25'>    self-&gt;<a href='../S/2664.html#L5830' title='Defined at 5830 in Modules/expat/xmlparse.c.'>hash</a> = -1;
+<a name='L26'>    self-&gt;wr_object = ob;
+<a name='L27'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L28'>    self-&gt;wr_callback = <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>;
+<a name='L29'><font color='red'>}</font>
+<a name='L30'>
+<a name='L31'><b>static</b> <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *
+<a name='L32'><a href='../R/9213.html' title='Multiple refered from 2 places.'>new_weakref</a>(PyObject *ob, PyObject *callback)
+<a name='L33'><font color='red'>{</font>
+<a name='L34'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L35'>
+<a name='L36'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PyObject_GC_New(<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a>, &amp;_PyWeakref_RefType);
+<a name='L37'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L38'>        <a href='../S/2830.html#L23' title='Defined at 23 in Objects/weakrefobject.c.'>init_weakref</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, ob, <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L39'>        <a href='../D/3618.html' title='Multiple defined in 2 places.'>PyObject_GC_Track</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L40'>    <font color='red'>}</font>
+<a name='L41'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L42'><font color='red'>}</font>
+<a name='L43'>
+<a name='L44'>
+<a name='L45'><i><font color='green'>/* This function clears the passed-in reference and removes it from the</font></i>
+<a name='L46'><i><font color='green'> * list of weak references for the referent.  This is the only code that</font></i>
+<a name='L47'><i><font color='green'> * removes an item from the doubly-linked list of weak references for an</font></i>
+<a name='L48'><i><font color='green'> * object; it is also responsible for clearing the callback slot.</font></i>
+<a name='L49'><i><font color='green'> */</font></i>
+<a name='L50'><b>static</b> <b>void</b>
+<a name='L51'><a href='../R/6675.html' title='Multiple refered from 8 places.'>clear_weakref</a>(PyWeakReference *self)
+<a name='L52'><font color='red'>{</font>
+<a name='L53'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = self-&gt;wr_callback;
+<a name='L54'>
+<a name='L55'>    <b>if</b> (PyWeakref_GET_OBJECT(self) != Py_None) <font color='red'>{</font>
+<a name='L56'>        <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> **list = <a href='../D/1404.html' title='Multiple defined in 2 places.'>GET_WEAKREFS_LISTPTR</a>(
+<a name='L57'>            PyWeakref_GET_OBJECT(self));
+<a name='L58'>
+<a name='L59'>        <b>if</b> (*list == self)
+<a name='L60'>            <i><font color='green'>/* If 'self' is the end of the list (and thus self-&gt;wr_next == NULL)</font></i>
+<a name='L61'><i><font color='green'>               then the weakref list itself (and thus the value of *list) will</font></i>
+<a name='L62'><i><font color='green'>               end up being set to NULL. */</font></i>
+<a name='L63'>            *list = self-&gt;wr_next;
+<a name='L64'>        self-&gt;wr_object = Py_None;
+<a name='L65'>        <b>if</b> (self-&gt;wr_prev != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L66'>            self-&gt;wr_prev-&gt;wr_next = self-&gt;wr_next;
+<a name='L67'>        <b>if</b> (self-&gt;wr_next != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L68'>            self-&gt;wr_next-&gt;wr_prev = self-&gt;wr_prev;
+<a name='L69'>        self-&gt;wr_prev = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L70'>        self-&gt;wr_next = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L71'>    <font color='red'>}</font>
+<a name='L72'>    <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L73'>        Py_DECREF(<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L74'>        self-&gt;wr_callback = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L75'>    <font color='red'>}</font>
+<a name='L76'><font color='red'>}</font>
+<a name='L77'>
+<a name='L78'><i><font color='green'>/* Cyclic gc uses this to *just* clear the passed-in reference, leaving</font></i>
+<a name='L79'><i><font color='green'> * the callback intact and uncalled.  It must be possible to call self's</font></i>
+<a name='L80'><i><font color='green'> * tp_dealloc() after calling this, so self has to be left in a sane enough</font></i>
+<a name='L81'><i><font color='green'> * state for that to work.  We expect tp_dealloc to decref the callback</font></i>
+<a name='L82'><i><font color='green'> * then.  The reason for not letting clear_weakref() decref the callback</font></i>
+<a name='L83'><i><font color='green'> * right now is that if the callback goes away, that may in turn trigger</font></i>
+<a name='L84'><i><font color='green'> * another callback (if a weak reference to the callback exists) -- running</font></i>
+<a name='L85'><i><font color='green'> * arbitrary Python code in the middle of gc is a disaster.  The convolution</font></i>
+<a name='L86'><i><font color='green'> * here allows gc to delay triggering such callbacks until the world is in</font></i>
+<a name='L87'><i><font color='green'> * a sane state again.</font></i>
+<a name='L88'><i><font color='green'> */</font></i>
+<a name='L89'><b>void</b>
+<a name='L90'><a href='../R/5538.html' title='Multiple refered from 2 places.'>_PyWeakref_ClearRef</a>(PyWeakReference *self)
+<a name='L91'><font color='red'>{</font>
+<a name='L92'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>;
+<a name='L93'>
+<a name='L94'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L95'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/589.html#L57' title='Defined at 57 in Include/weakrefobject.h.'>PyWeakref_Check</a>(self));
+<a name='L96'>    <i><font color='green'>/* Preserve and restore the callback around clear_weakref. */</font></i>
+<a name='L97'>    <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = self-&gt;wr_callback;
+<a name='L98'>    self-&gt;wr_callback = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L99'>    <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>(self);
+<a name='L100'>    self-&gt;wr_callback = <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>;
+<a name='L101'><font color='red'>}</font>
+<a name='L102'>
+<a name='L103'><b>static</b> <b>void</b>
+<a name='L104'><a href='../S/2830.html#L341' title='Refered from 341 in Objects/weakrefobject.c.'>weakref_dealloc</a>(PyObject *self)
+<a name='L105'><font color='red'>{</font>
+<a name='L106'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(self);
+<a name='L107'>    <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>((<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *) self);
+<a name='L108'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free(self);
+<a name='L109'><font color='red'>}</font>
+<a name='L110'>
+<a name='L111'>
+<a name='L112'><b>static</b> <b>int</b>
+<a name='L113'><a href='../R/7999.html' title='Multiple refered from 3 places.'>gc_traverse</a>(PyWeakReference *self, visitproc visit, <b>void</b> *arg)
+<a name='L114'><font color='red'>{</font>
+<a name='L115'>    Py_VISIT(self-&gt;wr_callback);
+<a name='L116'>    <b>return</b> 0;
+<a name='L117'><font color='red'>}</font>
+<a name='L118'>
+<a name='L119'>
+<a name='L120'><b>static</b> <b>int</b>
+<a name='L121'><a href='../R/7977.html' title='Multiple refered from 3 places.'>gc_clear</a>(PyWeakReference *self)
+<a name='L122'><font color='red'>{</font>
+<a name='L123'>    <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>(self);
+<a name='L124'>    <b>return</b> 0;
+<a name='L125'><font color='red'>}</font>
+<a name='L126'>
+<a name='L127'>
+<a name='L128'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L129'><a href='../S/2830.html#L351' title='Refered from 351 in Objects/weakrefobject.c.'>weakref_call</a>(PyWeakReference *self, PyObject *args, PyObject *kw)
+<a name='L130'><font color='red'>{</font>
+<a name='L131'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L132'>
+<a name='L133'>    <b>if</b> (<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kw, ":__call__", kwlist)) <font color='red'>{</font>
+<a name='L134'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/500.html#L6' title='Defined at 6 in Include/asdl.h.'>object</a> = PyWeakref_GET_OBJECT(self);
+<a name='L135'>        Py_INCREF(<a href='../S/500.html#L6' title='Defined at 6 in Include/asdl.h.'>object</a>);
+<a name='L136'>        <b>return</b> (<a href='../S/500.html#L6' title='Defined at 6 in Include/asdl.h.'>object</a>);
+<a name='L137'>    <font color='red'>}</font>
+<a name='L138'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L139'><font color='red'>}</font>
+<a name='L140'>
+<a name='L141'>
+<a name='L142'><b>static</b> <a href='../S/565.html#L186' title='Defined at 186 in Include/pyport.h.'>Py_hash_t</a>
+<a name='L143'><a href='../S/2830.html#L350' title='Refered from 350 in Objects/weakrefobject.c.'>weakref_hash</a>(PyWeakReference *self)
+<a name='L144'><font color='red'>{</font>
+<a name='L145'>    <b>if</b> (self-&gt;<a href='../S/2664.html#L5830' title='Defined at 5830 in Modules/expat/xmlparse.c.'>hash</a> != -1)
+<a name='L146'>        <b>return</b> self-&gt;<a href='../S/2664.html#L5830' title='Defined at 5830 in Modules/expat/xmlparse.c.'>hash</a>;
+<a name='L147'>    <b>if</b> (PyWeakref_GET_OBJECT(self) == Py_None) <font color='red'>{</font>
+<a name='L148'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError, "weak object has gone away");
+<a name='L149'>        <b>return</b> -1;
+<a name='L150'>    <font color='red'>}</font>
+<a name='L151'>    self-&gt;<a href='../S/2664.html#L5830' title='Defined at 5830 in Modules/expat/xmlparse.c.'>hash</a> = <a href='../S/2803.html#L758' title='Defined at 758 in Objects/object.c.'>PyObject_Hash</a>(PyWeakref_GET_OBJECT(self));
+<a name='L152'>    <b>return</b> self-&gt;<a href='../S/2664.html#L5830' title='Defined at 5830 in Modules/expat/xmlparse.c.'>hash</a>;
+<a name='L153'><font color='red'>}</font>
+<a name='L154'>
+<a name='L155'>
+<a name='L156'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L157'><a href='../S/2830.html#L346' title='Refered from 346 in Objects/weakrefobject.c.'>weakref_repr</a>(PyWeakReference *self)
+<a name='L158'><font color='red'>{</font>
+<a name='L159'>    <b>char</b> <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>[256];
+<a name='L160'>    <b>if</b> (PyWeakref_GET_OBJECT(self) == Py_None) <font color='red'>{</font>
+<a name='L161'>        <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <b>sizeof</b>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>), "&lt;weakref at %p; dead&gt;", self);
+<a name='L162'>    <font color='red'>}</font>
+<a name='L163'>    <b>else</b> <font color='red'>{</font>
+<a name='L164'>        <b>char</b> *name = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L165'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *nameobj = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(PyWeakref_GET_OBJECT(self),
+<a name='L166'>                                                   "__name__");
+<a name='L167'>        <b>if</b> (nameobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L168'>                <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L169'>        <b>else</b> <b>if</b> (PyUnicode_Check(nameobj))
+<a name='L170'>                name = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(nameobj);
+<a name='L171'>        <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <b>sizeof</b>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>),
+<a name='L172'>                      name ? "&lt;weakref at %p; to '%.50s' at %p (%s)&gt;"
+<a name='L173'>                           : "&lt;weakref at %p; to '%.50s' at %p&gt;",
+<a name='L174'>                      self,
+<a name='L175'>                      <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(PyWeakref_GET_OBJECT(self))-&gt;tp_name,
+<a name='L176'>                      PyWeakref_GET_OBJECT(self),
+<a name='L177'>                      name);
+<a name='L178'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(nameobj);
+<a name='L179'>    <font color='red'>}</font>
+<a name='L180'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L181'><font color='red'>}</font>
+<a name='L182'>
+<a name='L183'><i><font color='green'>/* Weak references only support equality, not ordering. Two weak references</font></i>
+<a name='L184'><i><font color='green'>   are equal if the underlying objects are equal. If the underlying object has</font></i>
+<a name='L185'><i><font color='green'>   gone away, they are equal if they are identical. */</font></i>
+<a name='L186'>
+<a name='L187'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L188'><a href='../S/2830.html#L361' title='Refered from 361 in Objects/weakrefobject.c.'>weakref_richcompare</a>(PyWeakReference* self, PyWeakReference* other, <b>int</b> op)
+<a name='L189'><font color='red'>{</font>
+<a name='L190'>    <b>if</b> ((op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a> &amp;&amp; op != <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>) ||
+<a name='L191'>        !<a href='../S/589.html#L57' title='Defined at 57 in Include/weakrefobject.h.'>PyWeakref_Check</a>(self) ||
+<a name='L192'>        !<a href='../S/589.html#L57' title='Defined at 57 in Include/weakrefobject.h.'>PyWeakref_Check</a>(<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>)) <font color='red'>{</font>
+<a name='L193'>        Py_INCREF(Py_NotImplemented);
+<a name='L194'>        <b>return</b> Py_NotImplemented;
+<a name='L195'>    <font color='red'>}</font>
+<a name='L196'>    <b>if</b> (PyWeakref_GET_OBJECT(self) == Py_None
+<a name='L197'>        || PyWeakref_GET_OBJECT(<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>) == Py_None) <font color='red'>{</font>
+<a name='L198'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res = self==<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a> ? Py_True : Py_False;
+<a name='L199'>        Py_INCREF(res);
+<a name='L200'>        <b>return</b> res;
+<a name='L201'>    <font color='red'>}</font>
+<a name='L202'>    <b>return</b> <a href='../S/2803.html#L587' title='Defined at 587 in Objects/object.c.'>PyObject_RichCompare</a>(PyWeakref_GET_OBJECT(self),
+<a name='L203'>                                PyWeakref_GET_OBJECT(<a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>), op);
+<a name='L204'><font color='red'>}</font>
+<a name='L205'>
+<a name='L206'><i><font color='green'>/* Given the head of an object's list of weak references, extract the</font></i>
+<a name='L207'><i><font color='green'> * two callback-less refs (ref and proxy).  Used to determine if the</font></i>
+<a name='L208'><i><font color='green'> * shared references exist and to determine the back link for newly</font></i>
+<a name='L209'><i><font color='green'> * inserted references.</font></i>
+<a name='L210'><i><font color='green'> */</font></i>
+<a name='L211'><b>static</b> <b>void</b>
+<a name='L212'><a href='../R/8026.html' title='Multiple refered from 6 places.'>get_basic_refs</a>(PyWeakReference *head,
+<a name='L213'>               PyWeakReference **refp, PyWeakReference **proxyp)
+<a name='L214'><font color='red'>{</font>
+<a name='L215'>    *refp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L216'>    *proxyp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L217'>
+<a name='L218'>    <b>if</b> (head != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; head-&gt;wr_callback == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L219'>        <i><font color='green'>/* We need to be careful that the "basic refs" aren't</font></i>
+<a name='L220'><i><font color='green'>           subclasses of the main types.  That complicates this a</font></i>
+<a name='L221'><i><font color='green'>           little. */</font></i>
+<a name='L222'>        <b>if</b> (PyWeakref_CheckRefExact(head)) <font color='red'>{</font>
+<a name='L223'>            *refp = head;
+<a name='L224'>            head = head-&gt;wr_next;
+<a name='L225'>        <font color='red'>}</font>
+<a name='L226'>        <b>if</b> (head != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L227'>            &amp;&amp; head-&gt;wr_callback == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L228'>            &amp;&amp; <a href='../S/589.html#L50' title='Defined at 50 in Include/weakrefobject.h.'>PyWeakref_CheckProxy</a>(head)) <font color='red'>{</font>
+<a name='L229'>            *proxyp = head;
+<a name='L230'>            <i><font color='green'>/* head = head-&gt;wr_next; */</font></i>
+<a name='L231'>        <font color='red'>}</font>
+<a name='L232'>    <font color='red'>}</font>
+<a name='L233'><font color='red'>}</font>
+<a name='L234'>
+<a name='L235'><i><font color='green'>/* Insert 'newref' in the list after 'prev'.  Both must be non-NULL. */</font></i>
+<a name='L236'><b>static</b> <b>void</b>
+<a name='L237'><a href='../R/8410.html' title='Multiple refered from 3 places.'>insert_after</a>(PyWeakReference *newref, PyWeakReference *prev)
+<a name='L238'><font color='red'>{</font>
+<a name='L239'>    newref-&gt;wr_prev = prev;
+<a name='L240'>    newref-&gt;wr_next = prev-&gt;wr_next;
+<a name='L241'>    <b>if</b> (prev-&gt;wr_next != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L242'>        prev-&gt;wr_next-&gt;wr_prev = newref;
+<a name='L243'>    prev-&gt;wr_next = newref;
+<a name='L244'><font color='red'>}</font>
+<a name='L245'>
+<a name='L246'><i><font color='green'>/* Insert 'newref' at the head of the list; 'list' points to the variable</font></i>
+<a name='L247'><i><font color='green'> * that stores the head.</font></i>
+<a name='L248'><i><font color='green'> */</font></i>
+<a name='L249'><b>static</b> <b>void</b>
+<a name='L250'><a href='../R/8412.html' title='Multiple refered from 5 places.'>insert_head</a>(PyWeakReference *newref, PyWeakReference **list)
+<a name='L251'><font color='red'>{</font>
+<a name='L252'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *next = *list;
+<a name='L253'>
+<a name='L254'>    newref-&gt;wr_prev = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L255'>    newref-&gt;wr_next = next;
+<a name='L256'>    <b>if</b> (next != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L257'>        next-&gt;wr_prev = newref;
+<a name='L258'>    *list = newref;
+<a name='L259'><font color='red'>}</font>
+<a name='L260'>
+<a name='L261'><b>static</b> <b>int</b>
+<a name='L262'><a href='../R/9466.html' title='Multiple refered from 2 places.'>parse_weakref_init_args</a>(<b>char</b> *funcname, PyObject *args, PyObject *kwargs,
+<a name='L263'>                        PyObject **obp, PyObject **callbackp)
+<a name='L264'><font color='red'>{</font>
+<a name='L265'>    <i><font color='green'>/* XXX Should check that kwargs == NULL or is empty. */</font></i>
+<a name='L266'>    <b>return</b> <a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, funcname, 1, 2, obp, callbackp);
+<a name='L267'><font color='red'>}</font>
+<a name='L268'>
+<a name='L269'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L270'><a href='../S/2830.html#L375' title='Refered from 375 in Objects/weakrefobject.c.'>weakref___new__</a>(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+<a name='L271'><font color='red'>{</font>
+<a name='L272'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *self = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L273'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ob, *<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L274'>
+<a name='L275'>    <b>if</b> (<a href='../S/2830.html#L262' title='Defined at 262 in Objects/weakrefobject.c.'>parse_weakref_init_args</a>("__new__", <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs, &amp;ob, &amp;<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>)) <font color='red'>{</font>
+<a name='L276'>        <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *ref, *proxy;
+<a name='L277'>        <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> **list;
+<a name='L278'>
+<a name='L279'>        <b>if</b> (!<a href='../S/545.html#L330' title='Defined at 330 in Include/objimpl.h.'>PyType_SUPPORTS_WEAKREFS</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(ob))) <font color='red'>{</font>
+<a name='L280'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L281'>                         "cannot create weak reference to '%s' object",
+<a name='L282'>                         <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(ob)-&gt;tp_name);
+<a name='L283'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L284'>        <font color='red'>}</font>
+<a name='L285'>        <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == Py_None)
+<a name='L286'>            <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L287'>        list = <a href='../D/1404.html' title='Multiple defined in 2 places.'>GET_WEAKREFS_LISTPTR</a>(ob);
+<a name='L288'>        <a href='../S/2830.html#L212' title='Defined at 212 in Objects/weakrefobject.c.'>get_basic_refs</a>(*list, &amp;ref, &amp;proxy);
+<a name='L289'>        <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; type == &amp;_PyWeakref_RefType) <font color='red'>{</font>
+<a name='L290'>            <b>if</b> (ref != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L291'>                <i><font color='green'>/* We can re-use an existing reference. */</font></i>
+<a name='L292'>                Py_INCREF(ref);
+<a name='L293'>                <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)ref;
+<a name='L294'>            <font color='red'>}</font>
+<a name='L295'>        <font color='red'>}</font>
+<a name='L296'>        <i><font color='green'>/* We have to create a new reference. */</font></i>
+<a name='L297'>        <i><font color='green'>/* Note: the tp_alloc() can trigger cyclic GC, so the weakref</font></i>
+<a name='L298'><i><font color='green'>           list on ob can be mutated.  This means that the ref and</font></i>
+<a name='L299'><i><font color='green'>           proxy pointers we got back earlier may have been collected,</font></i>
+<a name='L300'><i><font color='green'>           so we need to compute these values again before we use</font></i>
+<a name='L301'><i><font color='green'>           them. */</font></i>
+<a name='L302'>        self = (<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *) (type-&gt;tp_alloc(type, 0));
+<a name='L303'>        <b>if</b> (self != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L304'>            <a href='../S/2830.html#L23' title='Defined at 23 in Objects/weakrefobject.c.'>init_weakref</a>(self, ob, <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L305'>            <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; type == &amp;_PyWeakref_RefType) <font color='red'>{</font>
+<a name='L306'>                <a href='../S/2830.html#L250' title='Defined at 250 in Objects/weakrefobject.c.'>insert_head</a>(self, list);
+<a name='L307'>            <font color='red'>}</font>
+<a name='L308'>            <b>else</b> <font color='red'>{</font>
+<a name='L309'>                <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *prev;
+<a name='L310'>
+<a name='L311'>                <a href='../S/2830.html#L212' title='Defined at 212 in Objects/weakrefobject.c.'>get_basic_refs</a>(*list, &amp;ref, &amp;proxy);
+<a name='L312'>                prev = (proxy == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) ? ref : proxy;
+<a name='L313'>                <b>if</b> (prev == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L314'>                    <a href='../S/2830.html#L250' title='Defined at 250 in Objects/weakrefobject.c.'>insert_head</a>(self, list);
+<a name='L315'>                <b>else</b>
+<a name='L316'>                    <a href='../S/2830.html#L237' title='Defined at 237 in Objects/weakrefobject.c.'>insert_after</a>(self, prev);
+<a name='L317'>            <font color='red'>}</font>
+<a name='L318'>        <font color='red'>}</font>
+<a name='L319'>    <font color='red'>}</font>
+<a name='L320'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L321'><font color='red'>}</font>
+<a name='L322'>
+<a name='L323'><b>static</b> <b>int</b>
+<a name='L324'><a href='../S/2830.html#L373' title='Refered from 373 in Objects/weakrefobject.c.'>weakref___init__</a>(PyObject *self, PyObject *args, PyObject *kwargs)
+<a name='L325'><font color='red'>{</font>
+<a name='L326'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp;
+<a name='L327'>
+<a name='L328'>    <b>if</b> (<a href='../S/2830.html#L262' title='Defined at 262 in Objects/weakrefobject.c.'>parse_weakref_init_args</a>("__init__", <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs, &amp;tmp, &amp;tmp))
+<a name='L329'>        <b>return</b> 0;
+<a name='L330'>    <b>else</b>
+<a name='L331'>        <b>return</b> -1;
+<a name='L332'><font color='red'>}</font>
+<a name='L333'>
+<a name='L334'>
+<a name='L335'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a>
+<a name='L336'>_PyWeakref_RefType = <font color='red'>{</font>
+<a name='L337'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L338'>    "weakref",
+<a name='L339'>    <b>sizeof</b>(<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a>),
+<a name='L340'>    0,
+<a name='L341'>    <a href='../S/2830.html#L104' title='Defined at 104 in Objects/weakrefobject.c.'>weakref_dealloc</a>,            <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L342'>    0,                          <i><font color='green'>/*tp_print*/</font></i>
+<a name='L343'>    0,                          <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L344'>    0,                          <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L345'>    0,                          <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L346'>    (reprfunc)<a href='../S/2830.html#L157' title='Defined at 157 in Objects/weakrefobject.c.'>weakref_repr</a>,     <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L347'>    0,                          <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L348'>    0,                          <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L349'>    0,                          <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L350'>    (hashfunc)<a href='../S/2830.html#L143' title='Defined at 143 in Objects/weakrefobject.c.'>weakref_hash</a>,     <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L351'>    (ternaryfunc)<a href='../S/2830.html#L129' title='Defined at 129 in Objects/weakrefobject.c.'>weakref_call</a>,  <i><font color='green'>/*tp_call*/</font></i>
+<a name='L352'>    0,                          <i><font color='green'>/*tp_str*/</font></i>
+<a name='L353'>    0,                          <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L354'>    0,                          <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L355'>    0,                          <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L356'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC
+<a name='L357'>        | Py_TPFLAGS_BASETYPE,  <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L358'>    0,                          <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L359'>    (traverseproc)<a href='../S/2830.html#L113' title='Defined at 113 in Objects/weakrefobject.c.'>gc_traverse</a>,  <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L360'>    (inquiry)<a href='../S/2830.html#L121' title='Defined at 121 in Objects/weakrefobject.c.'>gc_clear</a>,          <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L361'>    (richcmpfunc)<a href='../S/2830.html#L188' title='Defined at 188 in Objects/weakrefobject.c.'>weakref_richcompare</a>,   <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L362'>    0,                          <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L363'>    0,                          <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L364'>    0,                          <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L365'>    0,                          <i><font color='green'>/*tp_methods*/</font></i>
+<a name='L366'>    0,                          <i><font color='green'>/*tp_members*/</font></i>
+<a name='L367'>    0,                          <i><font color='green'>/*tp_getset*/</font></i>
+<a name='L368'>    0,                          <i><font color='green'>/*tp_base*/</font></i>
+<a name='L369'>    0,                          <i><font color='green'>/*tp_dict*/</font></i>
+<a name='L370'>    0,                          <i><font color='green'>/*tp_descr_get*/</font></i>
+<a name='L371'>    0,                          <i><font color='green'>/*tp_descr_set*/</font></i>
+<a name='L372'>    0,                          <i><font color='green'>/*tp_dictoffset*/</font></i>
+<a name='L373'>    <a href='../S/2830.html#L324' title='Defined at 324 in Objects/weakrefobject.c.'>weakref___init__</a>,           <i><font color='green'>/*tp_init*/</font></i>
+<a name='L374'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,        <i><font color='green'>/*tp_alloc*/</font></i>
+<a name='L375'>    <a href='../S/2830.html#L270' title='Defined at 270 in Objects/weakrefobject.c.'>weakref___new__</a>,            <i><font color='green'>/*tp_new*/</font></i>
+<a name='L376'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>,            <i><font color='green'>/*tp_free*/</font></i>
+<a name='L377'><font color='red'>}</font>;
+<a name='L378'>
+<a name='L379'>
+<a name='L380'><b>static</b> <b>int</b>
+<a name='L381'><a href='../R/9754.html' title='Multiple refered from 9 places.'>proxy_checkref</a>(PyWeakReference *proxy)
+<a name='L382'><font color='red'>{</font>
+<a name='L383'>    <b>if</b> (PyWeakref_GET_OBJECT(proxy) == Py_None) <font color='red'>{</font>
+<a name='L384'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ReferenceError,
+<a name='L385'>                        "weakly-referenced object no longer exists");
+<a name='L386'>        <b>return</b> 0;
+<a name='L387'>    <font color='red'>}</font>
+<a name='L388'>    <b>return</b> 1;
+<a name='L389'><font color='red'>}</font>
+<a name='L390'>
+<a name='L391'>
+<a name='L392'><i><font color='green'>/* If a parameter is a proxy, check that it is still "live" and wrap it,</font></i>
+<a name='L393'><i><font color='green'> * replacing the original value with the raw object.  Raises ReferenceError</font></i>
+<a name='L394'><i><font color='green'> * if the param is a dead proxy.</font></i>
+<a name='L395'><i><font color='green'> */</font></i>
+<a name='L396'><font color='darkred'>#define</font> <a href='../R/4754.html' title='Multiple refered from 9 places.'>UNWRAP</a>(o) \
+<a name='L397'>        <b>if</b> (<a href='../S/589.html#L50' title='Defined at 50 in Include/weakrefobject.h.'>PyWeakref_CheckProxy</a>(o)) <font color='red'>{</font> \
+<a name='L398'>            <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>((<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *)o)) \
+<a name='L399'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; \
+<a name='L400'>            o = PyWeakref_GET_OBJECT(o); \
+<a name='L401'>        <font color='red'>}</font>
+<a name='L402'>
+<a name='L403'><font color='darkred'>#define</font> UNWRAP_I(o) \
+<a name='L404'>        <b>if</b> (<a href='../S/589.html#L50' title='Defined at 50 in Include/weakrefobject.h.'>PyWeakref_CheckProxy</a>(o)) <font color='red'>{</font> \
+<a name='L405'>            <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>((<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *)o)) \
+<a name='L406'>                <b>return</b> -1; \
+<a name='L407'>            o = PyWeakref_GET_OBJECT(o); \
+<a name='L408'>        <font color='red'>}</font>
+<a name='L409'>
+<a name='L410'><font color='darkred'>#define</font> <a href='../R/4914.html' title='Multiple refered from 8 places.'>WRAP_UNARY</a>(method, generic) \
+<a name='L411'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * \
+<a name='L412'>    method(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *proxy) <font color='red'>{</font> \
+<a name='L413'>        <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(proxy); \
+<a name='L414'>        <b>return</b> generic(proxy); \
+<a name='L415'>    <font color='red'>}</font>
+<a name='L416'>
+<a name='L417'><font color='darkred'>#define</font> <a href='../R/4911.html' title='Multiple refered from 22 places.'>WRAP_BINARY</a>(method, generic) \
+<a name='L418'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * \
+<a name='L419'>    method(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *x, <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *y) <font color='red'>{</font> \
+<a name='L420'>        <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(x); \
+<a name='L421'>        <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(y); \
+<a name='L422'>        <b>return</b> generic(x, y); \
+<a name='L423'>    <font color='red'>}</font>
+<a name='L424'>
+<a name='L425'><i><font color='green'>/* Note that the third arg needs to be checked for NULL since the tp_call</font></i>
+<a name='L426'><i><font color='green'> * slot can receive NULL for this arg.</font></i>
+<a name='L427'><i><font color='green'> */</font></i>
+<a name='L428'><font color='darkred'>#define</font> <a href='../R/4913.html' title='Multiple refered from 3 places.'>WRAP_TERNARY</a>(method, generic) \
+<a name='L429'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * \
+<a name='L430'>    method(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *proxy, <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v, <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *w) <font color='red'>{</font> \
+<a name='L431'>        <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(proxy); \
+<a name='L432'>        <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(v); \
+<a name='L433'>        <b>if</b> (w != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) \
+<a name='L434'>            <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(w); \
+<a name='L435'>        <b>return</b> generic(proxy, v, w); \
+<a name='L436'>    <font color='red'>}</font>
+<a name='L437'>
+<a name='L438'><font color='darkred'>#define</font> <a href='../S/2830.html#L586' title='Refered from 586 in Objects/weakrefobject.c.'>WRAP_METHOD</a>(method, special) \
+<a name='L439'>    <b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> * \
+<a name='L440'>    method(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *proxy) <font color='red'>{</font> \
+<a name='L441'>            <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(proxy); \
+<a name='L442'>                <b>return</b> <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(proxy, special, ""); \
+<a name='L443'>        <font color='red'>}</font>
+<a name='L444'>
+<a name='L445'>
+<a name='L446'><i><font color='green'>/* direct slots */</font></i>
+<a name='L447'>
+<a name='L448'><a href='../R/4911.html' title='Multiple refered from 22 places.'>WRAP_BINARY</a>(proxy_getattr, PyObject_GetAttr)
+<a name='L449'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_str, PyObject_Str)
+<a name='L450'><a href='../S/2830.html#L428' title='Defined at 428 in Objects/weakrefobject.c.'>WRAP_TERNARY</a>(proxy_call, PyEval_CallObjectWithKeywords)
+<a name='L451'>
+<a name='L452'><b>static</b> PyObject *
+<a name='L453'>proxy_repr(PyWeakReference *proxy)
+<a name='L454'><font color='red'>{</font>
+<a name='L455'>    <b>char</b> buf[160];
+<a name='L456'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L457'>                  "&lt;weakproxy at %p to %.100s at %p&gt;", proxy,
+<a name='L458'>                  <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(PyWeakref_GET_OBJECT(proxy))-&gt;tp_name,
+<a name='L459'>                  PyWeakref_GET_OBJECT(proxy));
+<a name='L460'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(buf);
+<a name='L461'><font color='red'>}</font>
+<a name='L462'>
+<a name='L463'>
+<a name='L464'><b>static</b> <b>int</b>
+<a name='L465'><a href='../R/9769.html' title='Multiple refered from 2 places.'>proxy_setattr</a>(PyWeakReference *proxy, PyObject *name, PyObject *value)
+<a name='L466'><font color='red'>{</font>
+<a name='L467'>    <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>(proxy))
+<a name='L468'>        <b>return</b> -1;
+<a name='L469'>    <b>return</b> <a href='../S/2803.html#L859' title='Defined at 859 in Objects/object.c.'>PyObject_SetAttr</a>(PyWeakref_GET_OBJECT(proxy), name, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L470'><font color='red'>}</font>
+<a name='L471'>
+<a name='L472'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L473'><a href='../R/9768.html' title='Multiple refered from 3 places.'>proxy_richcompare</a>(PyObject *proxy, PyObject *v, <b>int</b> op)
+<a name='L474'><font color='red'>{</font>
+<a name='L475'>    <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(proxy);
+<a name='L476'>    <a href='../S/2830.html#L396' title='Defined at 396 in Objects/weakrefobject.c.'>UNWRAP</a>(v);
+<a name='L477'>    <b>return</b> <a href='../S/2803.html#L587' title='Defined at 587 in Objects/object.c.'>PyObject_RichCompare</a>(proxy, v, op);
+<a name='L478'><font color='red'>}</font>
+<a name='L479'>
+<a name='L480'><i><font color='green'>/* number slots */</font></i>
+<a name='L481'><a href='../R/4911.html' title='Multiple refered from 22 places.'>WRAP_BINARY</a>(proxy_add, PyNumber_Add)
+<a name='L482'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_sub, PyNumber_Subtract)
+<a name='L483'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_mul, PyNumber_Multiply)
+<a name='L484'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_floor_div, PyNumber_FloorDivide)
+<a name='L485'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_true_div, PyNumber_TrueDivide)
+<a name='L486'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_mod, PyNumber_Remainder)
+<a name='L487'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_divmod, PyNumber_Divmod)
+<a name='L488'><a href='../S/2830.html#L428' title='Defined at 428 in Objects/weakrefobject.c.'>WRAP_TERNARY</a>(proxy_pow, PyNumber_Power)
+<a name='L489'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_neg, PyNumber_Negative)
+<a name='L490'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_pos, PyNumber_Positive)
+<a name='L491'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_abs, PyNumber_Absolute)
+<a name='L492'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_invert, PyNumber_Invert)
+<a name='L493'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_lshift, PyNumber_Lshift)
+<a name='L494'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_rshift, PyNumber_Rshift)
+<a name='L495'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_and, PyNumber_And)
+<a name='L496'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_xor, PyNumber_Xor)
+<a name='L497'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_or, PyNumber_Or)
+<a name='L498'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_int, PyNumber_Long)
+<a name='L499'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_float, PyNumber_Float)
+<a name='L500'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_iadd, PyNumber_InPlaceAdd)
+<a name='L501'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_isub, PyNumber_InPlaceSubtract)
+<a name='L502'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_imul, PyNumber_InPlaceMultiply)
+<a name='L503'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_ifloor_div, PyNumber_InPlaceFloorDivide)
+<a name='L504'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_itrue_div, PyNumber_InPlaceTrueDivide)
+<a name='L505'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_imod, PyNumber_InPlaceRemainder)
+<a name='L506'><a href='../S/2830.html#L428' title='Defined at 428 in Objects/weakrefobject.c.'>WRAP_TERNARY</a>(proxy_ipow, PyNumber_InPlacePower)
+<a name='L507'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_ilshift, PyNumber_InPlaceLshift)
+<a name='L508'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_irshift, PyNumber_InPlaceRshift)
+<a name='L509'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_iand, PyNumber_InPlaceAnd)
+<a name='L510'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_ixor, PyNumber_InPlaceXor)
+<a name='L511'><a href='../D/5543.html' title='Multiple defined in 4 places.'>WRAP_BINARY</a>(proxy_ior, PyNumber_InPlaceOr)
+<a name='L512'><a href='../S/2830.html#L410' title='Defined at 410 in Objects/weakrefobject.c.'>WRAP_UNARY</a>(proxy_index, PyNumber_Index)
+<a name='L513'>
+<a name='L514'><b>static</b> <b>int</b>
+<a name='L515'>proxy_bool(PyWeakReference *proxy)
+<a name='L516'><font color='red'>{</font>
+<a name='L517'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o = PyWeakref_GET_OBJECT(proxy);
+<a name='L518'>    <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>(proxy))
+<a name='L519'>        <b>return</b> -1;
+<a name='L520'>    <b>return</b> <a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(o);
+<a name='L521'><font color='red'>}</font>
+<a name='L522'>
+<a name='L523'><b>static</b> <b>void</b>
+<a name='L524'><a href='../R/9757.html' title='Multiple refered from 3 places.'>proxy_dealloc</a>(PyWeakReference *self)
+<a name='L525'><font color='red'>{</font>
+<a name='L526'>    <b>if</b> (self-&gt;wr_callback != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L527'>        <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self);
+<a name='L528'>    <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>(self);
+<a name='L529'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(self);
+<a name='L530'><font color='red'>}</font>
+<a name='L531'>
+<a name='L532'><i><font color='green'>/* sequence slots */</font></i>
+<a name='L533'>
+<a name='L534'><b>static</b> <b>int</b>
+<a name='L535'><a href='../R/9755.html' title='Multiple refered from 2 places.'>proxy_contains</a>(PyWeakReference *proxy, PyObject *value)
+<a name='L536'><font color='red'>{</font>
+<a name='L537'>    <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>(proxy))
+<a name='L538'>        <b>return</b> -1;
+<a name='L539'>    <b>return</b> <a href='../S/2775.html#L1960' title='Defined at 1960 in Objects/abstract.c.'>PySequence_Contains</a>(PyWeakref_GET_OBJECT(proxy), <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L540'><font color='red'>}</font>
+<a name='L541'>
+<a name='L542'>
+<a name='L543'><i><font color='green'>/* mapping slots */</font></i>
+<a name='L544'>
+<a name='L545'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L546'><a href='../R/9766.html' title='Multiple refered from 2 places.'>proxy_length</a>(PyWeakReference *proxy)
+<a name='L547'><font color='red'>{</font>
+<a name='L548'>    <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>(proxy))
+<a name='L549'>        <b>return</b> -1;
+<a name='L550'>    <b>return</b> <a href='../D/3640.html' title='Multiple defined in 3 places.'>PyObject_Length</a>(PyWeakref_GET_OBJECT(proxy));
+<a name='L551'><font color='red'>}</font>
+<a name='L552'>
+<a name='L553'><a href='../R/4911.html' title='Multiple refered from 22 places.'>WRAP_BINARY</a>(proxy_getitem, PyObject_GetItem)
+<a name='L554'>
+<a name='L555'><b>static</b> <b>int</b>
+<a name='L556'>proxy_setitem(PyWeakReference *proxy, PyObject *key, PyObject *value)
+<a name='L557'><font color='red'>{</font>
+<a name='L558'>    <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>(proxy))
+<a name='L559'>        <b>return</b> -1;
+<a name='L560'>
+<a name='L561'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L562'>        <b>return</b> <a href='../S/2775.html#L173' title='Defined at 173 in Objects/abstract.c.'>PyObject_DelItem</a>(PyWeakref_GET_OBJECT(proxy), <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L563'>    <b>else</b>
+<a name='L564'>        <b>return</b> <a href='../S/2775.html#L141' title='Defined at 141 in Objects/abstract.c.'>PyObject_SetItem</a>(PyWeakref_GET_OBJECT(proxy), <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L565'><font color='red'>}</font>
+<a name='L566'>
+<a name='L567'><i><font color='green'>/* iterator slots */</font></i>
+<a name='L568'>
+<a name='L569'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L570'><a href='../R/9762.html' title='Multiple refered from 2 places.'>proxy_iter</a>(PyWeakReference *proxy)
+<a name='L571'><font color='red'>{</font>
+<a name='L572'>    <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>(proxy))
+<a name='L573'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L574'>    <b>return</b> <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(PyWeakref_GET_OBJECT(proxy));
+<a name='L575'><font color='red'>}</font>
+<a name='L576'>
+<a name='L577'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L578'><a href='../R/9763.html' title='Multiple refered from 2 places.'>proxy_iternext</a>(PyWeakReference *proxy)
+<a name='L579'><font color='red'>{</font>
+<a name='L580'>    <b>if</b> (!<a href='../S/2830.html#L381' title='Defined at 381 in Objects/weakrefobject.c.'>proxy_checkref</a>(proxy))
+<a name='L581'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L582'>    <b>return</b> <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(PyWeakref_GET_OBJECT(proxy));
+<a name='L583'><font color='red'>}</font>
+<a name='L584'>
+<a name='L585'>
+<a name='L586'><a href='../S/2830.html#L438' title='Defined at 438 in Objects/weakrefobject.c.'>WRAP_METHOD</a>(proxy_bytes, "__bytes__")
+<a name='L587'>
+<a name='L588'>
+<a name='L589'><b>static</b> PyMethodDef proxy_methods[] = <font color='red'>{</font>
+<a name='L590'>        <font color='red'>{</font>"__bytes__", (PyCFunction)proxy_bytes, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L591'>        <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L592'><font color='red'>}</font>;
+<a name='L593'>
+<a name='L594'>
+<a name='L595'><b>static</b> <a href='../S/544.html#L247' title='Defined at 247 in Include/object.h.'>PyNumberMethods</a> proxy_as_number = <font color='red'>{</font>
+<a name='L596'>    proxy_add,              <i><font color='green'>/*nb_add*/</font></i>
+<a name='L597'>    proxy_sub,              <i><font color='green'>/*nb_subtract*/</font></i>
+<a name='L598'>    proxy_mul,              <i><font color='green'>/*nb_multiply*/</font></i>
+<a name='L599'>    proxy_mod,              <i><font color='green'>/*nb_remainder*/</font></i>
+<a name='L600'>    proxy_divmod,           <i><font color='green'>/*nb_divmod*/</font></i>
+<a name='L601'>    proxy_pow,              <i><font color='green'>/*nb_power*/</font></i>
+<a name='L602'>    proxy_neg,              <i><font color='green'>/*nb_negative*/</font></i>
+<a name='L603'>    proxy_pos,              <i><font color='green'>/*nb_positive*/</font></i>
+<a name='L604'>    proxy_abs,              <i><font color='green'>/*nb_absolute*/</font></i>
+<a name='L605'>    (inquiry)proxy_bool,    <i><font color='green'>/*nb_bool*/</font></i>
+<a name='L606'>    proxy_invert,           <i><font color='green'>/*nb_invert*/</font></i>
+<a name='L607'>    proxy_lshift,           <i><font color='green'>/*nb_lshift*/</font></i>
+<a name='L608'>    proxy_rshift,           <i><font color='green'>/*nb_rshift*/</font></i>
+<a name='L609'>    proxy_and,              <i><font color='green'>/*nb_and*/</font></i>
+<a name='L610'>    proxy_xor,              <i><font color='green'>/*nb_xor*/</font></i>
+<a name='L611'>    proxy_or,               <i><font color='green'>/*nb_or*/</font></i>
+<a name='L612'>    proxy_int,              <i><font color='green'>/*nb_int*/</font></i>
+<a name='L613'>    0,                      <i><font color='green'>/*nb_reserved*/</font></i>
+<a name='L614'>    proxy_float,            <i><font color='green'>/*nb_float*/</font></i>
+<a name='L615'>    proxy_iadd,             <i><font color='green'>/*nb_inplace_add*/</font></i>
+<a name='L616'>    proxy_isub,             <i><font color='green'>/*nb_inplace_subtract*/</font></i>
+<a name='L617'>    proxy_imul,             <i><font color='green'>/*nb_inplace_multiply*/</font></i>
+<a name='L618'>    proxy_imod,             <i><font color='green'>/*nb_inplace_remainder*/</font></i>
+<a name='L619'>    proxy_ipow,             <i><font color='green'>/*nb_inplace_power*/</font></i>
+<a name='L620'>    proxy_ilshift,          <i><font color='green'>/*nb_inplace_lshift*/</font></i>
+<a name='L621'>    proxy_irshift,          <i><font color='green'>/*nb_inplace_rshift*/</font></i>
+<a name='L622'>    proxy_iand,             <i><font color='green'>/*nb_inplace_and*/</font></i>
+<a name='L623'>    proxy_ixor,             <i><font color='green'>/*nb_inplace_xor*/</font></i>
+<a name='L624'>    proxy_ior,              <i><font color='green'>/*nb_inplace_or*/</font></i>
+<a name='L625'>    proxy_floor_div,        <i><font color='green'>/*nb_floor_divide*/</font></i>
+<a name='L626'>    proxy_true_div,         <i><font color='green'>/*nb_true_divide*/</font></i>
+<a name='L627'>    proxy_ifloor_div,       <i><font color='green'>/*nb_inplace_floor_divide*/</font></i>
+<a name='L628'>    proxy_itrue_div,        <i><font color='green'>/*nb_inplace_true_divide*/</font></i>
+<a name='L629'>    proxy_index,            <i><font color='green'>/*nb_index*/</font></i>
+<a name='L630'><font color='red'>}</font>;
+<a name='L631'>
+<a name='L632'><b>static</b> <a href='../S/544.html#L261' title='Defined at 261 in Include/object.h.'>PySequenceMethods</a> proxy_as_sequence = <font color='red'>{</font>
+<a name='L633'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2830.html#L546' title='Defined at 546 in Objects/weakrefobject.c.'>proxy_length</a>,      <i><font color='green'>/*sq_length*/</font></i>
+<a name='L634'>    0,                          <i><font color='green'>/*sq_concat*/</font></i>
+<a name='L635'>    0,                          <i><font color='green'>/*sq_repeat*/</font></i>
+<a name='L636'>    0,                          <i><font color='green'>/*sq_item*/</font></i>
+<a name='L637'>    0,                          <i><font color='green'>/*sq_slice*/</font></i>
+<a name='L638'>    0,                          <i><font color='green'>/*sq_ass_item*/</font></i>
+<a name='L639'>    0,                           <i><font color='green'>/*sq_ass_slice*/</font></i>
+<a name='L640'>    (objobjproc)<a href='../D/10594.html' title='Multiple defined in 2 places.'>proxy_contains</a>, <i><font color='green'>/* sq_contains */</font></i>
+<a name='L641'><font color='red'>}</font>;
+<a name='L642'>
+<a name='L643'><b>static</b> <a href='../S/544.html#L267' title='Defined at 267 in Include/object.h.'>PyMappingMethods</a> proxy_as_mapping = <font color='red'>{</font>
+<a name='L644'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2830.html#L546' title='Defined at 546 in Objects/weakrefobject.c.'>proxy_length</a>,        <i><font color='green'>/*mp_length*/</font></i>
+<a name='L645'>    <a href='../S/2785.html#L670' title='Defined at 670 in Objects/descrobject.c.'>proxy_getitem</a>,                <i><font color='green'>/*mp_subscript*/</font></i>
+<a name='L646'>    (objobjargproc)proxy_setitem, <i><font color='green'>/*mp_ass_subscript*/</font></i>
+<a name='L647'><font color='red'>}</font>;
+<a name='L648'>
+<a name='L649'>
+<a name='L650'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a>
+<a name='L651'>_PyWeakref_ProxyType = <font color='red'>{</font>
+<a name='L652'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L653'>    "weakproxy",
+<a name='L654'>    <b>sizeof</b>(<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a>),
+<a name='L655'>    0,
+<a name='L656'>    <i><font color='green'>/* methods */</font></i>
+<a name='L657'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../D/10596.html' title='Multiple defined in 2 places.'>proxy_dealloc</a>,          <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L658'>    0,                                  <i><font color='green'>/* tp_print */</font></i>
+<a name='L659'>    0,                                  <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L660'>    0,                                  <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L661'>    0,                                  <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L662'>    (reprfunc)<a href='../S/2785.html#L770' title='Defined at 770 in Objects/descrobject.c.'>proxy_repr</a>,               <i><font color='green'>/* tp_repr */</font></i>
+<a name='L663'>    &amp;proxy_as_number,                   <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L664'>    &amp;proxy_as_sequence,                 <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L665'>    &amp;proxy_as_mapping,                  <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L666'>    0,                                  <i><font color='green'>/* tp_hash */</font></i>
+<a name='L667'>    0,                                  <i><font color='green'>/* tp_call */</font></i>
+<a name='L668'>    <a href='../S/2785.html#L764' title='Defined at 764 in Objects/descrobject.c.'>proxy_str</a>,                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L669'>    proxy_getattr,                      <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L670'>    (setattrofunc)<a href='../S/2830.html#L465' title='Defined at 465 in Objects/weakrefobject.c.'>proxy_setattr</a>,        <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L671'>    0,                                  <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L672'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L673'>    0,                                  <i><font color='green'>/* tp_doc */</font></i>
+<a name='L674'>    (traverseproc)<a href='../S/2830.html#L113' title='Defined at 113 in Objects/weakrefobject.c.'>gc_traverse</a>,          <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L675'>    (inquiry)<a href='../S/2830.html#L121' title='Defined at 121 in Objects/weakrefobject.c.'>gc_clear</a>,                  <i><font color='green'>/* tp_clear */</font></i>
+<a name='L676'>    <a href='../D/10607.html' title='Multiple defined in 2 places.'>proxy_richcompare</a>,                  <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L677'>    0,                                  <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L678'>    (getiterfunc)<a href='../S/2830.html#L570' title='Defined at 570 in Objects/weakrefobject.c.'>proxy_iter</a>,            <i><font color='green'>/* tp_iter */</font></i>
+<a name='L679'>    (iternextfunc)<a href='../S/2830.html#L578' title='Defined at 578 in Objects/weakrefobject.c.'>proxy_iternext</a>,       <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L680'>        proxy_methods,                      <i><font color='green'>/* tp_methods */</font></i>
+<a name='L681'><font color='red'>}</font>;
+<a name='L682'>
+<a name='L683'>
+<a name='L684'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a>
+<a name='L685'>_PyWeakref_CallableProxyType = <font color='red'>{</font>
+<a name='L686'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L687'>    "weakcallableproxy",
+<a name='L688'>    <b>sizeof</b>(<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a>),
+<a name='L689'>    0,
+<a name='L690'>    <i><font color='green'>/* methods */</font></i>
+<a name='L691'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../D/10596.html' title='Multiple defined in 2 places.'>proxy_dealloc</a>,          <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L692'>    0,                                  <i><font color='green'>/* tp_print */</font></i>
+<a name='L693'>    0,                                  <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L694'>    0,                                  <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L695'>    0,                                  <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L696'>    (unaryfunc)<a href='../S/2785.html#L770' title='Defined at 770 in Objects/descrobject.c.'>proxy_repr</a>,              <i><font color='green'>/* tp_repr */</font></i>
+<a name='L697'>    &amp;proxy_as_number,                   <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L698'>    &amp;proxy_as_sequence,                 <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L699'>    &amp;proxy_as_mapping,                  <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L700'>    0,                                  <i><font color='green'>/* tp_hash */</font></i>
+<a name='L701'>    proxy_call,                         <i><font color='green'>/* tp_call */</font></i>
+<a name='L702'>    <a href='../S/2785.html#L764' title='Defined at 764 in Objects/descrobject.c.'>proxy_str</a>,                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L703'>    proxy_getattr,                      <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L704'>    (setattrofunc)<a href='../S/2830.html#L465' title='Defined at 465 in Objects/weakrefobject.c.'>proxy_setattr</a>,        <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L705'>    0,                                  <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L706'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L707'>    0,                                  <i><font color='green'>/* tp_doc */</font></i>
+<a name='L708'>    (traverseproc)<a href='../S/2830.html#L113' title='Defined at 113 in Objects/weakrefobject.c.'>gc_traverse</a>,          <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L709'>    (inquiry)<a href='../S/2830.html#L121' title='Defined at 121 in Objects/weakrefobject.c.'>gc_clear</a>,                  <i><font color='green'>/* tp_clear */</font></i>
+<a name='L710'>    <a href='../D/10607.html' title='Multiple defined in 2 places.'>proxy_richcompare</a>,                  <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L711'>    0,                                  <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L712'>    (getiterfunc)<a href='../S/2830.html#L570' title='Defined at 570 in Objects/weakrefobject.c.'>proxy_iter</a>,            <i><font color='green'>/* tp_iter */</font></i>
+<a name='L713'>    (iternextfunc)<a href='../S/2830.html#L578' title='Defined at 578 in Objects/weakrefobject.c.'>proxy_iternext</a>,       <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L714'><font color='red'>}</font>;
+<a name='L715'>
+<a name='L716'>
+<a name='L717'>
+<a name='L718'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L719'><a href='../R/3620.html' title='Multiple refered from 6 places.'>PyWeakref_NewRef</a>(PyObject *ob, PyObject *callback)
+<a name='L720'><font color='red'>{</font>
+<a name='L721'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L722'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> **list;
+<a name='L723'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *ref, *proxy;
+<a name='L724'>
+<a name='L725'>    <b>if</b> (!<a href='../S/545.html#L330' title='Defined at 330 in Include/objimpl.h.'>PyType_SUPPORTS_WEAKREFS</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(ob))) <font color='red'>{</font>
+<a name='L726'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L727'>                     "cannot create weak reference to '%s' object",
+<a name='L728'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(ob)-&gt;tp_name);
+<a name='L729'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L730'>    <font color='red'>}</font>
+<a name='L731'>    list = <a href='../D/1404.html' title='Multiple defined in 2 places.'>GET_WEAKREFS_LISTPTR</a>(ob);
+<a name='L732'>    <a href='../S/2830.html#L212' title='Defined at 212 in Objects/weakrefobject.c.'>get_basic_refs</a>(*list, &amp;ref, &amp;proxy);
+<a name='L733'>    <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == Py_None)
+<a name='L734'>        <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L735'>    <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L736'>        <i><font color='green'>/* return existing weak reference if it exists */</font></i>
+<a name='L737'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = ref;
+<a name='L738'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L739'>        Py_INCREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L740'>    <b>else</b> <font color='red'>{</font>
+<a name='L741'>        <i><font color='green'>/* Note: new_weakref() can trigger cyclic GC, so the weakref</font></i>
+<a name='L742'><i><font color='green'>           list on ob can be mutated.  This means that the ref and</font></i>
+<a name='L743'><i><font color='green'>           proxy pointers we got back earlier may have been collected,</font></i>
+<a name='L744'><i><font color='green'>           so we need to compute these values again before we use</font></i>
+<a name='L745'><i><font color='green'>           them. */</font></i>
+<a name='L746'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2830.html#L32' title='Defined at 32 in Objects/weakrefobject.c.'>new_weakref</a>(ob, <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L747'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L748'>            <a href='../S/2830.html#L212' title='Defined at 212 in Objects/weakrefobject.c.'>get_basic_refs</a>(*list, &amp;ref, &amp;proxy);
+<a name='L749'>            <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L750'>                <b>if</b> (ref == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L751'>                    <a href='../S/2830.html#L250' title='Defined at 250 in Objects/weakrefobject.c.'>insert_head</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, list);
+<a name='L752'>                <b>else</b> <font color='red'>{</font>
+<a name='L753'>                    <i><font color='green'>/* Someone else added a ref without a callback</font></i>
+<a name='L754'><i><font color='green'>                       during GC.  Return that one instead of this one</font></i>
+<a name='L755'><i><font color='green'>                       to avoid violating the invariants of the list</font></i>
+<a name='L756'><i><font color='green'>                       of weakrefs for ob. */</font></i>
+<a name='L757'>                    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L758'>                    Py_INCREF(ref);
+<a name='L759'>                    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = ref;
+<a name='L760'>                <font color='red'>}</font>
+<a name='L761'>            <font color='red'>}</font>
+<a name='L762'>            <b>else</b> <font color='red'>{</font>
+<a name='L763'>                <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *prev;
+<a name='L764'>
+<a name='L765'>                prev = (proxy == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) ? ref : proxy;
+<a name='L766'>                <b>if</b> (prev == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L767'>                    <a href='../S/2830.html#L250' title='Defined at 250 in Objects/weakrefobject.c.'>insert_head</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, list);
+<a name='L768'>                <b>else</b>
+<a name='L769'>                    <a href='../S/2830.html#L237' title='Defined at 237 in Objects/weakrefobject.c.'>insert_after</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, prev);
+<a name='L770'>            <font color='red'>}</font>
+<a name='L771'>        <font color='red'>}</font>
+<a name='L772'>    <font color='red'>}</font>
+<a name='L773'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L774'><font color='red'>}</font>
+<a name='L775'>
+<a name='L776'>
+<a name='L777'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L778'><a href='../R/3619.html' title='Multiple refered from 2 places.'>PyWeakref_NewProxy</a>(PyObject *ob, PyObject *callback)
+<a name='L779'><font color='red'>{</font>
+<a name='L780'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L781'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> **list;
+<a name='L782'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *ref, *proxy;
+<a name='L783'>
+<a name='L784'>    <b>if</b> (!<a href='../S/545.html#L330' title='Defined at 330 in Include/objimpl.h.'>PyType_SUPPORTS_WEAKREFS</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(ob))) <font color='red'>{</font>
+<a name='L785'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L786'>                     "cannot create weak reference to '%s' object",
+<a name='L787'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(ob)-&gt;tp_name);
+<a name='L788'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L789'>    <font color='red'>}</font>
+<a name='L790'>    list = <a href='../D/1404.html' title='Multiple defined in 2 places.'>GET_WEAKREFS_LISTPTR</a>(ob);
+<a name='L791'>    <a href='../S/2830.html#L212' title='Defined at 212 in Objects/weakrefobject.c.'>get_basic_refs</a>(*list, &amp;ref, &amp;proxy);
+<a name='L792'>    <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == Py_None)
+<a name='L793'>        <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L794'>    <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L795'>        <i><font color='green'>/* attempt to return an existing weak reference if it exists */</font></i>
+<a name='L796'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = proxy;
+<a name='L797'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L798'>        Py_INCREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L799'>    <b>else</b> <font color='red'>{</font>
+<a name='L800'>        <i><font color='green'>/* Note: new_weakref() can trigger cyclic GC, so the weakref</font></i>
+<a name='L801'><i><font color='green'>           list on ob can be mutated.  This means that the ref and</font></i>
+<a name='L802'><i><font color='green'>           proxy pointers we got back earlier may have been collected,</font></i>
+<a name='L803'><i><font color='green'>           so we need to compute these values again before we use</font></i>
+<a name='L804'><i><font color='green'>           them. */</font></i>
+<a name='L805'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2830.html#L32' title='Defined at 32 in Objects/weakrefobject.c.'>new_weakref</a>(ob, <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L806'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L807'>            <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *prev;
+<a name='L808'>
+<a name='L809'>            <b>if</b> (<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(ob))
+<a name='L810'>                <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) = &amp;_PyWeakref_CallableProxyType;
+<a name='L811'>            <b>else</b>
+<a name='L812'>                <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) = &amp;_PyWeakref_ProxyType;
+<a name='L813'>            <a href='../S/2830.html#L212' title='Defined at 212 in Objects/weakrefobject.c.'>get_basic_refs</a>(*list, &amp;ref, &amp;proxy);
+<a name='L814'>            <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L815'>                <b>if</b> (proxy != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L816'>                    <i><font color='green'>/* Someone else added a proxy without a callback</font></i>
+<a name='L817'><i><font color='green'>                       during GC.  Return that one instead of this one</font></i>
+<a name='L818'><i><font color='green'>                       to avoid violating the invariants of the list</font></i>
+<a name='L819'><i><font color='green'>                       of weakrefs for ob. */</font></i>
+<a name='L820'>                    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L821'>                    Py_INCREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = proxy);
+<a name='L822'>                    <b>goto</b> skip_insert;
+<a name='L823'>                <font color='red'>}</font>
+<a name='L824'>                prev = ref;
+<a name='L825'>            <font color='red'>}</font>
+<a name='L826'>            <b>else</b>
+<a name='L827'>                prev = (proxy == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) ? ref : proxy;
+<a name='L828'>
+<a name='L829'>            <b>if</b> (prev == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L830'>                <a href='../S/2830.html#L250' title='Defined at 250 in Objects/weakrefobject.c.'>insert_head</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, list);
+<a name='L831'>            <b>else</b>
+<a name='L832'>                <a href='../S/2830.html#L237' title='Defined at 237 in Objects/weakrefobject.c.'>insert_after</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, prev);
+<a name='L833'>        skip_insert:
+<a name='L834'>            ;
+<a name='L835'>        <font color='red'>}</font>
+<a name='L836'>    <font color='red'>}</font>
+<a name='L837'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L838'><font color='red'>}</font>
+<a name='L839'>
+<a name='L840'>
+<a name='L841'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L842'><a href='../R/3618.html' title='Multiple refered from 9 places.'>PyWeakref_GetObject</a>(PyObject *ref)
+<a name='L843'><font color='red'>{</font>
+<a name='L844'>    <b>if</b> (ref == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !<a href='../S/589.html#L57' title='Defined at 57 in Include/weakrefobject.h.'>PyWeakref_Check</a>(ref)) <font color='red'>{</font>
+<a name='L845'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L846'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L847'>    <font color='red'>}</font>
+<a name='L848'>    <b>return</b> PyWeakref_GET_OBJECT(ref);
+<a name='L849'><font color='red'>}</font>
+<a name='L850'>
+<a name='L851'><i><font color='green'>/* Note that there's an inlined copy-paste of handle_callback() in gcmodule.c's</font></i>
+<a name='L852'><i><font color='green'> * handle_weakrefs().</font></i>
+<a name='L853'><i><font color='green'> */</font></i>
+<a name='L854'><b>static</b> <b>void</b>
+<a name='L855'><a href='../R/8251.html' title='Multiple refered from 2 places.'>handle_callback</a>(PyWeakReference *ref, PyObject *callback)
+<a name='L856'><font color='red'>{</font>
+<a name='L857'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *cbresult = <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>(<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>, ref, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L858'>
+<a name='L859'>    <b>if</b> (cbresult == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L860'>        <a href='../S/3106.html#L708' title='Defined at 708 in Python/errors.c.'>PyErr_WriteUnraisable</a>(<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L861'>    <b>else</b>
+<a name='L862'>        Py_DECREF(cbresult);
+<a name='L863'><font color='red'>}</font>
+<a name='L864'>
+<a name='L865'><i><font color='green'>/* This function is called by the tp_dealloc handler to clear weak references.</font></i>
+<a name='L866'><i><font color='green'> *</font></i>
+<a name='L867'><i><font color='green'> * This iterates through the weak references for 'object' and calls callbacks</font></i>
+<a name='L868'><i><font color='green'> * for those references which have one.  It returns when all callbacks have</font></i>
+<a name='L869'><i><font color='green'> * been attempted.</font></i>
+<a name='L870'><i><font color='green'> */</font></i>
+<a name='L871'><b>void</b>
+<a name='L872'><a href='../R/3255.html' title='Multiple refered from 26 places.'>PyObject_ClearWeakRefs</a>(PyObject *object)
+<a name='L873'><font color='red'>{</font>
+<a name='L874'>    <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> **list;
+<a name='L875'>
+<a name='L876'>    <b>if</b> (<a href='../S/500.html#L6' title='Defined at 6 in Include/asdl.h.'>object</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L877'>        || !<a href='../S/545.html#L330' title='Defined at 330 in Include/objimpl.h.'>PyType_SUPPORTS_WEAKREFS</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../S/500.html#L6' title='Defined at 6 in Include/asdl.h.'>object</a>))
+<a name='L878'>        || <a href='../S/500.html#L6' title='Defined at 6 in Include/asdl.h.'>object</a>-&gt;ob_refcnt != 0) <font color='red'>{</font>
+<a name='L879'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L880'>        <b>return</b>;
+<a name='L881'>    <font color='red'>}</font>
+<a name='L882'>    list = <a href='../D/1404.html' title='Multiple defined in 2 places.'>GET_WEAKREFS_LISTPTR</a>(<a href='../S/500.html#L6' title='Defined at 6 in Include/asdl.h.'>object</a>);
+<a name='L883'>    <i><font color='green'>/* Remove the callback-less basic and proxy references */</font></i>
+<a name='L884'>    <b>if</b> (*list != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; (*list)-&gt;wr_callback == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L885'>        <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>(*list);
+<a name='L886'>        <b>if</b> (*list != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; (*list)-&gt;wr_callback == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L887'>            <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>(*list);
+<a name='L888'>    <font color='red'>}</font>
+<a name='L889'>    <b>if</b> (*list != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L890'>        <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *current = *list;
+<a name='L891'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count = <a href='../S/2830.html#L10' title='Defined at 10 in Objects/weakrefobject.c.'>_PyWeakref_GetWeakrefCount</a>(current);
+<a name='L892'>        <b>int</b> restore_error = <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>() ? 1 : 0;
+<a name='L893'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *err_type, *err_value, *err_tb;
+<a name='L894'>
+<a name='L895'>        <b>if</b> (restore_error)
+<a name='L896'>            <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;err_type, &amp;err_value, &amp;err_tb);
+<a name='L897'>        <b>if</b> (count == 1) <font color='red'>{</font>
+<a name='L898'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = current-&gt;wr_callback;
+<a name='L899'>
+<a name='L900'>            current-&gt;wr_callback = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L901'>            <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>(current);
+<a name='L902'>            <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L903'>                <b>if</b> (((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)current)-&gt;ob_refcnt &gt; 0)
+<a name='L904'>                    <a href='../S/2830.html#L855' title='Defined at 855 in Objects/weakrefobject.c.'>handle_callback</a>(current, <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L905'>                Py_DECREF(<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L906'>            <font color='red'>}</font>
+<a name='L907'>        <font color='red'>}</font>
+<a name='L908'>        <b>else</b> <font color='red'>{</font>
+<a name='L909'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tuple;
+<a name='L910'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i = 0;
+<a name='L911'>
+<a name='L912'>            tuple = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(count * 2);
+<a name='L913'>            <b>if</b> (tuple == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L914'>                <b>if</b> (restore_error)
+<a name='L915'>                    <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;err_type, &amp;err_value, &amp;err_tb);
+<a name='L916'>                <b>return</b>;
+<a name='L917'>            <font color='red'>}</font>
+<a name='L918'>
+<a name='L919'>            <b>for</b> (i = 0; i &lt; count; ++i) <font color='red'>{</font>
+<a name='L920'>                <a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *next = current-&gt;wr_next;
+<a name='L921'>
+<a name='L922'>                <b>if</b> (((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)current)-&gt;ob_refcnt &gt; 0)
+<a name='L923'>                <font color='red'>{</font>
+<a name='L924'>                    Py_INCREF(current);
+<a name='L925'>                    PyTuple_SET_ITEM(tuple, i * 2, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) current);
+<a name='L926'>                    PyTuple_SET_ITEM(tuple, i * 2 + 1, current-&gt;wr_callback);
+<a name='L927'>                <font color='red'>}</font>
+<a name='L928'>                <b>else</b> <font color='red'>{</font>
+<a name='L929'>                    Py_DECREF(current-&gt;wr_callback);
+<a name='L930'>                <font color='red'>}</font>
+<a name='L931'>                current-&gt;wr_callback = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L932'>                <a href='../S/2830.html#L51' title='Defined at 51 in Objects/weakrefobject.c.'>clear_weakref</a>(current);
+<a name='L933'>                current = next;
+<a name='L934'>            <font color='red'>}</font>
+<a name='L935'>            <b>for</b> (i = 0; i &lt; count; ++i) <font color='red'>{</font>
+<a name='L936'>                <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> = PyTuple_GET_ITEM(tuple, i * 2 + 1);
+<a name='L937'>
+<a name='L938'>                <i><font color='green'>/* The tuple may have slots left to NULL */</font></i>
+<a name='L939'>                <b>if</b> (<a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L940'>                    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item = PyTuple_GET_ITEM(tuple, i * 2);
+<a name='L941'>                    <a href='../S/2830.html#L855' title='Defined at 855 in Objects/weakrefobject.c.'>handle_callback</a>((<a href='../S/589.html#L10' title='Defined at 10 in Include/weakrefobject.h.'>PyWeakReference</a> *)item, <a href='../D/7341.html' title='Multiple defined in 2 places.'>callback</a>);
+<a name='L942'>                <font color='red'>}</font>
+<a name='L943'>            <font color='red'>}</font>
+<a name='L944'>            Py_DECREF(tuple);
+<a name='L945'>        <font color='red'>}</font>
+<a name='L946'>        <b>if</b> (restore_error)
+<a name='L947'>            <a href='../S/3106.html#L25' title='Defined at 25 in Python/errors.c.'>PyErr_Restore</a>(err_type, err_value, err_tb);
+<a name='L948'>    <font color='red'>}</font>
+<a name='L949'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L10'>[^]</a><a href='#L872'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

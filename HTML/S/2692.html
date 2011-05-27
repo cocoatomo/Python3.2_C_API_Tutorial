@@ -1,0 +1,508 @@
+<html>
+<head>
+<title>Modules/nismodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/nismodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L50'>[^]</a><a href='#L460'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L50' title='Defined at 50.'>nis_error</a>
+<li><a href='#L73' title='Defined at 73.'>nis_mapname</a>
+<li><a href='#L105' title='Defined at 105.'>nis_foreach</a>
+<li><a href='#L144' title='Defined at 144.'>nis_get_default_domain</a>
+<li><a href='#L158' title='Defined at 158.'>nis_match</a>
+<li><a href='#L201' title='Defined at 201.'>nis_cat</a>
+<li><a href='#L279' title='Defined at 279.'>nis_xdr_domainname</a>
+<li><a href='#L289' title='Defined at 289.'>nis_xdr_mapname</a>
+<li><a href='#L299' title='Defined at 299.'>nis_xdr_ypmaplist</a>
+<li><a href='#L314' title='Defined at 314.'>nis_xdr_ypstat</a>
+<li><a href='#L325' title='Defined at 325.'>nis_xdr_ypresp_maplist</a>
+<li><a href='#L341' title='Defined at 341.'>nisproc_maplist_2</a>
+<li><a href='#L358' title='Defined at 358.'>nis_maplist</a>
+<li><a href='#L394' title='Defined at 394.'>nis_maps</a>
+<li><a href='#L460' title='Defined at 460.'>PyInit_nis</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/***********************************************************</font></i>
+<a name='L2'><i><font color='green'>    Written by:</font></i>
+<a name='L3'><i><font color='green'>    Fred Gansevles &lt;Fred.Gansevles@cs.utwente.nl&gt;</font></i>
+<a name='L4'><i><font color='green'>    B&amp;O group,</font></i>
+<a name='L5'><i><font color='green'>    Faculteit der Informatica,</font></i>
+<a name='L6'><i><font color='green'>    Universiteit Twente,</font></i>
+<a name='L7'><i><font color='green'>    Enschede,</font></i>
+<a name='L8'><i><font color='green'>    the Netherlands.</font></i>
+<a name='L9'><i><font color='green'>******************************************************************/</font></i>
+<a name='L10'>
+<a name='L11'><i><font color='green'>/* NIS module implementation */</font></i>
+<a name='L12'>
+<a name='L13'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L14'>
+<a name='L15'><font color='darkred'>#include</font> &lt;sys/time.h&gt;
+<a name='L16'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L17'><font color='darkred'>#include</font> &lt;rpc/rpc.h&gt;
+<a name='L18'><font color='darkred'>#include</font> &lt;rpcsvc/yp_prot.h&gt;
+<a name='L19'><font color='darkred'>#include</font> &lt;rpcsvc/ypclnt.h&gt;
+<a name='L20'>
+<a name='L21'><font color='darkred'>#ifdef</font> __sgi
+<a name='L22'><i><font color='green'>/* This is missing from rpcsvc/ypclnt.h */</font></i>
+<a name='L23'><b>extern</b> <b>int</b> yp_get_default_domain(<b>char</b> **);
+<a name='L24'><font color='darkred'>#endif</font>
+<a name='L25'>
+<a name='L26'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(get_default_domain__doc__,
+<a name='L27'>"get_default_domain() -&gt; str\n\
+<a name='L28'>Corresponds to the C library yp_get_default_domain() call, returning\n\
+<a name='L29'>the default NIS domain.\n");
+<a name='L30'>
+<a name='L31'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(match__doc__,
+<a name='L32'>"match(key, map, domain = defaultdomain)\n\
+<a name='L33'>Corresponds to the C library yp_match() call, returning the value of\n\
+<a name='L34'>key in the given map. Optionally domain can be specified but it\n\
+<a name='L35'>defaults to the system default domain.\n");
+<a name='L36'>
+<a name='L37'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(cat__doc__,
+<a name='L38'>"cat(map, domain = defaultdomain)\n\
+<a name='L39'>Returns the entire map as a dictionary. Optionally domain can be\n\
+<a name='L40'>specified but it defaults to the system default domain.\n");
+<a name='L41'>
+<a name='L42'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(maps__doc__,
+<a name='L43'>"maps(domain = defaultdomain)\n\
+<a name='L44'>Returns an array of all available NIS maps within a domain. If domain\n\
+<a name='L45'>is not specified it defaults to the system default domain.\n");
+<a name='L46'>
+<a name='L47'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *NisError;
+<a name='L48'>
+<a name='L49'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L50'><a href='../R/9238.html' title='Multiple refered from 6 places.'>nis_error</a> (<b>int</b> err)
+<a name='L51'><font color='red'>{</font>
+<a name='L52'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(NisError, yperr_string(err));
+<a name='L53'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L54'><font color='red'>}</font>
+<a name='L55'>
+<a name='L56'><b>static</b> <b>struct</b> nis_map <font color='red'>{</font>
+<a name='L57'>    <b>char</b> *<a href='../D/6702.html' title='Multiple defined in 2 places.'>alias</a>;
+<a name='L58'>    <b>char</b> *map;
+<a name='L59'>    <b>int</b>  fix;
+<a name='L60'><font color='red'>}</font> aliases [] = <font color='red'>{</font>
+<a name='L61'>    <font color='red'>{</font>"passwd",          "passwd.byname",        0<font color='red'>}</font>,
+<a name='L62'>    <font color='red'>{</font>"group",           "group.byname",         0<font color='red'>}</font>,
+<a name='L63'>    <font color='red'>{</font>"networks",        "networks.byaddr",      0<font color='red'>}</font>,
+<a name='L64'>    <font color='red'>{</font>"hosts",           "hosts.byname",         0<font color='red'>}</font>,
+<a name='L65'>    <font color='red'>{</font>"protocols",       "protocols.bynumber",   0<font color='red'>}</font>,
+<a name='L66'>    <font color='red'>{</font>"services",        "services.byname",      0<font color='red'>}</font>,
+<a name='L67'>    <font color='red'>{</font>"aliases",         "mail.aliases",         1<font color='red'>}</font>, <i><font color='green'>/* created with 'makedbm -a' */</font></i>
+<a name='L68'>    <font color='red'>{</font>"ethers",          "ethers.byname",        0<font color='red'>}</font>,
+<a name='L69'>    <font color='red'>{</font>0L,                0L,                     0<font color='red'>}</font>
+<a name='L70'><font color='red'>}</font>;
+<a name='L71'>
+<a name='L72'><b>static</b> <b>char</b> *
+<a name='L73'><a href='../R/9242.html' title='Multiple refered from 2 places.'>nis_mapname</a> (<b>char</b> *map, <b>int</b> *pfix)
+<a name='L74'><font color='red'>{</font>
+<a name='L75'>    <b>int</b> i;
+<a name='L76'>
+<a name='L77'>    *pfix = 0;
+<a name='L78'>    <b>for</b> (i=0; aliases[i].<a href='../D/6702.html' title='Multiple defined in 2 places.'>alias</a> != 0L; i++) <font color='red'>{</font>
+<a name='L79'>        <b>if</b> (!strcmp (aliases[i].<a href='../D/6702.html' title='Multiple defined in 2 places.'>alias</a>, map)) <font color='red'>{</font>
+<a name='L80'>            *pfix = aliases[i].fix;
+<a name='L81'>            <b>return</b> aliases[i].map;
+<a name='L82'>        <font color='red'>}</font>
+<a name='L83'>        <b>if</b> (!strcmp (aliases[i].map, map)) <font color='red'>{</font>
+<a name='L84'>            *pfix = aliases[i].fix;
+<a name='L85'>            <b>return</b> aliases[i].map;
+<a name='L86'>        <font color='red'>}</font>
+<a name='L87'>    <font color='red'>}</font>
+<a name='L88'>
+<a name='L89'>    <b>return</b> map;
+<a name='L90'><font color='red'>}</font>
+<a name='L91'>
+<a name='L92'><font color='darkred'>#if</font> <b>defined</b>(__APPLE__) || <b>defined</b>(__OpenBSD__) || <b>defined</b>(__FreeBSD__)
+<a name='L93'><b>typedef</b> <b>int</b> (*foreachfunc)(<b>unsigned</b> <b>long</b>, <b>char</b> *, <b>int</b>, <b>char</b> *, <b>int</b>, <b>void</b> *);
+<a name='L94'><font color='darkred'>#else</font>
+<a name='L95'><b>typedef</b> <b>int</b> (*foreachfunc)(<b>int</b>, <b>char</b> *, <b>int</b>, <b>char</b> *, <b>int</b>, <b>char</b> *);
+<a name='L96'><font color='darkred'>#endif</font>
+<a name='L97'>
+<a name='L98'><b>struct</b> <a href='../S/2692.html#L206' title='Refered from 206 in Modules/nismodule.c.'>ypcallback_data</a> <font color='red'>{</font>
+<a name='L99'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>            *dict;
+<a name='L100'>    <b>int</b>                         fix;
+<a name='L101'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L102'><font color='red'>}</font>;
+<a name='L103'>
+<a name='L104'><b>static</b> <b>int</b>
+<a name='L105'><a href='../S/2692.html#L219' title='Refered from 219 in Modules/nismodule.c.'>nis_foreach</a> (<b>int</b> instatus, <b>char</b> *inkey, <b>int</b> inkeylen, <b>char</b> *inval,
+<a name='L106'>             <b>int</b> invallen, <b>struct</b> ypcallback_data *indata)
+<a name='L107'><font color='red'>{</font>
+<a name='L108'>    <b>if</b> (instatus == YP_TRUE) <font color='red'>{</font>
+<a name='L109'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L110'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *val;
+<a name='L111'>        <b>int</b> err;
+<a name='L112'>
+<a name='L113'>        <a href='../S/3091.html#L435' title='Defined at 435 in Python/ceval.c.'>PyEval_RestoreThread</a>(indata-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L114'>        <b>if</b> (indata-&gt;fix) <font color='red'>{</font>
+<a name='L115'>            <b>if</b> (inkeylen &gt; 0 &amp;&amp; inkey[inkeylen-1] == '\0')
+<a name='L116'>            inkeylen--;
+<a name='L117'>            <b>if</b> (invallen &gt; 0 &amp;&amp; inval[invallen-1] == '\0')
+<a name='L118'>            invallen--;
+<a name='L119'>        <font color='red'>}</font>
+<a name='L120'>        <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../D/3976.html' title='Multiple defined in 3 places.'>PyUnicode_DecodeFSDefaultAndSize</a>(inkey, inkeylen);
+<a name='L121'>        val = <a href='../D/3976.html' title='Multiple defined in 3 places.'>PyUnicode_DecodeFSDefaultAndSize</a>(inval, invallen);
+<a name='L122'>        <b>if</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || val == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L123'>            <i><font color='green'>/* XXX error -- don't know how to handle */</font></i>
+<a name='L124'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L125'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L126'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(val);
+<a name='L127'>            indata-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/3091.html#L422' title='Defined at 422 in Python/ceval.c.'>PyEval_SaveThread</a>();
+<a name='L128'>            <b>return</b> 1;
+<a name='L129'>        <font color='red'>}</font>
+<a name='L130'>        err = <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(indata-&gt;dict, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, val);
+<a name='L131'>        Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L132'>        Py_DECREF(val);
+<a name='L133'>        <b>if</b> (err != 0)
+<a name='L134'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L135'>        indata-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/3091.html#L422' title='Defined at 422 in Python/ceval.c.'>PyEval_SaveThread</a>();
+<a name='L136'>        <b>if</b> (err != 0)
+<a name='L137'>            <b>return</b> 1;
+<a name='L138'>        <b>return</b> 0;
+<a name='L139'>    <font color='red'>}</font>
+<a name='L140'>    <b>return</b> 1;
+<a name='L141'><font color='red'>}</font>
+<a name='L142'>
+<a name='L143'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L144'><a href='../S/2692.html#L438' title='Refered from 438 in Modules/nismodule.c.'>nis_get_default_domain</a> (PyObject *self)
+<a name='L145'><font color='red'>{</font>
+<a name='L146'>    <b>char</b> *domain;
+<a name='L147'>    <b>int</b> err;
+<a name='L148'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L149'>
+<a name='L150'>    <b>if</b> ((err = yp_get_default_domain(&amp;domain)) != 0)
+<a name='L151'>        <b>return</b> <a href='../S/2692.html#L50' title='Defined at 50 in Modules/nismodule.c.'>nis_error</a>(err);
+<a name='L152'>
+<a name='L153'>    res = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a> (domain, strlen(domain));
+<a name='L154'>    <b>return</b> res;
+<a name='L155'><font color='red'>}</font>
+<a name='L156'>
+<a name='L157'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L158'><a href='../S/2692.html#L429' title='Refered from 429 in Modules/nismodule.c.'>nis_match</a> (PyObject *self, PyObject *args, PyObject *kwdict)
+<a name='L159'><font color='red'>{</font>
+<a name='L160'>    <b>char</b> *match;
+<a name='L161'>    <b>char</b> *domain = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L162'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> keylen;
+<a name='L163'>    <b>int</b> len;
+<a name='L164'>    <b>char</b> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, *map;
+<a name='L165'>    <b>int</b> err;
+<a name='L166'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ukey, *bkey, *res;
+<a name='L167'>    <b>int</b> fix;
+<a name='L168'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"key", "map", "domain", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L169'>
+<a name='L170'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict,
+<a name='L171'>                                     "Us|s:match", kwlist,
+<a name='L172'>                                     &amp;ukey, &amp;map, &amp;domain))
+<a name='L173'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L174'>    <b>if</b> ((bkey = <a href='../S/2828.html#L1585' title='Defined at 1585 in Objects/unicodeobject.c.'>PyUnicode_EncodeFSDefault</a>(ukey)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L175'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L176'>    <b>if</b> (<a href='../S/2779.html#L528' title='Defined at 528 in Objects/bytesobject.c.'>PyBytes_AsStringAndSize</a>(bkey, &amp;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, &amp;keylen) == -1) <font color='red'>{</font>
+<a name='L177'>        Py_DECREF(bkey);
+<a name='L178'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L179'>    <font color='red'>}</font>
+<a name='L180'>    <b>if</b> (!domain &amp;&amp; ((err = yp_get_default_domain(&amp;domain)) != 0)) <font color='red'>{</font>
+<a name='L181'>        Py_DECREF(bkey);
+<a name='L182'>        <b>return</b> <a href='../S/2692.html#L50' title='Defined at 50 in Modules/nismodule.c.'>nis_error</a>(err);
+<a name='L183'>    <font color='red'>}</font>
+<a name='L184'>    map = <a href='../S/2692.html#L73' title='Defined at 73 in Modules/nismodule.c.'>nis_mapname</a> (map, &amp;fix);
+<a name='L185'>    <b>if</b> (fix)
+<a name='L186'>        keylen++;
+<a name='L187'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L188'>    err = yp_match (domain, map, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, keylen, &amp;match, &amp;len);
+<a name='L189'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L190'>    Py_DECREF(bkey);
+<a name='L191'>    <b>if</b> (fix)
+<a name='L192'>        len--;
+<a name='L193'>    <b>if</b> (err != 0)
+<a name='L194'>        <b>return</b> <a href='../S/2692.html#L50' title='Defined at 50 in Modules/nismodule.c.'>nis_error</a>(err);
+<a name='L195'>    res = <a href='../D/3976.html' title='Multiple defined in 3 places.'>PyUnicode_DecodeFSDefaultAndSize</a>(match, len);
+<a name='L196'>    free (match);
+<a name='L197'>    <b>return</b> res;
+<a name='L198'><font color='red'>}</font>
+<a name='L199'>
+<a name='L200'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L201'><a href='../S/2692.html#L432' title='Refered from 432 in Modules/nismodule.c.'>nis_cat</a> (PyObject *self, PyObject *args, PyObject *kwdict)
+<a name='L202'><font color='red'>{</font>
+<a name='L203'>    <b>char</b> *domain = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L204'>    <b>char</b> *map;
+<a name='L205'>    <b>struct</b> ypall_callback cb;
+<a name='L206'>    <b>struct</b> <a href='../S/2692.html#L98' title='Defined at 98 in Modules/nismodule.c.'>ypcallback_data</a> data;
+<a name='L207'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict;
+<a name='L208'>    <b>int</b> err;
+<a name='L209'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"map", "domain", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L210'>
+<a name='L211'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict, "s|s:cat",
+<a name='L212'>                                     kwlist, &amp;map, &amp;domain))
+<a name='L213'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L214'>    <b>if</b> (!domain &amp;&amp; ((err = yp_get_default_domain(&amp;domain)) != 0))
+<a name='L215'>        <b>return</b> <a href='../S/2692.html#L50' title='Defined at 50 in Modules/nismodule.c.'>nis_error</a>(err);
+<a name='L216'>    dict = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a> ();
+<a name='L217'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L218'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L219'>    cb.foreach = (foreachfunc)<a href='../S/2692.html#L105' title='Defined at 105 in Modules/nismodule.c.'>nis_foreach</a>;
+<a name='L220'>    data.dict = dict;
+<a name='L221'>    map = <a href='../S/2692.html#L73' title='Defined at 73 in Modules/nismodule.c.'>nis_mapname</a> (map, &amp;data.fix);
+<a name='L222'>    cb.data = (<b>char</b> *)&amp;data;
+<a name='L223'>    data.<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/3091.html#L422' title='Defined at 422 in Python/ceval.c.'>PyEval_SaveThread</a>();
+<a name='L224'>    err = yp_all (domain, map, &amp;cb);
+<a name='L225'>    <a href='../S/3091.html#L435' title='Defined at 435 in Python/ceval.c.'>PyEval_RestoreThread</a>(data.<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L226'>    <b>if</b> (err != 0) <font color='red'>{</font>
+<a name='L227'>        Py_DECREF(dict);
+<a name='L228'>        <b>return</b> <a href='../S/2692.html#L50' title='Defined at 50 in Modules/nismodule.c.'>nis_error</a>(err);
+<a name='L229'>    <font color='red'>}</font>
+<a name='L230'>    <b>return</b> dict;
+<a name='L231'><font color='red'>}</font>
+<a name='L232'>
+<a name='L233'><i><font color='green'>/* These should be u_long on Sun h/w but not on 64-bit h/w.</font></i>
+<a name='L234'><i><font color='green'>   This is not portable to machines with 16-bit ints and no prototypes */</font></i>
+<a name='L235'><font color='darkred'>#ifndef</font> <a href='../S/2692.html#L236' title='Defined at 236 in Modules/nismodule.c.'>YPPROC_MAPLIST</a>
+<a name='L236'><font color='darkred'>#define</font> <a href='../R/5251.html' title='Multiple refered from 2 places.'>YPPROC_MAPLIST</a>  11
+<a name='L237'><font color='darkred'>#endif</font>
+<a name='L238'><font color='darkred'>#ifndef</font> <a href='../S/2692.html#L239' title='Defined at 239 in Modules/nismodule.c.'>YPPROG</a>
+<a name='L239'><font color='darkred'>#define</font> <a href='../R/5252.html' title='Multiple refered from 2 places.'>YPPROG</a>          100004
+<a name='L240'><font color='darkred'>#endif</font>
+<a name='L241'><font color='darkred'>#ifndef</font> <a href='../S/2692.html#L242' title='Defined at 242 in Modules/nismodule.c.'>YPVERS</a>
+<a name='L242'><font color='darkred'>#define</font> <a href='../R/5253.html' title='Multiple refered from 2 places.'>YPVERS</a>          2
+<a name='L243'><font color='darkred'>#endif</font>
+<a name='L244'>
+<a name='L245'><b>typedef</b> <b>char</b> *domainname;
+<a name='L246'><b>typedef</b> <b>char</b> *<a href='../S/2692.html#L264' title='Refered from 264 in Modules/nismodule.c.'>mapname</a>;
+<a name='L247'>
+<a name='L248'><b>enum</b> <a href='../R/9253.html' title='Multiple refered from 2 places.'>nisstat</a> <font color='red'>{</font>
+<a name='L249'>    <a href='../S/2692.html#L382' title='Refered from 382 in Modules/nismodule.c.'>NIS_TRUE</a> = 1,
+<a name='L250'>    NIS_NOMORE = 2,
+<a name='L251'>    NIS_FALSE = 0,
+<a name='L252'>    NIS_NOMAP = -1,
+<a name='L253'>    NIS_NODOM = -2,
+<a name='L254'>    NIS_NOKEY = -3,
+<a name='L255'>    NIS_BADOP = -4,
+<a name='L256'>    NIS_BADDB = -5,
+<a name='L257'>    NIS_YPERR = -6,
+<a name='L258'>    NIS_BADARGS = -7,
+<a name='L259'>    NIS_VERS = -8
+<a name='L260'><font color='red'>}</font>;
+<a name='L261'><b>typedef</b> <b>enum</b> <a href='../S/2692.html#L248' title='Defined at 248 in Modules/nismodule.c.'>nisstat</a> nisstat;
+<a name='L262'>
+<a name='L263'><b>struct</b> <a href='../R/9250.html' title='Multiple refered from 7 places.'>nismaplist</a> <font color='red'>{</font>
+<a name='L264'>    <a href='../S/2692.html#L246' title='Defined at 246 in Modules/nismodule.c.'>mapname</a> map;
+<a name='L265'>    <b>struct</b> <a href='../D/10081.html' title='Multiple defined in 2 places.'>nismaplist</a> *next;
+<a name='L266'><font color='red'>}</font>;
+<a name='L267'><b>typedef</b> <b>struct</b> <a href='../R/9250.html' title='Multiple refered from 7 places.'>nismaplist</a> <a href='../D/10081.html' title='Multiple defined in 2 places.'>nismaplist</a>;
+<a name='L268'>
+<a name='L269'><b>struct</b> <a href='../R/9252.html' title='Multiple refered from 4 places.'>nisresp_maplist</a> <font color='red'>{</font>
+<a name='L270'>    <a href='../S/2692.html#L248' title='Defined at 248 in Modules/nismodule.c.'>nisstat</a> stat;
+<a name='L271'>    <a href='../D/10081.html' title='Multiple defined in 2 places.'>nismaplist</a> *maps;
+<a name='L272'><font color='red'>}</font>;
+<a name='L273'><b>typedef</b> <b>struct</b> <a href='../R/9252.html' title='Multiple refered from 4 places.'>nisresp_maplist</a> <a href='../D/10083.html' title='Multiple defined in 2 places.'>nisresp_maplist</a>;
+<a name='L274'>
+<a name='L275'><b>static</b> <b>struct</b> timeval TIMEOUT = <font color='red'>{</font> 25, 0 <font color='red'>}</font>;
+<a name='L276'>
+<a name='L277'><b>static</b>
+<a name='L278'>bool_t
+<a name='L279'><a href='../S/2692.html#L347' title='Refered from 347 in Modules/nismodule.c.'>nis_xdr_domainname</a>(XDR *xdrs, domainname *objp)
+<a name='L280'><font color='red'>{</font>
+<a name='L281'>    <b>if</b> (!xdr_string(xdrs, objp, YPMAXDOMAIN)) <font color='red'>{</font>
+<a name='L282'>        <b>return</b> (<a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L283'>    <font color='red'>}</font>
+<a name='L284'>    <b>return</b> (<a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>);
+<a name='L285'><font color='red'>}</font>
+<a name='L286'>
+<a name='L287'><b>static</b>
+<a name='L288'>bool_t
+<a name='L289'><a href='../S/2692.html#L301' title='Refered from 301 in Modules/nismodule.c.'>nis_xdr_mapname</a>(XDR *xdrs, mapname *objp)
+<a name='L290'><font color='red'>{</font>
+<a name='L291'>    <b>if</b> (!xdr_string(xdrs, objp, YPMAXMAP)) <font color='red'>{</font>
+<a name='L292'>        <b>return</b> (<a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L293'>    <font color='red'>}</font>
+<a name='L294'>    <b>return</b> (<a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>);
+<a name='L295'><font color='red'>}</font>
+<a name='L296'>
+<a name='L297'><b>static</b>
+<a name='L298'>bool_t
+<a name='L299'><a href='../R/9247.html' title='Multiple refered from 2 places.'>nis_xdr_ypmaplist</a>(XDR *xdrs, nismaplist *objp)
+<a name='L300'><font color='red'>{</font>
+<a name='L301'>    <b>if</b> (!<a href='../S/2692.html#L289' title='Defined at 289 in Modules/nismodule.c.'>nis_xdr_mapname</a>(xdrs, &amp;objp-&gt;map)) <font color='red'>{</font>
+<a name='L302'>        <b>return</b> (<a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L303'>    <font color='red'>}</font>
+<a name='L304'>    <b>if</b> (!xdr_pointer(xdrs, (<b>char</b> **)&amp;objp-&gt;next,
+<a name='L305'>                     <b>sizeof</b>(<a href='../D/10081.html' title='Multiple defined in 2 places.'>nismaplist</a>), (xdrproc_t)<a href='../S/2692.html#L299' title='Defined at 299 in Modules/nismodule.c.'>nis_xdr_ypmaplist</a>))
+<a name='L306'>    <font color='red'>{</font>
+<a name='L307'>        <b>return</b> (<a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L308'>    <font color='red'>}</font>
+<a name='L309'>    <b>return</b> (<a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>);
+<a name='L310'><font color='red'>}</font>
+<a name='L311'>
+<a name='L312'><b>static</b>
+<a name='L313'>bool_t
+<a name='L314'><a href='../S/2692.html#L327' title='Refered from 327 in Modules/nismodule.c.'>nis_xdr_ypstat</a>(XDR *xdrs, nisstat *objp)
+<a name='L315'><font color='red'>{</font>
+<a name='L316'>    <b>if</b> (!xdr_enum(xdrs, (enum_t *)objp)) <font color='red'>{</font>
+<a name='L317'>        <b>return</b> (<a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L318'>    <font color='red'>}</font>
+<a name='L319'>    <b>return</b> (<a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>);
+<a name='L320'><font color='red'>}</font>
+<a name='L321'>
+<a name='L322'>
+<a name='L323'><b>static</b>
+<a name='L324'>bool_t
+<a name='L325'><a href='../S/2692.html#L348' title='Refered from 348 in Modules/nismodule.c.'>nis_xdr_ypresp_maplist</a>(XDR *xdrs, nisresp_maplist *objp)
+<a name='L326'><font color='red'>{</font>
+<a name='L327'>    <b>if</b> (!<a href='../S/2692.html#L314' title='Defined at 314 in Modules/nismodule.c.'>nis_xdr_ypstat</a>(xdrs, &amp;objp-&gt;stat)) <font color='red'>{</font>
+<a name='L328'>        <b>return</b> (<a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L329'>    <font color='red'>}</font>
+<a name='L330'>    <b>if</b> (!xdr_pointer(xdrs, (<b>char</b> **)&amp;objp-&gt;maps,
+<a name='L331'>                     <b>sizeof</b>(<a href='../D/10081.html' title='Multiple defined in 2 places.'>nismaplist</a>), (xdrproc_t)<a href='../S/2692.html#L299' title='Defined at 299 in Modules/nismodule.c.'>nis_xdr_ypmaplist</a>))
+<a name='L332'>    <font color='red'>{</font>
+<a name='L333'>        <b>return</b> (<a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L334'>    <font color='red'>}</font>
+<a name='L335'>    <b>return</b> (<a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>);
+<a name='L336'><font color='red'>}</font>
+<a name='L337'>
+<a name='L338'>
+<a name='L339'><b>static</b>
+<a name='L340'><a href='../D/10083.html' title='Multiple defined in 2 places.'>nisresp_maplist</a> *
+<a name='L341'><a href='../S/2692.html#L378' title='Refered from 378 in Modules/nismodule.c.'>nisproc_maplist_2</a>(domainname *argp, CLIENT *clnt)
+<a name='L342'><font color='red'>{</font>
+<a name='L343'>    <b>static</b> <a href='../D/10083.html' title='Multiple defined in 2 places.'>nisresp_maplist</a> res;
+<a name='L344'>
+<a name='L345'>    memset(&amp;res, 0, <b>sizeof</b>(res));
+<a name='L346'>    <b>if</b> (clnt_call(clnt, <a href='../S/2692.html#L236' title='Defined at 236 in Modules/nismodule.c.'>YPPROC_MAPLIST</a>,
+<a name='L347'>                  (xdrproc_t)<a href='../S/2692.html#L279' title='Defined at 279 in Modules/nismodule.c.'>nis_xdr_domainname</a>, (caddr_t)argp,
+<a name='L348'>                  (xdrproc_t)<a href='../S/2692.html#L325' title='Defined at 325 in Modules/nismodule.c.'>nis_xdr_ypresp_maplist</a>, (caddr_t)&amp;res,
+<a name='L349'>                  TIMEOUT) != RPC_SUCCESS)
+<a name='L350'>    <font color='red'>{</font>
+<a name='L351'>        <b>return</b> (<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L352'>    <font color='red'>}</font>
+<a name='L353'>    <b>return</b> (&amp;res);
+<a name='L354'><font color='red'>}</font>
+<a name='L355'>
+<a name='L356'><b>static</b>
+<a name='L357'><a href='../D/10081.html' title='Multiple defined in 2 places.'>nismaplist</a> *
+<a name='L358'><a href='../S/2692.html#L410' title='Refered from 410 in Modules/nismodule.c.'>nis_maplist</a> (<b>char</b> *dom)
+<a name='L359'><font color='red'>{</font>
+<a name='L360'>    <a href='../D/10083.html' title='Multiple defined in 2 places.'>nisresp_maplist</a> *list;
+<a name='L361'>    CLIENT *cl;
+<a name='L362'>    <b>char</b> *server = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L363'>    <b>int</b> mapi = 0;
+<a name='L364'>
+<a name='L365'>    <b>while</b> (!server &amp;&amp; aliases[mapi].map != 0L) <font color='red'>{</font>
+<a name='L366'>        yp_master (dom, aliases[mapi].map, &amp;server);
+<a name='L367'>        mapi++;
+<a name='L368'>    <font color='red'>}</font>
+<a name='L369'>    <b>if</b> (!server) <font color='red'>{</font>
+<a name='L370'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(NisError, "No NIS master found for any map");
+<a name='L371'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L372'>    <font color='red'>}</font>
+<a name='L373'>    cl = clnt_create(server, <a href='../S/2692.html#L239' title='Defined at 239 in Modules/nismodule.c.'>YPPROG</a>, <a href='../S/2692.html#L242' title='Defined at 242 in Modules/nismodule.c.'>YPVERS</a>, "tcp");
+<a name='L374'>    <b>if</b> (cl == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L375'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(NisError, clnt_spcreateerror(server));
+<a name='L376'>        <b>goto</b> finally;
+<a name='L377'>    <font color='red'>}</font>
+<a name='L378'>    list = <a href='../S/2692.html#L341' title='Defined at 341 in Modules/nismodule.c.'>nisproc_maplist_2</a> (&amp;dom, cl);
+<a name='L379'>    clnt_destroy(cl);
+<a name='L380'>    <b>if</b> (list == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L381'>        <b>goto</b> finally;
+<a name='L382'>    <b>if</b> (list-&gt;stat != <a href='../S/2692.html#L249' title='Defined at 249 in Modules/nismodule.c.'>NIS_TRUE</a>)
+<a name='L383'>        <b>goto</b> finally;
+<a name='L384'>
+<a name='L385'>    free(server);
+<a name='L386'>    <b>return</b> list-&gt;maps;
+<a name='L387'>
+<a name='L388'>  finally:
+<a name='L389'>    free(server);
+<a name='L390'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L391'><font color='red'>}</font>
+<a name='L392'>
+<a name='L393'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L394'><a href='../S/2692.html#L435' title='Refered from 435 in Modules/nismodule.c.'>nis_maps</a> (PyObject *self, PyObject *args, PyObject *kwdict)
+<a name='L395'><font color='red'>{</font>
+<a name='L396'>    <b>char</b> *domain = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L397'>    <a href='../D/10081.html' title='Multiple defined in 2 places.'>nismaplist</a> *maps;
+<a name='L398'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *list;
+<a name='L399'>    <b>int</b> err;
+<a name='L400'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"domain", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L401'>
+<a name='L402'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict,
+<a name='L403'>                                     "|s:maps", kwlist, &amp;domain))
+<a name='L404'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L405'>    <b>if</b> (!domain &amp;&amp; ((err = yp_get_default_domain (&amp;domain)) != 0)) <font color='red'>{</font>
+<a name='L406'>        <a href='../S/2692.html#L50' title='Defined at 50 in Modules/nismodule.c.'>nis_error</a>(err);
+<a name='L407'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L408'>    <font color='red'>}</font>
+<a name='L409'>
+<a name='L410'>    <b>if</b> ((maps = <a href='../S/2692.html#L358' title='Defined at 358 in Modules/nismodule.c.'>nis_maplist</a> (domain)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L411'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L412'>    <b>if</b> ((list = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L413'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L414'>    <b>for</b> (maps = maps; maps; maps = maps-&gt;next) <font color='red'>{</font>
+<a name='L415'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *str = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(maps-&gt;map);
+<a name='L416'>        <b>if</b> (!str || <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(list, str) &lt; 0)
+<a name='L417'>        <font color='red'>{</font>
+<a name='L418'>            Py_DECREF(list);
+<a name='L419'>            list = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L420'>            <b>break</b>;
+<a name='L421'>        <font color='red'>}</font>
+<a name='L422'>        Py_DECREF(str);
+<a name='L423'>    <font color='red'>}</font>
+<a name='L424'>    <i><font color='green'>/* XXX Shouldn't we free the list of maps now? */</font></i>
+<a name='L425'>    <b>return</b> list;
+<a name='L426'><font color='red'>}</font>
+<a name='L427'>
+<a name='L428'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> nis_methods[] = <font color='red'>{</font>
+<a name='L429'>    <font color='red'>{</font>"match",                   (PyCFunction)<a href='../S/2692.html#L158' title='Defined at 158 in Modules/nismodule.c.'>nis_match</a>,
+<a name='L430'>                                    <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS,
+<a name='L431'>                                    match__doc__<font color='red'>}</font>,
+<a name='L432'>    <font color='red'>{</font>"cat",                     (PyCFunction)<a href='../S/2692.html#L201' title='Defined at 201 in Modules/nismodule.c.'>nis_cat</a>,
+<a name='L433'>                                    <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS,
+<a name='L434'>                                    cat__doc__<font color='red'>}</font>,
+<a name='L435'>    <font color='red'>{</font>"maps",                    (PyCFunction)<a href='../S/2692.html#L394' title='Defined at 394 in Modules/nismodule.c.'>nis_maps</a>,
+<a name='L436'>                                    <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS,
+<a name='L437'>                                    maps__doc__<font color='red'>}</font>,
+<a name='L438'>    <font color='red'>{</font>"get_default_domain",      (PyCFunction)<a href='../S/2692.html#L144' title='Defined at 144 in Modules/nismodule.c.'>nis_get_default_domain</a>,
+<a name='L439'>                                    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L440'>                                    get_default_domain__doc__<font color='red'>}</font>,
+<a name='L441'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,                      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>            <i><font color='green'>/* Sentinel */</font></i>
+<a name='L442'><font color='red'>}</font>;
+<a name='L443'>
+<a name='L444'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(nis__doc__,
+<a name='L445'>"This module contains functions for accessing NIS maps.\n");
+<a name='L446'>
+<a name='L447'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> nismodule = <font color='red'>{</font>
+<a name='L448'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L449'>    "nis",
+<a name='L450'>    nis__doc__,
+<a name='L451'>    -1,
+<a name='L452'>    nis_methods,
+<a name='L453'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L454'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L455'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L456'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L457'><font color='red'>}</font>;
+<a name='L458'>
+<a name='L459'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L460'>PyInit_nis (<b>void</b>)
+<a name='L461'><font color='red'>{</font>
+<a name='L462'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m, *d;
+<a name='L463'>    m = PyModule_Create(&amp;nismodule);
+<a name='L464'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L465'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L466'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(m);
+<a name='L467'>    NisError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("nis.error", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L468'>    <b>if</b> (NisError != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L469'>        <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "error", NisError);
+<a name='L470'>    <b>return</b> m;
+<a name='L471'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L50'>[^]</a><a href='#L460'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

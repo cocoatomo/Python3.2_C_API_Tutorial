@@ -1,0 +1,437 @@
+<html>
+<head>
+<title>Python/traceback.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/traceback.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L20'>[^]</a><a href='#L366'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L20' title='Defined at 20.'>tb_dir</a>
+<li><a href='#L40' title='Defined at 40.'>tb_dealloc</a>
+<li><a href='#L51' title='Defined at 51.'>tb_traverse</a>
+<li><a href='#L59' title='Defined at 59.'>tb_clear</a>
+<li><a href='#L101' title='Defined at 101.'>newtracebackobject</a>
+<li><a href='#L123' title='Defined at 123.'>PyTraceBack_Here</a>
+<li><a href='#L136' title='Defined at 136.'>_Py_FindSourceFile</a>
+<li><a href='#L214' title='Defined at 214.'>_Py_DisplaySourceLine</a>
+<li><a href='#L320' title='Defined at 320.'>tb_displayline</a>
+<li><a href='#L339' title='Defined at 339.'>tb_printinternal</a>
+<li><a href='#L366' title='Defined at 366.'>PyTraceBack_Print</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Traceback implementation */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'>
+<a name='L6'><font color='darkred'>#include</font> "<a href='511.html'>code.h</a>"
+<a name='L7'><font color='darkred'>#include</font> "<a href='526.html'>frameobject.h</a>"
+<a name='L8'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L9'><font color='darkred'>#include</font> "<a href='547.html'>osdefs.h</a>"
+<a name='L10'><font color='darkred'>#ifdef</font> <a href='../D/1484.html' title='Multiple defined in 4 places.'>HAVE_FCNTL_H</a>
+<a name='L11'><font color='darkred'>#include</font> &lt;fcntl.h&gt;
+<a name='L12'><font color='darkred'>#endif</font>
+<a name='L13'>
+<a name='L14'><font color='darkred'>#define</font> <a href='../R/2175.html' title='Multiple refered from 57 places.'>OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a>, x)
+<a name='L15'>
+<a name='L16'><i><font color='green'>/* Method from Parser/tokenizer.c */</font></i>
+<a name='L17'><b>extern</b> <b>char</b> * <a href='../S/2851.html#L1702' title='Defined at 1702 in Parser/tokenizer.c.'>PyTokenizer_FindEncoding</a>(<b>int</b>);
+<a name='L18'>
+<a name='L19'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L20'><a href='../S/3156.html#L27' title='Refered from 27 in Python/traceback.c.'>tb_dir</a>(PyTracebackObject *self)
+<a name='L21'><font color='red'>{</font>
+<a name='L22'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("[ssss]", "tb_frame", "tb_next",
+<a name='L23'>                                   "tb_lasti", "tb_lineno");
+<a name='L24'><font color='red'>}</font>
+<a name='L25'>
+<a name='L26'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> tb_methods[] = <font color='red'>{</font>
+<a name='L27'>   <font color='red'>{</font>"__dir__", (PyCFunction)<a href='../S/3156.html#L20' title='Defined at 20 in Python/traceback.c.'>tb_dir</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L28'>   <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L29'><font color='red'>}</font>;
+<a name='L30'>
+<a name='L31'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> tb_memberlist[] = <font color='red'>{</font>
+<a name='L32'>    <font color='red'>{</font>"tb_next",         <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,       <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(tb_next),   <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L33'>    <font color='red'>{</font>"tb_frame",        <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,       <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(tb_frame),  <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L34'>    <font color='red'>{</font>"tb_lasti",        <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,          <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(tb_lasti),  <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L35'>    <font color='red'>{</font>"tb_lineno",       <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,          <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(tb_lineno), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L36'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>      <i><font color='green'>/* Sentinel */</font></i>
+<a name='L37'><font color='red'>}</font>;
+<a name='L38'>
+<a name='L39'><b>static</b> <b>void</b>
+<a name='L40'><a href='../S/3156.html#L70' title='Refered from 70 in Python/traceback.c.'>tb_dealloc</a>(PyTracebackObject *tb)
+<a name='L41'><font color='red'>{</font>
+<a name='L42'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(tb);
+<a name='L43'>    Py_TRASHCAN_SAFE_BEGIN(tb)
+<a name='L44'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tb-&gt;tb_next);
+<a name='L45'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tb-&gt;tb_frame);
+<a name='L46'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(tb);
+<a name='L47'>    <a href='../S/544.html#L914' title='Defined at 914 in Include/object.h.'>Py_TRASHCAN_SAFE_END</a>(tb)
+<a name='L48'><font color='red'>}</font>
+<a name='L49'>
+<a name='L50'><b>static</b> <b>int</b>
+<a name='L51'><a href='../S/3156.html#L87' title='Refered from 87 in Python/traceback.c.'>tb_traverse</a>(PyTracebackObject *tb, visitproc visit, <b>void</b> *arg)
+<a name='L52'><font color='red'>{</font>
+<a name='L53'>    Py_VISIT(tb-&gt;tb_next);
+<a name='L54'>    Py_VISIT(tb-&gt;tb_frame);
+<a name='L55'>    <b>return</b> 0;
+<a name='L56'><font color='red'>}</font>
+<a name='L57'>
+<a name='L58'><b>static</b> <b>void</b>
+<a name='L59'><a href='../S/3156.html#L88' title='Refered from 88 in Python/traceback.c.'>tb_clear</a>(PyTracebackObject *tb)
+<a name='L60'><font color='red'>{</font>
+<a name='L61'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tb-&gt;tb_next);
+<a name='L62'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tb-&gt;tb_frame);
+<a name='L63'><font color='red'>}</font>
+<a name='L64'>
+<a name='L65'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyTraceBack_Type = <font color='red'>{</font>
+<a name='L66'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L67'>    "traceback",
+<a name='L68'>    <b>sizeof</b>(<a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a>),
+<a name='L69'>    0,
+<a name='L70'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/3156.html#L40' title='Defined at 40 in Python/traceback.c.'>tb_dealloc</a>, <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L71'>    0,                  <i><font color='green'>/*tp_print*/</font></i>
+<a name='L72'>    0,    <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L73'>    0,                  <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L74'>    0,                  <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L75'>    0,                  <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L76'>    0,                  <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L77'>    0,                  <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L78'>    0,                  <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L79'>    0,                  <i><font color='green'>/* tp_hash */</font></i>
+<a name='L80'>    0,                  <i><font color='green'>/* tp_call */</font></i>
+<a name='L81'>    0,                  <i><font color='green'>/* tp_str */</font></i>
+<a name='L82'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L83'>    0,                  <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L84'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L85'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,<i><font color='green'>/* tp_flags */</font></i>
+<a name='L86'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L87'>    (traverseproc)<a href='../S/3156.html#L51' title='Defined at 51 in Python/traceback.c.'>tb_traverse</a>,                  <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L88'>    (inquiry)<a href='../S/3156.html#L59' title='Defined at 59 in Python/traceback.c.'>tb_clear</a>,                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L89'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L90'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L91'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L92'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L93'>    tb_methods,         <i><font color='green'>/* tp_methods */</font></i>
+<a name='L94'>    tb_memberlist,      <i><font color='green'>/* tp_members */</font></i>
+<a name='L95'>    0,                                          <i><font color='green'>/* tp_getset */</font></i>
+<a name='L96'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L97'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L98'><font color='red'>}</font>;
+<a name='L99'>
+<a name='L100'><b>static</b> <a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a> *
+<a name='L101'><a href='../S/3156.html#L127' title='Refered from 127 in Python/traceback.c.'>newtracebackobject</a>(PyTracebackObject *next, PyFrameObject *frame)
+<a name='L102'><font color='red'>{</font>
+<a name='L103'>    <a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a> *tb;
+<a name='L104'>    <b>if</b> ((next != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; !PyTraceBack_Check(next)) ||
+<a name='L105'>                    frame == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !PyFrame_Check(frame)) <font color='red'>{</font>
+<a name='L106'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L107'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L108'>    <font color='red'>}</font>
+<a name='L109'>    tb = PyObject_GC_New(<a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a>, &amp;PyTraceBack_Type);
+<a name='L110'>    <b>if</b> (tb != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L111'>        <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(next);
+<a name='L112'>        tb-&gt;tb_next = next;
+<a name='L113'>        <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(frame);
+<a name='L114'>        tb-&gt;tb_frame = frame;
+<a name='L115'>        tb-&gt;tb_lasti = frame-&gt;f_lasti;
+<a name='L116'>        tb-&gt;tb_lineno = <a href='../S/2792.html#L35' title='Defined at 35 in Objects/frameobject.c.'>PyFrame_GetLineNumber</a>(frame);
+<a name='L117'>        <a href='../D/3618.html' title='Multiple defined in 2 places.'>PyObject_GC_Track</a>(tb);
+<a name='L118'>    <font color='red'>}</font>
+<a name='L119'>    <b>return</b> tb;
+<a name='L120'><font color='red'>}</font>
+<a name='L121'>
+<a name='L122'><b>int</b>
+<a name='L123'><a href='../R/3477.html' title='Multiple refered from 4 places.'>PyTraceBack_Here</a>(PyFrameObject *frame)
+<a name='L124'><font color='red'>{</font>
+<a name='L125'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate = <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>();
+<a name='L126'>    <a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a> *oldtb = (<a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a> *) tstate-&gt;curexc_traceback;
+<a name='L127'>    <a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a> *tb = <a href='../S/3156.html#L101' title='Defined at 101 in Python/traceback.c.'>newtracebackobject</a>(oldtb, frame);
+<a name='L128'>    <b>if</b> (tb == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L129'>        <b>return</b> -1;
+<a name='L130'>    tstate-&gt;curexc_traceback = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)tb;
+<a name='L131'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(oldtb);
+<a name='L132'>    <b>return</b> 0;
+<a name='L133'><font color='red'>}</font>
+<a name='L134'>
+<a name='L135'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L136'><a href='../S/3156.html#L240' title='Refered from 240 in Python/traceback.c.'>_Py_FindSourceFile</a>(PyObject *filename, <b>char</b>* namebuf, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> namelen, PyObject *io)
+<a name='L137'><font color='red'>{</font>
+<a name='L138'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L139'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *binary;
+<a name='L140'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L141'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> npath;
+<a name='L142'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> taillen;
+<a name='L143'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *syspath;
+<a name='L144'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *path;
+<a name='L145'>    <b>const</b> <b>char</b>* tail;
+<a name='L146'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *filebytes;
+<a name='L147'>    <b>const</b> <b>char</b>* filepath;
+<a name='L148'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L149'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L150'>
+<a name='L151'>    filebytes = <a href='../S/2828.html#L1585' title='Defined at 1585 in Objects/unicodeobject.c.'>PyUnicode_EncodeFSDefault</a>(filename);
+<a name='L152'>    <b>if</b> (filebytes == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L153'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L154'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L155'>    <font color='red'>}</font>
+<a name='L156'>    filepath = PyBytes_AS_STRING(filebytes);
+<a name='L157'>
+<a name='L158'>    <i><font color='green'>/* Search tail of filename in sys.path before giving up */</font></i>
+<a name='L159'>    tail = strrchr(filepath, <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>);
+<a name='L160'>    <b>if</b> (tail == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L161'>        tail = filepath;
+<a name='L162'>    <b>else</b>
+<a name='L163'>        tail++;
+<a name='L164'>    taillen = strlen(tail);
+<a name='L165'>
+<a name='L166'>    syspath = <a href='../S/3144.html#L44' title='Defined at 44 in Python/sysmodule.c.'>PySys_GetObject</a>("path");
+<a name='L167'>    <b>if</b> (syspath == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !PyList_Check(syspath))
+<a name='L168'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L169'>    npath = <a href='../S/2796.html#L166' title='Defined at 166 in Objects/listobject.c.'>PyList_Size</a>(syspath);
+<a name='L170'>
+<a name='L171'>    <b>for</b> (i = 0; i &lt; npath; i++) <font color='red'>{</font>
+<a name='L172'>        v = <a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(syspath, i);
+<a name='L173'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L174'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L175'>            <b>break</b>;
+<a name='L176'>        <font color='red'>}</font>
+<a name='L177'>        <b>if</b> (!PyUnicode_Check(v))
+<a name='L178'>            <b>continue</b>;
+<a name='L179'>        path = <a href='../S/2828.html#L1585' title='Defined at 1585 in Objects/unicodeobject.c.'>PyUnicode_EncodeFSDefault</a>(v);
+<a name='L180'>        <b>if</b> (path == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L181'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L182'>            <b>continue</b>;
+<a name='L183'>        <font color='red'>}</font>
+<a name='L184'>        len = PyBytes_GET_SIZE(path);
+<a name='L185'>        <b>if</b> (len + 1 + (<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)taillen &gt;= (<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)namelen - 1) <font color='red'>{</font>
+<a name='L186'>            Py_DECREF(path);
+<a name='L187'>            <b>continue</b>; <i><font color='green'>/* Too long */</font></i>
+<a name='L188'>        <font color='red'>}</font>
+<a name='L189'>        strcpy(namebuf, PyBytes_AS_STRING(path));
+<a name='L190'>        Py_DECREF(path);
+<a name='L191'>        <b>if</b> (strlen(namebuf) != len)
+<a name='L192'>            <b>continue</b>; <i><font color='green'>/* v contains '\0' */</font></i>
+<a name='L193'>        <b>if</b> (len &gt; 0 &amp;&amp; namebuf[len-1] != <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>)
+<a name='L194'>            namebuf[len++] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L195'>        strcpy(namebuf+len, tail);
+<a name='L196'>
+<a name='L197'>        binary = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(io, "open", "ss", namebuf, "rb");
+<a name='L198'>        <b>if</b> (binary != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L199'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = binary;
+<a name='L200'>            <b>goto</b> finally;
+<a name='L201'>        <font color='red'>}</font>
+<a name='L202'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L203'>    <font color='red'>}</font>
+<a name='L204'>    <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L205'>
+<a name='L206'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L207'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L208'>finally:
+<a name='L209'>    Py_DECREF(filebytes);
+<a name='L210'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L211'><font color='red'>}</font>
+<a name='L212'>
+<a name='L213'><b>int</b>
+<a name='L214'><a href='../R/5565.html' title='Multiple refered from 2 places.'>_Py_DisplaySourceLine</a>(PyObject *f, PyObject *filename, <b>int</b> lineno, <b>int</b> indent)
+<a name='L215'><font color='red'>{</font>
+<a name='L216'>    <b>int</b> err = 0;
+<a name='L217'>    <b>int</b> fd;
+<a name='L218'>    <b>int</b> i;
+<a name='L219'>    <b>char</b> *found_encoding;
+<a name='L220'>    <b>char</b> *<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>;
+<a name='L221'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *io;
+<a name='L222'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *binary;
+<a name='L223'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *fob = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L224'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *lineobj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L225'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L226'>    <b>char</b> buf[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>+1];
+<a name='L227'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *u, *p;
+<a name='L228'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L229'>
+<a name='L230'>    <i><font color='green'>/* open the file */</font></i>
+<a name='L231'>    <b>if</b> (filename == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L232'>        <b>return</b> 0;
+<a name='L233'>
+<a name='L234'>    io = <a href='../S/3120.html#L2348' title='Defined at 2348 in Python/import.c.'>PyImport_ImportModuleNoBlock</a>("io");
+<a name='L235'>    <b>if</b> (io == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L236'>        <b>return</b> -1;
+<a name='L237'>    binary = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(io, "open", "Os", filename, "rb");
+<a name='L238'>
+<a name='L239'>    <b>if</b> (binary == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L240'>        binary = <a href='../S/3156.html#L136' title='Defined at 136 in Python/traceback.c.'>_Py_FindSourceFile</a>(filename, buf, <b>sizeof</b>(buf), io);
+<a name='L241'>        <b>if</b> (binary == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L242'>            Py_DECREF(io);
+<a name='L243'>            <b>return</b> 0;
+<a name='L244'>        <font color='red'>}</font>
+<a name='L245'>    <font color='red'>}</font>
+<a name='L246'>
+<a name='L247'>    <i><font color='green'>/* use the right encoding to decode the file as unicode */</font></i>
+<a name='L248'>    fd = <a href='../S/2790.html#L197' title='Defined at 197 in Objects/fileobject.c.'>PyObject_AsFileDescriptor</a>(binary);
+<a name='L249'>    found_encoding = <a href='../S/2851.html#L1702' title='Defined at 1702 in Parser/tokenizer.c.'>PyTokenizer_FindEncoding</a>(fd);
+<a name='L250'>    <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = (found_encoding != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) ? found_encoding : "utf-8";
+<a name='L251'>    lseek(fd, 0, 0); <i><font color='green'>/* Reset position */</font></i>
+<a name='L252'>    fob = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(io, "TextIOWrapper", "Os", binary, <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L253'>    Py_DECREF(io);
+<a name='L254'>    Py_DECREF(binary);
+<a name='L255'>    PyMem_FREE(found_encoding);
+<a name='L256'>
+<a name='L257'>    <b>if</b> (fob == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L258'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L259'>        <b>return</b> 0;
+<a name='L260'>    <font color='red'>}</font>
+<a name='L261'>
+<a name='L262'>    <i><font color='green'>/* get the line number lineno */</font></i>
+<a name='L263'>    <b>for</b> (i = 0; i &lt; lineno; i++) <font color='red'>{</font>
+<a name='L264'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(lineobj);
+<a name='L265'>        lineobj = <a href='../S/2790.html#L49' title='Defined at 49 in Objects/fileobject.c.'>PyFile_GetLine</a>(fob, -1);
+<a name='L266'>        <b>if</b> (!lineobj) <font color='red'>{</font>
+<a name='L267'>            err = -1;
+<a name='L268'>            <b>break</b>;
+<a name='L269'>        <font color='red'>}</font>
+<a name='L270'>    <font color='red'>}</font>
+<a name='L271'>    res = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(fob, "close", "");
+<a name='L272'>    <b>if</b> (res)
+<a name='L273'>        Py_DECREF(res);
+<a name='L274'>    <b>else</b>
+<a name='L275'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L276'>    Py_DECREF(fob);
+<a name='L277'>    <b>if</b> (!lineobj || !PyUnicode_Check(lineobj)) <font color='red'>{</font>
+<a name='L278'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(lineobj);
+<a name='L279'>        <b>return</b> err;
+<a name='L280'>    <font color='red'>}</font>
+<a name='L281'>
+<a name='L282'>    <i><font color='green'>/* remove the indentation of the line */</font></i>
+<a name='L283'>    u = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(lineobj);
+<a name='L284'>    len = <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(lineobj);
+<a name='L285'>    <b>for</b> (p=u; *p == ' ' || *p == '\t' || *p == '\014'; p++)
+<a name='L286'>        len--;
+<a name='L287'>    <b>if</b> (u != p) <font color='red'>{</font>
+<a name='L288'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *truncated;
+<a name='L289'>        truncated = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(p, len);
+<a name='L290'>        <b>if</b> (truncated) <font color='red'>{</font>
+<a name='L291'>            Py_DECREF(lineobj);
+<a name='L292'>            lineobj = truncated;
+<a name='L293'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L294'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L295'>        <font color='red'>}</font>
+<a name='L296'>    <font color='red'>}</font>
+<a name='L297'>
+<a name='L298'>    <i><font color='green'>/* Write some spaces before the line */</font></i>
+<a name='L299'>    strcpy(buf, "          ");
+<a name='L300'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (strlen(buf) == 10);
+<a name='L301'>    <b>while</b> (indent &gt; 0) <font color='red'>{</font>
+<a name='L302'>        <b>if</b>(indent &lt; 10)
+<a name='L303'>            buf[indent] = '\0';
+<a name='L304'>        err = <a href='../S/2790.html#L167' title='Defined at 167 in Objects/fileobject.c.'>PyFile_WriteString</a>(buf, f);
+<a name='L305'>        <b>if</b> (err != 0)
+<a name='L306'>            <b>break</b>;
+<a name='L307'>        indent -= 10;
+<a name='L308'>    <font color='red'>}</font>
+<a name='L309'>
+<a name='L310'>    <i><font color='green'>/* finally display the line */</font></i>
+<a name='L311'>    <b>if</b> (err == 0)
+<a name='L312'>        err = <a href='../S/2790.html#L131' title='Defined at 131 in Objects/fileobject.c.'>PyFile_WriteObject</a>(lineobj, f, Py_PRINT_RAW);
+<a name='L313'>    Py_DECREF(lineobj);
+<a name='L314'>    <b>if</b>  (err == 0)
+<a name='L315'>        err = <a href='../S/2790.html#L167' title='Defined at 167 in Objects/fileobject.c.'>PyFile_WriteString</a>("\n", f);
+<a name='L316'>    <b>return</b> err;
+<a name='L317'><font color='red'>}</font>
+<a name='L318'>
+<a name='L319'><b>static</b> <b>int</b>
+<a name='L320'><a href='../S/3156.html#L350' title='Refered from 350 in Python/traceback.c.'>tb_displayline</a>(PyObject *f, PyObject *filename, <b>int</b> lineno, PyObject *name)
+<a name='L321'><font color='red'>{</font>
+<a name='L322'>    <b>int</b> err;
+<a name='L323'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *line;
+<a name='L324'>
+<a name='L325'>    <b>if</b> (filename == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || name == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L326'>        <b>return</b> -1;
+<a name='L327'>    line = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("  File \"%U\", line %d, in %U\n",
+<a name='L328'>                                filename, lineno, name);
+<a name='L329'>    <b>if</b> (line == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L330'>        <b>return</b> -1;
+<a name='L331'>    err = <a href='../S/2790.html#L131' title='Defined at 131 in Objects/fileobject.c.'>PyFile_WriteObject</a>(line, f, Py_PRINT_RAW);
+<a name='L332'>    Py_DECREF(line);
+<a name='L333'>    <b>if</b> (err != 0)
+<a name='L334'>        <b>return</b> err;
+<a name='L335'>    <b>return</b> <a href='../S/3156.html#L214' title='Defined at 214 in Python/traceback.c.'>_Py_DisplaySourceLine</a>(f, filename, lineno, 4);
+<a name='L336'><font color='red'>}</font>
+<a name='L337'>
+<a name='L338'><b>static</b> <b>int</b>
+<a name='L339'><a href='../S/3156.html#L402' title='Refered from 402 in Python/traceback.c.'>tb_printinternal</a>(PyTracebackObject *tb, PyObject *f, <b>long</b> limit)
+<a name='L340'><font color='red'>{</font>
+<a name='L341'>    <b>int</b> err = 0;
+<a name='L342'>    <b>long</b> depth = 0;
+<a name='L343'>    <a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a> *tb1 = tb;
+<a name='L344'>    <b>while</b> (tb1 != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L345'>        depth++;
+<a name='L346'>        tb1 = tb1-&gt;tb_next;
+<a name='L347'>    <font color='red'>}</font>
+<a name='L348'>    <b>while</b> (tb != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; err == 0) <font color='red'>{</font>
+<a name='L349'>        <b>if</b> (depth &lt;= limit) <font color='red'>{</font>
+<a name='L350'>            err = <a href='../S/3156.html#L320' title='Defined at 320 in Python/traceback.c.'>tb_displayline</a>(f,
+<a name='L351'>                                 tb-&gt;tb_frame-&gt;f_code-&gt;co_filename,
+<a name='L352'>                                 tb-&gt;tb_lineno,
+<a name='L353'>                                 tb-&gt;tb_frame-&gt;f_code-&gt;co_name);
+<a name='L354'>        <font color='red'>}</font>
+<a name='L355'>        depth--;
+<a name='L356'>        tb = tb-&gt;tb_next;
+<a name='L357'>        <b>if</b> (err == 0)
+<a name='L358'>            err = <a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>();
+<a name='L359'>    <font color='red'>}</font>
+<a name='L360'>    <b>return</b> err;
+<a name='L361'><font color='red'>}</font>
+<a name='L362'>
+<a name='L363'><font color='darkred'>#define</font> <a href='../R/3478.html' title='Multiple refered from 3 places.'>PyTraceBack_LIMIT</a> 1000
+<a name='L364'>
+<a name='L365'><b>int</b>
+<a name='L366'><a href='../R/3479.html' title='Multiple refered from 2 places.'>PyTraceBack_Print</a>(PyObject *v, PyObject *f)
+<a name='L367'><font color='red'>{</font>
+<a name='L368'>    <b>int</b> err;
+<a name='L369'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *limitv;
+<a name='L370'>    <b>long</b> limit = <a href='../S/3156.html#L363' title='Defined at 363 in Python/traceback.c.'>PyTraceBack_LIMIT</a>;
+<a name='L371'>
+<a name='L372'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L373'>        <b>return</b> 0;
+<a name='L374'>    <b>if</b> (!PyTraceBack_Check(v)) <font color='red'>{</font>
+<a name='L375'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L376'>        <b>return</b> -1;
+<a name='L377'>    <font color='red'>}</font>
+<a name='L378'>    limitv = <a href='../S/3144.html#L44' title='Defined at 44 in Python/sysmodule.c.'>PySys_GetObject</a>("tracebacklimit");
+<a name='L379'>    <b>if</b> (limitv) <font color='red'>{</font>
+<a name='L380'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *exc_type, *exc_value, *exc_tb;
+<a name='L381'>
+<a name='L382'>        <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;exc_type, &amp;exc_value, &amp;exc_tb);
+<a name='L383'>        limit = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(limitv);
+<a name='L384'>        <b>if</b> (limit == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L385'>            <b>if</b> (<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_OverflowError)) <font color='red'>{</font>
+<a name='L386'>                limit = <a href='../S/3156.html#L363' title='Defined at 363 in Python/traceback.c.'>PyTraceBack_LIMIT</a>;
+<a name='L387'>            <font color='red'>}</font>
+<a name='L388'>            <b>else</b> <font color='red'>{</font>
+<a name='L389'>                <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(exc_type);
+<a name='L390'>                <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(exc_value);
+<a name='L391'>                <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(exc_tb);
+<a name='L392'>                <b>return</b> 0;
+<a name='L393'>            <font color='red'>}</font>
+<a name='L394'>        <font color='red'>}</font>
+<a name='L395'>        <b>else</b> <b>if</b> (limit &lt;= 0) <font color='red'>{</font>
+<a name='L396'>            limit = <a href='../S/3156.html#L363' title='Defined at 363 in Python/traceback.c.'>PyTraceBack_LIMIT</a>;
+<a name='L397'>        <font color='red'>}</font>
+<a name='L398'>        <a href='../S/3106.html#L25' title='Defined at 25 in Python/errors.c.'>PyErr_Restore</a>(exc_type, exc_value, exc_tb);
+<a name='L399'>    <font color='red'>}</font>
+<a name='L400'>    err = <a href='../S/2790.html#L167' title='Defined at 167 in Objects/fileobject.c.'>PyFile_WriteString</a>("Traceback (most recent call last):\n", f);
+<a name='L401'>    <b>if</b> (!err)
+<a name='L402'>        err = <a href='../S/3156.html#L339' title='Defined at 339 in Python/traceback.c.'>tb_printinternal</a>((<a href='../S/583.html#L18' title='Defined at 18 in Include/traceback.h.'>PyTracebackObject</a> *)v, f, limit);
+<a name='L403'>    <b>return</b> err;
+<a name='L404'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L20'>[^]</a><a href='#L366'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

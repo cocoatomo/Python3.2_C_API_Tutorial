@@ -1,0 +1,174 @@
+<html>
+<head>
+<title>Modules/_multiprocessing/pipe_connection.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3386.html'>_multiprocessing</a>/pipe_connection.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L18'>[^]</a><a href='#L93'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L18' title='Defined at 18.'>conn_send_string</a>
+<li><a href='#L42' title='Defined at 42.'>conn_recv_string</a>
+<li><a href='#L93' title='Defined at 93.'>conn_poll</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'> * A type which wraps a pipe handle in message oriented mode</font></i>
+<a name='L3'><i><font color='green'> *</font></i>
+<a name='L4'><i><font color='green'> * pipe_connection.c</font></i>
+<a name='L5'><i><font color='green'> *</font></i>
+<a name='L6'><i><font color='green'> * Copyright (c) 2006-2008, R Oudkerk --- see COPYING.txt</font></i>
+<a name='L7'><i><font color='green'> */</font></i>
+<a name='L8'>
+<a name='L9'><font color='darkred'>#include</font> "<a href='2583.html'>multiprocessing.h</a>"
+<a name='L10'>
+<a name='L11'><font color='darkred'>#define</font> <a href='../R/528.html' title='Multiple refered from 5 places.'>CLOSE</a>(h) CloseHandle(h)
+<a name='L12'>
+<a name='L13'><i><font color='green'>/*</font></i>
+<a name='L14'><i><font color='green'> * Send string to the pipe; assumes in message oriented mode</font></i>
+<a name='L15'><i><font color='green'> */</font></i>
+<a name='L16'>
+<a name='L17'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L18'><a href='../R/6967.html' title='Multiple refered from 2 places.'>conn_send_string</a>(ConnectionObject *conn, <b>char</b> *string, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> length)
+<a name='L19'><font color='red'>{</font>
+<a name='L20'>    DWORD amount_written;
+<a name='L21'>    <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> ret;
+<a name='L22'>
+<a name='L23'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L24'>    ret = WriteFile(conn-&gt;handle, <a href='../S/500.html#L5' title='Defined at 5 in Include/asdl.h.'>string</a>, length, &amp;amount_written, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L25'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L26'>
+<a name='L27'>    <b>if</b> (ret == 0 &amp;&amp; GetLastError() == ERROR_NO_SYSTEM_RESOURCES) <font color='red'>{</font>
+<a name='L28'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError, "Cannnot send %" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a> "d bytes over connection", length);
+<a name='L29'>        <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L30'>    <font color='red'>}</font>
+<a name='L31'>
+<a name='L32'>    <b>return</b> ret ? <a href='../S/2583.html#L118' title='Defined at 118 in Modules/_multiprocessing/multiprocessing.h.'>MP_SUCCESS</a> : <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L33'><font color='red'>}</font>
+<a name='L34'>
+<a name='L35'><i><font color='green'>/*</font></i>
+<a name='L36'><i><font color='green'> * Attempts to read into buffer, or if buffer too small into *newbuffer.</font></i>
+<a name='L37'><i><font color='green'> *</font></i>
+<a name='L38'><i><font color='green'> * Returns number of bytes read.  Assumes in message oriented mode.</font></i>
+<a name='L39'><i><font color='green'> */</font></i>
+<a name='L40'>
+<a name='L41'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L42'><a href='../R/6966.html' title='Multiple refered from 3 places.'>conn_recv_string</a>(ConnectionObject *conn, <b>char</b> *buffer,
+<a name='L43'>                 <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> buflength, <b>char</b> **newbuffer, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> maxlength)
+<a name='L44'><font color='red'>{</font>
+<a name='L45'>    DWORD left, length, full_length, err;
+<a name='L46'>    <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> ret;
+<a name='L47'>    *newbuffer = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L48'>
+<a name='L49'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L50'>    ret = ReadFile(conn-&gt;handle, <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <a href='../D/2125.html' title='Multiple defined in 11 places.'>MIN</a>(buflength, maxlength),
+<a name='L51'>                  &amp;length, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L52'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L53'>    <b>if</b> (ret)
+<a name='L54'>        <b>return</b> length;
+<a name='L55'>
+<a name='L56'>    err = GetLastError();
+<a name='L57'>    <b>if</b> (err != ERROR_MORE_DATA) <font color='red'>{</font>
+<a name='L58'>        <b>if</b> (err == ERROR_BROKEN_PIPE)
+<a name='L59'>            <b>return</b> <a href='../S/2583.html#L121' title='Defined at 121 in Modules/_multiprocessing/multiprocessing.h.'>MP_END_OF_FILE</a>;
+<a name='L60'>        <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L61'>    <font color='red'>}</font>
+<a name='L62'>
+<a name='L63'>    <b>if</b> (!PeekNamedPipe(conn-&gt;handle, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, &amp;left))
+<a name='L64'>        <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L65'>
+<a name='L66'>    full_length = length + left;
+<a name='L67'>    <b>if</b> (full_length &gt; maxlength)
+<a name='L68'>        <b>return</b> <a href='../S/2583.html#L123' title='Defined at 123 in Modules/_multiprocessing/multiprocessing.h.'>MP_BAD_MESSAGE_LENGTH</a>;
+<a name='L69'>
+<a name='L70'>    *newbuffer = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(full_length);
+<a name='L71'>    <b>if</b> (*newbuffer == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L72'>        <b>return</b> <a href='../S/2583.html#L120' title='Defined at 120 in Modules/_multiprocessing/multiprocessing.h.'>MP_MEMORY_ERROR</a>;
+<a name='L73'>
+<a name='L74'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(*newbuffer, <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, length);
+<a name='L75'>
+<a name='L76'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L77'>    ret = ReadFile(conn-&gt;handle, *newbuffer+length, left, &amp;length, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L78'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L79'>    <b>if</b> (ret) <font color='red'>{</font>
+<a name='L80'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(length == left);
+<a name='L81'>        <b>return</b> full_length;
+<a name='L82'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L83'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(*newbuffer);
+<a name='L84'>        <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L85'>    <font color='red'>}</font>
+<a name='L86'><font color='red'>}</font>
+<a name='L87'>
+<a name='L88'><i><font color='green'>/*</font></i>
+<a name='L89'><i><font color='green'> * Check whether any data is available for reading</font></i>
+<a name='L90'><i><font color='green'> */</font></i>
+<a name='L91'>
+<a name='L92'><b>static</b> <b>int</b>
+<a name='L93'><a href='../S/2581.html#L369' title='Refered from 369 in Modules/_multiprocessing/connection.h.'>conn_poll</a>(ConnectionObject *conn, <b>double</b> timeout, PyThreadState *_save)
+<a name='L94'><font color='red'>{</font>
+<a name='L95'>    DWORD <a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>, deadline, delay;
+<a name='L96'>    <b>int</b> difference, res;
+<a name='L97'>    <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> = <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>;
+<a name='L98'>
+<a name='L99'>    <b>if</b> (!PeekNamedPipe(conn-&gt;handle, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, &amp;<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))
+<a name='L100'>        <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L101'>
+<a name='L102'>    <b>if</b> (timeout == 0.0)
+<a name='L103'>        <b>return</b> <a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a> &gt; 0;
+<a name='L104'>
+<a name='L105'>    <b>if</b> (timeout &lt; 0.0)
+<a name='L106'>        <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> = <a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>;
+<a name='L107'>    <b>else</b>
+<a name='L108'>        <i><font color='green'>/* XXX does not check for overflow */</font></i>
+<a name='L109'>        deadline = GetTickCount() + (DWORD)(1000 * timeout + 0.5);
+<a name='L110'>
+<a name='L111'>    <a href='../S/2618.html#L307' title='Defined at 307 in Modules/_tkinter.c.'>Sleep</a>(0);
+<a name='L112'>
+<a name='L113'>    <b>for</b> (delay = 1 ; ; delay += 1) <font color='red'>{</font>
+<a name='L114'>        <b>if</b> (!PeekNamedPipe(conn-&gt;handle, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, &amp;<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))
+<a name='L115'>            <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L116'>        <b>else</b> <b>if</b> (<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a> &gt; 0)
+<a name='L117'>            <b>return</b> <a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>;
+<a name='L118'>
+<a name='L119'>        <b>if</b> (!<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>) <font color='red'>{</font>
+<a name='L120'>            difference = deadline - GetTickCount();
+<a name='L121'>            <b>if</b> (difference &lt; 0)
+<a name='L122'>                <b>return</b> <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>;
+<a name='L123'>            <b>if</b> ((<b>int</b>)delay &gt; difference)
+<a name='L124'>                delay = difference;
+<a name='L125'>        <font color='red'>}</font>
+<a name='L126'>
+<a name='L127'>        <b>if</b> (delay &gt; 20)
+<a name='L128'>            delay = 20;
+<a name='L129'>
+<a name='L130'>        <a href='../S/2618.html#L307' title='Defined at 307 in Modules/_tkinter.c.'>Sleep</a>(delay);
+<a name='L131'>
+<a name='L132'>        <i><font color='green'>/* check for signals */</font></i>
+<a name='L133'>        <a href='../D/4082.html' title='Multiple defined in 2 places.'>Py_BLOCK_THREADS</a>
+<a name='L134'>        res = <a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>();
+<a name='L135'>        <a href='../D/4264.html' title='Multiple defined in 2 places.'>Py_UNBLOCK_THREADS</a>
+<a name='L136'>
+<a name='L137'>        <b>if</b> (res)
+<a name='L138'>            <b>return</b> <a href='../S/2583.html#L125' title='Defined at 125 in Modules/_multiprocessing/multiprocessing.h.'>MP_EXCEPTION_HAS_BEEN_SET</a>;
+<a name='L139'>    <font color='red'>}</font>
+<a name='L140'><font color='red'>}</font>
+<a name='L141'>
+<a name='L142'><i><font color='green'>/*</font></i>
+<a name='L143'><i><font color='green'> * "connection.h" defines the PipeConnection type using the definitions above</font></i>
+<a name='L144'><i><font color='green'> */</font></i>
+<a name='L145'>
+<a name='L146'><font color='darkred'>#define</font> <a href='../R/571.html' title='Multiple refered from 2 places.'>CONNECTION_NAME</a> "PipeConnection"
+<a name='L147'><font color='darkred'>#define</font> <a href='../S/2581.html#L485' title='Refered from 485 in Modules/_multiprocessing/connection.h.'>CONNECTION_TYPE</a> PipeConnectionType
+<a name='L148'>
+<a name='L149'><font color='darkred'>#include</font> "<a href='../I/380.html'>connection.h</a>"
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L18'>[^]</a><a href='#L93'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

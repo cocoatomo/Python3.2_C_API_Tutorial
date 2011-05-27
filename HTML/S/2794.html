@@ -1,0 +1,444 @@
+<html>
+<head>
+<title>Objects/genobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/genobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L9'>[^]</a><a href='#L393'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L9' title='Defined at 9.'>gen_traverse</a>
+<li><a href='#L17' title='Defined at 17.'>gen_dealloc</a>
+<li><a href='#L43' title='Defined at 43.'>gen_send_ex</a>
+<li><a href='#L115' title='Defined at 115.'>gen_send</a>
+<li><a href='#L124' title='Defined at 124.'>gen_close</a>
+<li><a href='#L146' title='Defined at 146.'>gen_del</a>
+<li><a href='#L213' title='Defined at 213.'>gen_throw</a>
+<li><a href='#L277' title='Defined at 277.'>gen_iternext</a>
+<li><a href='#L284' title='Defined at 284.'>gen_repr</a>
+<li><a href='#L293' title='Defined at 293.'>gen_get_name</a>
+<li><a href='#L376' title='Defined at 376.'>PyGen_New</a>
+<li><a href='#L393' title='Defined at 393.'>PyGen_NeedsFinalizing</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Generator object implementation */</font></i>
+<a name='L2'>
+<a name='L3'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L4'><font color='darkred'>#include</font> "<a href='526.html'>frameobject.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L6'><font color='darkred'>#include</font> "<a href='546.html'>opcode.h</a>"
+<a name='L7'>
+<a name='L8'><b>static</b> <b>int</b>
+<a name='L9'><a href='../S/2794.html#L347' title='Refered from 347 in Objects/genobject.c.'>gen_traverse</a>(PyGenObject *gen, visitproc visit, <b>void</b> *arg)
+<a name='L10'><font color='red'>{</font>
+<a name='L11'>    Py_VISIT((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)gen-&gt;gi_frame);
+<a name='L12'>    Py_VISIT(gen-&gt;gi_code);
+<a name='L13'>    <b>return</b> 0;
+<a name='L14'><font color='red'>}</font>
+<a name='L15'>
+<a name='L16'><b>static</b> <b>void</b>
+<a name='L17'><a href='../S/2794.html#L330' title='Refered from 330 in Objects/genobject.c.'>gen_dealloc</a>(PyGenObject *gen)
+<a name='L18'><font color='red'>{</font>
+<a name='L19'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *self = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) gen;
+<a name='L20'>
+<a name='L21'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(gen);
+<a name='L22'>
+<a name='L23'>    <b>if</b> (gen-&gt;gi_weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L24'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>(self);
+<a name='L25'>
+<a name='L26'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(self);
+<a name='L27'>
+<a name='L28'>    <b>if</b> (gen-&gt;gi_frame != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; gen-&gt;gi_frame-&gt;f_stacktop != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L29'>        <i><font color='green'>/* Generator is paused, so we need to close */</font></i>
+<a name='L30'>        <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(gen)-&gt;tp_del(self);
+<a name='L31'>        <b>if</b> (self-&gt;ob_refcnt &gt; 0)
+<a name='L32'>            <b>return</b>;                     <i><font color='green'>/* resurrected.  :( */</font></i>
+<a name='L33'>    <font color='red'>}</font>
+<a name='L34'>
+<a name='L35'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(self);
+<a name='L36'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(gen-&gt;gi_frame);
+<a name='L37'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(gen-&gt;gi_code);
+<a name='L38'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(gen);
+<a name='L39'><font color='red'>}</font>
+<a name='L40'>
+<a name='L41'>
+<a name='L42'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L43'><a href='../R/8010.html' title='Multiple refered from 4 places.'>gen_send_ex</a>(PyGenObject *gen, PyObject *arg, <b>int</b> exc)
+<a name='L44'><font color='red'>{</font>
+<a name='L45'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate = <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>();
+<a name='L46'>    <a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a> *f = gen-&gt;gi_frame;
+<a name='L47'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L48'>
+<a name='L49'>    <b>if</b> (gen-&gt;gi_running) <font color='red'>{</font>
+<a name='L50'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L51'>                        "generator already executing");
+<a name='L52'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L53'>    <font color='red'>}</font>
+<a name='L54'>    <b>if</b> (f==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || f-&gt;f_stacktop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L55'>        <i><font color='green'>/* Only set exception if called from send() */</font></i>
+<a name='L56'>        <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> &amp;&amp; !exc)
+<a name='L57'>            <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_StopIteration);
+<a name='L58'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L59'>    <font color='red'>}</font>
+<a name='L60'>
+<a name='L61'>    <b>if</b> (f-&gt;f_lasti == -1) <font color='red'>{</font>
+<a name='L62'>        <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> &amp;&amp; <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> != Py_None) <font color='red'>{</font>
+<a name='L63'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L64'>                            "can't send non-None value to a "
+<a name='L65'>                            "just-started generator");
+<a name='L66'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L67'>        <font color='red'>}</font>
+<a name='L68'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L69'>        <i><font color='green'>/* Push arg onto the frame's value stack */</font></i>
+<a name='L70'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> ? <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> : Py_None;
+<a name='L71'>        Py_INCREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L72'>        *(f-&gt;f_stacktop++) = <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L73'>    <font color='red'>}</font>
+<a name='L74'>
+<a name='L75'>    <i><font color='green'>/* Generators always return to their most recent caller, not</font></i>
+<a name='L76'><i><font color='green'>     * necessarily their creator. */</font></i>
+<a name='L77'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(tstate-&gt;frame);
+<a name='L78'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(f-&gt;f_back == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L79'>    f-&gt;f_back = tstate-&gt;frame;
+<a name='L80'>
+<a name='L81'>    gen-&gt;gi_running = 1;
+<a name='L82'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/3091.html#L781' title='Defined at 781 in Python/ceval.c.'>PyEval_EvalFrameEx</a>(f, exc);
+<a name='L83'>    gen-&gt;gi_running = 0;
+<a name='L84'>
+<a name='L85'>    <i><font color='green'>/* Don't keep the reference to f_back any longer than necessary.  It</font></i>
+<a name='L86'><i><font color='green'>     * may keep a chain of frames alive or it could create a reference</font></i>
+<a name='L87'><i><font color='green'>     * cycle. */</font></i>
+<a name='L88'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(f-&gt;f_back == tstate-&gt;frame);
+<a name='L89'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_back);
+<a name='L90'>
+<a name='L91'>    <i><font color='green'>/* If the generator just returned (as opposed to yielding), signal</font></i>
+<a name='L92'><i><font color='green'>     * that the generator is exhausted. */</font></i>
+<a name='L93'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == Py_None &amp;&amp; f-&gt;f_stacktop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L94'>        Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L95'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L96'>        <i><font color='green'>/* Set exception if not called by gen_iternext() */</font></i>
+<a name='L97'>        <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)
+<a name='L98'>            <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_StopIteration);
+<a name='L99'>    <font color='red'>}</font>
+<a name='L100'>
+<a name='L101'>    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> || f-&gt;f_stacktop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L102'>        <i><font color='green'>/* generator can't be rerun, so release the frame */</font></i>
+<a name='L103'>        Py_DECREF(f);
+<a name='L104'>        gen-&gt;gi_frame = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L105'>    <font color='red'>}</font>
+<a name='L106'>
+<a name='L107'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L108'><font color='red'>}</font>
+<a name='L109'>
+<a name='L110'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(send_doc,
+<a name='L111'>"send(arg) -&gt; send 'arg' into generator,\n\
+<a name='L112'>return next yielded value or raise StopIteration.");
+<a name='L113'>
+<a name='L114'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L115'><a href='../S/2794.html#L318' title='Refered from 318 in Objects/genobject.c.'>gen_send</a>(PyGenObject *gen, PyObject *arg)
+<a name='L116'><font color='red'>{</font>
+<a name='L117'>    <b>return</b> <a href='../S/2794.html#L43' title='Defined at 43 in Objects/genobject.c.'>gen_send_ex</a>(gen, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, 0);
+<a name='L118'><font color='red'>}</font>
+<a name='L119'>
+<a name='L120'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(close_doc,
+<a name='L121'>"close(arg) -&gt; raise GeneratorExit inside generator.");
+<a name='L122'>
+<a name='L123'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L124'><a href='../R/8002.html' title='Multiple refered from 2 places.'>gen_close</a>(PyGenObject *gen, PyObject *args)
+<a name='L125'><font color='red'>{</font>
+<a name='L126'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *retval;
+<a name='L127'>    <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_GeneratorExit);
+<a name='L128'>    retval = <a href='../S/2794.html#L43' title='Defined at 43 in Objects/genobject.c.'>gen_send_ex</a>(gen, Py_None, 1);
+<a name='L129'>    <b>if</b> (retval) <font color='red'>{</font>
+<a name='L130'>        Py_DECREF(retval);
+<a name='L131'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L132'>                        "generator ignored GeneratorExit");
+<a name='L133'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L134'>    <font color='red'>}</font>
+<a name='L135'>    <b>if</b> (<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_StopIteration)
+<a name='L136'>        || <a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_GeneratorExit))
+<a name='L137'>    <font color='red'>{</font>
+<a name='L138'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();          <i><font color='green'>/* ignore these errors */</font></i>
+<a name='L139'>        Py_INCREF(Py_None);
+<a name='L140'>        <b>return</b> Py_None;
+<a name='L141'>    <font color='red'>}</font>
+<a name='L142'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L143'><font color='red'>}</font>
+<a name='L144'>
+<a name='L145'><b>static</b> <b>void</b>
+<a name='L146'><a href='../S/2794.html#L372' title='Refered from 372 in Objects/genobject.c.'>gen_del</a>(PyObject *self)
+<a name='L147'><font color='red'>{</font>
+<a name='L148'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L149'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *error_type, *error_value, *error_traceback;
+<a name='L150'>    <a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a> *gen = (<a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a> *)self;
+<a name='L151'>
+<a name='L152'>    <b>if</b> (gen-&gt;gi_frame == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || gen-&gt;gi_frame-&gt;f_stacktop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L153'>        <i><font color='green'>/* Generator isn't paused, so no need to close */</font></i>
+<a name='L154'>        <b>return</b>;
+<a name='L155'>
+<a name='L156'>    <i><font color='green'>/* Temporarily resurrect the object. */</font></i>
+<a name='L157'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;ob_refcnt == 0);
+<a name='L158'>    self-&gt;ob_refcnt = 1;
+<a name='L159'>
+<a name='L160'>    <i><font color='green'>/* Save the current exception, if any. */</font></i>
+<a name='L161'>    <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;error_type, &amp;error_value, &amp;error_traceback);
+<a name='L162'>
+<a name='L163'>    res = <a href='../S/2794.html#L124' title='Defined at 124 in Objects/genobject.c.'>gen_close</a>(gen, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L164'>
+<a name='L165'>    <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L166'>        <a href='../S/3106.html#L708' title='Defined at 708 in Python/errors.c.'>PyErr_WriteUnraisable</a>(self);
+<a name='L167'>    <b>else</b>
+<a name='L168'>        Py_DECREF(res);
+<a name='L169'>
+<a name='L170'>    <i><font color='green'>/* Restore the saved exception. */</font></i>
+<a name='L171'>    <a href='../S/3106.html#L25' title='Defined at 25 in Python/errors.c.'>PyErr_Restore</a>(error_type, error_value, error_traceback);
+<a name='L172'>
+<a name='L173'>    <i><font color='green'>/* Undo the temporary resurrection; can't use DECREF here, it would</font></i>
+<a name='L174'><i><font color='green'>     * cause a recursive call.</font></i>
+<a name='L175'><i><font color='green'>     */</font></i>
+<a name='L176'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;ob_refcnt &gt; 0);
+<a name='L177'>    <b>if</b> (--self-&gt;ob_refcnt == 0)
+<a name='L178'>        <b>return</b>; <i><font color='green'>/* this is the normal path out */</font></i>
+<a name='L179'>
+<a name='L180'>    <i><font color='green'>/* close() resurrected it!  Make it look like the original Py_DECREF</font></i>
+<a name='L181'><i><font color='green'>     * never happened.</font></i>
+<a name='L182'><i><font color='green'>     */</font></i>
+<a name='L183'>    <font color='red'>{</font>
+<a name='L184'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> refcnt = self-&gt;ob_refcnt;
+<a name='L185'>        <a href='../S/2803.html#L1650' title='Defined at 1650 in Objects/object.c.'>_Py_NewReference</a>(self);
+<a name='L186'>        self-&gt;ob_refcnt = refcnt;
+<a name='L187'>    <font color='red'>}</font>
+<a name='L188'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyType_IS_GC(self-&gt;ob_type) &amp;&amp;
+<a name='L189'>           <a href='../S/545.html#L258' title='Defined at 258 in Include/objimpl.h.'>_Py_AS_GC</a>(self)-&gt;gc.gc_refs != <a href='../S/545.html#L260' title='Defined at 260 in Include/objimpl.h.'>_PyGC_REFS_UNTRACKED</a>);
+<a name='L190'>
+<a name='L191'>    <i><font color='green'>/* If Py_REF_DEBUG, _Py_NewReference bumped _Py_RefTotal, so</font></i>
+<a name='L192'><i><font color='green'>     * we need to undo that. */</font></i>
+<a name='L193'>    <a href='../S/544.html#L661' title='Defined at 661 in Include/object.h.'>_Py_DEC_REFTOTAL</a>;
+<a name='L194'>    <i><font color='green'>/* If Py_TRACE_REFS, _Py_NewReference re-added self to the object</font></i>
+<a name='L195'><i><font color='green'>     * chain, so no more to do there.</font></i>
+<a name='L196'><i><font color='green'>     * If COUNT_ALLOCS, the original decref bumped tp_frees, and</font></i>
+<a name='L197'><i><font color='green'>     * _Py_NewReference bumped tp_allocs:  both of those need to be</font></i>
+<a name='L198'><i><font color='green'>     * undone.</font></i>
+<a name='L199'><i><font color='green'>     */</font></i>
+<a name='L200'><font color='darkred'>#ifdef</font> COUNT_ALLOCS
+<a name='L201'>    --self-&gt;ob_type-&gt;tp_frees;
+<a name='L202'>    --self-&gt;ob_type-&gt;tp_allocs;
+<a name='L203'><font color='darkred'>#endif</font>
+<a name='L204'><font color='red'>}</font>
+<a name='L205'>
+<a name='L206'>
+<a name='L207'>
+<a name='L208'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(throw_doc,
+<a name='L209'>"throw(typ[,val[,tb]]) -&gt; raise exception in generator,\n\
+<a name='L210'>return next yielded value or raise StopIteration.");
+<a name='L211'>
+<a name='L212'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L213'><a href='../S/2794.html#L319' title='Refered from 319 in Objects/genobject.c.'>gen_throw</a>(PyGenObject *gen, PyObject *args)
+<a name='L214'><font color='red'>{</font>
+<a name='L215'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *typ;
+<a name='L216'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tb = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L217'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *val = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L218'>
+<a name='L219'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "throw", 1, 3, &amp;typ, &amp;val, &amp;tb))
+<a name='L220'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L221'>
+<a name='L222'>    <i><font color='green'>/* First, check the traceback argument, replacing None with</font></i>
+<a name='L223'><i><font color='green'>       NULL. */</font></i>
+<a name='L224'>    <b>if</b> (tb == Py_None)
+<a name='L225'>        tb = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L226'>    <b>else</b> <b>if</b> (tb != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; !PyTraceBack_Check(tb)) <font color='red'>{</font>
+<a name='L227'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L228'>            "throw() third argument must be a traceback object");
+<a name='L229'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L230'>    <font color='red'>}</font>
+<a name='L231'>
+<a name='L232'>    Py_INCREF(typ);
+<a name='L233'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(val);
+<a name='L234'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(tb);
+<a name='L235'>
+<a name='L236'>    <b>if</b> (PyExceptionClass_Check(typ)) <font color='red'>{</font>
+<a name='L237'>        <a href='../S/3106.html#L202' title='Defined at 202 in Python/errors.c.'>PyErr_NormalizeException</a>(&amp;typ, &amp;val, &amp;tb);
+<a name='L238'>    <font color='red'>}</font>
+<a name='L239'>
+<a name='L240'>    <b>else</b> <b>if</b> (PyExceptionInstance_Check(typ)) <font color='red'>{</font>
+<a name='L241'>        <i><font color='green'>/* Raising an instance.  The value should be a dummy. */</font></i>
+<a name='L242'>        <b>if</b> (val &amp;&amp; val != Py_None) <font color='red'>{</font>
+<a name='L243'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L244'>              "instance exception may not have a separate value");
+<a name='L245'>            <b>goto</b> failed_throw;
+<a name='L246'>        <font color='red'>}</font>
+<a name='L247'>        <b>else</b> <font color='red'>{</font>
+<a name='L248'>            <i><font color='green'>/* Normalize to raise &lt;class&gt;, &lt;instance&gt; */</font></i>
+<a name='L249'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(val);
+<a name='L250'>            val = typ;
+<a name='L251'>            typ = PyExceptionInstance_Class(typ);
+<a name='L252'>            Py_INCREF(typ);
+<a name='L253'>        <font color='red'>}</font>
+<a name='L254'>    <font color='red'>}</font>
+<a name='L255'>    <b>else</b> <font color='red'>{</font>
+<a name='L256'>        <i><font color='green'>/* Not something you can raise.  throw() fails. */</font></i>
+<a name='L257'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L258'>                     "exceptions must be classes or instances "
+<a name='L259'>                     "deriving from BaseException, not %s",
+<a name='L260'>                     typ-&gt;ob_type-&gt;tp_name);
+<a name='L261'>            <b>goto</b> failed_throw;
+<a name='L262'>    <font color='red'>}</font>
+<a name='L263'>
+<a name='L264'>    <a href='../S/3106.html#L25' title='Defined at 25 in Python/errors.c.'>PyErr_Restore</a>(typ, val, tb);
+<a name='L265'>    <b>return</b> <a href='../S/2794.html#L43' title='Defined at 43 in Objects/genobject.c.'>gen_send_ex</a>(gen, Py_None, 1);
+<a name='L266'>
+<a name='L267'>failed_throw:
+<a name='L268'>    <i><font color='green'>/* Didn't use our arguments, so restore their original refcounts */</font></i>
+<a name='L269'>    Py_DECREF(typ);
+<a name='L270'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(val);
+<a name='L271'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(tb);
+<a name='L272'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L273'><font color='red'>}</font>
+<a name='L274'>
+<a name='L275'>
+<a name='L276'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L277'><a href='../S/2794.html#L352' title='Refered from 352 in Objects/genobject.c.'>gen_iternext</a>(PyGenObject *gen)
+<a name='L278'><font color='red'>{</font>
+<a name='L279'>    <b>return</b> <a href='../S/2794.html#L43' title='Defined at 43 in Objects/genobject.c.'>gen_send_ex</a>(gen, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0);
+<a name='L280'><font color='red'>}</font>
+<a name='L281'>
+<a name='L282'>
+<a name='L283'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L284'><a href='../S/2794.html#L335' title='Refered from 335 in Objects/genobject.c.'>gen_repr</a>(PyGenObject *gen)
+<a name='L285'><font color='red'>{</font>
+<a name='L286'>    <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;generator object %S at %p&gt;",
+<a name='L287'>                                ((<a href='../S/511.html#L32' title='Defined at 32 in Include/code.h.'>PyCodeObject</a> *)gen-&gt;gi_code)-&gt;co_name,
+<a name='L288'>                                gen);
+<a name='L289'><font color='red'>}</font>
+<a name='L290'>
+<a name='L291'>
+<a name='L292'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L293'><a href='../S/2794.html#L305' title='Refered from 305 in Objects/genobject.c.'>gen_get_name</a>(PyGenObject *gen)
+<a name='L294'><font color='red'>{</font>
+<a name='L295'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name = ((<a href='../S/511.html#L32' title='Defined at 32 in Include/code.h.'>PyCodeObject</a> *)gen-&gt;gi_code)-&gt;co_name;
+<a name='L296'>    Py_INCREF(name);
+<a name='L297'>    <b>return</b> name;
+<a name='L298'><font color='red'>}</font>
+<a name='L299'>
+<a name='L300'>
+<a name='L301'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(gen__name__doc__,
+<a name='L302'>"Return the name of the generator's associated code object.");
+<a name='L303'>
+<a name='L304'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> gen_getsetlist[] = <font color='red'>{</font>
+<a name='L305'>    <font color='red'>{</font>"__name__", (getter)<a href='../S/2794.html#L293' title='Defined at 293 in Objects/genobject.c.'>gen_get_name</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, gen__name__doc__<font color='red'>}</font>,
+<a name='L306'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L307'><font color='red'>}</font>;
+<a name='L308'>
+<a name='L309'>
+<a name='L310'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> gen_memberlist[] = <font color='red'>{</font>
+<a name='L311'>    <font color='red'>{</font>"gi_frame",        <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a>, gi_frame),      <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L312'>    <font color='red'>{</font>"gi_running",      <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a>, gi_running),    <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L313'>    <font color='red'>{</font>"gi_code",     <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a>, gi_code),  <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L314'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>      <i><font color='green'>/* Sentinel */</font></i>
+<a name='L315'><font color='red'>}</font>;
+<a name='L316'>
+<a name='L317'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> gen_methods[] = <font color='red'>{</font>
+<a name='L318'>    <font color='red'>{</font>"send",(PyCFunction)<a href='../S/2794.html#L115' title='Defined at 115 in Objects/genobject.c.'>gen_send</a>, METH_O, send_doc<font color='red'>}</font>,
+<a name='L319'>    <font color='red'>{</font>"throw",(PyCFunction)<a href='../S/2794.html#L213' title='Defined at 213 in Objects/genobject.c.'>gen_throw</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, throw_doc<font color='red'>}</font>,
+<a name='L320'>    <font color='red'>{</font>"close",(PyCFunction)<a href='../S/2794.html#L124' title='Defined at 124 in Objects/genobject.c.'>gen_close</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, close_doc<font color='red'>}</font>,
+<a name='L321'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>        <i><font color='green'>/* Sentinel */</font></i>
+<a name='L322'><font color='red'>}</font>;
+<a name='L323'>
+<a name='L324'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyGen_Type = <font color='red'>{</font>
+<a name='L325'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L326'>    "generator",                                <i><font color='green'>/* tp_name */</font></i>
+<a name='L327'>    <b>sizeof</b>(<a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a>),                        <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L328'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L329'>    <i><font color='green'>/* methods */</font></i>
+<a name='L330'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2794.html#L17' title='Defined at 17 in Objects/genobject.c.'>gen_dealloc</a>,                    <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L331'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L332'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L333'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L334'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L335'>    (reprfunc)<a href='../S/2794.html#L284' title='Defined at 284 in Objects/genobject.c.'>gen_repr</a>,                         <i><font color='green'>/* tp_repr */</font></i>
+<a name='L336'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L337'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L338'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L339'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L340'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L341'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L342'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L343'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L344'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L345'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,<i><font color='green'>/* tp_flags */</font></i>
+<a name='L346'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L347'>    (traverseproc)<a href='../S/2794.html#L9' title='Defined at 9 in Objects/genobject.c.'>gen_traverse</a>,                 <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L348'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L349'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L350'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a>, gi_weakreflist),      <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L351'>    <a href='../S/2803.html#L933' title='Defined at 933 in Objects/object.c.'>PyObject_SelfIter</a>,                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L352'>    (iternextfunc)<a href='../S/2794.html#L277' title='Defined at 277 in Objects/genobject.c.'>gen_iternext</a>,                 <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L353'>    gen_methods,                                <i><font color='green'>/* tp_methods */</font></i>
+<a name='L354'>    gen_memberlist,                             <i><font color='green'>/* tp_members */</font></i>
+<a name='L355'>    gen_getsetlist,                             <i><font color='green'>/* tp_getset */</font></i>
+<a name='L356'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L357'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L358'>
+<a name='L359'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L360'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L361'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L362'>    0,                                          <i><font color='green'>/* tp_init */</font></i>
+<a name='L363'>    0,                                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L364'>    0,                                          <i><font color='green'>/* tp_new */</font></i>
+<a name='L365'>    0,                                          <i><font color='green'>/* tp_free */</font></i>
+<a name='L366'>    0,                                          <i><font color='green'>/* tp_is_gc */</font></i>
+<a name='L367'>    0,                                          <i><font color='green'>/* tp_bases */</font></i>
+<a name='L368'>    0,                                          <i><font color='green'>/* tp_mro */</font></i>
+<a name='L369'>    0,                                          <i><font color='green'>/* tp_cache */</font></i>
+<a name='L370'>    0,                                          <i><font color='green'>/* tp_subclasses */</font></i>
+<a name='L371'>    0,                                          <i><font color='green'>/* tp_weaklist */</font></i>
+<a name='L372'>    <a href='../S/2794.html#L146' title='Defined at 146 in Objects/genobject.c.'>gen_del</a>,                                    <i><font color='green'>/* tp_del */</font></i>
+<a name='L373'><font color='red'>}</font>;
+<a name='L374'>
+<a name='L375'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L376'><a href='../S/3091.html#L3308' title='Refered from 3308 in Python/ceval.c.'>PyGen_New</a>(PyFrameObject *f)
+<a name='L377'><font color='red'>{</font>
+<a name='L378'>    <a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a> *gen = PyObject_GC_New(<a href='../S/528.html#L28' title='Defined at 28 in Include/genobject.h.'>PyGenObject</a>, &amp;PyGen_Type);
+<a name='L379'>    <b>if</b> (gen == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L380'>        Py_DECREF(f);
+<a name='L381'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L382'>    <font color='red'>}</font>
+<a name='L383'>    gen-&gt;gi_frame = f;
+<a name='L384'>    Py_INCREF(f-&gt;f_code);
+<a name='L385'>    gen-&gt;gi_code = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)(f-&gt;f_code);
+<a name='L386'>    gen-&gt;gi_running = 0;
+<a name='L387'>    gen-&gt;gi_weakreflist = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L388'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(gen);
+<a name='L389'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)gen;
+<a name='L390'><font color='red'>}</font>
+<a name='L391'>
+<a name='L392'><b>int</b>
+<a name='L393'><a href='../S/2676.html#L465' title='Refered from 465 in Modules/gcmodule.c.'>PyGen_NeedsFinalizing</a>(PyGenObject *gen)
+<a name='L394'><font color='red'>{</font>
+<a name='L395'>    <b>int</b> i;
+<a name='L396'>    <a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a> *f = gen-&gt;gi_frame;
+<a name='L397'>
+<a name='L398'>    <b>if</b> (f == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || f-&gt;f_stacktop == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || f-&gt;f_iblock &lt;= 0)
+<a name='L399'>        <b>return</b> 0; <i><font color='green'>/* no frame or empty blockstack == no finalization */</font></i>
+<a name='L400'>
+<a name='L401'>    <i><font color='green'>/* Any block type besides a loop requires cleanup. */</font></i>
+<a name='L402'>    i = f-&gt;f_iblock;
+<a name='L403'>    <b>while</b> (--i &gt;= 0) <font color='red'>{</font>
+<a name='L404'>        <b>if</b> (f-&gt;f_blockstack[i].b_type != <a href='../S/546.html#L108' title='Defined at 108 in Include/opcode.h.'>SETUP_LOOP</a>)
+<a name='L405'>            <b>return</b> 1;
+<a name='L406'>    <font color='red'>}</font>
+<a name='L407'>
+<a name='L408'>    <i><font color='green'>/* No blocks except loops, it's safe to skip finalization. */</font></i>
+<a name='L409'>    <b>return</b> 0;
+<a name='L410'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L9'>[^]</a><a href='#L393'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

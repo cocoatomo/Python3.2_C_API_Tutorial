@@ -1,0 +1,838 @@
+<html>
+<head>
+<title>Modules/sha512module.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/sha512module.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L63'>[^]</a><a href='#L786'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L63' title='Defined at 63.'>longReverse</a>
+<li><a href='#L87' title='Defined at 87.'>SHAcopy</a>
+<li><a href='#L138' title='Defined at 138.'>sha512_transform</a>
+<li><a href='#L255' title='Defined at 255.'>sha512_init</a>
+<li><a href='#L273' title='Defined at 273.'>sha384_init</a>
+<li><a href='#L294' title='Defined at 294.'>sha512_update</a>
+<li><a href='#L334' title='Defined at 334.'>sha512_final</a>
+<li><a href='#L450' title='Defined at 450.'>newSHA384object</a>
+<li><a href='#L456' title='Defined at 456.'>newSHA512object</a>
+<li><a href='#L464' title='Defined at 464.'>SHA512_dealloc</a>
+<li><a href='#L475' title='Defined at 475.'>SHA512_copy</a>
+<li><a href='#L495' title='Defined at 495.'>SHA512_digest</a>
+<li><a href='#L509' title='Defined at 509.'>SHA512_hexdigest</a>
+<li><a href='#L548' title='Defined at 548.'>SHA512_update</a>
+<li><a href='#L574' title='Defined at 574.'>SHA512_get_block_size</a>
+<li><a href='#L580' title='Defined at 580.'>SHA512_get_name</a>
+<li><a href='#L680' title='Defined at 680.'>SHA512_new</a>
+<li><a href='#L721' title='Defined at 721.'>SHA384_new</a>
+<li><a href='#L786' title='Defined at 786.'>PyInit__sha512</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* SHA512 module */</font></i>
+<a name='L2'>
+<a name='L3'><i><font color='green'>/* This module provides an interface to NIST's SHA-512 and SHA-384 Algorithms */</font></i>
+<a name='L4'>
+<a name='L5'><i><font color='green'>/* See below for information about the original code this module was</font></i>
+<a name='L6'><i><font color='green'>   based upon. Additional work performed by:</font></i>
+<a name='L7'><i><font color='green'></font></i>
+<a name='L8'><i><font color='green'>   Andrew Kuchling (amk@amk.ca)</font></i>
+<a name='L9'><i><font color='green'>   Greg Stein (gstein@lyra.org)</font></i>
+<a name='L10'><i><font color='green'>   Trevor Perrin (trevp@trevp.net)</font></i>
+<a name='L11'><i><font color='green'></font></i>
+<a name='L12'><i><font color='green'>   Copyright (C) 2005-2007   Gregory P. Smith (greg@krypto.org)</font></i>
+<a name='L13'><i><font color='green'>   Licensed to PSF under a Contributor Agreement.</font></i>
+<a name='L14'><i><font color='green'></font></i>
+<a name='L15'><i><font color='green'>*/</font></i>
+<a name='L16'>
+<a name='L17'><i><font color='green'>/* SHA objects */</font></i>
+<a name='L18'>
+<a name='L19'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L20'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L21'><font color='darkred'>#include</font> "<a href='2682.html'>hashlib.h</a>"
+<a name='L22'>
+<a name='L23'><font color='darkred'>#ifdef</font> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> <i><font color='green'>/* If no PY_LONG_LONG, don't compile anything! */</font></i>
+<a name='L24'>
+<a name='L25'><i><font color='green'>/* Endianness testing and definitions */</font></i>
+<a name='L26'><font color='darkred'>#define</font> <a href='../R/4635.html' title='Multiple refered from 4 places.'>TestEndianness</a>(variable) <font color='red'>{</font><b>int</b> i=1; variable=<a href='../D/2476.html' title='Multiple defined in 2 places.'>PCT_BIG_ENDIAN</a>;\
+<a name='L27'>        <b>if</b> (*((<b>char</b>*)&amp;i)==1) variable=<a href='../D/2477.html' title='Multiple defined in 2 places.'>PCT_LITTLE_ENDIAN</a>;<font color='red'>}</font>
+<a name='L28'>
+<a name='L29'><font color='darkred'>#define</font> <a href='../R/2243.html' title='Multiple refered from 2 places.'>PCT_LITTLE_ENDIAN</a> 1
+<a name='L30'><font color='darkred'>#define</font> <a href='../R/2242.html' title='Multiple refered from 4 places.'>PCT_BIG_ENDIAN</a> 0
+<a name='L31'>
+<a name='L32'><i><font color='green'>/* Some useful types */</font></i>
+<a name='L33'>
+<a name='L34'><b>typedef</b> <b>unsigned</b> <b>char</b> <a href='../R/4122.html' title='Multiple refered from 14 places.'>SHA_BYTE</a>;
+<a name='L35'>
+<a name='L36'><font color='darkred'>#if</font> <a href='../D/4733.html' title='Multiple defined in 3 places.'>SIZEOF_INT</a> == 4
+<a name='L37'><b>typedef</b> <b>unsigned</b> <b>int</b> <a href='../R/4124.html' title='Multiple refered from 14 places.'>SHA_INT32</a>; <i><font color='green'>/* 32-bit integer */</font></i>
+<a name='L38'><b>typedef</b> <b>unsigned</b> PY_LONG_LONG <a href='../R/4125.html' title='Multiple refered from 4 places.'>SHA_INT64</a>;        <i><font color='green'>/* 64-bit integer */</font></i>
+<a name='L39'><font color='darkred'>#else</font>
+<a name='L40'><i><font color='green'>/* not defined. compilation will die. */</font></i>
+<a name='L41'><font color='darkred'>#endif</font>
+<a name='L42'>
+<a name='L43'><i><font color='green'>/* The SHA block size and message digest sizes, in bytes */</font></i>
+<a name='L44'>
+<a name='L45'><font color='darkred'>#define</font> <a href='../R/4121.html' title='Multiple refered from 24 places.'>SHA_BLOCKSIZE</a>   128
+<a name='L46'><font color='darkred'>#define</font> <a href='../R/4123.html' title='Multiple refered from 6 places.'>SHA_DIGESTSIZE</a>  64
+<a name='L47'>
+<a name='L48'><i><font color='green'>/* The structure for storing SHA info */</font></i>
+<a name='L49'>
+<a name='L50'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L51'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L52'>    <a href='../S/2709.html#L38' title='Defined at 38 in Modules/sha512module.c.'>SHA_INT64</a> digest[8];                <i><font color='green'>/* Message digest */</font></i>
+<a name='L53'>    <a href='../D/4688.html' title='Multiple defined in 2 places.'>SHA_INT32</a> count_lo, count_hi;       <i><font color='green'>/* 64-bit bit count */</font></i>
+<a name='L54'>    <a href='../D/4686.html' title='Multiple defined in 2 places.'>SHA_BYTE</a> data[<a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a>];       <i><font color='green'>/* SHA data buffer */</font></i>
+<a name='L55'>    <b>int</b> Endianness;
+<a name='L56'>    <b>int</b> <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>;                          <i><font color='green'>/* unprocessed amount in data */</font></i>
+<a name='L57'>    <b>int</b> digestsize;
+<a name='L58'><font color='red'>}</font> <a href='../R/4128.html' title='Multiple refered from 26 places.'>SHAobject</a>;
+<a name='L59'>
+<a name='L60'><i><font color='green'>/* When run on a little-endian CPU we need to perform byte reversal on an</font></i>
+<a name='L61'><i><font color='green'>   array of longwords. */</font></i>
+<a name='L62'>
+<a name='L63'><b>static</b> <b>void</b> <a href='../R/8755.html' title='Multiple refered from 2 places.'>longReverse</a>(<a href='../S/2709.html#L38' title='Defined at 38 in Modules/sha512module.c.'>SHA_INT64</a> *buffer, <b>int</b> byteCount, <b>int</b> Endianness)
+<a name='L64'><font color='red'>{</font>
+<a name='L65'>    <a href='../S/2709.html#L38' title='Defined at 38 in Modules/sha512module.c.'>SHA_INT64</a> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L66'>
+<a name='L67'>    <b>if</b> ( Endianness == <a href='../D/2476.html' title='Multiple defined in 2 places.'>PCT_BIG_ENDIAN</a> )
+<a name='L68'>        <b>return</b>;
+<a name='L69'>
+<a name='L70'>    byteCount /= <b>sizeof</b>(*<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L71'>    <b>while</b> (byteCount--) <font color='red'>{</font>
+<a name='L72'>        <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = *<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>;
+<a name='L73'>
+<a name='L74'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[0] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt; 56) &amp; 0xff;
+<a name='L75'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[1] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt; 48) &amp; 0xff;
+<a name='L76'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[2] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt; 40) &amp; 0xff;
+<a name='L77'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[3] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt; 32) &amp; 0xff;
+<a name='L78'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[4] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt; 24) &amp; 0xff;
+<a name='L79'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[5] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt; 16) &amp; 0xff;
+<a name='L80'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[6] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &gt;&gt;  8) &amp; 0xff;
+<a name='L81'>                ((<b>unsigned</b> <b>char</b>*)<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>)[7] = (<b>unsigned</b> <b>char</b>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>      ) &amp; 0xff;
+<a name='L82'>
+<a name='L83'>                <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>++;
+<a name='L84'>    <font color='red'>}</font>
+<a name='L85'><font color='red'>}</font>
+<a name='L86'>
+<a name='L87'><b>static</b> <b>void</b> <a href='../R/4127.html' title='Multiple refered from 6 places.'>SHAcopy</a>(SHAobject *src, SHAobject *dest)
+<a name='L88'><font color='red'>{</font>
+<a name='L89'>    dest-&gt;Endianness = src-&gt;Endianness;
+<a name='L90'>    dest-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> = src-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>;
+<a name='L91'>    dest-&gt;digestsize = src-&gt;digestsize;
+<a name='L92'>    dest-&gt;count_lo = src-&gt;count_lo;
+<a name='L93'>    dest-&gt;count_hi = src-&gt;count_hi;
+<a name='L94'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(dest-&gt;digest, src-&gt;digest, <b>sizeof</b>(src-&gt;digest));
+<a name='L95'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(dest-&gt;data, src-&gt;data, <b>sizeof</b>(src-&gt;data));
+<a name='L96'><font color='red'>}</font>
+<a name='L97'>
+<a name='L98'>
+<a name='L99'><i><font color='green'>/* ------------------------------------------------------------------------</font></i>
+<a name='L100'><i><font color='green'> *</font></i>
+<a name='L101'><i><font color='green'> * This code for the SHA-512 algorithm was noted as public domain. The</font></i>
+<a name='L102'><i><font color='green'> * original headers are pasted below.</font></i>
+<a name='L103'><i><font color='green'> *</font></i>
+<a name='L104'><i><font color='green'> * Several changes have been made to make it more compatible with the</font></i>
+<a name='L105'><i><font color='green'> * Python environment and desired interface.</font></i>
+<a name='L106'><i><font color='green'> *</font></i>
+<a name='L107'><i><font color='green'> */</font></i>
+<a name='L108'>
+<a name='L109'><i><font color='green'>/* LibTomCrypt, modular cryptographic library -- Tom St Denis</font></i>
+<a name='L110'><i><font color='green'> *</font></i>
+<a name='L111'><i><font color='green'> * LibTomCrypt is a library that provides various cryptographic</font></i>
+<a name='L112'><i><font color='green'> * algorithms in a highly modular and flexible manner.</font></i>
+<a name='L113'><i><font color='green'> *</font></i>
+<a name='L114'><i><font color='green'> * The library is free for all purposes without any express</font></i>
+<a name='L115'><i><font color='green'> * gurantee it works.</font></i>
+<a name='L116'><i><font color='green'> *</font></i>
+<a name='L117'><i><font color='green'> * Tom St Denis, tomstdenis@iahu.ca, http://libtom.org</font></i>
+<a name='L118'><i><font color='green'> */</font></i>
+<a name='L119'>
+<a name='L120'>
+<a name='L121'><i><font color='green'>/* SHA512 by Tom St Denis */</font></i>
+<a name='L122'>
+<a name='L123'><i><font color='green'>/* Various logical functions */</font></i>
+<a name='L124'><font color='darkred'>#define</font> <a href='../S/2709.html#L129' title='Refered from 129 in Modules/sha512module.c.'>ROR64</a>(x, y) \
+<a name='L125'>    ( ((((x) &amp; <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xFFFFFFFFFFFFFFFF))&gt;&gt;((<b>unsigned</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>)(y) &amp; 63)) | \
+<a name='L126'>      ((x)&lt;&lt;((<b>unsigned</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>)(64-((y) &amp; 63))))) &amp; <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xFFFFFFFFFFFFFFFF))
+<a name='L127'><font color='darkred'>#define</font> <a href='../R/633.html' title='Multiple refered from 2 places.'>Ch</a>(x,y,z)       (z ^ (x &amp; (y ^ z)))
+<a name='L128'><font color='darkred'>#define</font> <a href='../R/2005.html' title='Multiple refered from 2 places.'>Maj</a>(x,y,z)      (((x | y) &amp; z) | (x &amp; y))
+<a name='L129'><font color='darkred'>#define</font> <a href='../R/4018.html' title='Multiple refered from 267 places.'>S</a>(x, n)         <a href='../S/2709.html#L124' title='Defined at 124 in Modules/sha512module.c.'>ROR64</a>((x),(n))
+<a name='L130'><font color='darkred'>#define</font> <a href='../R/3892.html' title='Multiple refered from 26 places.'>R</a>(x, n)         (((x) &amp; <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xFFFFFFFFFFFFFFFF)) &gt;&gt; ((<b>unsigned</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>)n))
+<a name='L131'><font color='darkred'>#define</font> <a href='../R/4478.html' title='Multiple refered from 2 places.'>Sigma0</a>(x)       (<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 28) ^ <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 34) ^ <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 39))
+<a name='L132'><font color='darkred'>#define</font> <a href='../R/4479.html' title='Multiple refered from 2 places.'>Sigma1</a>(x)       (<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 14) ^ <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 18) ^ <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 41))
+<a name='L133'><font color='darkred'>#define</font> <a href='../R/1283.html' title='Multiple refered from 2 places.'>Gamma0</a>(x)       (<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 1) ^ <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 8) ^ <a href='../D/4412.html' title='Multiple defined in 2 places.'>R</a>(x, 7))
+<a name='L134'><font color='darkred'>#define</font> <a href='../R/1284.html' title='Multiple refered from 2 places.'>Gamma1</a>(x)       (<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 19) ^ <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>(x, 61) ^ <a href='../D/4412.html' title='Multiple defined in 2 places.'>R</a>(x, 6))
+<a name='L135'>
+<a name='L136'>
+<a name='L137'><b>static</b> <b>void</b>
+<a name='L138'><a href='../R/10292.html' title='Multiple refered from 4 places.'>sha512_transform</a>(SHAobject *sha_info)
+<a name='L139'><font color='red'>{</font>
+<a name='L140'>    <b>int</b> i;
+<a name='L141'>    <a href='../S/2709.html#L38' title='Defined at 38 in Modules/sha512module.c.'>SHA_INT64</a> <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[8], W[80], <a href='../S/2333.html#L122' title='Defined at 122 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t0</a>, <a href='../S/2333.html#L123' title='Defined at 123 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t1</a>;
+<a name='L142'>
+<a name='L143'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(W, sha_info-&gt;data, <b>sizeof</b>(sha_info-&gt;data));
+<a name='L144'>    <a href='../D/9576.html' title='Multiple defined in 2 places.'>longReverse</a>(W, (<b>int</b>)<b>sizeof</b>(sha_info-&gt;data), sha_info-&gt;Endianness);
+<a name='L145'>
+<a name='L146'>    <b>for</b> (i = 16; i &lt; 80; ++i) <font color='red'>{</font>
+<a name='L147'>                W[i] = <a href='../D/1427.html' title='Multiple defined in 2 places.'>Gamma1</a>(W[i - 2]) + W[i - 7] + <a href='../D/1426.html' title='Multiple defined in 2 places.'>Gamma0</a>(W[i - 15]) + W[i - 16];
+<a name='L148'>    <font color='red'>}</font>
+<a name='L149'>    <b>for</b> (i = 0; i &lt; 8; ++i) <font color='red'>{</font>
+<a name='L150'>        <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[i] = sha_info-&gt;digest[i];
+<a name='L151'>    <font color='red'>}</font>
+<a name='L152'>
+<a name='L153'>    <i><font color='green'>/* Compress */</font></i>
+<a name='L154'><font color='darkred'>#define</font> <a href='../R/3973.html' title='Multiple refered from 144 places.'>RND</a>(a,b,c,d,e,f,g,h,i,ki)                    \
+<a name='L155'>     <a href='../S/2333.html#L122' title='Defined at 122 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t0</a> = h + <a href='../D/5075.html' title='Multiple defined in 2 places.'>Sigma1</a>(e) + <a href='../D/678.html' title='Multiple defined in 2 places.'>Ch</a>(e, f, g) + ki + W[i];   \
+<a name='L156'>     <a href='../S/2333.html#L123' title='Defined at 123 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t1</a> = <a href='../D/5074.html' title='Multiple defined in 2 places.'>Sigma0</a>(a) + <a href='../D/2209.html' title='Multiple defined in 2 places.'>Maj</a>(a, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>, c);                  \
+<a name='L157'>     d += <a href='../S/2333.html#L122' title='Defined at 122 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t0</a>;                                        \
+<a name='L158'>     h  = <a href='../S/2333.html#L122' title='Defined at 122 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t0</a> + <a href='../S/2333.html#L123' title='Defined at 123 in Modules/_ctypes/libffi/src/mips/ffitarget.h.'>t1</a>;
+<a name='L159'>
+<a name='L160'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],0,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x428a2f98d728ae22));
+<a name='L161'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],1,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x7137449123ef65cd));
+<a name='L162'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],2,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xb5c0fbcfec4d3b2f));
+<a name='L163'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],3,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xe9b5dba58189dbbc));
+<a name='L164'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],4,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x3956c25bf348b538));
+<a name='L165'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],5,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x59f111f1b605d019));
+<a name='L166'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],6,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x923f82a4af194f9b));
+<a name='L167'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],7,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xab1c5ed5da6d8118));
+<a name='L168'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],8,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xd807aa98a3030242));
+<a name='L169'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],9,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x12835b0145706fbe));
+<a name='L170'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],10,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x243185be4ee4b28c));
+<a name='L171'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],11,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x550c7dc3d5ffb4e2));
+<a name='L172'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],12,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x72be5d74f27b896f));
+<a name='L173'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],13,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x80deb1fe3b1696b1));
+<a name='L174'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],14,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x9bdc06a725c71235));
+<a name='L175'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],15,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xc19bf174cf692694));
+<a name='L176'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],16,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xe49b69c19ef14ad2));
+<a name='L177'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],17,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xefbe4786384f25e3));
+<a name='L178'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],18,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x0fc19dc68b8cd5b5));
+<a name='L179'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],19,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x240ca1cc77ac9c65));
+<a name='L180'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],20,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x2de92c6f592b0275));
+<a name='L181'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],21,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x4a7484aa6ea6e483));
+<a name='L182'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],22,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x5cb0a9dcbd41fbd4));
+<a name='L183'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],23,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x76f988da831153b5));
+<a name='L184'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],24,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x983e5152ee66dfab));
+<a name='L185'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],25,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xa831c66d2db43210));
+<a name='L186'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],26,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xb00327c898fb213f));
+<a name='L187'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],27,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xbf597fc7beef0ee4));
+<a name='L188'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],28,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xc6e00bf33da88fc2));
+<a name='L189'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],29,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xd5a79147930aa725));
+<a name='L190'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],30,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x06ca6351e003826f));
+<a name='L191'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],31,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x142929670a0e6e70));
+<a name='L192'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],32,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x27b70a8546d22ffc));
+<a name='L193'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],33,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x2e1b21385c26c926));
+<a name='L194'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],34,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x4d2c6dfc5ac42aed));
+<a name='L195'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],35,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x53380d139d95b3df));
+<a name='L196'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],36,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x650a73548baf63de));
+<a name='L197'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],37,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x766a0abb3c77b2a8));
+<a name='L198'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],38,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x81c2c92e47edaee6));
+<a name='L199'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],39,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x92722c851482353b));
+<a name='L200'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],40,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xa2bfe8a14cf10364));
+<a name='L201'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],41,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xa81a664bbc423001));
+<a name='L202'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],42,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xc24b8b70d0f89791));
+<a name='L203'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],43,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xc76c51a30654be30));
+<a name='L204'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],44,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xd192e819d6ef5218));
+<a name='L205'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],45,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xd69906245565a910));
+<a name='L206'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],46,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xf40e35855771202a));
+<a name='L207'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],47,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x106aa07032bbd1b8));
+<a name='L208'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],48,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x19a4c116b8d2d0c8));
+<a name='L209'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],49,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x1e376c085141ab53));
+<a name='L210'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],50,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x2748774cdf8eeb99));
+<a name='L211'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],51,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x34b0bcb5e19b48a8));
+<a name='L212'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],52,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x391c0cb3c5c95a63));
+<a name='L213'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],53,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x4ed8aa4ae3418acb));
+<a name='L214'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],54,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x5b9cca4f7763e373));
+<a name='L215'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],55,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x682e6ff3d6b2b8a3));
+<a name='L216'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],56,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x748f82ee5defb2fc));
+<a name='L217'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],57,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x78a5636f43172f60));
+<a name='L218'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],58,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x84c87814a1f0ab72));
+<a name='L219'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],59,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x8cc702081a6439ec));
+<a name='L220'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],60,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x90befffa23631e28));
+<a name='L221'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],61,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xa4506cebde82bde9));
+<a name='L222'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],62,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xbef9a3f7b2c67915));
+<a name='L223'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],63,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xc67178f2e372532b));
+<a name='L224'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],64,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xca273eceea26619c));
+<a name='L225'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],65,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xd186b8c721c0c207));
+<a name='L226'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],66,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xeada7dd6cde0eb1e));
+<a name='L227'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],67,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xf57d4f7fee6ed178));
+<a name='L228'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],68,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x06f067aa72176fba));
+<a name='L229'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],69,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x0a637dc5a2c898a6));
+<a name='L230'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],70,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x113f9804bef90dae));
+<a name='L231'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],71,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x1b710b35131c471b));
+<a name='L232'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],72,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x28db77f523047d84));
+<a name='L233'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],73,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x32caab7b40c72493));
+<a name='L234'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],74,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x3c9ebe0a15c9bebc));
+<a name='L235'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],75,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x431d67c49c100d4c));
+<a name='L236'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],76,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x4cc5d4becb3e42b6));
+<a name='L237'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],77,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x597f299cfc657e2a));
+<a name='L238'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],78,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x5fcb6fab3ad6faec));
+<a name='L239'>    <a href='../D/4505.html' title='Multiple defined in 4 places.'>RND</a>(<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[1],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[2],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[3],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[4],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[5],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[6],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[7],<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[0],79,<a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x6c44198c4a475817));
+<a name='L240'>
+<a name='L241'><font color='darkred'>#undef</font> <a href='../R/3973.html' title='Multiple refered from 144 places.'>RND</a>
+<a name='L242'>
+<a name='L243'>    <i><font color='green'>/* feedback */</font></i>
+<a name='L244'>    <b>for</b> (i = 0; i &lt; 8; i++) <font color='red'>{</font>
+<a name='L245'>        sha_info-&gt;digest[i] = sha_info-&gt;digest[i] + <a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>[i];
+<a name='L246'>    <font color='red'>}</font>
+<a name='L247'>
+<a name='L248'><font color='red'>}</font>
+<a name='L249'>
+<a name='L250'>
+<a name='L251'>
+<a name='L252'><i><font color='green'>/* initialize the SHA digest */</font></i>
+<a name='L253'>
+<a name='L254'><b>static</b> <b>void</b>
+<a name='L255'><a href='../S/2709.html#L701' title='Refered from 701 in Modules/sha512module.c.'>sha512_init</a>(SHAobject *sha_info)
+<a name='L256'><font color='red'>{</font>
+<a name='L257'>    <a href='../D/5248.html' title='Multiple defined in 2 places.'>TestEndianness</a>(sha_info-&gt;Endianness)
+<a name='L258'>    sha_info-&gt;digest[0] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x6a09e667f3bcc908);
+<a name='L259'>    sha_info-&gt;digest[1] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xbb67ae8584caa73b);
+<a name='L260'>    sha_info-&gt;digest[2] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x3c6ef372fe94f82b);
+<a name='L261'>    sha_info-&gt;digest[3] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xa54ff53a5f1d36f1);
+<a name='L262'>    sha_info-&gt;digest[4] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x510e527fade682d1);
+<a name='L263'>    sha_info-&gt;digest[5] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x9b05688c2b3e6c1f);
+<a name='L264'>    sha_info-&gt;digest[6] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x1f83d9abfb41bd6b);
+<a name='L265'>    sha_info-&gt;digest[7] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x5be0cd19137e2179);
+<a name='L266'>    sha_info-&gt;count_lo = 0L;
+<a name='L267'>    sha_info-&gt;count_hi = 0L;
+<a name='L268'>    sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> = 0;
+<a name='L269'>    sha_info-&gt;digestsize = 64;
+<a name='L270'><font color='red'>}</font>
+<a name='L271'>
+<a name='L272'><b>static</b> <b>void</b>
+<a name='L273'><a href='../S/2709.html#L742' title='Refered from 742 in Modules/sha512module.c.'>sha384_init</a>(SHAobject *sha_info)
+<a name='L274'><font color='red'>{</font>
+<a name='L275'>    <a href='../D/5248.html' title='Multiple defined in 2 places.'>TestEndianness</a>(sha_info-&gt;Endianness)
+<a name='L276'>    sha_info-&gt;digest[0] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xcbbb9d5dc1059ed8);
+<a name='L277'>    sha_info-&gt;digest[1] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x629a292a367cd507);
+<a name='L278'>    sha_info-&gt;digest[2] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x9159015a3070dd17);
+<a name='L279'>    sha_info-&gt;digest[3] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x152fecd8f70e5939);
+<a name='L280'>    sha_info-&gt;digest[4] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x67332667ffc00b31);
+<a name='L281'>    sha_info-&gt;digest[5] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x8eb44a8768581511);
+<a name='L282'>    sha_info-&gt;digest[6] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0xdb0c2e0d64f98fa7);
+<a name='L283'>    sha_info-&gt;digest[7] = <a href='../S/565.html#L831' title='Defined at 831 in Include/pyport.h.'>Py_ULL</a>(0x47b5481dbefa4fa4);
+<a name='L284'>    sha_info-&gt;count_lo = 0L;
+<a name='L285'>    sha_info-&gt;count_hi = 0L;
+<a name='L286'>    sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> = 0;
+<a name='L287'>    sha_info-&gt;digestsize = 48;
+<a name='L288'><font color='red'>}</font>
+<a name='L289'>
+<a name='L290'>
+<a name='L291'><i><font color='green'>/* update the SHA digest */</font></i>
+<a name='L292'>
+<a name='L293'><b>static</b> <b>void</b>
+<a name='L294'><a href='../R/10293.html' title='Multiple refered from 3 places.'>sha512_update</a>(SHAobject *sha_info, <a href='../D/4686.html' title='Multiple defined in 2 places.'>SHA_BYTE</a> *buffer, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count)
+<a name='L295'><font color='red'>{</font>
+<a name='L296'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L297'>    <a href='../D/4688.html' title='Multiple defined in 2 places.'>SHA_INT32</a> clo;
+<a name='L298'>
+<a name='L299'>    clo = sha_info-&gt;count_lo + ((<a href='../D/4688.html' title='Multiple defined in 2 places.'>SHA_INT32</a>) count &lt;&lt; 3);
+<a name='L300'>    <b>if</b> (clo &lt; sha_info-&gt;count_lo) <font color='red'>{</font>
+<a name='L301'>        ++sha_info-&gt;count_hi;
+<a name='L302'>    <font color='red'>}</font>
+<a name='L303'>    sha_info-&gt;count_lo = clo;
+<a name='L304'>    sha_info-&gt;count_hi += (<a href='../D/4688.html' title='Multiple defined in 2 places.'>SHA_INT32</a>) count &gt;&gt; 29;
+<a name='L305'>    <b>if</b> (sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>) <font color='red'>{</font>
+<a name='L306'>        i = <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a> - sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>;
+<a name='L307'>        <b>if</b> (i &gt; count) <font color='red'>{</font>
+<a name='L308'>            i = count;
+<a name='L309'>        <font color='red'>}</font>
+<a name='L310'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(((<a href='../D/4686.html' title='Multiple defined in 2 places.'>SHA_BYTE</a> *) sha_info-&gt;data) + sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>, <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, i);
+<a name='L311'>        count -= i;
+<a name='L312'>        <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> += i;
+<a name='L313'>        sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> += i;
+<a name='L314'>        <b>if</b> (sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> == <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a>) <font color='red'>{</font>
+<a name='L315'>            <a href='../S/2709.html#L138' title='Defined at 138 in Modules/sha512module.c.'>sha512_transform</a>(sha_info);
+<a name='L316'>        <font color='red'>}</font>
+<a name='L317'>        <b>else</b> <font color='red'>{</font>
+<a name='L318'>            <b>return</b>;
+<a name='L319'>        <font color='red'>}</font>
+<a name='L320'>    <font color='red'>}</font>
+<a name='L321'>    <b>while</b> (count &gt;= <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a>) <font color='red'>{</font>
+<a name='L322'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(sha_info-&gt;data, <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a>);
+<a name='L323'>        <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> += <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a>;
+<a name='L324'>        count -= <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a>;
+<a name='L325'>        <a href='../S/2709.html#L138' title='Defined at 138 in Modules/sha512module.c.'>sha512_transform</a>(sha_info);
+<a name='L326'>    <font color='red'>}</font>
+<a name='L327'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(sha_info-&gt;data, <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, count);
+<a name='L328'>    sha_info-&gt;<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> = count;
+<a name='L329'><font color='red'>}</font>
+<a name='L330'>
+<a name='L331'><i><font color='green'>/* finish computing the SHA digest */</font></i>
+<a name='L332'>
+<a name='L333'><b>static</b> <b>void</b>
+<a name='L334'><a href='../R/10290.html' title='Multiple refered from 2 places.'>sha512_final</a>(<b>unsigned</b> <b>char</b> digest[<a href='../D/4687.html' title='Multiple defined in 2 places.'>SHA_DIGESTSIZE</a>], SHAobject *sha_info)
+<a name='L335'><font color='red'>{</font>
+<a name='L336'>    <b>int</b> count;
+<a name='L337'>    <a href='../D/4688.html' title='Multiple defined in 2 places.'>SHA_INT32</a> lo_bit_count, hi_bit_count;
+<a name='L338'>
+<a name='L339'>    lo_bit_count = sha_info-&gt;count_lo;
+<a name='L340'>    hi_bit_count = sha_info-&gt;count_hi;
+<a name='L341'>    count = (<b>int</b>) ((lo_bit_count &gt;&gt; 3) &amp; 0x7f);
+<a name='L342'>    ((<a href='../D/4686.html' title='Multiple defined in 2 places.'>SHA_BYTE</a> *) sha_info-&gt;data)[count++] = 0x80;
+<a name='L343'>    <b>if</b> (count &gt; <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a> - 16) <font color='red'>{</font>
+<a name='L344'>        memset(((<a href='../D/4686.html' title='Multiple defined in 2 places.'>SHA_BYTE</a> *) sha_info-&gt;data) + count, 0,
+<a name='L345'>               <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a> - count);
+<a name='L346'>        <a href='../S/2709.html#L138' title='Defined at 138 in Modules/sha512module.c.'>sha512_transform</a>(sha_info);
+<a name='L347'>        memset((<a href='../D/4686.html' title='Multiple defined in 2 places.'>SHA_BYTE</a> *) sha_info-&gt;data, 0, <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a> - 16);
+<a name='L348'>    <font color='red'>}</font>
+<a name='L349'>    <b>else</b> <font color='red'>{</font>
+<a name='L350'>        memset(((<a href='../D/4686.html' title='Multiple defined in 2 places.'>SHA_BYTE</a> *) sha_info-&gt;data) + count, 0,
+<a name='L351'>               <a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a> - 16 - count);
+<a name='L352'>    <font color='red'>}</font>
+<a name='L353'>
+<a name='L354'>    <i><font color='green'>/* GJS: note that we add the hi/lo in big-endian. sha512_transform will</font></i>
+<a name='L355'><i><font color='green'>       swap these values into host-order. */</font></i>
+<a name='L356'>    sha_info-&gt;data[112] = 0;
+<a name='L357'>    sha_info-&gt;data[113] = 0;
+<a name='L358'>    sha_info-&gt;data[114] = 0;
+<a name='L359'>    sha_info-&gt;data[115] = 0;
+<a name='L360'>    sha_info-&gt;data[116] = 0;
+<a name='L361'>    sha_info-&gt;data[117] = 0;
+<a name='L362'>    sha_info-&gt;data[118] = 0;
+<a name='L363'>    sha_info-&gt;data[119] = 0;
+<a name='L364'>    sha_info-&gt;data[120] = (hi_bit_count &gt;&gt; 24) &amp; 0xff;
+<a name='L365'>    sha_info-&gt;data[121] = (hi_bit_count &gt;&gt; 16) &amp; 0xff;
+<a name='L366'>    sha_info-&gt;data[122] = (hi_bit_count &gt;&gt;  8) &amp; 0xff;
+<a name='L367'>    sha_info-&gt;data[123] = (hi_bit_count &gt;&gt;  0) &amp; 0xff;
+<a name='L368'>    sha_info-&gt;data[124] = (lo_bit_count &gt;&gt; 24) &amp; 0xff;
+<a name='L369'>    sha_info-&gt;data[125] = (lo_bit_count &gt;&gt; 16) &amp; 0xff;
+<a name='L370'>    sha_info-&gt;data[126] = (lo_bit_count &gt;&gt;  8) &amp; 0xff;
+<a name='L371'>    sha_info-&gt;data[127] = (lo_bit_count &gt;&gt;  0) &amp; 0xff;
+<a name='L372'>    <a href='../S/2709.html#L138' title='Defined at 138 in Modules/sha512module.c.'>sha512_transform</a>(sha_info);
+<a name='L373'>    digest[ 0] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0] &gt;&gt; 56) &amp; 0xff);
+<a name='L374'>    digest[ 1] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0] &gt;&gt; 48) &amp; 0xff);
+<a name='L375'>    digest[ 2] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0] &gt;&gt; 40) &amp; 0xff);
+<a name='L376'>    digest[ 3] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0] &gt;&gt; 32) &amp; 0xff);
+<a name='L377'>    digest[ 4] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0] &gt;&gt; 24) &amp; 0xff);
+<a name='L378'>    digest[ 5] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0] &gt;&gt; 16) &amp; 0xff);
+<a name='L379'>    digest[ 6] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0] &gt;&gt;  8) &amp; 0xff);
+<a name='L380'>    digest[ 7] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[0]      ) &amp; 0xff);
+<a name='L381'>    digest[ 8] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1] &gt;&gt; 56) &amp; 0xff);
+<a name='L382'>    digest[ 9] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1] &gt;&gt; 48) &amp; 0xff);
+<a name='L383'>    digest[10] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1] &gt;&gt; 40) &amp; 0xff);
+<a name='L384'>    digest[11] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1] &gt;&gt; 32) &amp; 0xff);
+<a name='L385'>    digest[12] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1] &gt;&gt; 24) &amp; 0xff);
+<a name='L386'>    digest[13] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1] &gt;&gt; 16) &amp; 0xff);
+<a name='L387'>    digest[14] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1] &gt;&gt;  8) &amp; 0xff);
+<a name='L388'>    digest[15] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[1]      ) &amp; 0xff);
+<a name='L389'>    digest[16] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2] &gt;&gt; 56) &amp; 0xff);
+<a name='L390'>    digest[17] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2] &gt;&gt; 48) &amp; 0xff);
+<a name='L391'>    digest[18] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2] &gt;&gt; 40) &amp; 0xff);
+<a name='L392'>    digest[19] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2] &gt;&gt; 32) &amp; 0xff);
+<a name='L393'>    digest[20] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2] &gt;&gt; 24) &amp; 0xff);
+<a name='L394'>    digest[21] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2] &gt;&gt; 16) &amp; 0xff);
+<a name='L395'>    digest[22] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2] &gt;&gt;  8) &amp; 0xff);
+<a name='L396'>    digest[23] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[2]      ) &amp; 0xff);
+<a name='L397'>    digest[24] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3] &gt;&gt; 56) &amp; 0xff);
+<a name='L398'>    digest[25] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3] &gt;&gt; 48) &amp; 0xff);
+<a name='L399'>    digest[26] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3] &gt;&gt; 40) &amp; 0xff);
+<a name='L400'>    digest[27] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3] &gt;&gt; 32) &amp; 0xff);
+<a name='L401'>    digest[28] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3] &gt;&gt; 24) &amp; 0xff);
+<a name='L402'>    digest[29] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3] &gt;&gt; 16) &amp; 0xff);
+<a name='L403'>    digest[30] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3] &gt;&gt;  8) &amp; 0xff);
+<a name='L404'>    digest[31] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[3]      ) &amp; 0xff);
+<a name='L405'>    digest[32] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4] &gt;&gt; 56) &amp; 0xff);
+<a name='L406'>    digest[33] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4] &gt;&gt; 48) &amp; 0xff);
+<a name='L407'>    digest[34] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4] &gt;&gt; 40) &amp; 0xff);
+<a name='L408'>    digest[35] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4] &gt;&gt; 32) &amp; 0xff);
+<a name='L409'>    digest[36] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4] &gt;&gt; 24) &amp; 0xff);
+<a name='L410'>    digest[37] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4] &gt;&gt; 16) &amp; 0xff);
+<a name='L411'>    digest[38] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4] &gt;&gt;  8) &amp; 0xff);
+<a name='L412'>    digest[39] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[4]      ) &amp; 0xff);
+<a name='L413'>    digest[40] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5] &gt;&gt; 56) &amp; 0xff);
+<a name='L414'>    digest[41] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5] &gt;&gt; 48) &amp; 0xff);
+<a name='L415'>    digest[42] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5] &gt;&gt; 40) &amp; 0xff);
+<a name='L416'>    digest[43] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5] &gt;&gt; 32) &amp; 0xff);
+<a name='L417'>    digest[44] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5] &gt;&gt; 24) &amp; 0xff);
+<a name='L418'>    digest[45] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5] &gt;&gt; 16) &amp; 0xff);
+<a name='L419'>    digest[46] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5] &gt;&gt;  8) &amp; 0xff);
+<a name='L420'>    digest[47] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[5]      ) &amp; 0xff);
+<a name='L421'>    digest[48] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6] &gt;&gt; 56) &amp; 0xff);
+<a name='L422'>    digest[49] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6] &gt;&gt; 48) &amp; 0xff);
+<a name='L423'>    digest[50] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6] &gt;&gt; 40) &amp; 0xff);
+<a name='L424'>    digest[51] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6] &gt;&gt; 32) &amp; 0xff);
+<a name='L425'>    digest[52] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6] &gt;&gt; 24) &amp; 0xff);
+<a name='L426'>    digest[53] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6] &gt;&gt; 16) &amp; 0xff);
+<a name='L427'>    digest[54] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6] &gt;&gt;  8) &amp; 0xff);
+<a name='L428'>    digest[55] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[6]      ) &amp; 0xff);
+<a name='L429'>    digest[56] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7] &gt;&gt; 56) &amp; 0xff);
+<a name='L430'>    digest[57] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7] &gt;&gt; 48) &amp; 0xff);
+<a name='L431'>    digest[58] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7] &gt;&gt; 40) &amp; 0xff);
+<a name='L432'>    digest[59] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7] &gt;&gt; 32) &amp; 0xff);
+<a name='L433'>    digest[60] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7] &gt;&gt; 24) &amp; 0xff);
+<a name='L434'>    digest[61] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7] &gt;&gt; 16) &amp; 0xff);
+<a name='L435'>    digest[62] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7] &gt;&gt;  8) &amp; 0xff);
+<a name='L436'>    digest[63] = (<b>unsigned</b> <b>char</b>) ((sha_info-&gt;digest[7]      ) &amp; 0xff);
+<a name='L437'><font color='red'>}</font>
+<a name='L438'>
+<a name='L439'><i><font color='green'>/*</font></i>
+<a name='L440'><i><font color='green'> * End of copied SHA code.</font></i>
+<a name='L441'><i><font color='green'> *</font></i>
+<a name='L442'><i><font color='green'> * ------------------------------------------------------------------------</font></i>
+<a name='L443'><i><font color='green'> */</font></i>
+<a name='L444'>
+<a name='L445'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> SHA384type;
+<a name='L446'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> SHA512type;
+<a name='L447'>
+<a name='L448'>
+<a name='L449'><b>static</b> <a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *
+<a name='L450'><a href='../R/9191.html' title='Multiple refered from 2 places.'>newSHA384object</a>(<b>void</b>)
+<a name='L451'><font color='red'>{</font>
+<a name='L452'>    <b>return</b> (<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *)PyObject_New(<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a>, &amp;SHA384type);
+<a name='L453'><font color='red'>}</font>
+<a name='L454'>
+<a name='L455'><b>static</b> <a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *
+<a name='L456'><a href='../R/9192.html' title='Multiple refered from 2 places.'>newSHA512object</a>(<b>void</b>)
+<a name='L457'><font color='red'>{</font>
+<a name='L458'>    <b>return</b> (<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *)PyObject_New(<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a>, &amp;SHA512type);
+<a name='L459'><font color='red'>}</font>
+<a name='L460'>
+<a name='L461'><i><font color='green'>/* Internal methods for a hash object */</font></i>
+<a name='L462'>
+<a name='L463'><b>static</b> <b>void</b>
+<a name='L464'><a href='../R/4114.html' title='Multiple refered from 2 places.'>SHA512_dealloc</a>(PyObject *ptr)
+<a name='L465'><font color='red'>{</font>
+<a name='L466'>    PyObject_Del(ptr);
+<a name='L467'><font color='red'>}</font>
+<a name='L468'>
+<a name='L469'>
+<a name='L470'><i><font color='green'>/* External methods for a hash object */</font></i>
+<a name='L471'>
+<a name='L472'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA512_copy__doc__, "Return a copy of the hash object.");
+<a name='L473'>
+<a name='L474'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L475'><a href='../S/2709.html#L566' title='Refered from 566 in Modules/sha512module.c.'>SHA512_copy</a>(SHAobject *self, PyObject *unused)
+<a name='L476'><font color='red'>{</font>
+<a name='L477'>    <a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *newobj;
+<a name='L478'>
+<a name='L479'>    <b>if</b> (((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self)-&gt;ob_type == &amp;SHA512type) <font color='red'>{</font>
+<a name='L480'>        <b>if</b> ( (newobj = <a href='../S/2709.html#L456' title='Defined at 456 in Modules/sha512module.c.'>newSHA512object</a>())==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L481'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L482'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L483'>        <b>if</b> ( (newobj = <a href='../S/2709.html#L450' title='Defined at 450 in Modules/sha512module.c.'>newSHA384object</a>())==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L484'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L485'>    <font color='red'>}</font>
+<a name='L486'>
+<a name='L487'>    <a href='../D/4691.html' title='Multiple defined in 2 places.'>SHAcopy</a>(self, newobj);
+<a name='L488'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)newobj;
+<a name='L489'><font color='red'>}</font>
+<a name='L490'>
+<a name='L491'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA512_digest__doc__,
+<a name='L492'>"Return the digest value as a string of binary data.");
+<a name='L493'>
+<a name='L494'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L495'><a href='../S/2709.html#L567' title='Refered from 567 in Modules/sha512module.c.'>SHA512_digest</a>(SHAobject *self, PyObject *unused)
+<a name='L496'><font color='red'>{</font>
+<a name='L497'>    <b>unsigned</b> <b>char</b> digest[<a href='../D/4687.html' title='Multiple defined in 2 places.'>SHA_DIGESTSIZE</a>];
+<a name='L498'>    <a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> temp;
+<a name='L499'>
+<a name='L500'>    <a href='../D/4691.html' title='Multiple defined in 2 places.'>SHAcopy</a>(self, &amp;temp);
+<a name='L501'>    <a href='../S/2709.html#L334' title='Defined at 334 in Modules/sha512module.c.'>sha512_final</a>(digest, &amp;temp);
+<a name='L502'>    <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>((<b>const</b> <b>char</b> *)digest, self-&gt;digestsize);
+<a name='L503'><font color='red'>}</font>
+<a name='L504'>
+<a name='L505'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA512_hexdigest__doc__,
+<a name='L506'>"Return the digest value as a string of hexadecimal digits.");
+<a name='L507'>
+<a name='L508'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L509'><a href='../S/2709.html#L568' title='Refered from 568 in Modules/sha512module.c.'>SHA512_hexdigest</a>(SHAobject *self, PyObject *unused)
+<a name='L510'><font color='red'>{</font>
+<a name='L511'>    <b>unsigned</b> <b>char</b> digest[<a href='../D/4687.html' title='Multiple defined in 2 places.'>SHA_DIGESTSIZE</a>];
+<a name='L512'>    <a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> temp;
+<a name='L513'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *retval;
+<a name='L514'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *hex_digest;
+<a name='L515'>    <b>int</b> i, j;
+<a name='L516'>
+<a name='L517'>    <i><font color='green'>/* Get the raw (binary) digest value */</font></i>
+<a name='L518'>    <a href='../D/4691.html' title='Multiple defined in 2 places.'>SHAcopy</a>(self, &amp;temp);
+<a name='L519'>    <a href='../S/2709.html#L334' title='Defined at 334 in Modules/sha512module.c.'>sha512_final</a>(digest, &amp;temp);
+<a name='L520'>
+<a name='L521'>    <i><font color='green'>/* Create a new string */</font></i>
+<a name='L522'>    retval = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, self-&gt;digestsize * 2);
+<a name='L523'>    <b>if</b> (!retval)
+<a name='L524'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L525'>    hex_digest = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(retval);
+<a name='L526'>    <b>if</b> (!hex_digest) <font color='red'>{</font>
+<a name='L527'>            Py_DECREF(retval);
+<a name='L528'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L529'>    <font color='red'>}</font>
+<a name='L530'>
+<a name='L531'>    <i><font color='green'>/* Make hex version of the digest */</font></i>
+<a name='L532'>    <b>for</b> (i=j=0; i&lt;self-&gt;digestsize; i++) <font color='red'>{</font>
+<a name='L533'>        <b>char</b> c;
+<a name='L534'>        c = (digest[i] &gt;&gt; 4) &amp; 0xf;
+<a name='L535'>        c = (c&gt;9) ? c+'a'-10 : c + '0';
+<a name='L536'>        hex_digest[j++] = c;
+<a name='L537'>        c = (digest[i] &amp; 0xf);
+<a name='L538'>        c = (c&gt;9) ? c+'a'-10 : c + '0';
+<a name='L539'>        hex_digest[j++] = c;
+<a name='L540'>    <font color='red'>}</font>
+<a name='L541'>    <b>return</b> retval;
+<a name='L542'><font color='red'>}</font>
+<a name='L543'>
+<a name='L544'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA512_update__doc__,
+<a name='L545'>"Update this hash object's state with the provided string.");
+<a name='L546'>
+<a name='L547'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L548'><a href='../S/2709.html#L569' title='Refered from 569 in Modules/sha512module.c.'>SHA512_update</a>(SHAobject *self, PyObject *args)
+<a name='L549'><font color='red'>{</font>
+<a name='L550'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L551'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> buf;
+<a name='L552'>
+<a name='L553'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O:update", &amp;obj))
+<a name='L554'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L555'>
+<a name='L556'>    <a href='../S/2682.html#L8' title='Defined at 8 in Modules/hashlib.h.'>GET_BUFFER_VIEW_OR_ERROUT</a>(obj, &amp;buf);
+<a name='L557'>
+<a name='L558'>    <a href='../S/2709.html#L294' title='Defined at 294 in Modules/sha512module.c.'>sha512_update</a>(self, buf.buf, buf.len);
+<a name='L559'>
+<a name='L560'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L561'>    Py_INCREF(Py_None);
+<a name='L562'>    <b>return</b> Py_None;
+<a name='L563'><font color='red'>}</font>
+<a name='L564'>
+<a name='L565'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> SHA_methods[] = <font color='red'>{</font>
+<a name='L566'>    <font color='red'>{</font>"copy",      (PyCFunction)<a href='../S/2709.html#L475' title='Defined at 475 in Modules/sha512module.c.'>SHA512_copy</a>,      <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, SHA512_copy__doc__<font color='red'>}</font>,
+<a name='L567'>    <font color='red'>{</font>"digest",    (PyCFunction)<a href='../S/2709.html#L495' title='Defined at 495 in Modules/sha512module.c.'>SHA512_digest</a>,    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, SHA512_digest__doc__<font color='red'>}</font>,
+<a name='L568'>    <font color='red'>{</font>"hexdigest", (PyCFunction)<a href='../S/2709.html#L509' title='Defined at 509 in Modules/sha512module.c.'>SHA512_hexdigest</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, SHA512_hexdigest__doc__<font color='red'>}</font>,
+<a name='L569'>    <font color='red'>{</font>"update",    (PyCFunction)<a href='../S/2709.html#L548' title='Defined at 548 in Modules/sha512module.c.'>SHA512_update</a>,    <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, SHA512_update__doc__<font color='red'>}</font>,
+<a name='L570'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>         <i><font color='green'>/* sentinel */</font></i>
+<a name='L571'><font color='red'>}</font>;
+<a name='L572'>
+<a name='L573'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L574'><a href='../S/2709.html#L590' title='Refered from 590 in Modules/sha512module.c.'>SHA512_get_block_size</a>(PyObject *self, <b>void</b> *closure)
+<a name='L575'><font color='red'>{</font>
+<a name='L576'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../D/4685.html' title='Multiple defined in 2 places.'>SHA_BLOCKSIZE</a>);
+<a name='L577'><font color='red'>}</font>
+<a name='L578'>
+<a name='L579'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L580'><a href='../S/2709.html#L594' title='Refered from 594 in Modules/sha512module.c.'>SHA512_get_name</a>(PyObject *self, <b>void</b> *closure)
+<a name='L581'><font color='red'>{</font>
+<a name='L582'>    <b>if</b> (((<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *)self)-&gt;digestsize == 64)
+<a name='L583'>        <b>return</b> <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>("SHA512", 6);
+<a name='L584'>    <b>else</b>
+<a name='L585'>        <b>return</b> <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>("SHA384", 6);
+<a name='L586'><font color='red'>}</font>
+<a name='L587'>
+<a name='L588'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> SHA_getseters[] = <font color='red'>{</font>
+<a name='L589'>    <font color='red'>{</font>"block_size",
+<a name='L590'>     (getter)<a href='../S/2709.html#L574' title='Defined at 574 in Modules/sha512module.c.'>SHA512_get_block_size</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L591'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L592'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L593'>    <font color='red'>{</font>"name",
+<a name='L594'>     (getter)<a href='../S/2709.html#L580' title='Defined at 580 in Modules/sha512module.c.'>SHA512_get_name</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L595'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L596'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L597'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>  <i><font color='green'>/* Sentinel */</font></i>
+<a name='L598'><font color='red'>}</font>;
+<a name='L599'>
+<a name='L600'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> SHA_members[] = <font color='red'>{</font>
+<a name='L601'>    <font color='red'>{</font>"digest_size", <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a>, digestsize), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L602'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>  <i><font color='green'>/* Sentinel */</font></i>
+<a name='L603'><font color='red'>}</font>;
+<a name='L604'>
+<a name='L605'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> SHA384type = <font color='red'>{</font>
+<a name='L606'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L607'>    "_sha512.sha384",   <i><font color='green'>/*tp_name*/</font></i>
+<a name='L608'>    <b>sizeof</b>(<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a>),  <i><font color='green'>/*tp_size*/</font></i>
+<a name='L609'>    0,                  <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L610'>    <i><font color='green'>/* methods */</font></i>
+<a name='L611'>    <a href='../S/2709.html#L464' title='Defined at 464 in Modules/sha512module.c.'>SHA512_dealloc</a>,     <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L612'>    0,                  <i><font color='green'>/*tp_print*/</font></i>
+<a name='L613'>    0,                  <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L614'>    0,                  <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L615'>    0,                  <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L616'>    0,                  <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L617'>    0,                  <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L618'>    0,                  <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L619'>    0,                  <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L620'>    0,                  <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L621'>    0,                  <i><font color='green'>/*tp_call*/</font></i>
+<a name='L622'>    0,                  <i><font color='green'>/*tp_str*/</font></i>
+<a name='L623'>    0,                  <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L624'>    0,                  <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L625'>    0,                  <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L626'>    Py_TPFLAGS_DEFAULT, <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L627'>    0,                  <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L628'>    0,                  <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L629'>    0,                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L630'>    0,                  <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L631'>    0,                  <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L632'>    0,                  <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L633'>    0,                  <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L634'>    SHA_methods,        <i><font color='green'>/* tp_methods */</font></i>
+<a name='L635'>    SHA_members,        <i><font color='green'>/* tp_members */</font></i>
+<a name='L636'>    SHA_getseters,      <i><font color='green'>/* tp_getset */</font></i>
+<a name='L637'><font color='red'>}</font>;
+<a name='L638'>
+<a name='L639'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> SHA512type = <font color='red'>{</font>
+<a name='L640'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L641'>    "_sha512.sha512",   <i><font color='green'>/*tp_name*/</font></i>
+<a name='L642'>    <b>sizeof</b>(<a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a>),  <i><font color='green'>/*tp_size*/</font></i>
+<a name='L643'>    0,                  <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L644'>    <i><font color='green'>/* methods */</font></i>
+<a name='L645'>    <a href='../S/2709.html#L464' title='Defined at 464 in Modules/sha512module.c.'>SHA512_dealloc</a>,     <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L646'>    0,                  <i><font color='green'>/*tp_print*/</font></i>
+<a name='L647'>    0,                  <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L648'>    0,                  <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L649'>    0,                  <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L650'>    0,                  <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L651'>    0,                  <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L652'>    0,                  <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L653'>    0,                  <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L654'>    0,                  <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L655'>    0,                  <i><font color='green'>/*tp_call*/</font></i>
+<a name='L656'>    0,                  <i><font color='green'>/*tp_str*/</font></i>
+<a name='L657'>    0,                  <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L658'>    0,                  <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L659'>    0,                  <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L660'>    Py_TPFLAGS_DEFAULT, <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L661'>    0,                  <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L662'>    0,                  <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L663'>    0,                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L664'>    0,                  <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L665'>    0,                  <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L666'>    0,                  <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L667'>    0,                  <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L668'>    SHA_methods,        <i><font color='green'>/* tp_methods */</font></i>
+<a name='L669'>    SHA_members,        <i><font color='green'>/* tp_members */</font></i>
+<a name='L670'>    SHA_getseters,      <i><font color='green'>/* tp_getset */</font></i>
+<a name='L671'><font color='red'>}</font>;
+<a name='L672'>
+<a name='L673'>
+<a name='L674'><i><font color='green'>/* The single module-level function: new() */</font></i>
+<a name='L675'>
+<a name='L676'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA512_new__doc__,
+<a name='L677'>"Return a new SHA-512 hash object; optionally initialized with a string.");
+<a name='L678'>
+<a name='L679'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L680'><a href='../S/2709.html#L762' title='Refered from 762 in Modules/sha512module.c.'>SHA512_new</a>(PyObject *self, PyObject *args, PyObject *kwdict)
+<a name='L681'><font color='red'>{</font>
+<a name='L682'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"string", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L683'>    <a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *new;
+<a name='L684'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *data_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L685'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> buf;
+<a name='L686'>
+<a name='L687'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict, "|O:new", kwlist,
+<a name='L688'>                                     &amp;data_obj)) <font color='red'>{</font>
+<a name='L689'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L690'>    <font color='red'>}</font>
+<a name='L691'>
+<a name='L692'>    <b>if</b> (data_obj)
+<a name='L693'>        <a href='../S/2682.html#L8' title='Defined at 8 in Modules/hashlib.h.'>GET_BUFFER_VIEW_OR_ERROUT</a>(data_obj, &amp;buf);
+<a name='L694'>
+<a name='L695'>    <b>if</b> ((new = <a href='../S/2709.html#L456' title='Defined at 456 in Modules/sha512module.c.'>newSHA512object</a>()) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L696'>        <b>if</b> (data_obj)
+<a name='L697'>            <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L698'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L699'>    <font color='red'>}</font>
+<a name='L700'>
+<a name='L701'>    <a href='../S/2709.html#L255' title='Defined at 255 in Modules/sha512module.c.'>sha512_init</a>(new);
+<a name='L702'>
+<a name='L703'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L704'>        Py_DECREF(new);
+<a name='L705'>        <b>if</b> (data_obj)
+<a name='L706'>            <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L707'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L708'>    <font color='red'>}</font>
+<a name='L709'>    <b>if</b> (data_obj) <font color='red'>{</font>
+<a name='L710'>        <a href='../S/2709.html#L294' title='Defined at 294 in Modules/sha512module.c.'>sha512_update</a>(new, buf.buf, buf.len);
+<a name='L711'>        <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L712'>    <font color='red'>}</font>
+<a name='L713'>
+<a name='L714'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)new;
+<a name='L715'><font color='red'>}</font>
+<a name='L716'>
+<a name='L717'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA384_new__doc__,
+<a name='L718'>"Return a new SHA-384 hash object; optionally initialized with a string.");
+<a name='L719'>
+<a name='L720'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L721'><a href='../S/2709.html#L763' title='Refered from 763 in Modules/sha512module.c.'>SHA384_new</a>(PyObject *self, PyObject *args, PyObject *kwdict)
+<a name='L722'><font color='red'>{</font>
+<a name='L723'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"string", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L724'>    <a href='../D/4692.html' title='Multiple defined in 2 places.'>SHAobject</a> *new;
+<a name='L725'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *data_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L726'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> buf;
+<a name='L727'>
+<a name='L728'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict, "|O:new", kwlist,
+<a name='L729'>                                     &amp;data_obj)) <font color='red'>{</font>
+<a name='L730'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L731'>    <font color='red'>}</font>
+<a name='L732'>
+<a name='L733'>    <b>if</b> (data_obj)
+<a name='L734'>        <a href='../S/2682.html#L8' title='Defined at 8 in Modules/hashlib.h.'>GET_BUFFER_VIEW_OR_ERROUT</a>(data_obj, &amp;buf);
+<a name='L735'>
+<a name='L736'>    <b>if</b> ((new = <a href='../S/2709.html#L450' title='Defined at 450 in Modules/sha512module.c.'>newSHA384object</a>()) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L737'>        <b>if</b> (data_obj)
+<a name='L738'>            <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L739'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L740'>    <font color='red'>}</font>
+<a name='L741'>
+<a name='L742'>    <a href='../S/2709.html#L273' title='Defined at 273 in Modules/sha512module.c.'>sha384_init</a>(new);
+<a name='L743'>
+<a name='L744'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L745'>        Py_DECREF(new);
+<a name='L746'>        <b>if</b> (data_obj)
+<a name='L747'>            <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L748'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L749'>    <font color='red'>}</font>
+<a name='L750'>    <b>if</b> (data_obj) <font color='red'>{</font>
+<a name='L751'>        <a href='../S/2709.html#L294' title='Defined at 294 in Modules/sha512module.c.'>sha512_update</a>(new, buf.buf, buf.len);
+<a name='L752'>        <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L753'>    <font color='red'>}</font>
+<a name='L754'>
+<a name='L755'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)new;
+<a name='L756'><font color='red'>}</font>
+<a name='L757'>
+<a name='L758'>
+<a name='L759'><i><font color='green'>/* List of functions exported by this module */</font></i>
+<a name='L760'>
+<a name='L761'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> SHA_functions[] = <font color='red'>{</font>
+<a name='L762'>    <font color='red'>{</font>"sha512", (PyCFunction)<a href='../S/2709.html#L680' title='Defined at 680 in Modules/sha512module.c.'>SHA512_new</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>|METH_KEYWORDS, SHA512_new__doc__<font color='red'>}</font>,
+<a name='L763'>    <font color='red'>{</font>"sha384", (PyCFunction)<a href='../S/2709.html#L721' title='Defined at 721 in Modules/sha512module.c.'>SHA384_new</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>|METH_KEYWORDS, SHA384_new__doc__<font color='red'>}</font>,
+<a name='L764'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>            <i><font color='green'>/* Sentinel */</font></i>
+<a name='L765'><font color='red'>}</font>;
+<a name='L766'>
+<a name='L767'>
+<a name='L768'><i><font color='green'>/* Initialize this module. */</font></i>
+<a name='L769'>
+<a name='L770'><font color='darkred'>#define</font> <a href='../S/3031.html#L1713' title='Refered from 1713 in PC/winreg.c.'>insint</a>(n,v) <font color='red'>{</font> <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m,n,v); <font color='red'>}</font>
+<a name='L771'>
+<a name='L772'>
+<a name='L773'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _sha512module = <font color='red'>{</font>
+<a name='L774'>        <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L775'>        "_sha512",
+<a name='L776'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L777'>        -1,
+<a name='L778'>        SHA_functions,
+<a name='L779'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L780'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L781'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L782'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L783'><font color='red'>}</font>;
+<a name='L784'>
+<a name='L785'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L786'><a href='../R/3037.html' title='Multiple refered from 2 places.'>PyInit__sha512</a>(<b>void</b>)
+<a name='L787'><font color='red'>{</font>
+<a name='L788'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(&amp;SHA384type) = &amp;PyType_Type;
+<a name='L789'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;SHA384type) &lt; 0)
+<a name='L790'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L791'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(&amp;SHA512type) = &amp;PyType_Type;
+<a name='L792'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;SHA512type) &lt; 0)
+<a name='L793'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L794'>    <b>return</b> PyModule_Create(&amp;_sha512module);
+<a name='L795'><font color='red'>}</font>
+<a name='L796'>
+<a name='L797'><font color='darkred'>#endif</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L63'>[^]</a><a href='#L786'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

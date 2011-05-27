@@ -1,0 +1,315 @@
+<html>
+<head>
+<title>Python/dynload_win.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/dynload_win.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L31'>[^]</a><a href='#L174'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L31' title='Defined at 31.'>strcasecmp</a>
+<li><a href='#L67' title='Defined at 67.'>GetPythonImport</a>
+<li><a href='#L174' title='Defined at 174.'>_PyImport_GetDynLoadFunc</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Support for dynamic loading of extension modules */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'>
+<a name='L6'><font color='darkred'>#ifdef</font> <a href='../D/1477.html' title='Multiple defined in 3 places.'>HAVE_DIRECT_H</a>
+<a name='L7'><font color='darkred'>#include</font> &lt;direct.h&gt;
+<a name='L8'><font color='darkred'>#endif</font>
+<a name='L9'><font color='darkred'>#include</font> &lt;<a href='2809.html'>ctype.h</a>&gt;
+<a name='L10'>
+<a name='L11'><font color='darkred'>#include</font> "<a href='3122.html'>importdl.h</a>"
+<a name='L12'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L13'>
+<a name='L14'><i><font color='green'>// "activation context" magic - see dl_nt.c...</font></i>
+<a name='L15'><b>extern</b> ULONG_PTR <a href='../S/2869.html#L61' title='Defined at 61 in PC/dl_nt.c.'>_Py_ActivateActCtx</a>();
+<a name='L16'><b>void</b> <a href='../S/2869.html#L72' title='Defined at 72 in PC/dl_nt.c.'>_Py_DeactivateActCtx</a>(ULONG_PTR cookie);
+<a name='L17'>
+<a name='L18'><b>const</b> <b>struct</b> <a href='../S/3122.html#L23' title='Defined at 23 in Python/importdl.h.'>filedescr</a> _PyImport_DynLoadFiletab[] = <font color='red'>{</font>
+<a name='L19'><font color='darkred'>#ifdef</font> _DEBUG
+<a name='L20'>    <font color='red'>{</font>"_d.pyd", "rb", <a href='../S/3122.html#L14' title='Defined at 14 in Python/importdl.h.'>C_EXTENSION</a><font color='red'>}</font>,
+<a name='L21'><font color='darkred'>#else</font>
+<a name='L22'>    <font color='red'>{</font>".pyd", "rb", <a href='../S/3122.html#L14' title='Defined at 14 in Python/importdl.h.'>C_EXTENSION</a><font color='red'>}</font>,
+<a name='L23'><font color='darkred'>#endif</font>
+<a name='L24'>    <font color='red'>{</font>0, 0<font color='red'>}</font>
+<a name='L25'><font color='red'>}</font>;
+<a name='L26'>
+<a name='L27'>
+<a name='L28'><i><font color='green'>/* Case insensitive string compare, to avoid any dependencies on particular</font></i>
+<a name='L29'><i><font color='green'>   C RTL implementations */</font></i>
+<a name='L30'>
+<a name='L31'><b>static</b> <b>int</b> <a href='../S/3105.html#L276' title='Refered from 276 in Python/dynload_win.c.'>strcasecmp</a> (<b>char</b> *string1, <b>char</b> *string2)
+<a name='L32'><font color='red'>{</font>
+<a name='L33'>    <b>int</b> first, second;
+<a name='L34'>
+<a name='L35'>    <b>do</b> <font color='red'>{</font>
+<a name='L36'>        first  = <a href='../D/11819.html' title='Multiple defined in 2 places.'>tolower</a>(*string1);
+<a name='L37'>        second = <a href='../D/11819.html' title='Multiple defined in 2 places.'>tolower</a>(*string2);
+<a name='L38'>        string1++;
+<a name='L39'>        string2++;
+<a name='L40'>    <font color='red'>}</font> <b>while</b> (first &amp;&amp; first == second);
+<a name='L41'>
+<a name='L42'>    <b>return</b> (first - second);
+<a name='L43'><font color='red'>}</font>
+<a name='L44'>
+<a name='L45'>
+<a name='L46'><i><font color='green'>/* Function to return the name of the "python" DLL that the supplied module</font></i>
+<a name='L47'><i><font color='green'>   directly imports.  Looks through the list of imported modules and</font></i>
+<a name='L48'><i><font color='green'>   returns the first entry that starts with "python" (case sensitive) and</font></i>
+<a name='L49'><i><font color='green'>   is followed by nothing but numbers until the separator (period).</font></i>
+<a name='L50'><i><font color='green'></font></i>
+<a name='L51'><i><font color='green'>   Returns a pointer to the import name, or NULL if no matching name was</font></i>
+<a name='L52'><i><font color='green'>   located.</font></i>
+<a name='L53'><i><font color='green'></font></i>
+<a name='L54'><i><font color='green'>   This function parses through the PE header for the module as loaded in</font></i>
+<a name='L55'><i><font color='green'>   memory by the system loader.  The PE header is accessed as documented by</font></i>
+<a name='L56'><i><font color='green'>   Microsoft in the MSDN PE and COFF specification (2/99), and handles</font></i>
+<a name='L57'><i><font color='green'>   both PE32 and PE32+.  It only worries about the direct import table and</font></i>
+<a name='L58'><i><font color='green'>   not the delay load import table since it's unlikely an extension is</font></i>
+<a name='L59'><i><font color='green'>   going to be delay loading Python (after all, it's already loaded).</font></i>
+<a name='L60'><i><font color='green'></font></i>
+<a name='L61'><i><font color='green'>   If any magic values are not found (e.g., the PE header or optional</font></i>
+<a name='L62'><i><font color='green'>   header magic), then this function simply returns NULL. */</font></i>
+<a name='L63'>
+<a name='L64'><font color='darkred'>#define</font> <a href='../R/776.html' title='Multiple refered from 6 places.'>DWORD_AT</a>(mem) (*(DWORD *)(mem))
+<a name='L65'><font color='darkred'>#define</font> <a href='../S/3105.html#L103' title='Refered from 103 in Python/dynload_win.c.'>WORD_AT</a>(mem)  (*(WORD *)(mem))
+<a name='L66'>
+<a name='L67'><b>static</b> <b>char</b> *<a href='../S/3105.html#L273' title='Refered from 273 in Python/dynload_win.c.'>GetPythonImport</a> (HINSTANCE hModule)
+<a name='L68'><font color='red'>{</font>
+<a name='L69'>    <b>unsigned</b> <b>char</b> *dllbase, *import_data, *<a href='../S/529.html#L30' title='Defined at 30 in Include/graminit.h.'>import_name</a>;
+<a name='L70'>    DWORD pe_offset, opt_offset;
+<a name='L71'>    WORD opt_magic;
+<a name='L72'>    <b>int</b> num_dict_off, import_off;
+<a name='L73'>
+<a name='L74'>    <i><font color='green'>/* Safety check input */</font></i>
+<a name='L75'>    <b>if</b> (hModule == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L76'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L77'>    <font color='red'>}</font>
+<a name='L78'>
+<a name='L79'>    <i><font color='green'>/* Module instance is also the base load address.  First portion of</font></i>
+<a name='L80'><i><font color='green'>       memory is the MS-DOS loader, which holds the offset to the PE</font></i>
+<a name='L81'><i><font color='green'>       header (from the load base) at 0x3C */</font></i>
+<a name='L82'>    dllbase = (<b>unsigned</b> <b>char</b> *)hModule;
+<a name='L83'>    pe_offset = <a href='../S/3105.html#L64' title='Defined at 64 in Python/dynload_win.c.'>DWORD_AT</a>(dllbase + 0x3C);
+<a name='L84'>
+<a name='L85'>    <i><font color='green'>/* The PE signature must be "PE\0\0" */</font></i>
+<a name='L86'>    <b>if</b> (memcmp(dllbase+pe_offset,"PE\0\0",4)) <font color='red'>{</font>
+<a name='L87'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L88'>    <font color='red'>}</font>
+<a name='L89'>
+<a name='L90'>    <i><font color='green'>/* Following the PE signature is the standard COFF header (20</font></i>
+<a name='L91'><i><font color='green'>       bytes) and then the optional header.  The optional header starts</font></i>
+<a name='L92'><i><font color='green'>       with a magic value of 0x10B for PE32 or 0x20B for PE32+ (PE32+</font></i>
+<a name='L93'><i><font color='green'>       uses 64-bits for some fields).  It might also be 0x107 for a ROM</font></i>
+<a name='L94'><i><font color='green'>       image, but we don't process that here.</font></i>
+<a name='L95'><i><font color='green'></font></i>
+<a name='L96'><i><font color='green'>       The optional header ends with a data dictionary that directly</font></i>
+<a name='L97'><i><font color='green'>       points to certain types of data, among them the import entries</font></i>
+<a name='L98'><i><font color='green'>       (in the second table entry). Based on the header type, we</font></i>
+<a name='L99'><i><font color='green'>       determine offsets for the data dictionary count and the entry</font></i>
+<a name='L100'><i><font color='green'>       within the dictionary pointing to the imports. */</font></i>
+<a name='L101'>
+<a name='L102'>    opt_offset = pe_offset + 4 + 20;
+<a name='L103'>    opt_magic = <a href='../S/3105.html#L65' title='Defined at 65 in Python/dynload_win.c.'>WORD_AT</a>(dllbase+opt_offset);
+<a name='L104'>    <b>if</b> (opt_magic == 0x10B) <font color='red'>{</font>
+<a name='L105'>        <i><font color='green'>/* PE32 */</font></i>
+<a name='L106'>        num_dict_off = 92;
+<a name='L107'>        import_off   = 104;
+<a name='L108'>    <font color='red'>}</font> <b>else</b> <b>if</b> (opt_magic == 0x20B) <font color='red'>{</font>
+<a name='L109'>        <i><font color='green'>/* PE32+ */</font></i>
+<a name='L110'>        num_dict_off = 108;
+<a name='L111'>        import_off   = 120;
+<a name='L112'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L113'>        <i><font color='green'>/* Unsupported */</font></i>
+<a name='L114'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L115'>    <font color='red'>}</font>
+<a name='L116'>
+<a name='L117'>    <i><font color='green'>/* Now if an import table exists, offset to it and walk the list of</font></i>
+<a name='L118'><i><font color='green'>       imports.  The import table is an array (ending when an entry has</font></i>
+<a name='L119'><i><font color='green'>       empty values) of structures (20 bytes each), which contains (at</font></i>
+<a name='L120'><i><font color='green'>       offset 12) a relative address (to the module base) at which a</font></i>
+<a name='L121'><i><font color='green'>       string constant holding the import name is located. */</font></i>
+<a name='L122'>
+<a name='L123'>    <b>if</b> (<a href='../S/3105.html#L64' title='Defined at 64 in Python/dynload_win.c.'>DWORD_AT</a>(dllbase + opt_offset + num_dict_off) &gt;= 2) <font color='red'>{</font>
+<a name='L124'>        <i><font color='green'>/* We have at least 2 tables - the import table is the second</font></i>
+<a name='L125'><i><font color='green'>           one.  But still it may be that the table size is zero */</font></i>
+<a name='L126'>        <b>if</b> (0 == <a href='../S/3105.html#L64' title='Defined at 64 in Python/dynload_win.c.'>DWORD_AT</a>(dllbase + opt_offset + import_off + <b>sizeof</b>(DWORD)))
+<a name='L127'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L128'>        import_data = dllbase + <a href='../S/3105.html#L64' title='Defined at 64 in Python/dynload_win.c.'>DWORD_AT</a>(dllbase +
+<a name='L129'>                                         opt_offset +
+<a name='L130'>                                         import_off);
+<a name='L131'>        <b>while</b> (<a href='../S/3105.html#L64' title='Defined at 64 in Python/dynload_win.c.'>DWORD_AT</a>(import_data)) <font color='red'>{</font>
+<a name='L132'>            <a href='../S/529.html#L30' title='Defined at 30 in Include/graminit.h.'>import_name</a> = dllbase + <a href='../S/3105.html#L64' title='Defined at 64 in Python/dynload_win.c.'>DWORD_AT</a>(import_data+12);
+<a name='L133'>            <b>if</b> (strlen(<a href='../S/529.html#L30' title='Defined at 30 in Include/graminit.h.'>import_name</a>) &gt;= 6 &amp;&amp;
+<a name='L134'>                !strncmp(<a href='../S/529.html#L30' title='Defined at 30 in Include/graminit.h.'>import_name</a>,"python",6)) <font color='red'>{</font>
+<a name='L135'>                <b>char</b> *pch;
+<a name='L136'>
+<a name='L137'><font color='darkred'>#ifndef</font> _DEBUG
+<a name='L138'>                <i><font color='green'>/* In a release version, don't claim that python3.dll is</font></i>
+<a name='L139'><i><font color='green'>                   a Python DLL. */</font></i>
+<a name='L140'>                <b>if</b> (strcmp(<a href='../S/529.html#L30' title='Defined at 30 in Include/graminit.h.'>import_name</a>, "python3.dll") == 0) <font color='red'>{</font>
+<a name='L141'>                    import_data += 20;
+<a name='L142'>                    <b>continue</b>;
+<a name='L143'>                <font color='red'>}</font>
+<a name='L144'><font color='darkred'>#endif</font>
+<a name='L145'>
+<a name='L146'>                <i><font color='green'>/* Ensure python prefix is followed only</font></i>
+<a name='L147'><i><font color='green'>                   by numbers to the end of the basename */</font></i>
+<a name='L148'>                pch = <a href='../S/529.html#L30' title='Defined at 30 in Include/graminit.h.'>import_name</a> + 6;
+<a name='L149'><font color='darkred'>#ifdef</font> _DEBUG
+<a name='L150'>                <b>while</b> (*pch &amp;&amp; pch[0] != '_' &amp;&amp; pch[1] != 'd' &amp;&amp; pch[2] != '.') <font color='red'>{</font>
+<a name='L151'><font color='darkred'>#else</font>
+<a name='L152'>                <b>while</b> (*pch &amp;&amp; *pch != '.') <font color='red'>{</font>
+<a name='L153'><font color='darkred'>#endif</font>
+<a name='L154'>                    <b>if</b> (*pch &gt;= '0' &amp;&amp; *pch &lt;= '9') <font color='red'>{</font>
+<a name='L155'>                        pch++;
+<a name='L156'>                    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L157'>                        pch = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L158'>                        <b>break</b>;
+<a name='L159'>                    <font color='red'>}</font>
+<a name='L160'>                <font color='red'>}</font>
+<a name='L161'>
+<a name='L162'>                <b>if</b> (pch) <font color='red'>{</font>
+<a name='L163'>                    <i><font color='green'>/* Found it - return the name */</font></i>
+<a name='L164'>                    <b>return</b> <a href='../S/529.html#L30' title='Defined at 30 in Include/graminit.h.'>import_name</a>;
+<a name='L165'>                <font color='red'>}</font>
+<a name='L166'>            <font color='red'>}</font>
+<a name='L167'>            import_data += 20;
+<a name='L168'>        <font color='red'>}</font>
+<a name='L169'>    <font color='red'>}</font>
+<a name='L170'>
+<a name='L171'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L172'><font color='red'>}</font>
+<a name='L173'>
+<a name='L174'><a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a> <a href='../R/5428.html' title='Multiple refered from 2 places.'>_PyImport_GetDynLoadFunc</a>(<b>const</b> <b>char</b> *fqname, <b>const</b> <b>char</b> *shortname,
+<a name='L175'>                                    <b>const</b> <b>char</b> *pathname, FILE *fp)
+<a name='L176'><font color='red'>{</font>
+<a name='L177'>    <a href='../S/3122.html#L39' title='Defined at 39 in Python/importdl.h.'>dl_funcptr</a> p;
+<a name='L178'>    <b>char</b> funcname[258], *import_python;
+<a name='L179'>
+<a name='L180'><font color='darkred'>#ifndef</font> _DEBUG
+<a name='L181'>    <a href='../S/2881.html#L720' title='Defined at 720 in PC/getpathp.c.'>_Py_CheckPython3</a>();
+<a name='L182'><font color='darkred'>#endif</font>
+<a name='L183'>
+<a name='L184'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(funcname, <b>sizeof</b>(funcname), "PyInit_%.200s", shortname);
+<a name='L185'>
+<a name='L186'>    <font color='red'>{</font>
+<a name='L187'>        HINSTANCE hDLL = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L188'>        <b>char</b> pathbuf[260];
+<a name='L189'>        LPTSTR dummy;
+<a name='L190'>        <b>unsigned</b> <b>int</b> old_mode;
+<a name='L191'>        ULONG_PTR cookie = 0;
+<a name='L192'>        <i><font color='green'>/* We use LoadLibraryEx so Windows looks for dependent DLLs</font></i>
+<a name='L193'><i><font color='green'>            in directory of pathname first.  However, Windows95</font></i>
+<a name='L194'><i><font color='green'>            can sometimes not work correctly unless the absolute</font></i>
+<a name='L195'><i><font color='green'>            path is used.  If GetFullPathName() fails, the LoadLibrary</font></i>
+<a name='L196'><i><font color='green'>            will certainly fail too, so use its error code */</font></i>
+<a name='L197'>
+<a name='L198'>        <i><font color='green'>/* Don't display a message box when Python can't load a DLL */</font></i>
+<a name='L199'>        old_mode = SetErrorMode(SEM_FAILCRITICALERRORS);
+<a name='L200'>
+<a name='L201'>        <b>if</b> (GetFullPathName(pathname,
+<a name='L202'>                            <b>sizeof</b>(pathbuf),
+<a name='L203'>                            pathbuf,
+<a name='L204'>                            &amp;dummy)) <font color='red'>{</font>
+<a name='L205'>            ULONG_PTR cookie = <a href='../S/2869.html#L61' title='Defined at 61 in PC/dl_nt.c.'>_Py_ActivateActCtx</a>();
+<a name='L206'>            <i><font color='green'>/* XXX This call doesn't exist in Windows CE */</font></i>
+<a name='L207'>            hDLL = LoadLibraryEx(pathname, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L208'>                                 LOAD_WITH_ALTERED_SEARCH_PATH);
+<a name='L209'>            <a href='../S/2869.html#L72' title='Defined at 72 in PC/dl_nt.c.'>_Py_DeactivateActCtx</a>(cookie);
+<a name='L210'>        <font color='red'>}</font>
+<a name='L211'>
+<a name='L212'>        <i><font color='green'>/* restore old error mode settings */</font></i>
+<a name='L213'>        SetErrorMode(old_mode);
+<a name='L214'>
+<a name='L215'>        <b>if</b> (hDLL==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)<font color='red'>{</font>
+<a name='L216'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *message;
+<a name='L217'>            <b>unsigned</b> <b>int</b> <a href='../S/2664.html#L597' title='Defined at 597 in Modules/expat/xmlparse.c.'>errorCode</a>;
+<a name='L218'>
+<a name='L219'>            <i><font color='green'>/* Get an error string from Win32 error code */</font></i>
+<a name='L220'>            wchar_t theInfo[256]; <i><font color='green'>/* Pointer to error text</font></i>
+<a name='L221'><i><font color='green'>                                  from system */</font></i>
+<a name='L222'>            <b>int</b> theLength; <i><font color='green'>/* Length of error text */</font></i>
+<a name='L223'>
+<a name='L224'>            <a href='../S/2664.html#L597' title='Defined at 597 in Modules/expat/xmlparse.c.'>errorCode</a> = GetLastError();
+<a name='L225'>
+<a name='L226'>            theLength = FormatMessageW(
+<a name='L227'>                FORMAT_MESSAGE_FROM_SYSTEM |
+<a name='L228'>                FORMAT_MESSAGE_IGNORE_INSERTS, <i><font color='green'>/* flags */</font></i>
+<a name='L229'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <i><font color='green'>/* message source */</font></i>
+<a name='L230'>                <a href='../S/2664.html#L597' title='Defined at 597 in Modules/expat/xmlparse.c.'>errorCode</a>, <i><font color='green'>/* the message (error) ID */</font></i>
+<a name='L231'>                MAKELANGID(LANG_NEUTRAL,
+<a name='L232'>                           SUBLANG_DEFAULT),
+<a name='L233'>                           <i><font color='green'>/* Default language */</font></i>
+<a name='L234'>                theInfo, <i><font color='green'>/* the buffer */</font></i>
+<a name='L235'>                <b>sizeof</b>(theInfo), <i><font color='green'>/* the buffer size */</font></i>
+<a name='L236'>                <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>); <i><font color='green'>/* no additional format args. */</font></i>
+<a name='L237'>
+<a name='L238'>            <i><font color='green'>/* Problem: could not get the error message.</font></i>
+<a name='L239'><i><font color='green'>               This should not happen if called correctly. */</font></i>
+<a name='L240'>            <b>if</b> (theLength == 0) <font color='red'>{</font>
+<a name='L241'>                message = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>(
+<a name='L242'>                    "DLL load failed with error code %d",
+<a name='L243'>                    <a href='../S/2664.html#L597' title='Defined at 597 in Modules/expat/xmlparse.c.'>errorCode</a>);
+<a name='L244'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L245'>                <i><font color='green'>/* For some reason a \r\n</font></i>
+<a name='L246'><i><font color='green'>                   is appended to the text */</font></i>
+<a name='L247'>                <b>if</b> (theLength &gt;= 2 &amp;&amp;
+<a name='L248'>                    theInfo[theLength-2] == '\r' &amp;&amp;
+<a name='L249'>                    theInfo[theLength-1] == '\n') <font color='red'>{</font>
+<a name='L250'>                    theLength -= 2;
+<a name='L251'>                    theInfo[theLength] = '\0';
+<a name='L252'>                <font color='red'>}</font>
+<a name='L253'>                message = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(
+<a name='L254'>                    "DLL load failed: ");
+<a name='L255'>
+<a name='L256'>                <a href='../D/3946.html' title='Multiple defined in 3 places.'>PyUnicode_AppendAndDel</a>(&amp;message,
+<a name='L257'>                    <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(
+<a name='L258'>                        theInfo,
+<a name='L259'>                        theLength));
+<a name='L260'>            <font color='red'>}</font>
+<a name='L261'>            <a href='../S/3106.html#L53' title='Defined at 53 in Python/errors.c.'>PyErr_SetObject</a>(PyExc_ImportError, message);
+<a name='L262'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(message);
+<a name='L263'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L264'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L265'>            <b>char</b> <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>[256];
+<a name='L266'>
+<a name='L267'><font color='darkred'>#ifdef</font> _DEBUG
+<a name='L268'>            <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <b>sizeof</b>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>), "python%d%d_d.dll",
+<a name='L269'><font color='darkred'>#else</font>
+<a name='L270'>            <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <b>sizeof</b>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>), "python%d%d.dll",
+<a name='L271'><font color='darkred'>#endif</font>
+<a name='L272'>                          <a href='../S/549.html#L19' title='Defined at 19 in Include/patchlevel.h.'>PY_MAJOR_VERSION</a>,<a href='../S/549.html#L20' title='Defined at 20 in Include/patchlevel.h.'>PY_MINOR_VERSION</a>);
+<a name='L273'>            import_python = <a href='../S/3105.html#L67' title='Defined at 67 in Python/dynload_win.c.'>GetPythonImport</a>(hDLL);
+<a name='L274'>
+<a name='L275'>            <b>if</b> (import_python &amp;&amp;
+<a name='L276'>                <a href='../S/3105.html#L31' title='Defined at 31 in Python/dynload_win.c.'>strcasecmp</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>,import_python)) <font color='red'>{</font>
+<a name='L277'>                <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <b>sizeof</b>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>),
+<a name='L278'>                              "Module use of %.150s conflicts "
+<a name='L279'>                              "with this version of Python.",
+<a name='L280'>                              import_python);
+<a name='L281'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ImportError,<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L282'>                FreeLibrary(hDLL);
+<a name='L283'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L284'>            <font color='red'>}</font>
+<a name='L285'>        <font color='red'>}</font>
+<a name='L286'>        p = <a href='../D/1434.html' title='Multiple defined in 2 places.'>GetProcAddress</a>(hDLL, funcname);
+<a name='L287'>    <font color='red'>}</font>
+<a name='L288'>
+<a name='L289'>    <b>return</b> p;
+<a name='L290'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L31'>[^]</a><a href='#L174'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

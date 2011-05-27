@@ -1,0 +1,1149 @@
+<html>
+<head>
+<title>Modules/_sqlite/cursor.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3387.html'>_sqlite</a>/cursor.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L41'>[^]</a><a href='#L1102'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L41' title='Defined at 41.'>detect_statement_type</a>
+<li><a href='#L79' title='Defined at 79.'>pysqlite_cursor_init</a>
+<li><a href='#L127' title='Defined at 127.'>pysqlite_cursor_dealloc</a>
+<li><a href='#L151' title='Defined at 151.'>_pysqlite_get_converter</a>
+<li><a href='#L167' title='Defined at 167.'>pysqlite_build_row_cast_map</a>
+<li><a href='#L252' title='Defined at 252.'>_pysqlite_build_column_name</a>
+<li><a href='#L271' title='Defined at 271.'>pysqlite_unicode_from_string</a>
+<li><a href='#L282' title='Defined at 282.'>_pysqlite_fetch_one_row</a>
+<li><a href='#L425' title='Defined at 425.'>check_cursor</a>
+<li><a href='#L440' title='Defined at 440.'>_pysqlite_query_execute</a>
+<li><a href='#L764' title='Defined at 764.'>pysqlite_cursor_execute</a>
+<li><a href='#L769' title='Defined at 769.'>pysqlite_cursor_executemany</a>
+<li><a href='#L774' title='Defined at 774.'>pysqlite_cursor_executescript</a>
+<li><a href='#L858' title='Defined at 858.'>pysqlite_cursor_getiter</a>
+<li><a href='#L864' title='Defined at 864.'>pysqlite_cursor_iternext</a>
+<li><a href='#L915' title='Defined at 915.'>pysqlite_cursor_fetchone</a>
+<li><a href='#L928' title='Defined at 928.'>pysqlite_cursor_fetchmany</a>
+<li><a href='#L971' title='Defined at 971.'>pysqlite_cursor_fetchall</a>
+<li><a href='#L1000' title='Defined at 1000.'>pysqlite_noop</a>
+<li><a href='#L1007' title='Defined at 1007.'>pysqlite_cursor_close</a>
+<li><a href='#L1102' title='Defined at 1102.'>pysqlite_cursor_setup_types</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* cursor.c - the cursor type</font></i>
+<a name='L2'><i><font color='green'> *</font></i>
+<a name='L3'><i><font color='green'> * Copyright (C) 2004-2010 Gerhard Häring &lt;gh@ghaering.de&gt;</font></i>
+<a name='L4'><i><font color='green'> *</font></i>
+<a name='L5'><i><font color='green'> * This file is part of pysqlite.</font></i>
+<a name='L6'><i><font color='green'> *</font></i>
+<a name='L7'><i><font color='green'> * This software is provided 'as-is', without any express or implied</font></i>
+<a name='L8'><i><font color='green'> * warranty.  In no event will the authors be held liable for any damages</font></i>
+<a name='L9'><i><font color='green'> * arising from the use of this software.</font></i>
+<a name='L10'><i><font color='green'> *</font></i>
+<a name='L11'><i><font color='green'> * Permission is granted to anyone to use this software for any purpose,</font></i>
+<a name='L12'><i><font color='green'> * including commercial applications, and to alter it and redistribute it</font></i>
+<a name='L13'><i><font color='green'> * freely, subject to the following restrictions:</font></i>
+<a name='L14'><i><font color='green'> *</font></i>
+<a name='L15'><i><font color='green'> * 1. The origin of this software must not be misrepresented; you must not</font></i>
+<a name='L16'><i><font color='green'> *    claim that you wrote the original software. If you use this software</font></i>
+<a name='L17'><i><font color='green'> *    in a product, an acknowledgment in the product documentation would be</font></i>
+<a name='L18'><i><font color='green'> *    appreciated but is not required.</font></i>
+<a name='L19'><i><font color='green'> * 2. Altered source versions must be plainly marked as such, and must not be</font></i>
+<a name='L20'><i><font color='green'> *    misrepresented as being the original software.</font></i>
+<a name='L21'><i><font color='green'> * 3. This notice may not be removed or altered from any source distribution.</font></i>
+<a name='L22'><i><font color='green'> */</font></i>
+<a name='L23'>
+<a name='L24'><font color='darkred'>#include</font> "<a href='2597.html'>cursor.h</a>"
+<a name='L25'><font color='darkred'>#include</font> "<a href='2601.html'>module.h</a>"
+<a name='L26'><font color='darkred'>#include</font> "<a href='2610.html'>util.h</a>"
+<a name='L27'><font color='darkred'>#include</font> "<a href='2606.html'>sqlitecompat.h</a>"
+<a name='L28'>
+<a name='L29'><i><font color='green'>/* used to decide wether to call PyLong_FromLong or PyLong_FromLongLong */</font></i>
+<a name='L30'><font color='darkred'>#ifndef</font> <a href='../S/2596.html#L31' title='Defined at 31 in Modules/_sqlite/cursor.c.'>INT32_MIN</a>
+<a name='L31'><font color='darkred'>#define</font> <a href='../R/1554.html' title='Multiple refered from 2 places.'>INT32_MIN</a> (-2147483647 - 1)
+<a name='L32'><font color='darkred'>#endif</font>
+<a name='L33'><font color='darkred'>#ifndef</font> <a href='../S/2596.html#L34' title='Defined at 34 in Modules/_sqlite/cursor.c.'>INT32_MAX</a>
+<a name='L34'><font color='darkred'>#define</font> <a href='../R/1553.html' title='Multiple refered from 3 places.'>INT32_MAX</a> 2147483647
+<a name='L35'><font color='darkred'>#endif</font>
+<a name='L36'>
+<a name='L37'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2596.html#L864' title='Defined at 864 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_iternext</a>(pysqlite_Cursor* self);
+<a name='L38'>
+<a name='L39'><b>static</b> <b>char</b>* errmsg_fetch_across_rollback = "Cursor needed to be reset because of commit/rollback and can no longer be fetched from.";
+<a name='L40'>
+<a name='L41'><b>static</b> <a href='../S/2597.html#L57' title='Defined at 57 in Modules/_sqlite/cursor.h.'>pysqlite_StatementKind</a> <a href='../S/2596.html#L582' title='Refered from 582 in Modules/_sqlite/cursor.c.'>detect_statement_type</a>(<b>const</b> <b>char</b>* statement)
+<a name='L42'><font color='red'>{</font>
+<a name='L43'>    <b>char</b> buf[20];
+<a name='L44'>    <b>const</b> <b>char</b>* src;
+<a name='L45'>    <b>char</b>* dst;
+<a name='L46'>
+<a name='L47'>    src = statement;
+<a name='L48'>    <i><font color='green'>/* skip over whitepace */</font></i>
+<a name='L49'>    <b>while</b> (*src == '\r' || *src == '\n' || *src == ' ' || *src == '\t') <font color='red'>{</font>
+<a name='L50'>        src++;
+<a name='L51'>    <font color='red'>}</font>
+<a name='L52'>
+<a name='L53'>    <b>if</b> (*src == 0)
+<a name='L54'>        <b>return</b> <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_INVALID</a>;
+<a name='L55'>
+<a name='L56'>    dst = buf;
+<a name='L57'>    *dst = 0;
+<a name='L58'>    <b>while</b> (<a href='../D/9331.html' title='Multiple defined in 2 places.'>isalpha</a>(*src) &amp;&amp; dst - buf &lt; <b>sizeof</b>(buf) - 2) <font color='red'>{</font>
+<a name='L59'>        *dst++ = <a href='../D/11819.html' title='Multiple defined in 2 places.'>tolower</a>(*src++);
+<a name='L60'>    <font color='red'>}</font>
+<a name='L61'>
+<a name='L62'>    *dst = 0;
+<a name='L63'>
+<a name='L64'>    <b>if</b> (!strcmp(buf, "select")) <font color='red'>{</font>
+<a name='L65'>        <b>return</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_SELECT</a>;
+<a name='L66'>    <font color='red'>}</font> <b>else</b> <b>if</b> (!strcmp(buf, "insert")) <font color='red'>{</font>
+<a name='L67'>        <b>return</b> <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_INSERT</a>;
+<a name='L68'>    <font color='red'>}</font> <b>else</b> <b>if</b> (!strcmp(buf, "update")) <font color='red'>{</font>
+<a name='L69'>        <b>return</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_UPDATE</a>;
+<a name='L70'>    <font color='red'>}</font> <b>else</b> <b>if</b> (!strcmp(buf, "delete")) <font color='red'>{</font>
+<a name='L71'>        <b>return</b> <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_DELETE</a>;
+<a name='L72'>    <font color='red'>}</font> <b>else</b> <b>if</b> (!strcmp(buf, "replace")) <font color='red'>{</font>
+<a name='L73'>        <b>return</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_REPLACE</a>;
+<a name='L74'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L75'>        <b>return</b> <a href='../S/2597.html#L56' title='Defined at 56 in Modules/_sqlite/cursor.h.'>STATEMENT_OTHER</a>;
+<a name='L76'>    <font color='red'>}</font>
+<a name='L77'><font color='red'>}</font>
+<a name='L78'>
+<a name='L79'><b>static</b> <b>int</b> <a href='../S/2596.html#L1096' title='Refered from 1096 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_init</a>(pysqlite_Cursor* self, PyObject* args, PyObject* kwargs)
+<a name='L80'><font color='red'>{</font>
+<a name='L81'>    <a href='../S/2595.html#L113' title='Defined at 113 in Modules/_sqlite/connection.h.'>pysqlite_Connection</a>* connection;
+<a name='L82'>
+<a name='L83'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O!", &amp;pysqlite_ConnectionType, &amp;connection))
+<a name='L84'>    <font color='red'>{</font>
+<a name='L85'>        <b>return</b> -1;
+<a name='L86'>    <font color='red'>}</font>
+<a name='L87'>
+<a name='L88'>    Py_INCREF(connection);
+<a name='L89'>    self-&gt;connection = connection;
+<a name='L90'>    self-&gt;statement = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L91'>    self-&gt;next_row = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L92'>    self-&gt;in_weakreflist = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L93'>
+<a name='L94'>    self-&gt;row_cast_map = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L95'>    <b>if</b> (!self-&gt;row_cast_map) <font color='red'>{</font>
+<a name='L96'>        <b>return</b> -1;
+<a name='L97'>    <font color='red'>}</font>
+<a name='L98'>
+<a name='L99'>    Py_INCREF(Py_None);
+<a name='L100'>    self-&gt;description = Py_None;
+<a name='L101'>
+<a name='L102'>    Py_INCREF(Py_None);
+<a name='L103'>    self-&gt;lastrowid= Py_None;
+<a name='L104'>
+<a name='L105'>    self-&gt;arraysize = 1;
+<a name='L106'>    self-&gt;closed = 0;
+<a name='L107'>    self-&gt;reset = 0;
+<a name='L108'>
+<a name='L109'>    self-&gt;rowcount = -1L;
+<a name='L110'>
+<a name='L111'>    Py_INCREF(Py_None);
+<a name='L112'>    self-&gt;row_factory = Py_None;
+<a name='L113'>
+<a name='L114'>    <b>if</b> (!<a href='../S/2594.html#L1019' title='Defined at 1019 in Modules/_sqlite/connection.c.'>pysqlite_check_thread</a>(self-&gt;connection)) <font color='red'>{</font>
+<a name='L115'>        <b>return</b> -1;
+<a name='L116'>    <font color='red'>}</font>
+<a name='L117'>
+<a name='L118'>    <b>if</b> (!<a href='../S/2594.html#L252' title='Defined at 252 in Modules/_sqlite/connection.c.'>pysqlite_connection_register_cursor</a>(connection, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self)) <font color='red'>{</font>
+<a name='L119'>        <b>return</b> -1;
+<a name='L120'>    <font color='red'>}</font>
+<a name='L121'>
+<a name='L122'>    self-&gt;initialized = 1;
+<a name='L123'>
+<a name='L124'>    <b>return</b> 0;
+<a name='L125'><font color='red'>}</font>
+<a name='L126'>
+<a name='L127'><b>static</b> <b>void</b> <a href='../S/2596.html#L1065' title='Refered from 1065 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_dealloc</a>(pysqlite_Cursor* self)
+<a name='L128'><font color='red'>{</font>
+<a name='L129'>    <b>int</b> rc;
+<a name='L130'>
+<a name='L131'>    <i><font color='green'>/* Reset the statement if the user has not closed the cursor */</font></i>
+<a name='L132'>    <b>if</b> (self-&gt;statement) <font color='red'>{</font>
+<a name='L133'>        rc = <a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L134'>        Py_DECREF(self-&gt;statement);
+<a name='L135'>    <font color='red'>}</font>
+<a name='L136'>
+<a name='L137'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;connection);
+<a name='L138'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;row_cast_map);
+<a name='L139'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;description);
+<a name='L140'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;lastrowid);
+<a name='L141'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;row_factory);
+<a name='L142'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;next_row);
+<a name='L143'>
+<a name='L144'>    <b>if</b> (self-&gt;in_weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L145'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self);
+<a name='L146'>    <font color='red'>}</font>
+<a name='L147'>
+<a name='L148'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self);
+<a name='L149'><font color='red'>}</font>
+<a name='L150'>
+<a name='L151'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/5824.html' title='Multiple refered from 2 places.'>_pysqlite_get_converter</a>(PyObject* key)
+<a name='L152'><font color='red'>{</font>
+<a name='L153'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* upcase_key;
+<a name='L154'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* retval;
+<a name='L155'>
+<a name='L156'>    upcase_key = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, "upper", "");
+<a name='L157'>    <b>if</b> (!upcase_key) <font color='red'>{</font>
+<a name='L158'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L159'>    <font color='red'>}</font>
+<a name='L160'>
+<a name='L161'>    retval = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(converters, upcase_key);
+<a name='L162'>    Py_DECREF(upcase_key);
+<a name='L163'>
+<a name='L164'>    <b>return</b> retval;
+<a name='L165'><font color='red'>}</font>
+<a name='L166'>
+<a name='L167'><b>int</b> <a href='../S/2596.html#L669' title='Refered from 669 in Modules/_sqlite/cursor.c.'>pysqlite_build_row_cast_map</a>(pysqlite_Cursor* self)
+<a name='L168'><font color='red'>{</font>
+<a name='L169'>    <b>int</b> i;
+<a name='L170'>    <b>const</b> <b>char</b>* type_start = (<b>const</b> <b>char</b>*)-1;
+<a name='L171'>    <b>const</b> <b>char</b>* pos;
+<a name='L172'>
+<a name='L173'>    <b>const</b> <b>char</b>* colname;
+<a name='L174'>    <b>const</b> <b>char</b>* decltype;
+<a name='L175'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* py_decltype;
+<a name='L176'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>;
+<a name='L177'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L178'>
+<a name='L179'>    <b>if</b> (!self-&gt;connection-&gt;detect_types) <font color='red'>{</font>
+<a name='L180'>        <b>return</b> 0;
+<a name='L181'>    <font color='red'>}</font>
+<a name='L182'>
+<a name='L183'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;row_cast_map);
+<a name='L184'>    self-&gt;row_cast_map = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L185'>
+<a name='L186'>    <b>for</b> (i = 0; i &lt; sqlite3_column_count(self-&gt;statement-&gt;st); i++) <font color='red'>{</font>
+<a name='L187'>        <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L188'>
+<a name='L189'>        <b>if</b> (self-&gt;connection-&gt;detect_types &amp; <a href='../S/2601.html#L57' title='Defined at 57 in Modules/_sqlite/module.h.'>PARSE_COLNAMES</a>) <font color='red'>{</font>
+<a name='L190'>            colname = sqlite3_column_name(self-&gt;statement-&gt;st, i);
+<a name='L191'>            <b>if</b> (colname) <font color='red'>{</font>
+<a name='L192'>                <b>for</b> (pos = colname; *pos != 0; pos++) <font color='red'>{</font>
+<a name='L193'>                    <b>if</b> (*pos == '[') <font color='red'>{</font>
+<a name='L194'>                        type_start = pos + 1;
+<a name='L195'>                    <font color='red'>}</font> <b>else</b> <b>if</b> (*pos == ']' &amp;&amp; type_start != (<b>const</b> <b>char</b>*)-1) <font color='red'>{</font>
+<a name='L196'>                        <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(type_start, pos - type_start);
+<a name='L197'>                        <b>if</b> (!<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>) <font color='red'>{</font>
+<a name='L198'>                            <i><font color='green'>/* creating a string failed, but it is too complicated</font></i>
+<a name='L199'><i><font color='green'>                             * to propagate the error here, we just assume there is</font></i>
+<a name='L200'><i><font color='green'>                             * no converter and proceed */</font></i>
+<a name='L201'>                            <b>break</b>;
+<a name='L202'>                        <font color='red'>}</font>
+<a name='L203'>
+<a name='L204'>                        <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = <a href='../S/2596.html#L151' title='Defined at 151 in Modules/_sqlite/cursor.c.'>_pysqlite_get_converter</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L205'>                        Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L206'>                        <b>break</b>;
+<a name='L207'>                    <font color='red'>}</font>
+<a name='L208'>                <font color='red'>}</font>
+<a name='L209'>            <font color='red'>}</font>
+<a name='L210'>        <font color='red'>}</font>
+<a name='L211'>
+<a name='L212'>        <b>if</b> (!<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> &amp;&amp; self-&gt;connection-&gt;detect_types &amp; <a href='../S/2601.html#L56' title='Defined at 56 in Modules/_sqlite/module.h.'>PARSE_DECLTYPES</a>) <font color='red'>{</font>
+<a name='L213'>            decltype = sqlite3_column_decltype(self-&gt;statement-&gt;st, i);
+<a name='L214'>            <b>if</b> (decltype) <font color='red'>{</font>
+<a name='L215'>                <b>for</b> (pos = decltype;;pos++) <font color='red'>{</font>
+<a name='L216'>                    <i><font color='green'>/* Converter names are split at '(' and blanks.</font></i>
+<a name='L217'><i><font color='green'>                     * This allows 'INTEGER NOT NULL' to be treated as 'INTEGER' and</font></i>
+<a name='L218'><i><font color='green'>                     * 'NUMBER(10)' to be treated as 'NUMBER', for example.</font></i>
+<a name='L219'><i><font color='green'>                     * In other words, it will work as people expect it to work.*/</font></i>
+<a name='L220'>                    <b>if</b> (*pos == ' ' || *pos == '(' || *pos == 0) <font color='red'>{</font>
+<a name='L221'>                        py_decltype = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(decltype, pos - decltype);
+<a name='L222'>                        <b>if</b> (!py_decltype) <font color='red'>{</font>
+<a name='L223'>                            <b>return</b> -1;
+<a name='L224'>                        <font color='red'>}</font>
+<a name='L225'>                        <b>break</b>;
+<a name='L226'>                    <font color='red'>}</font>
+<a name='L227'>                <font color='red'>}</font>
+<a name='L228'>
+<a name='L229'>                <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = <a href='../S/2596.html#L151' title='Defined at 151 in Modules/_sqlite/cursor.c.'>_pysqlite_get_converter</a>(py_decltype);
+<a name='L230'>                Py_DECREF(py_decltype);
+<a name='L231'>            <font color='red'>}</font>
+<a name='L232'>        <font color='red'>}</font>
+<a name='L233'>
+<a name='L234'>        <b>if</b> (!<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>) <font color='red'>{</font>
+<a name='L235'>            <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = Py_None;
+<a name='L236'>        <font color='red'>}</font>
+<a name='L237'>
+<a name='L238'>        <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(self-&gt;row_cast_map, <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>) != 0) <font color='red'>{</font>
+<a name='L239'>            <b>if</b> (<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> != Py_None) <font color='red'>{</font>
+<a name='L240'>                Py_DECREF(<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>);
+<a name='L241'>            <font color='red'>}</font>
+<a name='L242'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;row_cast_map);
+<a name='L243'>            self-&gt;row_cast_map = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L244'>
+<a name='L245'>            <b>return</b> -1;
+<a name='L246'>        <font color='red'>}</font>
+<a name='L247'>    <font color='red'>}</font>
+<a name='L248'>
+<a name='L249'>    <b>return</b> 0;
+<a name='L250'><font color='red'>}</font>
+<a name='L251'>
+<a name='L252'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2596.html#L690' title='Refered from 690 in Modules/_sqlite/cursor.c.'>_pysqlite_build_column_name</a>(<b>const</b> <b>char</b>* colname)
+<a name='L253'><font color='red'>{</font>
+<a name='L254'>    <b>const</b> <b>char</b>* pos;
+<a name='L255'>
+<a name='L256'>    <b>if</b> (!colname) <font color='red'>{</font>
+<a name='L257'>        Py_INCREF(Py_None);
+<a name='L258'>        <b>return</b> Py_None;
+<a name='L259'>    <font color='red'>}</font>
+<a name='L260'>
+<a name='L261'>    <b>for</b> (pos = colname;; pos++) <font color='red'>{</font>
+<a name='L262'>        <b>if</b> (*pos == 0 || *pos == '[') <font color='red'>{</font>
+<a name='L263'>            <b>if</b> ((*pos == '[') &amp;&amp; (pos &gt; colname) &amp;&amp; (*(pos-1) == ' ')) <font color='red'>{</font>
+<a name='L264'>                pos--;
+<a name='L265'>            <font color='red'>}</font>
+<a name='L266'>            <b>return</b> <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(colname, pos - colname);
+<a name='L267'>        <font color='red'>}</font>
+<a name='L268'>    <font color='red'>}</font>
+<a name='L269'><font color='red'>}</font>
+<a name='L270'>
+<a name='L271'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2596.html#L361' title='Refered from 361 in Modules/_sqlite/cursor.c.'>pysqlite_unicode_from_string</a>(<b>const</b> <b>char</b>* val_str, <b>int</b> optimize)
+<a name='L272'><font color='red'>{</font>
+<a name='L273'>    <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(val_str);
+<a name='L274'><font color='red'>}</font>
+<a name='L275'>
+<a name='L276'><i><font color='green'>/*</font></i>
+<a name='L277'><i><font color='green'> * Returns a row from the currently active SQLite statement</font></i>
+<a name='L278'><i><font color='green'> *</font></i>
+<a name='L279'><i><font color='green'> * Precondidition:</font></i>
+<a name='L280'><i><font color='green'> * - sqlite3_step() has been called before and it returned SQLITE_ROW.</font></i>
+<a name='L281'><i><font color='green'> */</font></i>
+<a name='L282'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/5821.html' title='Multiple refered from 2 places.'>_pysqlite_fetch_one_row</a>(pysqlite_Cursor* self)
+<a name='L283'><font color='red'>{</font>
+<a name='L284'>    <b>int</b> i, numcols;
+<a name='L285'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* row;
+<a name='L286'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* item = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L287'>    <b>int</b> coltype;
+<a name='L288'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> intval;
+<a name='L289'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>;
+<a name='L290'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* converted;
+<a name='L291'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> nbytes;
+<a name='L292'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>;
+<a name='L293'>    <b>const</b> <b>char</b>* val_str;
+<a name='L294'>    <b>char</b> buf[200];
+<a name='L295'>    <b>const</b> <b>char</b>* colname;
+<a name='L296'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* buf_bytes;
+<a name='L297'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* error_obj;
+<a name='L298'>
+<a name='L299'>    <b>if</b> (self-&gt;reset) <font color='red'>{</font>
+<a name='L300'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_InterfaceError, errmsg_fetch_across_rollback);
+<a name='L301'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L302'>    <font color='red'>}</font>
+<a name='L303'>
+<a name='L304'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L305'>    numcols = sqlite3_data_count(self-&gt;statement-&gt;st);
+<a name='L306'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L307'>
+<a name='L308'>    row = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(numcols);
+<a name='L309'>    <b>if</b> (!row) <font color='red'>{</font>
+<a name='L310'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L311'>    <font color='red'>}</font>
+<a name='L312'>
+<a name='L313'>    <b>for</b> (i = 0; i &lt; numcols; i++) <font color='red'>{</font>
+<a name='L314'>        <b>if</b> (self-&gt;connection-&gt;detect_types) <font color='red'>{</font>
+<a name='L315'>            <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = <a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(self-&gt;row_cast_map, i);
+<a name='L316'>            <b>if</b> (!<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>) <font color='red'>{</font>
+<a name='L317'>                <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = Py_None;
+<a name='L318'>            <font color='red'>}</font>
+<a name='L319'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L320'>            <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> = Py_None;
+<a name='L321'>        <font color='red'>}</font>
+<a name='L322'>
+<a name='L323'>        <b>if</b> (<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> != Py_None) <font color='red'>{</font>
+<a name='L324'>            nbytes = sqlite3_column_bytes(self-&gt;statement-&gt;st, i);
+<a name='L325'>            val_str = (<b>const</b> <b>char</b>*)sqlite3_column_blob(self-&gt;statement-&gt;st, i);
+<a name='L326'>            <b>if</b> (!val_str) <font color='red'>{</font>
+<a name='L327'>                Py_INCREF(Py_None);
+<a name='L328'>                converted = Py_None;
+<a name='L329'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L330'>                item = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(val_str, nbytes);
+<a name='L331'>                <b>if</b> (!item) <font color='red'>{</font>
+<a name='L332'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L333'>                <font color='red'>}</font>
+<a name='L334'>                converted = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(<a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>, "O", item);
+<a name='L335'>                Py_DECREF(item);
+<a name='L336'>                <b>if</b> (!converted) <font color='red'>{</font>
+<a name='L337'>                    <b>break</b>;
+<a name='L338'>                <font color='red'>}</font>
+<a name='L339'>            <font color='red'>}</font>
+<a name='L340'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L341'>            <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L342'>            coltype = sqlite3_column_type(self-&gt;statement-&gt;st, i);
+<a name='L343'>            <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L344'>            <b>if</b> (coltype == SQLITE_NULL) <font color='red'>{</font>
+<a name='L345'>                Py_INCREF(Py_None);
+<a name='L346'>                converted = Py_None;
+<a name='L347'>            <font color='red'>}</font> <b>else</b> <b>if</b> (coltype == SQLITE_INTEGER) <font color='red'>{</font>
+<a name='L348'>                intval = sqlite3_column_int64(self-&gt;statement-&gt;st, i);
+<a name='L349'>                <b>if</b> (intval &lt; <a href='../S/2596.html#L31' title='Defined at 31 in Modules/_sqlite/cursor.c.'>INT32_MIN</a> || intval &gt; <a href='../S/2596.html#L34' title='Defined at 34 in Modules/_sqlite/cursor.c.'>INT32_MAX</a>) <font color='red'>{</font>
+<a name='L350'>                    converted = <a href='../S/2799.html#L994' title='Defined at 994 in Objects/longobject.c.'>PyLong_FromLongLong</a>(intval);
+<a name='L351'>                <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L352'>                    converted = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)intval);
+<a name='L353'>                <font color='red'>}</font>
+<a name='L354'>            <font color='red'>}</font> <b>else</b> <b>if</b> (coltype == SQLITE_FLOAT) <font color='red'>{</font>
+<a name='L355'>                converted = <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(sqlite3_column_double(self-&gt;statement-&gt;st, i));
+<a name='L356'>            <font color='red'>}</font> <b>else</b> <b>if</b> (coltype == SQLITE_TEXT) <font color='red'>{</font>
+<a name='L357'>                val_str = (<b>const</b> <b>char</b>*)sqlite3_column_text(self-&gt;statement-&gt;st, i);
+<a name='L358'>                <b>if</b> ((self-&gt;connection-&gt;text_factory == (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;PyUnicode_Type)
+<a name='L359'>                    || (self-&gt;connection-&gt;text_factory == pysqlite_OptimizedUnicode)) <font color='red'>{</font>
+<a name='L360'>
+<a name='L361'>                    converted = <a href='../S/2596.html#L271' title='Defined at 271 in Modules/_sqlite/cursor.c.'>pysqlite_unicode_from_string</a>(val_str,
+<a name='L362'>                        self-&gt;connection-&gt;text_factory == pysqlite_OptimizedUnicode ? 1 : 0);
+<a name='L363'>
+<a name='L364'>                    <b>if</b> (!converted) <font color='red'>{</font>
+<a name='L365'>                        colname = sqlite3_column_name(self-&gt;statement-&gt;st, i);
+<a name='L366'>                        <b>if</b> (!colname) <font color='red'>{</font>
+<a name='L367'>                            colname = "&lt;unknown column name&gt;";
+<a name='L368'>                        <font color='red'>}</font>
+<a name='L369'>                        <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf) - 1, "Could not decode to UTF-8 column '%s' with text '%s'",
+<a name='L370'>                                     colname , val_str);
+<a name='L371'>                        buf_bytes = <a href='../S/2777.html#L116' title='Defined at 116 in Objects/bytearrayobject.c.'>PyByteArray_FromStringAndSize</a>(buf, strlen(buf));
+<a name='L372'>                        <b>if</b> (!buf_bytes) <font color='red'>{</font>
+<a name='L373'>                            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_OperationalError, "Could not decode to UTF-8");
+<a name='L374'>                        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L375'>                            error_obj = <a href='../D/4007.html' title='Multiple defined in 3 places.'>PyUnicode_FromEncodedObject</a>(buf_bytes, "ascii", "replace");
+<a name='L376'>                            <b>if</b> (!error_obj) <font color='red'>{</font>
+<a name='L377'>                                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_OperationalError, "Could not decode to UTF-8");
+<a name='L378'>                            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L379'>                                <a href='../S/3106.html#L53' title='Defined at 53 in Python/errors.c.'>PyErr_SetObject</a>(pysqlite_OperationalError, error_obj);
+<a name='L380'>                                Py_DECREF(error_obj);
+<a name='L381'>                            <font color='red'>}</font>
+<a name='L382'>                            Py_DECREF(buf_bytes);
+<a name='L383'>                        <font color='red'>}</font>
+<a name='L384'>                    <font color='red'>}</font>
+<a name='L385'>                <font color='red'>}</font> <b>else</b> <b>if</b> (self-&gt;connection-&gt;text_factory == (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;PyBytes_Type) <font color='red'>{</font>
+<a name='L386'>                    converted = <a href='../S/2779.html#L122' title='Defined at 122 in Objects/bytesobject.c.'>PyBytes_FromString</a>(val_str);
+<a name='L387'>                <font color='red'>}</font> <b>else</b> <b>if</b> (self-&gt;connection-&gt;text_factory == (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;PyByteArray_Type) <font color='red'>{</font>
+<a name='L388'>                    converted = <a href='../S/2777.html#L116' title='Defined at 116 in Objects/bytearrayobject.c.'>PyByteArray_FromStringAndSize</a>(val_str, strlen(val_str));
+<a name='L389'>                <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L390'>                    converted = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(self-&gt;connection-&gt;text_factory, "y", val_str);
+<a name='L391'>                <font color='red'>}</font>
+<a name='L392'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L393'>                <i><font color='green'>/* coltype == SQLITE_BLOB */</font></i>
+<a name='L394'>                nbytes = sqlite3_column_bytes(self-&gt;statement-&gt;st, i);
+<a name='L395'>                <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(
+<a name='L396'>                    sqlite3_column_blob(self-&gt;statement-&gt;st, i), nbytes);
+<a name='L397'>                <b>if</b> (!<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>) <font color='red'>{</font>
+<a name='L398'>                    <b>break</b>;
+<a name='L399'>                <font color='red'>}</font>
+<a name='L400'>                converted = <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>;
+<a name='L401'>            <font color='red'>}</font>
+<a name='L402'>        <font color='red'>}</font>
+<a name='L403'>
+<a name='L404'>        <b>if</b> (converted) <font color='red'>{</font>
+<a name='L405'>            <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(row, i, converted);
+<a name='L406'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L407'>            Py_INCREF(Py_None);
+<a name='L408'>            <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(row, i, Py_None);
+<a name='L409'>        <font color='red'>}</font>
+<a name='L410'>    <font color='red'>}</font>
+<a name='L411'>
+<a name='L412'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L413'>        Py_DECREF(row);
+<a name='L414'>        row = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L415'>    <font color='red'>}</font>
+<a name='L416'>
+<a name='L417'>    <b>return</b> row;
+<a name='L418'><font color='red'>}</font>
+<a name='L419'>
+<a name='L420'><i><font color='green'>/*</font></i>
+<a name='L421'><i><font color='green'> * Checks if a cursor object is usable.</font></i>
+<a name='L422'><i><font color='green'> *</font></i>
+<a name='L423'><i><font color='green'> * 0 =&gt; error; 1 =&gt; ok</font></i>
+<a name='L424'><i><font color='green'> */</font></i>
+<a name='L425'><b>static</b> <b>int</b> <a href='../R/6624.html' title='Multiple refered from 3 places.'>check_cursor</a>(pysqlite_Cursor* cur)
+<a name='L426'><font color='red'>{</font>
+<a name='L427'>    <b>if</b> (!cur-&gt;initialized) <font color='red'>{</font>
+<a name='L428'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_ProgrammingError, "Base Cursor.__init__ not called.");
+<a name='L429'>        <b>return</b> 0;
+<a name='L430'>    <font color='red'>}</font>
+<a name='L431'>
+<a name='L432'>    <b>if</b> (cur-&gt;closed) <font color='red'>{</font>
+<a name='L433'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_ProgrammingError, "Cannot operate on a closed cursor.");
+<a name='L434'>        <b>return</b> 0;
+<a name='L435'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L436'>        <b>return</b> <a href='../S/2594.html#L1019' title='Defined at 1019 in Modules/_sqlite/connection.c.'>pysqlite_check_thread</a>(cur-&gt;connection) &amp;&amp; <a href='../S/2594.html#L337' title='Defined at 337 in Modules/_sqlite/connection.c.'>pysqlite_check_connection</a>(cur-&gt;connection);
+<a name='L437'>    <font color='red'>}</font>
+<a name='L438'><font color='red'>}</font>
+<a name='L439'>
+<a name='L440'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/5825.html' title='Multiple refered from 2 places.'>_pysqlite_query_execute</a>(pysqlite_Cursor* self, <b>int</b> multiple, PyObject* args)
+<a name='L441'><font color='red'>{</font>
+<a name='L442'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* operation;
+<a name='L443'>    <b>const</b> <b>char</b>* operation_cstr;
+<a name='L444'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> operation_len;
+<a name='L445'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* parameters_list = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L446'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* parameters_iter = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L447'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/529.html#L10' title='Defined at 10 in Include/graminit.h.'>parameters</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L448'>    <b>int</b> i;
+<a name='L449'>    <b>int</b> rc;
+<a name='L450'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* func_args;
+<a name='L451'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L452'>    <b>int</b> numcols;
+<a name='L453'>    <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> lastrowid;
+<a name='L454'>    <b>int</b> statement_type;
+<a name='L455'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* descriptor;
+<a name='L456'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* second_argument = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L457'>    <b>int</b> allow_8bit_chars;
+<a name='L458'>
+<a name='L459'>    <b>if</b> (!<a href='../S/2596.html#L425' title='Defined at 425 in Modules/_sqlite/cursor.c.'>check_cursor</a>(self)) <font color='red'>{</font>
+<a name='L460'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L461'>    <font color='red'>}</font>
+<a name='L462'>
+<a name='L463'>    self-&gt;reset = 0;
+<a name='L464'>
+<a name='L465'>    <i><font color='green'>/* Make shooting yourself in the foot with not utf-8 decodable 8-bit-strings harder */</font></i>
+<a name='L466'>    allow_8bit_chars = ((self-&gt;connection-&gt;text_factory != (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)&amp;PyUnicode_Type) &amp;&amp;
+<a name='L467'>        (self-&gt;connection-&gt;text_factory != pysqlite_OptimizedUnicode));
+<a name='L468'>
+<a name='L469'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;next_row);
+<a name='L470'>    self-&gt;next_row = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L471'>
+<a name='L472'>    <b>if</b> (multiple) <font color='red'>{</font>
+<a name='L473'>        <i><font color='green'>/* executemany() */</font></i>
+<a name='L474'>        <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "OO", &amp;operation, &amp;second_argument)) <font color='red'>{</font>
+<a name='L475'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L476'>        <font color='red'>}</font>
+<a name='L477'>
+<a name='L478'>        <b>if</b> (!PyUnicode_Check(operation)) <font color='red'>{</font>
+<a name='L479'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "operation parameter must be str");
+<a name='L480'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L481'>        <font color='red'>}</font>
+<a name='L482'>
+<a name='L483'>        <b>if</b> (PyIter_Check(second_argument)) <font color='red'>{</font>
+<a name='L484'>            <i><font color='green'>/* iterator */</font></i>
+<a name='L485'>            Py_INCREF(second_argument);
+<a name='L486'>            parameters_iter = second_argument;
+<a name='L487'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L488'>            <i><font color='green'>/* sequence */</font></i>
+<a name='L489'>            parameters_iter = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(second_argument);
+<a name='L490'>            <b>if</b> (!parameters_iter) <font color='red'>{</font>
+<a name='L491'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L492'>            <font color='red'>}</font>
+<a name='L493'>        <font color='red'>}</font>
+<a name='L494'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L495'>        <i><font color='green'>/* execute() */</font></i>
+<a name='L496'>        <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O|O", &amp;operation, &amp;second_argument)) <font color='red'>{</font>
+<a name='L497'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L498'>        <font color='red'>}</font>
+<a name='L499'>
+<a name='L500'>        <b>if</b> (!PyUnicode_Check(operation)) <font color='red'>{</font>
+<a name='L501'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "operation parameter must be str");
+<a name='L502'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L503'>        <font color='red'>}</font>
+<a name='L504'>
+<a name='L505'>        parameters_list = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L506'>        <b>if</b> (!parameters_list) <font color='red'>{</font>
+<a name='L507'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L508'>        <font color='red'>}</font>
+<a name='L509'>
+<a name='L510'>        <b>if</b> (second_argument == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L511'>            second_argument = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L512'>            <b>if</b> (!second_argument) <font color='red'>{</font>
+<a name='L513'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L514'>            <font color='red'>}</font>
+<a name='L515'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L516'>            Py_INCREF(second_argument);
+<a name='L517'>        <font color='red'>}</font>
+<a name='L518'>        <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(parameters_list, second_argument) != 0) <font color='red'>{</font>
+<a name='L519'>            Py_DECREF(second_argument);
+<a name='L520'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L521'>        <font color='red'>}</font>
+<a name='L522'>        Py_DECREF(second_argument);
+<a name='L523'>
+<a name='L524'>        parameters_iter = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(parameters_list);
+<a name='L525'>        <b>if</b> (!parameters_iter) <font color='red'>{</font>
+<a name='L526'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L527'>        <font color='red'>}</font>
+<a name='L528'>    <font color='red'>}</font>
+<a name='L529'>
+<a name='L530'>    <b>if</b> (self-&gt;statement != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L531'>        <i><font color='green'>/* There is an active statement */</font></i>
+<a name='L532'>        rc = <a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L533'>    <font color='red'>}</font>
+<a name='L534'>
+<a name='L535'>    operation_cstr = <a href='../S/2828.html#L1903' title='Defined at 1903 in Objects/unicodeobject.c.'>_PyUnicode_AsStringAndSize</a>(operation, &amp;operation_len);
+<a name='L536'>    <b>if</b> (operation_cstr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L537'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L538'>
+<a name='L539'>    <i><font color='green'>/* reset description and rowcount */</font></i>
+<a name='L540'>    Py_DECREF(self-&gt;description);
+<a name='L541'>    Py_INCREF(Py_None);
+<a name='L542'>    self-&gt;description = Py_None;
+<a name='L543'>    self-&gt;rowcount = -1L;
+<a name='L544'>
+<a name='L545'>    func_args = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(1);
+<a name='L546'>    <b>if</b> (!func_args) <font color='red'>{</font>
+<a name='L547'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L548'>    <font color='red'>}</font>
+<a name='L549'>    Py_INCREF(operation);
+<a name='L550'>    <b>if</b> (<a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(func_args, 0, operation) != 0) <font color='red'>{</font>
+<a name='L551'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L552'>    <font color='red'>}</font>
+<a name='L553'>
+<a name='L554'>    <b>if</b> (self-&gt;statement) <font color='red'>{</font>
+<a name='L555'>        (<b>void</b>)<a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L556'>        Py_DECREF(self-&gt;statement);
+<a name='L557'>    <font color='red'>}</font>
+<a name='L558'>
+<a name='L559'>    self-&gt;statement = (<a href='../S/2608.html#L42' title='Defined at 42 in Modules/_sqlite/statement.h.'>pysqlite_Statement</a>*)<a href='../S/2592.html#L116' title='Defined at 116 in Modules/_sqlite/cache.c.'>pysqlite_cache_get</a>(self-&gt;connection-&gt;statement_cache, func_args);
+<a name='L560'>    Py_DECREF(func_args);
+<a name='L561'>
+<a name='L562'>    <b>if</b> (!self-&gt;statement) <font color='red'>{</font>
+<a name='L563'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L564'>    <font color='red'>}</font>
+<a name='L565'>
+<a name='L566'>    <b>if</b> (self-&gt;statement-&gt;in_use) <font color='red'>{</font>
+<a name='L567'>        Py_DECREF(self-&gt;statement);
+<a name='L568'>        self-&gt;statement = PyObject_New(<a href='../S/2608.html#L42' title='Defined at 42 in Modules/_sqlite/statement.h.'>pysqlite_Statement</a>, &amp;pysqlite_StatementType);
+<a name='L569'>        <b>if</b> (!self-&gt;statement) <font color='red'>{</font>
+<a name='L570'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L571'>        <font color='red'>}</font>
+<a name='L572'>        rc = <a href='../S/2607.html#L51' title='Defined at 51 in Modules/_sqlite/statement.c.'>pysqlite_statement_create</a>(self-&gt;statement, self-&gt;connection, operation);
+<a name='L573'>        <b>if</b> (rc != SQLITE_OK) <font color='red'>{</font>
+<a name='L574'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;statement);
+<a name='L575'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L576'>        <font color='red'>}</font>
+<a name='L577'>    <font color='red'>}</font>
+<a name='L578'>
+<a name='L579'>    <a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L580'>    <a href='../S/2607.html#L365' title='Defined at 365 in Modules/_sqlite/statement.c.'>pysqlite_statement_mark_dirty</a>(self-&gt;statement);
+<a name='L581'>
+<a name='L582'>    statement_type = <a href='../S/2596.html#L41' title='Defined at 41 in Modules/_sqlite/cursor.c.'>detect_statement_type</a>(operation_cstr);
+<a name='L583'>    <b>if</b> (self-&gt;connection-&gt;begin_statement) <font color='red'>{</font>
+<a name='L584'>        <b>switch</b> (statement_type) <font color='red'>{</font>
+<a name='L585'>            <b>case</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_UPDATE</a>:
+<a name='L586'>            <b>case</b> <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_DELETE</a>:
+<a name='L587'>            <b>case</b> <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_INSERT</a>:
+<a name='L588'>            <b>case</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_REPLACE</a>:
+<a name='L589'>                <b>if</b> (!self-&gt;connection-&gt;inTransaction) <font color='red'>{</font>
+<a name='L590'>                    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2594.html#L352' title='Defined at 352 in Modules/_sqlite/connection.c.'>_pysqlite_connection_begin</a>(self-&gt;connection);
+<a name='L591'>                    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L592'>                        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L593'>                    <font color='red'>}</font>
+<a name='L594'>                    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L595'>                <font color='red'>}</font>
+<a name='L596'>                <b>break</b>;
+<a name='L597'>            <b>case</b> <a href='../S/2597.html#L56' title='Defined at 56 in Modules/_sqlite/cursor.h.'>STATEMENT_OTHER</a>:
+<a name='L598'>                <i><font color='green'>/* it's a DDL statement or something similar</font></i>
+<a name='L599'><i><font color='green'>                   - we better COMMIT first so it works for all cases */</font></i>
+<a name='L600'>                <b>if</b> (self-&gt;connection-&gt;inTransaction) <font color='red'>{</font>
+<a name='L601'>                    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2594.html#L391' title='Defined at 391 in Modules/_sqlite/connection.c.'>pysqlite_connection_commit</a>(self-&gt;connection, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L602'>                    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L603'>                        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L604'>                    <font color='red'>}</font>
+<a name='L605'>                    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L606'>                <font color='red'>}</font>
+<a name='L607'>                <b>break</b>;
+<a name='L608'>            <b>case</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_SELECT</a>:
+<a name='L609'>                <b>if</b> (multiple) <font color='red'>{</font>
+<a name='L610'>                    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_ProgrammingError,
+<a name='L611'>                                "You cannot execute SELECT statements in executemany().");
+<a name='L612'>                    <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L613'>                <font color='red'>}</font>
+<a name='L614'>                <b>break</b>;
+<a name='L615'>        <font color='red'>}</font>
+<a name='L616'>    <font color='red'>}</font>
+<a name='L617'>
+<a name='L618'>
+<a name='L619'>    <b>while</b> (1) <font color='red'>{</font>
+<a name='L620'>        <a href='../S/529.html#L10' title='Defined at 10 in Include/graminit.h.'>parameters</a> = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(parameters_iter);
+<a name='L621'>        <b>if</b> (!<a href='../S/529.html#L10' title='Defined at 10 in Include/graminit.h.'>parameters</a>) <font color='red'>{</font>
+<a name='L622'>            <b>break</b>;
+<a name='L623'>        <font color='red'>}</font>
+<a name='L624'>
+<a name='L625'>        <a href='../S/2607.html#L365' title='Defined at 365 in Modules/_sqlite/statement.c.'>pysqlite_statement_mark_dirty</a>(self-&gt;statement);
+<a name='L626'>
+<a name='L627'>        <a href='../S/2607.html#L169' title='Defined at 169 in Modules/_sqlite/statement.c.'>pysqlite_statement_bind_parameters</a>(self-&gt;statement, <a href='../S/529.html#L10' title='Defined at 10 in Include/graminit.h.'>parameters</a>, allow_8bit_chars);
+<a name='L628'>        <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L629'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L630'>        <font color='red'>}</font>
+<a name='L631'>
+<a name='L632'>        <i><font color='green'>/* Keep trying the SQL statement until the schema stops changing. */</font></i>
+<a name='L633'>        <b>while</b> (1) <font color='red'>{</font>
+<a name='L634'>            <i><font color='green'>/* Actually execute the SQL statement. */</font></i>
+<a name='L635'>            rc = <a href='../S/2609.html#L27' title='Defined at 27 in Modules/_sqlite/util.c.'>pysqlite_step</a>(self-&gt;statement-&gt;st, self-&gt;connection);
+<a name='L636'>            <b>if</b> (rc == SQLITE_DONE ||  rc == SQLITE_ROW) <font color='red'>{</font>
+<a name='L637'>                <i><font color='green'>/* If it worked, let's get out of the loop */</font></i>
+<a name='L638'>                <b>break</b>;
+<a name='L639'>            <font color='red'>}</font>
+<a name='L640'>            <i><font color='green'>/* Something went wrong.  Re-set the statement and try again. */</font></i>
+<a name='L641'>            rc = <a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L642'>            <b>if</b> (rc == SQLITE_SCHEMA) <font color='red'>{</font>
+<a name='L643'>                <i><font color='green'>/* If this was a result of the schema changing, let's try</font></i>
+<a name='L644'><i><font color='green'>                   again. */</font></i>
+<a name='L645'>                rc = <a href='../S/2607.html#L283' title='Defined at 283 in Modules/_sqlite/statement.c.'>pysqlite_statement_recompile</a>(self-&gt;statement, <a href='../S/529.html#L10' title='Defined at 10 in Include/graminit.h.'>parameters</a>);
+<a name='L646'>                <b>if</b> (rc == SQLITE_OK) <font color='red'>{</font>
+<a name='L647'>                    <b>continue</b>;
+<a name='L648'>                <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L649'>                    <i><font color='green'>/* If the database gave us an error, promote it to Python. */</font></i>
+<a name='L650'>                    (<b>void</b>)<a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L651'>                    <a href='../S/2609.html#L48' title='Defined at 48 in Modules/_sqlite/util.c.'>_pysqlite_seterror</a>(self-&gt;connection-&gt;db, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L652'>                    <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L653'>                <font color='red'>}</font>
+<a name='L654'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L655'>                <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L656'>                    <i><font color='green'>/* there was an error that occurred in a user-defined callback */</font></i>
+<a name='L657'>                    <b>if</b> (_enable_callback_tracebacks) <font color='red'>{</font>
+<a name='L658'>                        <a href='../S/3138.html#L1342' title='Defined at 1342 in Python/pythonrun.c.'>PyErr_Print</a>();
+<a name='L659'>                    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L660'>                        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L661'>                    <font color='red'>}</font>
+<a name='L662'>                <font color='red'>}</font>
+<a name='L663'>                (<b>void</b>)<a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L664'>                <a href='../S/2609.html#L48' title='Defined at 48 in Modules/_sqlite/util.c.'>_pysqlite_seterror</a>(self-&gt;connection-&gt;db, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L665'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L666'>            <font color='red'>}</font>
+<a name='L667'>        <font color='red'>}</font>
+<a name='L668'>
+<a name='L669'>        <b>if</b> (<a href='../S/2596.html#L167' title='Defined at 167 in Modules/_sqlite/cursor.c.'>pysqlite_build_row_cast_map</a>(self) != 0) <font color='red'>{</font>
+<a name='L670'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_OperationalError, "Error while building row_cast_map");
+<a name='L671'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L672'>        <font color='red'>}</font>
+<a name='L673'>
+<a name='L674'>        <b>if</b> (rc == SQLITE_ROW || (rc == SQLITE_DONE &amp;&amp; statement_type == <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_SELECT</a>)) <font color='red'>{</font>
+<a name='L675'>            <b>if</b> (self-&gt;description == Py_None) <font color='red'>{</font>
+<a name='L676'>                <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L677'>                numcols = sqlite3_column_count(self-&gt;statement-&gt;st);
+<a name='L678'>                <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L679'>
+<a name='L680'>                Py_DECREF(self-&gt;description);
+<a name='L681'>                self-&gt;description = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(numcols);
+<a name='L682'>                <b>if</b> (!self-&gt;description) <font color='red'>{</font>
+<a name='L683'>                    <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L684'>                <font color='red'>}</font>
+<a name='L685'>                <b>for</b> (i = 0; i &lt; numcols; i++) <font color='red'>{</font>
+<a name='L686'>                    descriptor = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(7);
+<a name='L687'>                    <b>if</b> (!descriptor) <font color='red'>{</font>
+<a name='L688'>                        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L689'>                    <font color='red'>}</font>
+<a name='L690'>                    <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(descriptor, 0, <a href='../S/2596.html#L252' title='Defined at 252 in Modules/_sqlite/cursor.c.'>_pysqlite_build_column_name</a>(sqlite3_column_name(self-&gt;statement-&gt;st, i)));
+<a name='L691'>                    Py_INCREF(Py_None); <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(descriptor, 1, Py_None);
+<a name='L692'>                    Py_INCREF(Py_None); <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(descriptor, 2, Py_None);
+<a name='L693'>                    Py_INCREF(Py_None); <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(descriptor, 3, Py_None);
+<a name='L694'>                    Py_INCREF(Py_None); <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(descriptor, 4, Py_None);
+<a name='L695'>                    Py_INCREF(Py_None); <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(descriptor, 5, Py_None);
+<a name='L696'>                    Py_INCREF(Py_None); <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(descriptor, 6, Py_None);
+<a name='L697'>                    <a href='../S/2823.html#L137' title='Defined at 137 in Objects/tupleobject.c.'>PyTuple_SetItem</a>(self-&gt;description, i, descriptor);
+<a name='L698'>                <font color='red'>}</font>
+<a name='L699'>            <font color='red'>}</font>
+<a name='L700'>        <font color='red'>}</font>
+<a name='L701'>
+<a name='L702'>        <b>if</b> (rc == SQLITE_ROW) <font color='red'>{</font>
+<a name='L703'>            <b>if</b> (multiple) <font color='red'>{</font>
+<a name='L704'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_ProgrammingError, "executemany() can only execute DML statements.");
+<a name='L705'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L706'>            <font color='red'>}</font>
+<a name='L707'>
+<a name='L708'>            self-&gt;next_row = <a href='../S/2596.html#L282' title='Defined at 282 in Modules/_sqlite/cursor.c.'>_pysqlite_fetch_one_row</a>(self);
+<a name='L709'>        <font color='red'>}</font> <b>else</b> <b>if</b> (rc == SQLITE_DONE &amp;&amp; !multiple) <font color='red'>{</font>
+<a name='L710'>            <a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L711'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;statement);
+<a name='L712'>        <font color='red'>}</font>
+<a name='L713'>
+<a name='L714'>        <b>switch</b> (statement_type) <font color='red'>{</font>
+<a name='L715'>            <b>case</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_UPDATE</a>:
+<a name='L716'>            <b>case</b> <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_DELETE</a>:
+<a name='L717'>            <b>case</b> <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_INSERT</a>:
+<a name='L718'>            <b>case</b> <a href='../S/2597.html#L55' title='Defined at 55 in Modules/_sqlite/cursor.h.'>STATEMENT_REPLACE</a>:
+<a name='L719'>                <b>if</b> (self-&gt;rowcount == -1L) <font color='red'>{</font>
+<a name='L720'>                    self-&gt;rowcount = 0L;
+<a name='L721'>                <font color='red'>}</font>
+<a name='L722'>                self-&gt;rowcount += (<b>long</b>)sqlite3_changes(self-&gt;connection-&gt;db);
+<a name='L723'>        <font color='red'>}</font>
+<a name='L724'>
+<a name='L725'>        Py_DECREF(self-&gt;lastrowid);
+<a name='L726'>        <b>if</b> (!multiple &amp;&amp; statement_type == <a href='../S/2597.html#L54' title='Defined at 54 in Modules/_sqlite/cursor.h.'>STATEMENT_INSERT</a>) <font color='red'>{</font>
+<a name='L727'>            <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L728'>            lastrowid = sqlite3_last_insert_rowid(self-&gt;connection-&gt;db);
+<a name='L729'>            <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L730'>            self-&gt;lastrowid = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)lastrowid);
+<a name='L731'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L732'>            Py_INCREF(Py_None);
+<a name='L733'>            self-&gt;lastrowid = Py_None;
+<a name='L734'>        <font color='red'>}</font>
+<a name='L735'>
+<a name='L736'>        <b>if</b> (multiple) <font color='red'>{</font>
+<a name='L737'>            rc = <a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L738'>        <font color='red'>}</font>
+<a name='L739'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/529.html#L10' title='Defined at 10 in Include/graminit.h.'>parameters</a>);
+<a name='L740'>    <font color='red'>}</font>
+<a name='L741'>
+<a name='L742'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L743'>    <i><font color='green'>/* just to be sure (implicit ROLLBACKs with ON CONFLICT ROLLBACK/OR</font></i>
+<a name='L744'><i><font color='green'>     * ROLLBACK could have happened */</font></i>
+<a name='L745'><font color='darkred'>    #ifdef</font> SQLITE_VERSION_NUMBER
+<a name='L746'><font color='darkred'>    #if</font> SQLITE_VERSION_NUMBER &gt;= 3002002
+<a name='L747'>    self-&gt;connection-&gt;inTransaction = !sqlite3_get_autocommit(self-&gt;connection-&gt;db);
+<a name='L748'><font color='darkred'>    #endif</font>
+<a name='L749'><font color='darkred'>    #endif</font>
+<a name='L750'>
+<a name='L751'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/529.html#L10' title='Defined at 10 in Include/graminit.h.'>parameters</a>);
+<a name='L752'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(parameters_iter);
+<a name='L753'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(parameters_list);
+<a name='L754'>
+<a name='L755'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L756'>        self-&gt;rowcount = -1L;
+<a name='L757'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L758'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L759'>        Py_INCREF(self);
+<a name='L760'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self;
+<a name='L761'>    <font color='red'>}</font>
+<a name='L762'><font color='red'>}</font>
+<a name='L763'>
+<a name='L764'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9873.html' title='Multiple refered from 2 places.'>pysqlite_cursor_execute</a>(pysqlite_Cursor* self, PyObject* args)
+<a name='L765'><font color='red'>{</font>
+<a name='L766'>    <b>return</b> <a href='../S/2596.html#L440' title='Defined at 440 in Modules/_sqlite/cursor.c.'>_pysqlite_query_execute</a>(self, 0, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L767'><font color='red'>}</font>
+<a name='L768'>
+<a name='L769'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9874.html' title='Multiple refered from 2 places.'>pysqlite_cursor_executemany</a>(pysqlite_Cursor* self, PyObject* args)
+<a name='L770'><font color='red'>{</font>
+<a name='L771'>    <b>return</b> <a href='../S/2596.html#L440' title='Defined at 440 in Modules/_sqlite/cursor.c.'>_pysqlite_query_execute</a>(self, 1, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L772'><font color='red'>}</font>
+<a name='L773'>
+<a name='L774'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2596.html#L1029' title='Refered from 1029 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_executescript</a>(pysqlite_Cursor* self, PyObject* args)
+<a name='L775'><font color='red'>{</font>
+<a name='L776'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* script_obj;
+<a name='L777'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* script_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L778'>    <b>const</b> <b>char</b>* script_cstr;
+<a name='L779'>    sqlite3_stmt* statement;
+<a name='L780'>    <b>int</b> rc;
+<a name='L781'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L782'>
+<a name='L783'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O", &amp;script_obj)) <font color='red'>{</font>
+<a name='L784'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L785'>    <font color='red'>}</font>
+<a name='L786'>
+<a name='L787'>    <b>if</b> (!<a href='../S/2596.html#L425' title='Defined at 425 in Modules/_sqlite/cursor.c.'>check_cursor</a>(self)) <font color='red'>{</font>
+<a name='L788'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L789'>    <font color='red'>}</font>
+<a name='L790'>
+<a name='L791'>    self-&gt;reset = 0;
+<a name='L792'>
+<a name='L793'>    <b>if</b> (PyUnicode_Check(script_obj)) <font color='red'>{</font>
+<a name='L794'>        script_cstr = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(script_obj);
+<a name='L795'>        <b>if</b> (!script_cstr) <font color='red'>{</font>
+<a name='L796'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L797'>        <font color='red'>}</font>
+<a name='L798'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L799'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "script argument must be unicode.");
+<a name='L800'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L801'>    <font color='red'>}</font>
+<a name='L802'>
+<a name='L803'>    <i><font color='green'>/* commit first */</font></i>
+<a name='L804'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2594.html#L391' title='Defined at 391 in Modules/_sqlite/connection.c.'>pysqlite_connection_commit</a>(self-&gt;connection, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L805'>    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L806'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L807'>    <font color='red'>}</font>
+<a name='L808'>    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L809'>
+<a name='L810'>    <b>while</b> (1) <font color='red'>{</font>
+<a name='L811'>        <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L812'>        rc = sqlite3_prepare(self-&gt;connection-&gt;db,
+<a name='L813'>                             script_cstr,
+<a name='L814'>                             -1,
+<a name='L815'>                             &amp;statement,
+<a name='L816'>                             &amp;script_cstr);
+<a name='L817'>        <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L818'>        <b>if</b> (rc != SQLITE_OK) <font color='red'>{</font>
+<a name='L819'>            <a href='../S/2609.html#L48' title='Defined at 48 in Modules/_sqlite/util.c.'>_pysqlite_seterror</a>(self-&gt;connection-&gt;db, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L820'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L821'>        <font color='red'>}</font>
+<a name='L822'>
+<a name='L823'>        <i><font color='green'>/* execute statement, and ignore results of SELECT statements */</font></i>
+<a name='L824'>        rc = SQLITE_ROW;
+<a name='L825'>        <b>while</b> (rc == SQLITE_ROW) <font color='red'>{</font>
+<a name='L826'>            rc = <a href='../S/2609.html#L27' title='Defined at 27 in Modules/_sqlite/util.c.'>pysqlite_step</a>(statement, self-&gt;connection);
+<a name='L827'>            <i><font color='green'>/* TODO: we probably need more error handling here */</font></i>
+<a name='L828'>        <font color='red'>}</font>
+<a name='L829'>
+<a name='L830'>        <b>if</b> (rc != SQLITE_DONE) <font color='red'>{</font>
+<a name='L831'>            (<b>void</b>)sqlite3_finalize(statement);
+<a name='L832'>            <a href='../S/2609.html#L48' title='Defined at 48 in Modules/_sqlite/util.c.'>_pysqlite_seterror</a>(self-&gt;connection-&gt;db, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L833'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L834'>        <font color='red'>}</font>
+<a name='L835'>
+<a name='L836'>        rc = sqlite3_finalize(statement);
+<a name='L837'>        <b>if</b> (rc != SQLITE_OK) <font color='red'>{</font>
+<a name='L838'>            <a href='../S/2609.html#L48' title='Defined at 48 in Modules/_sqlite/util.c.'>_pysqlite_seterror</a>(self-&gt;connection-&gt;db, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L839'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L840'>        <font color='red'>}</font>
+<a name='L841'>
+<a name='L842'>        <b>if</b> (*script_cstr == (<b>char</b>)0) <font color='red'>{</font>
+<a name='L843'>            <b>break</b>;
+<a name='L844'>        <font color='red'>}</font>
+<a name='L845'>    <font color='red'>}</font>
+<a name='L846'>
+<a name='L847'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L848'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(script_str);
+<a name='L849'>
+<a name='L850'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L851'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L852'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L853'>        Py_INCREF(self);
+<a name='L854'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self;
+<a name='L855'>    <font color='red'>}</font>
+<a name='L856'><font color='red'>}</font>
+<a name='L857'>
+<a name='L858'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9879.html' title='Multiple refered from 2 places.'>pysqlite_cursor_getiter</a>(pysqlite_Cursor *self)
+<a name='L859'><font color='red'>{</font>
+<a name='L860'>    Py_INCREF(self);
+<a name='L861'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self;
+<a name='L862'><font color='red'>}</font>
+<a name='L863'>
+<a name='L864'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9881.html' title='Multiple refered from 6 places.'>pysqlite_cursor_iternext</a>(pysqlite_Cursor *self)
+<a name='L865'><font color='red'>{</font>
+<a name='L866'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* next_row_tuple;
+<a name='L867'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* next_row;
+<a name='L868'>    <b>int</b> rc;
+<a name='L869'>
+<a name='L870'>    <b>if</b> (!<a href='../S/2596.html#L425' title='Defined at 425 in Modules/_sqlite/cursor.c.'>check_cursor</a>(self)) <font color='red'>{</font>
+<a name='L871'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L872'>    <font color='red'>}</font>
+<a name='L873'>
+<a name='L874'>    <b>if</b> (self-&gt;reset) <font color='red'>{</font>
+<a name='L875'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(pysqlite_InterfaceError, errmsg_fetch_across_rollback);
+<a name='L876'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L877'>    <font color='red'>}</font>
+<a name='L878'>
+<a name='L879'>    <b>if</b> (!self-&gt;next_row) <font color='red'>{</font>
+<a name='L880'>         <b>if</b> (self-&gt;statement) <font color='red'>{</font>
+<a name='L881'>            (<b>void</b>)<a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L882'>            Py_DECREF(self-&gt;statement);
+<a name='L883'>            self-&gt;statement = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L884'>        <font color='red'>}</font>
+<a name='L885'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L886'>    <font color='red'>}</font>
+<a name='L887'>
+<a name='L888'>    next_row_tuple = self-&gt;next_row;
+<a name='L889'>    self-&gt;next_row = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L890'>
+<a name='L891'>    <b>if</b> (self-&gt;row_factory != Py_None) <font color='red'>{</font>
+<a name='L892'>        next_row = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(self-&gt;row_factory, "OO", self, next_row_tuple);
+<a name='L893'>        Py_DECREF(next_row_tuple);
+<a name='L894'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L895'>        next_row = next_row_tuple;
+<a name='L896'>    <font color='red'>}</font>
+<a name='L897'>
+<a name='L898'>    <b>if</b> (self-&gt;statement) <font color='red'>{</font>
+<a name='L899'>        rc = <a href='../S/2609.html#L27' title='Defined at 27 in Modules/_sqlite/util.c.'>pysqlite_step</a>(self-&gt;statement-&gt;st, self-&gt;connection);
+<a name='L900'>        <b>if</b> (rc != SQLITE_DONE &amp;&amp; rc != SQLITE_ROW) <font color='red'>{</font>
+<a name='L901'>            (<b>void</b>)<a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L902'>            Py_DECREF(next_row);
+<a name='L903'>            <a href='../S/2609.html#L48' title='Defined at 48 in Modules/_sqlite/util.c.'>_pysqlite_seterror</a>(self-&gt;connection-&gt;db, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L904'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L905'>        <font color='red'>}</font>
+<a name='L906'>
+<a name='L907'>        <b>if</b> (rc == SQLITE_ROW) <font color='red'>{</font>
+<a name='L908'>            self-&gt;next_row = <a href='../S/2596.html#L282' title='Defined at 282 in Modules/_sqlite/cursor.c.'>_pysqlite_fetch_one_row</a>(self);
+<a name='L909'>        <font color='red'>}</font>
+<a name='L910'>    <font color='red'>}</font>
+<a name='L911'>
+<a name='L912'>    <b>return</b> next_row;
+<a name='L913'><font color='red'>}</font>
+<a name='L914'>
+<a name='L915'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9878.html' title='Multiple refered from 2 places.'>pysqlite_cursor_fetchone</a>(pysqlite_Cursor* self, PyObject* args)
+<a name='L916'><font color='red'>{</font>
+<a name='L917'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* row;
+<a name='L918'>
+<a name='L919'>    row = <a href='../S/2596.html#L864' title='Defined at 864 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_iternext</a>(self);
+<a name='L920'>    <b>if</b> (!row &amp;&amp; !<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L921'>        Py_INCREF(Py_None);
+<a name='L922'>        <b>return</b> Py_None;
+<a name='L923'>    <font color='red'>}</font>
+<a name='L924'>
+<a name='L925'>    <b>return</b> row;
+<a name='L926'><font color='red'>}</font>
+<a name='L927'>
+<a name='L928'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9877.html' title='Multiple refered from 2 places.'>pysqlite_cursor_fetchmany</a>(pysqlite_Cursor* self, PyObject* args, PyObject* kwargs)
+<a name='L929'><font color='red'>{</font>
+<a name='L930'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"size", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L931'>
+<a name='L932'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* row;
+<a name='L933'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* list;
+<a name='L934'>    <b>int</b> maxrows = self-&gt;arraysize;
+<a name='L935'>    <b>int</b> counter = 0;
+<a name='L936'>
+<a name='L937'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwargs, "|i:fetchmany", kwlist, &amp;maxrows)) <font color='red'>{</font>
+<a name='L938'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L939'>    <font color='red'>}</font>
+<a name='L940'>
+<a name='L941'>    list = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L942'>    <b>if</b> (!list) <font color='red'>{</font>
+<a name='L943'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L944'>    <font color='red'>}</font>
+<a name='L945'>
+<a name='L946'>    <i><font color='green'>/* just make sure we enter the loop */</font></i>
+<a name='L947'>    row = Py_None;
+<a name='L948'>
+<a name='L949'>    <b>while</b> (row) <font color='red'>{</font>
+<a name='L950'>        row = <a href='../S/2596.html#L864' title='Defined at 864 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_iternext</a>(self);
+<a name='L951'>        <b>if</b> (row) <font color='red'>{</font>
+<a name='L952'>            <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(list, row);
+<a name='L953'>            Py_DECREF(row);
+<a name='L954'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L955'>            <b>break</b>;
+<a name='L956'>        <font color='red'>}</font>
+<a name='L957'>
+<a name='L958'>        <b>if</b> (++counter == maxrows) <font color='red'>{</font>
+<a name='L959'>            <b>break</b>;
+<a name='L960'>        <font color='red'>}</font>
+<a name='L961'>    <font color='red'>}</font>
+<a name='L962'>
+<a name='L963'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L964'>        Py_DECREF(list);
+<a name='L965'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L966'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L967'>        <b>return</b> list;
+<a name='L968'>    <font color='red'>}</font>
+<a name='L969'><font color='red'>}</font>
+<a name='L970'>
+<a name='L971'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9876.html' title='Multiple refered from 2 places.'>pysqlite_cursor_fetchall</a>(pysqlite_Cursor* self, PyObject* args)
+<a name='L972'><font color='red'>{</font>
+<a name='L973'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* row;
+<a name='L974'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* list;
+<a name='L975'>
+<a name='L976'>    list = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L977'>    <b>if</b> (!list) <font color='red'>{</font>
+<a name='L978'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L979'>    <font color='red'>}</font>
+<a name='L980'>
+<a name='L981'>    <i><font color='green'>/* just make sure we enter the loop */</font></i>
+<a name='L982'>    row = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)Py_None;
+<a name='L983'>
+<a name='L984'>    <b>while</b> (row) <font color='red'>{</font>
+<a name='L985'>        row = <a href='../S/2596.html#L864' title='Defined at 864 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_iternext</a>(self);
+<a name='L986'>        <b>if</b> (row) <font color='red'>{</font>
+<a name='L987'>            <a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(list, row);
+<a name='L988'>            Py_DECREF(row);
+<a name='L989'>        <font color='red'>}</font>
+<a name='L990'>    <font color='red'>}</font>
+<a name='L991'>
+<a name='L992'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L993'>        Py_DECREF(list);
+<a name='L994'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L995'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L996'>        <b>return</b> list;
+<a name='L997'>    <font color='red'>}</font>
+<a name='L998'><font color='red'>}</font>
+<a name='L999'>
+<a name='L1000'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9892.html' title='Multiple refered from 3 places.'>pysqlite_noop</a>(pysqlite_Connection* self, PyObject* args)
+<a name='L1001'><font color='red'>{</font>
+<a name='L1002'>    <i><font color='green'>/* don't care, return None */</font></i>
+<a name='L1003'>    Py_INCREF(Py_None);
+<a name='L1004'>    <b>return</b> Py_None;
+<a name='L1005'><font color='red'>}</font>
+<a name='L1006'>
+<a name='L1007'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../R/9871.html' title='Multiple refered from 2 places.'>pysqlite_cursor_close</a>(pysqlite_Cursor* self, PyObject* args)
+<a name='L1008'><font color='red'>{</font>
+<a name='L1009'>    <b>if</b> (!<a href='../S/2594.html#L1019' title='Defined at 1019 in Modules/_sqlite/connection.c.'>pysqlite_check_thread</a>(self-&gt;connection) || !<a href='../S/2594.html#L337' title='Defined at 337 in Modules/_sqlite/connection.c.'>pysqlite_check_connection</a>(self-&gt;connection)) <font color='red'>{</font>
+<a name='L1010'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1011'>    <font color='red'>}</font>
+<a name='L1012'>
+<a name='L1013'>    <b>if</b> (self-&gt;statement) <font color='red'>{</font>
+<a name='L1014'>        (<b>void</b>)<a href='../S/2607.html#L346' title='Defined at 346 in Modules/_sqlite/statement.c.'>pysqlite_statement_reset</a>(self-&gt;statement);
+<a name='L1015'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;statement);
+<a name='L1016'>    <font color='red'>}</font>
+<a name='L1017'>
+<a name='L1018'>    self-&gt;closed = 1;
+<a name='L1019'>
+<a name='L1020'>    Py_INCREF(Py_None);
+<a name='L1021'>    <b>return</b> Py_None;
+<a name='L1022'><font color='red'>}</font>
+<a name='L1023'>
+<a name='L1024'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> cursor_methods[] = <font color='red'>{</font>
+<a name='L1025'>    <font color='red'>{</font>"execute", (PyCFunction)<a href='../S/2596.html#L764' title='Defined at 764 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_execute</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1026'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Executes a SQL statement.")<font color='red'>}</font>,
+<a name='L1027'>    <font color='red'>{</font>"executemany", (PyCFunction)<a href='../S/2596.html#L769' title='Defined at 769 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_executemany</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1028'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Repeatedly executes a SQL statement.")<font color='red'>}</font>,
+<a name='L1029'>    <font color='red'>{</font>"executescript", (PyCFunction)<a href='../S/2596.html#L774' title='Defined at 774 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_executescript</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1030'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Executes a multiple SQL statements at once. Non-standard.")<font color='red'>}</font>,
+<a name='L1031'>    <font color='red'>{</font>"fetchone", (PyCFunction)<a href='../S/2596.html#L915' title='Defined at 915 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_fetchone</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L1032'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Fetches one row from the resultset.")<font color='red'>}</font>,
+<a name='L1033'>    <font color='red'>{</font>"fetchmany", (PyCFunction)<a href='../S/2596.html#L928' title='Defined at 928 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_fetchmany</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>|METH_KEYWORDS,
+<a name='L1034'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Fetches several rows from the resultset.")<font color='red'>}</font>,
+<a name='L1035'>    <font color='red'>{</font>"fetchall", (PyCFunction)<a href='../S/2596.html#L971' title='Defined at 971 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_fetchall</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L1036'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Fetches all rows from the resultset.")<font color='red'>}</font>,
+<a name='L1037'>    <font color='red'>{</font>"close", (PyCFunction)<a href='../S/2596.html#L1007' title='Defined at 1007 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_close</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L1038'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Closes the cursor.")<font color='red'>}</font>,
+<a name='L1039'>    <font color='red'>{</font>"setinputsizes", (PyCFunction)<a href='../S/2596.html#L1000' title='Defined at 1000 in Modules/_sqlite/cursor.c.'>pysqlite_noop</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1040'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Required by DB-API. Does nothing in pysqlite.")<font color='red'>}</font>,
+<a name='L1041'>    <font color='red'>{</font>"setoutputsize", (PyCFunction)<a href='../S/2596.html#L1000' title='Defined at 1000 in Modules/_sqlite/cursor.c.'>pysqlite_noop</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1042'>        <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Required by DB-API. Does nothing in pysqlite.")<font color='red'>}</font>,
+<a name='L1043'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L1044'><font color='red'>}</font>;
+<a name='L1045'>
+<a name='L1046'><b>static</b> <b>struct</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> cursor_members[] =
+<a name='L1047'><font color='red'>{</font>
+<a name='L1048'>    <font color='red'>{</font>"connection", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>, connection), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L1049'>    <font color='red'>{</font>"description", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>, description), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L1050'>    <font color='red'>{</font>"arraysize", <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>, arraysize), 0<font color='red'>}</font>,
+<a name='L1051'>    <font color='red'>{</font>"lastrowid", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>, lastrowid), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L1052'>    <font color='red'>{</font>"rowcount", <a href='../S/577.html#L40' title='Defined at 40 in Include/structmember.h.'>T_LONG</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>, rowcount), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L1053'>    <font color='red'>{</font>"row_factory", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>, row_factory), 0<font color='red'>}</font>,
+<a name='L1054'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L1055'><font color='red'>}</font>;
+<a name='L1056'>
+<a name='L1057'><b>static</b> <b>char</b> cursor_doc[] =
+<a name='L1058'><a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("SQLite database cursor class.");
+<a name='L1059'>
+<a name='L1060'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> pysqlite_CursorType = <font color='red'>{</font>
+<a name='L1061'>        <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L1062'>        <a href='../D/2163.html' title='Multiple defined in 2 places.'>MODULE_NAME</a> ".Cursor",                          <i><font color='green'>/* tp_name */</font></i>
+<a name='L1063'>        <b>sizeof</b>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>),                        <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L1064'>        0,                                              <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L1065'>        (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2596.html#L127' title='Defined at 127 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_dealloc</a>,            <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L1066'>        0,                                              <i><font color='green'>/* tp_print */</font></i>
+<a name='L1067'>        0,                                              <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L1068'>        0,                                              <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L1069'>        0,                                              <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L1070'>        0,                                              <i><font color='green'>/* tp_repr */</font></i>
+<a name='L1071'>        0,                                              <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L1072'>        0,                                              <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L1073'>        0,                                              <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L1074'>        0,                                              <i><font color='green'>/* tp_hash */</font></i>
+<a name='L1075'>        0,                                              <i><font color='green'>/* tp_call */</font></i>
+<a name='L1076'>        0,                                              <i><font color='green'>/* tp_str */</font></i>
+<a name='L1077'>        0,                                              <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L1078'>        0,                                              <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L1079'>        0,                                              <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L1080'>        Py_TPFLAGS_DEFAULT|Py_TPFLAGS_BASETYPE, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L1081'>        cursor_doc,                                     <i><font color='green'>/* tp_doc */</font></i>
+<a name='L1082'>        0,                                              <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1083'>        0,                                              <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1084'>        0,                                              <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1085'>        <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2597.html#L51' title='Defined at 51 in Modules/_sqlite/cursor.h.'>pysqlite_Cursor</a>, in_weakreflist),      <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L1086'>        (getiterfunc)<a href='../S/2596.html#L858' title='Defined at 858 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_getiter</a>,           <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1087'>        (iternextfunc)<a href='../S/2596.html#L864' title='Defined at 864 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_iternext</a>,         <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1088'>        cursor_methods,                                 <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1089'>        cursor_members,                                 <i><font color='green'>/* tp_members */</font></i>
+<a name='L1090'>        0,                                              <i><font color='green'>/* tp_getset */</font></i>
+<a name='L1091'>        0,                                              <i><font color='green'>/* tp_base */</font></i>
+<a name='L1092'>        0,                                              <i><font color='green'>/* tp_dict */</font></i>
+<a name='L1093'>        0,                                              <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L1094'>        0,                                              <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L1095'>        0,                                              <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L1096'>        (initproc)<a href='../S/2596.html#L79' title='Defined at 79 in Modules/_sqlite/cursor.c.'>pysqlite_cursor_init</a>,                 <i><font color='green'>/* tp_init */</font></i>
+<a name='L1097'>        0,                                              <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L1098'>        0,                                              <i><font color='green'>/* tp_new */</font></i>
+<a name='L1099'>        0                                               <i><font color='green'>/* tp_free */</font></i>
+<a name='L1100'><font color='red'>}</font>;
+<a name='L1101'>
+<a name='L1102'><b>extern</b> <b>int</b> <a href='../R/9882.html' title='Multiple refered from 2 places.'>pysqlite_cursor_setup_types</a>(<b>void</b>)
+<a name='L1103'><font color='red'>{</font>
+<a name='L1104'>    pysqlite_CursorType.tp_new = <a href='../S/2824.html#L730' title='Defined at 730 in Objects/typeobject.c.'>PyType_GenericNew</a>;
+<a name='L1105'>    <b>return</b> <a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;pysqlite_CursorType);
+<a name='L1106'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L41'>[^]</a><a href='#L1102'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

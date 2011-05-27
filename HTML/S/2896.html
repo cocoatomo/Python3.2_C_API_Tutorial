@@ -1,0 +1,148 @@
+<html>
+<head>
+<title>PC/os2emx/pythonpm.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3393.html'>PC</a>/<a href='../files/3398.html'>os2emx</a>/pythonpm.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L42'>[^]</a><a href='#L103'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L42' title='Defined at 42.'>DL_EXPORT</a>
+<li><a href='#L103' title='Defined at 103.'>PythonThread</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* OS/2 PM main program - creates a hidden window, and starts Python</font></i>
+<a name='L2'><i><font color='green'> * interpreter in a separate thread, so that Python scripts can be</font></i>
+<a name='L3'><i><font color='green'> * run in PM process space without a console Window.  The interpreter</font></i>
+<a name='L4'><i><font color='green'> * is incorporated by linking in the Python DLL.</font></i>
+<a name='L5'><i><font color='green'> *</font></i>
+<a name='L6'><i><font color='green'> * As it stands, I don't think this is adequate for supporting Python</font></i>
+<a name='L7'><i><font color='green'> * GUI modules, as the Python thread doesn't have its own message</font></i>
+<a name='L8'><i><font color='green'> * queue - which is required of threads that want to create/use</font></i>
+<a name='L9'><i><font color='green'> * PM windows.</font></i>
+<a name='L10'><i><font color='green'> *</font></i>
+<a name='L11'><i><font color='green'> * This code owes a lot to "OS/2 Presentation Manager Programming", by</font></i>
+<a name='L12'><i><font color='green'> * Charles Petzold.</font></i>
+<a name='L13'><i><font color='green'> *</font></i>
+<a name='L14'><i><font color='green'> * Andrew MacIntyre &lt;andymac@bullseye.apana.org.au&gt;, August 2001.</font></i>
+<a name='L15'><i><font color='green'> * Released under the terms of the Python 2.1.1 licence - see the LICENCE</font></i>
+<a name='L16'><i><font color='green'> * file in the Python v2.1.1 (or later) source distribution.</font></i>
+<a name='L17'><i><font color='green'> * Copyright assigned to the Python Software Foundation, 2001.</font></i>
+<a name='L18'><i><font color='green'> */</font></i>
+<a name='L19'>
+<a name='L20'><font color='darkred'>#define</font> INCL_DOS
+<a name='L21'><font color='darkred'>#define</font> INCL_WIN
+<a name='L22'><font color='darkred'>#include</font> &lt;os2.h&gt;
+<a name='L23'><font color='darkred'>#include</font> &lt;process.h&gt;
+<a name='L24'>
+<a name='L25'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L26'>
+<a name='L27'><i><font color='green'>/* use structure to pass command line to Python thread */</font></i>
+<a name='L28'><b>typedef</b> <b>struct</b>
+<a name='L29'><font color='red'>{</font>
+<a name='L30'>    <b>int</b> argc;
+<a name='L31'>    <b>char</b> **argv;
+<a name='L32'>    HWND Frame;
+<a name='L33'>    <b>int</b> running;
+<a name='L34'><font color='red'>}</font> <a href='../R/5979.html' title='Multiple refered from 34 places.'>arglist</a>;
+<a name='L35'>
+<a name='L36'><i><font color='green'>/* make this a global to simplify access.</font></i>
+<a name='L37'><i><font color='green'> * it should only be set from the Python thread, or by the code that</font></i>
+<a name='L38'><i><font color='green'> * initiates the Python thread when the thread cannot be created.</font></i>
+<a name='L39'><i><font color='green'> */</font></i>
+<a name='L40'><b>int</b> PythonRC;
+<a name='L41'>
+<a name='L42'><b>extern</b> DL_EXPORT(<b>int</b>) Py_Main(<b>int</b>, <b>char</b> **);
+<a name='L43'><b>void</b> PythonThread(<b>void</b> *);
+<a name='L44'>
+<a name='L45'><b>int</b>
+<a name='L46'>main(<b>int</b> argc, <b>char</b> **argv)
+<a name='L47'><font color='red'>{</font>
+<a name='L48'>    ULONG FrameFlags = FCF_TITLEBAR |
+<a name='L49'>                       FCF_SYSMENU |
+<a name='L50'>                       FCF_SIZEBORDER |
+<a name='L51'>                       FCF_HIDEBUTTON |
+<a name='L52'>                       FCF_SHELLPOSITION |
+<a name='L53'>                       FCF_TASKLIST;
+<a name='L54'>    HAB hab;
+<a name='L55'>    HMQ hmq;
+<a name='L56'>    HWND Client;
+<a name='L57'>    QMSG qmsg;
+<a name='L58'>    <a href='../D/6732.html' title='Multiple defined in 2 places.'>arglist</a> <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L59'>    <b>int</b> python_tid;
+<a name='L60'>
+<a name='L61'>    <i><font color='green'>/* init PM and create message queue */</font></i>
+<a name='L62'>    hab = WinInitialize(0);
+<a name='L63'>    hmq = WinCreateMsgQueue(hab, 0);
+<a name='L64'>
+<a name='L65'>    <i><font color='green'>/* create a (hidden) Window to house the window procedure */</font></i>
+<a name='L66'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>.Frame = WinCreateStdWindow(HWND_DESKTOP,
+<a name='L67'>                                    0,
+<a name='L68'>                                    &amp;FrameFlags,
+<a name='L69'>                                    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L70'>                                    "PythonPM",
+<a name='L71'>                                    0L,
+<a name='L72'>                                    0,
+<a name='L73'>                                    0,
+<a name='L74'>                                    &amp;Client);
+<a name='L75'>
+<a name='L76'>    <i><font color='green'>/* run Python interpreter in a thread */</font></i>
+<a name='L77'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>.argc = argc;
+<a name='L78'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>.argv = argv;
+<a name='L79'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>.running = 0;
+<a name='L80'>    <b>if</b> (-1 == (python_tid = _beginthread(<a href='../S/2896.html#L103' title='Defined at 103 in PC/os2emx/pythonpm.c.'>PythonThread</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 1024 * 1024, &amp;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>)))
+<a name='L81'>    <font color='red'>{</font>
+<a name='L82'>        <i><font color='green'>/* couldn't start thread */</font></i>
+<a name='L83'>        WinAlarm(HWND_DESKTOP, WA_ERROR);
+<a name='L84'>        PythonRC = 1;
+<a name='L85'>    <font color='red'>}</font>
+<a name='L86'>    <b>else</b>
+<a name='L87'>    <font color='red'>{</font>
+<a name='L88'>        <i><font color='green'>/* process PM messages, until Python exits */</font></i>
+<a name='L89'>        <b>while</b> (WinGetMsg(hab, &amp;qmsg, NULLHANDLE, 0, 0))
+<a name='L90'>            WinDispatchMsg(hab, &amp;qmsg);
+<a name='L91'>        <b>if</b> (<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>.running &gt; 0)
+<a name='L92'>            DosKillThread(python_tid);
+<a name='L93'>    <font color='red'>}</font>
+<a name='L94'>
+<a name='L95'>    <i><font color='green'>/* destroy window, shutdown message queue and PM */</font></i>
+<a name='L96'>    WinDestroyWindow(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>.Frame);
+<a name='L97'>    WinDestroyMsgQueue(hmq);
+<a name='L98'>    WinTerminate(hab);
+<a name='L99'>
+<a name='L100'>    <b>return</b> PythonRC;
+<a name='L101'><font color='red'>}</font>
+<a name='L102'>
+<a name='L103'><b>void</b> <a href='../S/2896.html#L80' title='Refered from 80 in PC/os2emx/pythonpm.c.'>PythonThread</a>(<b>void</b> *argl)
+<a name='L104'><font color='red'>{</font>
+<a name='L105'>    HAB hab;
+<a name='L106'>    <a href='../D/6732.html' title='Multiple defined in 2 places.'>arglist</a> *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L107'>
+<a name='L108'>    <i><font color='green'>/* PM initialisation */</font></i>
+<a name='L109'>    hab = WinInitialize(0);
+<a name='L110'>
+<a name='L111'>    <i><font color='green'>/* start Python */</font></i>
+<a name='L112'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = (<a href='../D/6732.html' title='Multiple defined in 2 places.'>arglist</a> *)argl;
+<a name='L113'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;running = 1;
+<a name='L114'>    PythonRC = <a href='../S/2686.html#L306' title='Defined at 306 in Modules/main.c.'>Py_Main</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;argc, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;argv);
+<a name='L115'>
+<a name='L116'>    <i><font color='green'>/* enter a critical section and send the termination message */</font></i>
+<a name='L117'>    DosEnterCritSec();
+<a name='L118'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;running = 0;
+<a name='L119'>    WinPostMsg(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;Frame, WM_QUIT, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L120'>
+<a name='L121'>    <i><font color='green'>/* shutdown PM and terminate thread */</font></i>
+<a name='L122'>    WinTerminate(hab);
+<a name='L123'>    _endthread();
+<a name='L124'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L42'>[^]</a><a href='#L103'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

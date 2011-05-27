@@ -1,0 +1,302 @@
+<html>
+<head>
+<title>Modules/_ctypes/darwin/dlfcn_simple.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3354.html'>_ctypes</a>/<a href='../files/3355.html'>darwin</a>/dlfcn_simple.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L82'>[^]</a><a href='#L254'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L82' title='Defined at 82.'>error</a>
+<li><a href='#L109' title='Defined at 109.'>darwin_dlopen</a>
+<li><a href='#L148' title='Defined at 148.'>dlsymIntern</a>
+<li><a href='#L191' title='Defined at 191.'>darwin_dlerror</a>
+<li><a href='#L196' title='Defined at 196.'>darwin_dlclose</a>
+<li><a href='#L214' title='Defined at 214.'>darwin_dlsym</a>
+<li><a href='#L243' title='Defined at 243.'>darwin_dladdr</a>
+<li><a href='#L254' title='Defined at 254.'>ctypes_dlfcn_init</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'>Copyright (c) 2002 Peter O'Gorman &lt;ogorman@users.sourceforge.net&gt;</font></i>
+<a name='L3'><i><font color='green'></font></i>
+<a name='L4'><i><font color='green'>Permission is hereby granted, free of charge, to any person obtaining</font></i>
+<a name='L5'><i><font color='green'>a copy of this software and associated documentation files (the</font></i>
+<a name='L6'><i><font color='green'>"Software"), to deal in the Software without restriction, including</font></i>
+<a name='L7'><i><font color='green'>without limitation the rights to use, copy, modify, merge, publish,</font></i>
+<a name='L8'><i><font color='green'>distribute, sublicense, and/or sell copies of the Software, and to</font></i>
+<a name='L9'><i><font color='green'>permit persons to whom the Software is furnished to do so, subject to</font></i>
+<a name='L10'><i><font color='green'>the following conditions:</font></i>
+<a name='L11'><i><font color='green'></font></i>
+<a name='L12'><i><font color='green'>The above copyright notice and this permission notice shall be</font></i>
+<a name='L13'><i><font color='green'>included in all copies or substantial portions of the Software.</font></i>
+<a name='L14'><i><font color='green'></font></i>
+<a name='L15'><i><font color='green'>THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,</font></i>
+<a name='L16'><i><font color='green'>EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF</font></i>
+<a name='L17'><i><font color='green'>MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND</font></i>
+<a name='L18'><i><font color='green'>NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE</font></i>
+<a name='L19'><i><font color='green'>LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION</font></i>
+<a name='L20'><i><font color='green'>OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION</font></i>
+<a name='L21'><i><font color='green'>WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</font></i>
+<a name='L22'><i><font color='green'>*/</font></i>
+<a name='L23'>
+<a name='L24'>
+<a name='L25'><i><font color='green'>/* Just to prove that it isn't that hard to add Mac calls to your code :)</font></i>
+<a name='L26'><i><font color='green'>   This works with pretty much everything, including kde3 xemacs and the gimp,</font></i>
+<a name='L27'><i><font color='green'>   I'd guess that it'd work in at least 95% of cases, use this as your starting</font></i>
+<a name='L28'><i><font color='green'>   point, rather than the mess that is dlfcn.c, assuming that your code does not</font></i>
+<a name='L29'><i><font color='green'>   require ref counting or symbol lookups in dependent libraries</font></i>
+<a name='L30'><i><font color='green'>*/</font></i>
+<a name='L31'>
+<a name='L32'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L33'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L34'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L35'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L36'><font color='darkred'>#include</font> &lt;sys/stat.h&gt;
+<a name='L37'><font color='darkred'>#include</font> &lt;stdarg.h&gt;
+<a name='L38'><font color='darkred'>#include</font> &lt;limits.h&gt;
+<a name='L39'><font color='darkred'>#include</font> &lt;mach-o/dyld.h&gt;
+<a name='L40'><font color='darkred'>#include</font> &lt;AvailabilityMacros.h&gt;
+<a name='L41'><font color='darkred'>#include</font> "<a href='../I/117.html'>dlfcn.h</a>"
+<a name='L42'>
+<a name='L43'><font color='darkred'>#ifdef</font> <a href='../S/2254.html#L55' title='Defined at 55 in Modules/_ctypes/darwin/dlfcn.h.'>CTYPES_DARWIN_DLFCN</a>
+<a name='L44'>
+<a name='L45'><font color='darkred'>#define</font> <a href='../R/895.html' title='Multiple refered from 3 places.'>ERR_STR_LEN</a> 256
+<a name='L46'>
+<a name='L47'><font color='darkred'>#ifndef</font> <a href='../S/2255.html#L48' title='Defined at 48 in Modules/_ctypes/darwin/dlfcn_simple.c.'>MAC_OS_X_VERSION_10_3</a>
+<a name='L48'><font color='darkred'>#define</font> <a href='../R/1807.html' title='Multiple refered from 4 places.'>MAC_OS_X_VERSION_10_3</a> 1030
+<a name='L49'><font color='darkred'>#endif</font>
+<a name='L50'>
+<a name='L51'><font color='darkred'>#if</font> MAC_OS_X_VERSION_MAX_ALLOWED &gt;= <a href='../S/2255.html#L48' title='Defined at 48 in Modules/_ctypes/darwin/dlfcn_simple.c.'>MAC_OS_X_VERSION_10_3</a>
+<a name='L52'><font color='darkred'>#define</font> <a href='../S/2255.html#L60' title='Refered from 60 in Modules/_ctypes/darwin/dlfcn_simple.c.'>DARWIN_HAS_DLOPEN</a>
+<a name='L53'><b>extern</b> <b>void</b> * <a href='../D/8196.html' title='Multiple defined in 2 places.'>dlopen</a>(<b>const</b> <b>char</b> *path, <b>int</b> mode) <b>__attribute__</b>((weak_import));
+<a name='L54'><b>extern</b> <b>void</b> * <a href='../D/8199.html' title='Multiple defined in 2 places.'>dlsym</a>(<b>void</b> * handle, <b>const</b> <b>char</b> *symbol) <b>__attribute__</b>((weak_import));
+<a name='L55'><b>extern</b> <b>const</b> <b>char</b> * <a href='../D/8180.html' title='Multiple defined in 3 places.'>dlerror</a>(<b>void</b>) <b>__attribute__</b>((weak_import));
+<a name='L56'><b>extern</b> <b>int</b> <a href='../D/8179.html' title='Multiple defined in 2 places.'>dlclose</a>(<b>void</b> * handle) <b>__attribute__</b>((weak_import));
+<a name='L57'><b>extern</b> <b>int</b> <a href='../S/2255.html#L65' title='Defined at 65 in Modules/_ctypes/darwin/dlfcn_simple.c.'>dladdr</a>(<b>const</b> <b>void</b> *, Dl_info *) <b>__attribute__</b>((weak_import));
+<a name='L58'><font color='darkred'>#endif</font> <i><font color='green'>/* MAC_OS_X_VERSION_MAX_ALLOWED &gt;= MAC_OS_X_VERSION_10_3 */</font></i>
+<a name='L59'>
+<a name='L60'><font color='darkred'>#ifndef</font> <a href='../S/2255.html#L52' title='Defined at 52 in Modules/_ctypes/darwin/dlfcn_simple.c.'>DARWIN_HAS_DLOPEN</a>
+<a name='L61'><font color='darkred'>#define</font> <a href='../R/7412.html' title='Multiple refered from 7 places.'>dlopen</a> <a href='../S/2255.html#L109' title='Defined at 109 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlopen</a>
+<a name='L62'><font color='darkred'>#define</font> <a href='../R/7415.html' title='Multiple refered from 7 places.'>dlsym</a> <a href='../S/2255.html#L214' title='Defined at 214 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlsym</a>
+<a name='L63'><font color='darkred'>#define</font> <a href='../R/7398.html' title='Multiple refered from 6 places.'>dlerror</a> <a href='../S/2255.html#L191' title='Defined at 191 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlerror</a>
+<a name='L64'><font color='darkred'>#define</font> <a href='../R/7397.html' title='Multiple refered from 6 places.'>dlclose</a> <a href='../S/2255.html#L196' title='Defined at 196 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlclose</a>
+<a name='L65'><font color='darkred'>#define</font> <a href='../R/7395.html' title='Multiple refered from 5 places.'>dladdr</a> <a href='../S/2255.html#L243' title='Defined at 243 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dladdr</a>
+<a name='L66'><font color='darkred'>#endif</font>
+<a name='L67'>
+<a name='L68'><b>void</b> * (*<a href='../S/2253.html#L20' title='Defined at 20 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlopen</a>)(<b>const</b> <b>char</b> *path, <b>int</b> mode);
+<a name='L69'><b>void</b> * (*<a href='../S/2253.html#L18' title='Defined at 18 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlsym</a>)(<b>void</b> * handle, <b>const</b> <b>char</b> *symbol);
+<a name='L70'><b>const</b> <b>char</b> * (*<a href='../S/2253.html#L19' title='Defined at 19 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlerror</a>)(<b>void</b>);
+<a name='L71'><b>int</b> (*<a href='../S/2253.html#L21' title='Defined at 21 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlclose</a>)(<b>void</b> * handle);
+<a name='L72'><b>int</b> (*<a href='../S/2253.html#L22' title='Defined at 22 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dladdr</a>)(<b>const</b> <b>void</b> *, <a href='../S/2254.html#L50' title='Defined at 50 in Modules/_ctypes/darwin/dlfcn.h.'>Dl_info</a> *);
+<a name='L73'>
+<a name='L74'><font color='darkred'>#if</font> MAC_OS_X_VERSION_MIN_REQUIRED &lt; <a href='../S/2255.html#L48' title='Defined at 48 in Modules/_ctypes/darwin/dlfcn_simple.c.'>MAC_OS_X_VERSION_10_3</a>
+<a name='L75'><i><font color='green'>/* Mac OS X 10.3+ has dlopen, so strip all this dead code to avoid warnings */</font></i>
+<a name='L76'>
+<a name='L77'><b>static</b> <b>void</b> *<a href='../S/2255.html#L148' title='Defined at 148 in Modules/_ctypes/darwin/dlfcn_simple.c.'>dlsymIntern</a>(<b>void</b> *handle, <b>const</b> <b>char</b> *symbol);
+<a name='L78'>
+<a name='L79'><b>static</b> <b>const</b> <b>char</b> *<a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(<b>int</b> setget, <b>const</b> <b>char</b> *str, ...);
+<a name='L80'>
+<a name='L81'><i><font color='green'>/* Set and get the error string for use by dlerror */</font></i>
+<a name='L82'><b>static</b> <b>const</b> <b>char</b> *<a href='../R/7602.html' title='Multiple refered from 1145 places.'>error</a>(<b>int</b> setget, <b>const</b> <b>char</b> *str, ...)
+<a name='L83'><font color='red'>{</font>
+<a name='L84'>    <b>static</b> <b>char</b> errstr[<a href='../S/2255.html#L45' title='Defined at 45 in Modules/_ctypes/darwin/dlfcn_simple.c.'>ERR_STR_LEN</a>];
+<a name='L85'>    <b>static</b> <b>int</b> err_filled = 0;
+<a name='L86'>    <b>const</b> <b>char</b> *retval;
+<a name='L87'>    va_list <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L88'>    <b>if</b> (setget == 0)
+<a name='L89'>    <font color='red'>{</font>
+<a name='L90'>        va_start(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, str);
+<a name='L91'>        strncpy(errstr, "dlcompat: ", <a href='../S/2255.html#L45' title='Defined at 45 in Modules/_ctypes/darwin/dlfcn_simple.c.'>ERR_STR_LEN</a>);
+<a name='L92'>        <a href='../D/12268.html' title='Multiple defined in 2 places.'>vsnprintf</a>(errstr + 10, <a href='../S/2255.html#L45' title='Defined at 45 in Modules/_ctypes/darwin/dlfcn_simple.c.'>ERR_STR_LEN</a> - 10, str, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L93'>        va_end(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L94'>        err_filled = 1;
+<a name='L95'>        retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L96'>    <font color='red'>}</font>
+<a name='L97'>    <b>else</b>
+<a name='L98'>    <font color='red'>{</font>
+<a name='L99'>        <b>if</b> (!err_filled)
+<a name='L100'>            retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L101'>        <b>else</b>
+<a name='L102'>            retval = errstr;
+<a name='L103'>        err_filled = 0;
+<a name='L104'>    <font color='red'>}</font>
+<a name='L105'>    <b>return</b> retval;
+<a name='L106'><font color='red'>}</font>
+<a name='L107'>
+<a name='L108'><i><font color='green'>/* darwin_dlopen */</font></i>
+<a name='L109'><b>static</b> <b>void</b> *<a href='../R/7092.html' title='Multiple refered from 2 places.'>darwin_dlopen</a>(<b>const</b> <b>char</b> *path, <b>int</b> mode)
+<a name='L110'><font color='red'>{</font>
+<a name='L111'>    <b>void</b> *module = 0;
+<a name='L112'>    NSObjectFileImage ofi = 0;
+<a name='L113'>    NSObjectFileImageReturnCode ofirc;
+<a name='L114'>
+<a name='L115'>    <i><font color='green'>/* If we got no path, the app wants the global namespace, use -1 as the marker</font></i>
+<a name='L116'><i><font color='green'>       in this case */</font></i>
+<a name='L117'>    <b>if</b> (!path)
+<a name='L118'>        <b>return</b> (<b>void</b> *)-1;
+<a name='L119'>
+<a name='L120'>    <i><font color='green'>/* Create the object file image, works for things linked with the -bundle arg to ld */</font></i>
+<a name='L121'>    ofirc = NSCreateObjectFileImageFromFile(path, &amp;ofi);
+<a name='L122'>    <b>switch</b> (ofirc)
+<a name='L123'>    <font color='red'>{</font>
+<a name='L124'>        <b>case</b> NSObjectFileImageSuccess:
+<a name='L125'>            <i><font color='green'>/* It was okay, so use NSLinkModule to link in the image */</font></i>
+<a name='L126'>            module = NSLinkModule(ofi, path,
+<a name='L127'>                                                      NSLINKMODULE_OPTION_RETURN_ON_ERROR
+<a name='L128'>                                                      | (mode &amp; <a href='../D/4521.html' title='Multiple defined in 2 places.'>RTLD_GLOBAL</a>) ? 0 : NSLINKMODULE_OPTION_PRIVATE
+<a name='L129'>                                                      | (mode &amp; <a href='../D/4522.html' title='Multiple defined in 2 places.'>RTLD_LAZY</a>) ? 0 : NSLINKMODULE_OPTION_BINDNOW);
+<a name='L130'>            NSDestroyObjectFileImage(ofi);
+<a name='L131'>            <b>break</b>;
+<a name='L132'>        <b>case</b> NSObjectFileImageInappropriateFile:
+<a name='L133'>            <i><font color='green'>/* It may have been a dynamic library rather than a bundle, try to load it */</font></i>
+<a name='L134'>            module = (<b>void</b> *)NSAddImage(path, NSADDIMAGE_OPTION_RETURN_ON_ERROR);
+<a name='L135'>            <b>break</b>;
+<a name='L136'>        <b>default</b>:
+<a name='L137'>            <i><font color='green'>/* God knows what we got */</font></i>
+<a name='L138'>            <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(0, "Can not open \"%s\"", path);
+<a name='L139'>            <b>return</b> 0;
+<a name='L140'>    <font color='red'>}</font>
+<a name='L141'>    <b>if</b> (!module)
+<a name='L142'>        <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(0, "Can not open \"%s\"", path);
+<a name='L143'>    <b>return</b> module;
+<a name='L144'>
+<a name='L145'><font color='red'>}</font>
+<a name='L146'>
+<a name='L147'><i><font color='green'>/* dlsymIntern is used by dlsym to find the symbol */</font></i>
+<a name='L148'><b>static</b> <b>void</b> *<a href='../R/7416.html' title='Multiple refered from 3 places.'>dlsymIntern</a>(<b>void</b> *handle, <b>const</b> <b>char</b> *symbol)
+<a name='L149'><font color='red'>{</font>
+<a name='L150'>    NSSymbol nssym = 0;
+<a name='L151'>    <i><font color='green'>/* If the handle is -1, if is the app global context */</font></i>
+<a name='L152'>    <b>if</b> (handle == (<b>void</b> *)-1)
+<a name='L153'>    <font color='red'>{</font>
+<a name='L154'>        <i><font color='green'>/* Global context, use NSLookupAndBindSymbol */</font></i>
+<a name='L155'>        <b>if</b> (NSIsSymbolNameDefined(symbol))
+<a name='L156'>        <font color='red'>{</font>
+<a name='L157'>            nssym = NSLookupAndBindSymbol(symbol);
+<a name='L158'>        <font color='red'>}</font>
+<a name='L159'>
+<a name='L160'>    <font color='red'>}</font>
+<a name='L161'>    <i><font color='green'>/* Now see if the handle is a struch mach_header* or not, use NSLookupSymbol in image</font></i>
+<a name='L162'><i><font color='green'>       for libraries, and NSLookupSymbolInModule for bundles */</font></i>
+<a name='L163'>    <b>else</b>
+<a name='L164'>    <font color='red'>{</font>
+<a name='L165'>        <i><font color='green'>/* Check for both possible magic numbers depending on x86/ppc byte order */</font></i>
+<a name='L166'>        <b>if</b> ((((<b>struct</b> mach_header *)handle)-&gt;magic == MH_MAGIC) ||
+<a name='L167'>            (((<b>struct</b> mach_header *)handle)-&gt;magic == MH_CIGAM))
+<a name='L168'>        <font color='red'>{</font>
+<a name='L169'>            <b>if</b> (NSIsSymbolNameDefinedInImage((<b>struct</b> mach_header *)handle, symbol))
+<a name='L170'>            <font color='red'>{</font>
+<a name='L171'>                nssym = NSLookupSymbolInImage((<b>struct</b> mach_header *)handle,
+<a name='L172'>                                                                          symbol,
+<a name='L173'>                                                                          NSLOOKUPSYMBOLINIMAGE_OPTION_BIND
+<a name='L174'>                                                                          | NSLOOKUPSYMBOLINIMAGE_OPTION_RETURN_ON_ERROR);
+<a name='L175'>            <font color='red'>}</font>
+<a name='L176'>
+<a name='L177'>        <font color='red'>}</font>
+<a name='L178'>        <b>else</b>
+<a name='L179'>        <font color='red'>{</font>
+<a name='L180'>            nssym = NSLookupSymbolInModule(handle, symbol);
+<a name='L181'>        <font color='red'>}</font>
+<a name='L182'>    <font color='red'>}</font>
+<a name='L183'>    <b>if</b> (!nssym)
+<a name='L184'>    <font color='red'>{</font>
+<a name='L185'>        <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(0, "Symbol \"%s\" Not found", symbol);
+<a name='L186'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L187'>    <font color='red'>}</font>
+<a name='L188'>    <b>return</b> NSAddressOfSymbol(nssym);
+<a name='L189'><font color='red'>}</font>
+<a name='L190'>
+<a name='L191'><b>static</b> <b>const</b> <b>char</b> *<a href='../R/7091.html' title='Multiple refered from 2 places.'>darwin_dlerror</a>(<b>void</b>)
+<a name='L192'><font color='red'>{</font>
+<a name='L193'>    <b>return</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(1, (<b>char</b> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L194'><font color='red'>}</font>
+<a name='L195'>
+<a name='L196'><b>static</b> <b>int</b> <a href='../R/7090.html' title='Multiple refered from 2 places.'>darwin_dlclose</a>(<b>void</b> *handle)
+<a name='L197'><font color='red'>{</font>
+<a name='L198'>    <b>if</b> ((((<b>struct</b> mach_header *)handle)-&gt;magic == MH_MAGIC) ||
+<a name='L199'>        (((<b>struct</b> mach_header *)handle)-&gt;magic == MH_CIGAM))
+<a name='L200'>    <font color='red'>{</font>
+<a name='L201'>        <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(0, "Can't remove dynamic libraries on darwin");
+<a name='L202'>        <b>return</b> 0;
+<a name='L203'>    <font color='red'>}</font>
+<a name='L204'>    <b>if</b> (!NSUnLinkModule(handle, 0))
+<a name='L205'>    <font color='red'>{</font>
+<a name='L206'>        <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(0, "unable to unlink module %s", NSNameOfModule(handle));
+<a name='L207'>        <b>return</b> 1;
+<a name='L208'>    <font color='red'>}</font>
+<a name='L209'>    <b>return</b> 0;
+<a name='L210'><font color='red'>}</font>
+<a name='L211'>
+<a name='L212'>
+<a name='L213'><i><font color='green'>/* dlsym, prepend the underscore and call dlsymIntern */</font></i>
+<a name='L214'><b>static</b> <b>void</b> *<a href='../R/7093.html' title='Multiple refered from 2 places.'>darwin_dlsym</a>(<b>void</b> *handle, <b>const</b> <b>char</b> *symbol)
+<a name='L215'><font color='red'>{</font>
+<a name='L216'>    <b>static</b> <b>char</b> undersym[257];          <i><font color='green'>/* Saves calls to malloc(3) */</font></i>
+<a name='L217'>    <b>int</b> sym_len = strlen(symbol);
+<a name='L218'>    <b>void</b> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L219'>    <b>char</b> *malloc_sym = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L220'>
+<a name='L221'>    <b>if</b> (sym_len &lt; 256)
+<a name='L222'>    <font color='red'>{</font>
+<a name='L223'>        <a href='../S/2711.html#L370' title='Defined at 370 in Modules/socketmodule.c.'>snprintf</a>(undersym, 256, "_%s", symbol);
+<a name='L224'>        <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2255.html#L148' title='Defined at 148 in Modules/_ctypes/darwin/dlfcn_simple.c.'>dlsymIntern</a>(handle, undersym);
+<a name='L225'>    <font color='red'>}</font>
+<a name='L226'>    <b>else</b>
+<a name='L227'>    <font color='red'>{</font>
+<a name='L228'>        malloc_sym = malloc(sym_len + 2);
+<a name='L229'>        <b>if</b> (malloc_sym)
+<a name='L230'>        <font color='red'>{</font>
+<a name='L231'>            sprintf(malloc_sym, "_%s", symbol);
+<a name='L232'>            <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2255.html#L148' title='Defined at 148 in Modules/_ctypes/darwin/dlfcn_simple.c.'>dlsymIntern</a>(handle, malloc_sym);
+<a name='L233'>            free(malloc_sym);
+<a name='L234'>        <font color='red'>}</font>
+<a name='L235'>        <b>else</b>
+<a name='L236'>        <font color='red'>{</font>
+<a name='L237'>            <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>(0, "Unable to allocate memory");
+<a name='L238'>        <font color='red'>}</font>
+<a name='L239'>    <font color='red'>}</font>
+<a name='L240'>    <b>return</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L241'><font color='red'>}</font>
+<a name='L242'>
+<a name='L243'><b>static</b> <b>int</b> <a href='../R/7089.html' title='Multiple refered from 2 places.'>darwin_dladdr</a>(<b>const</b> <b>void</b> *handle, Dl_info *info) <font color='red'>{</font>
+<a name='L244'>    <b>return</b> 0;
+<a name='L245'><font color='red'>}</font>
+<a name='L246'><font color='darkred'>#endif</font> <i><font color='green'>/* MAC_OS_X_VERSION_MIN_REQUIRED &lt; MAC_OS_X_VERSION_10_3 */</font></i>
+<a name='L247'>
+<a name='L248'><font color='darkred'>#if</font> __GNUC__ &lt; 4
+<a name='L249'><font color='darkred'>#pragma</font> CALL_ON_LOAD ctypes_dlfcn_init
+<a name='L250'><font color='darkred'>#else</font>
+<a name='L251'><b>static</b> <b>void</b> <b>__attribute__</b> ((constructor)) <a href='../S/2255.html#L254' title='Defined at 254 in Modules/_ctypes/darwin/dlfcn_simple.c.'>ctypes_dlfcn_init</a>(<b>void</b>);
+<a name='L252'><b>static</b>
+<a name='L253'><font color='darkred'>#endif</font>
+<a name='L254'><b>void</b> <a href='../S/2255.html#L251' title='Refered from 251 in Modules/_ctypes/darwin/dlfcn_simple.c.'>ctypes_dlfcn_init</a>(<b>void</b>) <font color='red'>{</font>
+<a name='L255'>    <b>if</b> (<a href='../D/8196.html' title='Multiple defined in 2 places.'>dlopen</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L256'>        <a href='../S/2253.html#L18' title='Defined at 18 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlsym</a> = <a href='../D/8199.html' title='Multiple defined in 2 places.'>dlsym</a>;
+<a name='L257'>        <a href='../S/2253.html#L20' title='Defined at 20 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlopen</a> = <a href='../D/8196.html' title='Multiple defined in 2 places.'>dlopen</a>;
+<a name='L258'>        <a href='../S/2253.html#L19' title='Defined at 19 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlerror</a> = <a href='../D/8180.html' title='Multiple defined in 3 places.'>dlerror</a>;
+<a name='L259'>        <a href='../S/2253.html#L21' title='Defined at 21 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlclose</a> = <a href='../D/8179.html' title='Multiple defined in 2 places.'>dlclose</a>;
+<a name='L260'>        <a href='../S/2253.html#L22' title='Defined at 22 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dladdr</a> = <a href='../S/2255.html#L65' title='Defined at 65 in Modules/_ctypes/darwin/dlfcn_simple.c.'>dladdr</a>;
+<a name='L261'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L262'><font color='darkred'>#if</font> MAC_OS_X_VERSION_MIN_REQUIRED &lt; <a href='../S/2255.html#L48' title='Defined at 48 in Modules/_ctypes/darwin/dlfcn_simple.c.'>MAC_OS_X_VERSION_10_3</a>
+<a name='L263'>        <a href='../S/2253.html#L18' title='Defined at 18 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlsym</a> = <a href='../S/2255.html#L214' title='Defined at 214 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlsym</a>;
+<a name='L264'>        <a href='../S/2253.html#L20' title='Defined at 20 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlopen</a> = <a href='../S/2255.html#L109' title='Defined at 109 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlopen</a>;
+<a name='L265'>        <a href='../S/2253.html#L19' title='Defined at 19 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlerror</a> = <a href='../S/2255.html#L191' title='Defined at 191 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlerror</a>;
+<a name='L266'>        <a href='../S/2253.html#L21' title='Defined at 21 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dlclose</a> = <a href='../S/2255.html#L196' title='Defined at 196 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dlclose</a>;
+<a name='L267'>        <a href='../S/2253.html#L22' title='Defined at 22 in Modules/_ctypes/ctypes_dlfcn.h.'>ctypes_dladdr</a> = <a href='../S/2255.html#L243' title='Defined at 243 in Modules/_ctypes/darwin/dlfcn_simple.c.'>darwin_dladdr</a>;
+<a name='L268'><font color='darkred'>#endif</font> <i><font color='green'>/* MAC_OS_X_VERSION_MIN_REQUIRED &lt; MAC_OS_X_VERSION_10_3 */</font></i>
+<a name='L269'>    <font color='red'>}</font>
+<a name='L270'><font color='red'>}</font>
+<a name='L271'>
+<a name='L272'><font color='darkred'>#endif</font> <i><font color='green'>/* CTYPES_DARWIN_DLFCN */</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L82'>[^]</a><a href='#L254'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

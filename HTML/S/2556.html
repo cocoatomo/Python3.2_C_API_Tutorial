@@ -1,0 +1,136 @@
+<html>
+<head>
+<title>Modules/_ctypes/malloc_closure.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3354.html'>_ctypes</a>/malloc_closure.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L33'>[^]</a><a href='#L100'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L33' title='Defined at 33.'>more_core</a>
+<li><a href='#L92' title='Defined at 92.'>ffi_closure_free</a>
+<li><a href='#L100' title='Defined at 100.'>ffi_closure_alloc</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> &lt;<a href='570.html'>Python.h</a>&gt;
+<a name='L2'><font color='darkred'>#include</font> &lt;<a href='../I/325.html'>ffi.h</a>&gt;
+<a name='L3'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L4'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L5'><font color='darkred'>#else</font>
+<a name='L6'><font color='darkred'>#include</font> &lt;sys/mman.h&gt;
+<a name='L7'><font color='darkred'>#include</font> &lt;unistd.h&gt;
+<a name='L8'><font color='darkred'># if</font> !<b>defined</b>(<a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>) &amp;&amp; <b>defined</b>(MAP_ANON)
+<a name='L9'><font color='darkred'>#  define</font> <a href='../R/1822.html' title='Multiple refered from 17 places.'>MAP_ANONYMOUS</a> MAP_ANON
+<a name='L10'><font color='darkred'># endif</font>
+<a name='L11'><font color='darkred'>#endif</font>
+<a name='L12'><font color='darkred'>#include</font> "<a href='2252.html'>ctypes.h</a>"
+<a name='L13'>
+<a name='L14'><i><font color='green'>/* BLOCKSIZE can be adjusted.  Larger blocksize will take a larger memory</font></i>
+<a name='L15'><i><font color='green'>   overhead, but allocate less blocks from the system.  It may be that some</font></i>
+<a name='L16'><i><font color='green'>   systems have a limit of how many mmap'd blocks can be open.</font></i>
+<a name='L17'><i><font color='green'>*/</font></i>
+<a name='L18'>
+<a name='L19'><font color='darkred'>#define</font> <a href='../R/270.html' title='Multiple refered from 7 places.'>BLOCKSIZE</a> _pagesize
+<a name='L20'>
+<a name='L21'><i><font color='green'>/* #define MALLOC_CLOSURE_DEBUG */</font></i> <i><font color='green'>/* enable for some debugging output */</font></i>
+<a name='L22'>
+<a name='L23'><i><font color='green'>/******************************************************************/</font></i>
+<a name='L24'>
+<a name='L25'><b>typedef</b> <b>union</b> <a href='../S/2556.html#L27' title='Refered from 27 in Modules/_ctypes/malloc_closure.c.'>_tagITEM</a> <font color='red'>{</font>
+<a name='L26'>    <a href='../D/8478.html' title='Multiple defined in 4 places.'>ffi_closure</a> closure;
+<a name='L27'>    <b>union</b> <a href='../S/2556.html#L25' title='Defined at 25 in Modules/_ctypes/malloc_closure.c.'>_tagITEM</a> *next;
+<a name='L28'><font color='red'>}</font> <a href='../R/1610.html' title='Multiple refered from 13 places.'>ITEM</a>;
+<a name='L29'>
+<a name='L30'><b>static</b> <a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a> *free_list;
+<a name='L31'><b>static</b> <b>int</b> _pagesize;
+<a name='L32'>
+<a name='L33'><b>static</b> <b>void</b> <a href='../S/2556.html#L104' title='Refered from 104 in Modules/_ctypes/malloc_closure.c.'>more_core</a>(<b>void</b>)
+<a name='L34'><font color='red'>{</font>
+<a name='L35'>    <a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a> *item;
+<a name='L36'>    <b>int</b> count, i;
+<a name='L37'>
+<a name='L38'><i><font color='green'>/* determine the pagesize */</font></i>
+<a name='L39'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L40'>    <b>if</b> (!_pagesize) <font color='red'>{</font>
+<a name='L41'>        SYSTEM_INFO systeminfo;
+<a name='L42'>        GetSystemInfo(&amp;systeminfo);
+<a name='L43'>        _pagesize = systeminfo.dwPageSize;
+<a name='L44'>    <font color='red'>}</font>
+<a name='L45'><font color='darkred'>#else</font>
+<a name='L46'>    <b>if</b> (!_pagesize) <font color='red'>{</font>
+<a name='L47'><font color='darkred'>#ifdef</font> _SC_PAGESIZE
+<a name='L48'>        _pagesize = sysconf(_SC_PAGESIZE);
+<a name='L49'><font color='darkred'>#else</font>
+<a name='L50'>        _pagesize = getpagesize();
+<a name='L51'><font color='darkred'>#endif</font>
+<a name='L52'>    <font color='red'>}</font>
+<a name='L53'><font color='darkred'>#endif</font>
+<a name='L54'>
+<a name='L55'>    <i><font color='green'>/* calculate the number of nodes to allocate */</font></i>
+<a name='L56'>    count = <a href='../S/2556.html#L19' title='Defined at 19 in Modules/_ctypes/malloc_closure.c.'>BLOCKSIZE</a> / <b>sizeof</b>(<a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a>);
+<a name='L57'>
+<a name='L58'>    <i><font color='green'>/* allocate a memory block */</font></i>
+<a name='L59'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L60'>    item = (<a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a> *)VirtualAlloc(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L61'>                                           count * <b>sizeof</b>(<a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a>),
+<a name='L62'>                                           MEM_COMMIT,
+<a name='L63'>                                           PAGE_EXECUTE_READWRITE);
+<a name='L64'>    <b>if</b> (item == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L65'>        <b>return</b>;
+<a name='L66'><font color='darkred'>#else</font>
+<a name='L67'>    item = (<a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a> *)mmap(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L68'>                        count * <b>sizeof</b>(<a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a>),
+<a name='L69'>                        PROT_READ | PROT_WRITE | PROT_EXEC,
+<a name='L70'>                        MAP_PRIVATE | <a href='../D/2021.html' title='Multiple defined in 5 places.'>MAP_ANONYMOUS</a>,
+<a name='L71'>                        -1,
+<a name='L72'>                        0);
+<a name='L73'>    <b>if</b> (item == (<b>void</b> *)<a href='../D/2022.html' title='Multiple defined in 4 places.'>MAP_FAILED</a>)
+<a name='L74'>        <b>return</b>;
+<a name='L75'><font color='darkred'>#endif</font>
+<a name='L76'>
+<a name='L77'><font color='darkred'>#ifdef</font> MALLOC_CLOSURE_DEBUG
+<a name='L78'>    printf("block at %p allocated (%d bytes), %d ITEMs\n",
+<a name='L79'>           item, count * <b>sizeof</b>(<a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a>), count);
+<a name='L80'><font color='darkred'>#endif</font>
+<a name='L81'>    <i><font color='green'>/* put them into the free list */</font></i>
+<a name='L82'>    <b>for</b> (i = 0; i &lt; count; ++i) <font color='red'>{</font>
+<a name='L83'>        item-&gt;next = free_list;
+<a name='L84'>        free_list = item;
+<a name='L85'>        ++item;
+<a name='L86'>    <font color='red'>}</font>
+<a name='L87'><font color='red'>}</font>
+<a name='L88'>
+<a name='L89'><i><font color='green'>/******************************************************************/</font></i>
+<a name='L90'>
+<a name='L91'><i><font color='green'>/* put the item back into the free list */</font></i>
+<a name='L92'><b>void</b> <a href='../R/7694.html' title='Multiple refered from 3 places.'>ffi_closure_free</a>(<b>void</b> *p)
+<a name='L93'><font color='red'>{</font>
+<a name='L94'>    <a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a> *item = (<a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a> *)p;
+<a name='L95'>    item-&gt;next = free_list;
+<a name='L96'>    free_list = item;
+<a name='L97'><font color='red'>}</font>
+<a name='L98'>
+<a name='L99'><i><font color='green'>/* return one item from the free list, allocating more if needed */</font></i>
+<a name='L100'><b>void</b> *<a href='../R/7692.html' title='Multiple refered from 89 places.'>ffi_closure_alloc</a>(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> ignored, <b>void</b>** codeloc)
+<a name='L101'><font color='red'>{</font>
+<a name='L102'>    <a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a> *item;
+<a name='L103'>    <b>if</b> (!free_list)
+<a name='L104'>        <a href='../S/2556.html#L33' title='Defined at 33 in Modules/_ctypes/malloc_closure.c.'>more_core</a>();
+<a name='L105'>    <b>if</b> (!free_list)
+<a name='L106'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L107'>    item = free_list;
+<a name='L108'>    free_list = item-&gt;next;
+<a name='L109'>    *codeloc = (<b>void</b> *)item;
+<a name='L110'>    <b>return</b> (<b>void</b> *)item;
+<a name='L111'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L33'>[^]</a><a href='#L100'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

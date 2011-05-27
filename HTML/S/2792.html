@@ -1,0 +1,997 @@
+<html>
+<head>
+<title>Objects/frameobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/frameobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L27'>[^]</a><a href='#L950'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L27' title='Defined at 27.'>frame_getlocals</a>
+<li><a href='#L35' title='Defined at 35.'>PyFrame_GetLineNumber</a>
+<li><a href='#L44' title='Defined at 44.'>frame_getlineno</a>
+<li><a href='#L65' title='Defined at 65.'>frame_setlineno</a>
+<li><a href='#L335' title='Defined at 335.'>frame_gettrace</a>
+<li><a href='#L348' title='Defined at 348.'>frame_settrace</a>
+<li><a href='#L421' title='Defined at 421.'>frame_dealloc</a>
+<li><a href='#L464' title='Defined at 464.'>frame_traverse</a>
+<li><a href='#L494' title='Defined at 494.'>frame_clear</a>
+<li><a href='#L526' title='Defined at 526.'>frame_sizeof</a>
+<li><a href='#L586' title='Defined at 586.'>_PyFrame_Init</a>
+<li><a href='#L595' title='Defined at 595.'>PyFrame_New</a>
+<li><a href='#L722' title='Defined at 722.'>PyFrame_BlockSetup</a>
+<li><a href='#L734' title='Defined at 734.'>PyFrame_BlockPop</a>
+<li><a href='#L760' title='Defined at 760.'>map_to_dict</a>
+<li><a href='#L808' title='Defined at 808.'>dict_to_map</a>
+<li><a href='#L841' title='Defined at 841.'>PyFrame_FastToLocals</a>
+<li><a href='#L893' title='Defined at 893.'>PyFrame_LocalsToFast</a>
+<li><a href='#L935' title='Defined at 935.'>PyFrame_ClearFreeList</a>
+<li><a href='#L950' title='Defined at 950.'>PyFrame_Fini</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Frame object implementation */</font></i>
+<a name='L2'>
+<a name='L3'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L4'>
+<a name='L5'><font color='darkred'>#include</font> "<a href='511.html'>code.h</a>"
+<a name='L6'><font color='darkred'>#include</font> "<a href='526.html'>frameobject.h</a>"
+<a name='L7'><font color='darkred'>#include</font> "<a href='546.html'>opcode.h</a>"
+<a name='L8'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L9'>
+<a name='L10'><font color='darkred'>#undef</font> <a href='../R/1923.html' title='Multiple refered from 20 places.'>MIN</a>
+<a name='L11'><font color='darkred'>#undef</font> <a href='../R/1834.html' title='Multiple refered from 13 places.'>MAX</a>
+<a name='L12'><font color='darkred'>#define</font> <a href='../R/1923.html' title='Multiple refered from 20 places.'>MIN</a>(a, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>) ((a) &lt; (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>) ? (a) : (b))
+<a name='L13'><font color='darkred'>#define</font> <a href='../R/1834.html' title='Multiple refered from 13 places.'>MAX</a>(a, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>) ((a) &gt; (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>) ? (a) : (b))
+<a name='L14'>
+<a name='L15'><font color='darkred'>#define</font> <a href='../R/2175.html' title='Multiple refered from 57 places.'>OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a>, x)
+<a name='L16'>
+<a name='L17'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> frame_memberlist[] = <font color='red'>{</font>
+<a name='L18'>    <font color='red'>{</font>"f_back",          <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,       <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(f_back),    <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L19'>    <font color='red'>{</font>"f_code",          <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,       <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(f_code),    <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L20'>    <font color='red'>{</font>"f_builtins",      <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,       <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(f_builtins),<a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L21'>    <font color='red'>{</font>"f_globals",       <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,       <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(f_globals), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L22'>    <font color='red'>{</font>"f_lasti",         <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,          <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(f_lasti),   <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L23'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>      <i><font color='green'>/* Sentinel */</font></i>
+<a name='L24'><font color='red'>}</font>;
+<a name='L25'>
+<a name='L26'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L27'><a href='../S/2792.html#L365' title='Refered from 365 in Objects/frameobject.c.'>frame_getlocals</a>(PyFrameObject *f, <b>void</b> *closure)
+<a name='L28'><font color='red'>{</font>
+<a name='L29'>    <a href='../S/2792.html#L841' title='Defined at 841 in Objects/frameobject.c.'>PyFrame_FastToLocals</a>(f);
+<a name='L30'>    Py_INCREF(f-&gt;f_locals);
+<a name='L31'>    <b>return</b> f-&gt;f_locals;
+<a name='L32'><font color='red'>}</font>
+<a name='L33'>
+<a name='L34'><b>int</b>
+<a name='L35'><a href='../R/2962.html' title='Multiple refered from 5 places.'>PyFrame_GetLineNumber</a>(PyFrameObject *f)
+<a name='L36'><font color='red'>{</font>
+<a name='L37'>    <b>if</b> (f-&gt;f_trace)
+<a name='L38'>        <b>return</b> f-&gt;f_lineno;
+<a name='L39'>    <b>else</b>
+<a name='L40'>        <b>return</b> <a href='../S/2783.html#L493' title='Defined at 493 in Objects/codeobject.c.'>PyCode_Addr2Line</a>(f-&gt;f_code, f-&gt;f_lasti);
+<a name='L41'><font color='red'>}</font>
+<a name='L42'>
+<a name='L43'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L44'><a href='../S/2792.html#L366' title='Refered from 366 in Objects/frameobject.c.'>frame_getlineno</a>(PyFrameObject *f, <b>void</b> *closure)
+<a name='L45'><font color='red'>{</font>
+<a name='L46'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/2792.html#L35' title='Defined at 35 in Objects/frameobject.c.'>PyFrame_GetLineNumber</a>(f));
+<a name='L47'><font color='red'>}</font>
+<a name='L48'>
+<a name='L49'><i><font color='green'>/* Setter for f_lineno - you can set f_lineno from within a trace function in</font></i>
+<a name='L50'><i><font color='green'> * order to jump to a given line of code, subject to some restrictions.  Most</font></i>
+<a name='L51'><i><font color='green'> * lines are OK to jump to because they don't make any assumptions about the</font></i>
+<a name='L52'><i><font color='green'> * state of the stack (obvious because you could remove the line and the code</font></i>
+<a name='L53'><i><font color='green'> * would still work without any stack errors), but there are some constructs</font></i>
+<a name='L54'><i><font color='green'> * that limit jumping:</font></i>
+<a name='L55'><i><font color='green'> *</font></i>
+<a name='L56'><i><font color='green'> *  o Lines with an 'except' statement on them can't be jumped to, because</font></i>
+<a name='L57'><i><font color='green'> *    they expect an exception to be on the top of the stack.</font></i>
+<a name='L58'><i><font color='green'> *  o Lines that live in a 'finally' block can't be jumped from or to, since</font></i>
+<a name='L59'><i><font color='green'> *    the END_FINALLY expects to clean up the stack after the 'try' block.</font></i>
+<a name='L60'><i><font color='green'> *  o 'try'/'for'/'while' blocks can't be jumped into because the blockstack</font></i>
+<a name='L61'><i><font color='green'> *    needs to be set up before their code runs, and for 'for' loops the</font></i>
+<a name='L62'><i><font color='green'> *    iterator needs to be on the stack.</font></i>
+<a name='L63'><i><font color='green'> */</font></i>
+<a name='L64'><b>static</b> <b>int</b>
+<a name='L65'><a href='../S/2792.html#L367' title='Refered from 367 in Objects/frameobject.c.'>frame_setlineno</a>(PyFrameObject *f, PyObject* p_new_lineno)
+<a name='L66'><font color='red'>{</font>
+<a name='L67'>    <b>int</b> new_lineno = 0;                 <i><font color='green'>/* The new value of f_lineno */</font></i>
+<a name='L68'>    <b>long</b> l_new_lineno;
+<a name='L69'>    <b>int</b> <a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a>;
+<a name='L70'>    <b>int</b> new_lasti = 0;                  <i><font color='green'>/* The new value of f_lasti */</font></i>
+<a name='L71'>    <b>int</b> new_iblock = 0;                 <i><font color='green'>/* The new value of f_iblock */</font></i>
+<a name='L72'>    <b>unsigned</b> <b>char</b> *<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;         <i><font color='green'>/* The bytecode for the frame... */</font></i>
+<a name='L73'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> code_len = 0;            <i><font color='green'>/* ...and its length */</font></i>
+<a name='L74'>    <b>unsigned</b> <b>char</b> *lnotab = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;       <i><font color='green'>/* Iterating over co_lnotab */</font></i>
+<a name='L75'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> lnotab_len = 0;          <i><font color='green'>/* (ditto) */</font></i>
+<a name='L76'>    <b>int</b> offset = 0;                     <i><font color='green'>/* (ditto) */</font></i>
+<a name='L77'>    <b>int</b> line = 0;                       <i><font color='green'>/* (ditto) */</font></i>
+<a name='L78'>    <b>int</b> addr = 0;                       <i><font color='green'>/* (ditto) */</font></i>
+<a name='L79'>    <b>int</b> min_addr = 0;                   <i><font color='green'>/* Scanning the SETUPs and POPs */</font></i>
+<a name='L80'>    <b>int</b> max_addr = 0;                   <i><font color='green'>/* (ditto) */</font></i>
+<a name='L81'>    <b>int</b> delta_iblock = 0;               <i><font color='green'>/* (ditto) */</font></i>
+<a name='L82'>    <b>int</b> min_delta_iblock = 0;           <i><font color='green'>/* (ditto) */</font></i>
+<a name='L83'>    <b>int</b> min_iblock = 0;                 <i><font color='green'>/* (ditto) */</font></i>
+<a name='L84'>    <b>int</b> f_lasti_setup_addr = 0;         <i><font color='green'>/* Policing no-jump-into-finally */</font></i>
+<a name='L85'>    <b>int</b> new_lasti_setup_addr = 0;       <i><font color='green'>/* (ditto) */</font></i>
+<a name='L86'>    <b>int</b> blockstack[<a href='../S/511.html#L65' title='Defined at 65 in Include/code.h.'>CO_MAXBLOCKS</a>];       <i><font color='green'>/* Walking the 'finally' blocks */</font></i>
+<a name='L87'>    <b>int</b> in_finally[<a href='../S/511.html#L65' title='Defined at 65 in Include/code.h.'>CO_MAXBLOCKS</a>];       <i><font color='green'>/* (ditto) */</font></i>
+<a name='L88'>    <b>int</b> blockstack_top = 0;             <i><font color='green'>/* (ditto) */</font></i>
+<a name='L89'>    <b>unsigned</b> <b>char</b> setup_op = 0;         <i><font color='green'>/* (ditto) */</font></i>
+<a name='L90'>
+<a name='L91'>    <i><font color='green'>/* f_lineno must be an integer. */</font></i>
+<a name='L92'>    <b>if</b> (!PyLong_CheckExact(p_new_lineno)) <font color='red'>{</font>
+<a name='L93'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L94'>                        "lineno must be an integer");
+<a name='L95'>        <b>return</b> -1;
+<a name='L96'>    <font color='red'>}</font>
+<a name='L97'>
+<a name='L98'>    <i><font color='green'>/* You can only do this from within a trace function, not via</font></i>
+<a name='L99'><i><font color='green'>     * _getframe or similar hackery. */</font></i>
+<a name='L100'>    <b>if</b> (!f-&gt;f_trace)
+<a name='L101'>    <font color='red'>{</font>
+<a name='L102'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L103'>                     "f_lineno can only be set by a"
+<a name='L104'>                     " line trace function");
+<a name='L105'>        <b>return</b> -1;
+<a name='L106'>    <font color='red'>}</font>
+<a name='L107'>
+<a name='L108'>    <i><font color='green'>/* Fail if the line comes before the start of the code block. */</font></i>
+<a name='L109'>    l_new_lineno = <a href='../S/2799.html#L329' title='Defined at 329 in Objects/longobject.c.'>PyLong_AsLongAndOverflow</a>(p_new_lineno, &amp;<a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a>);
+<a name='L110'>    <b>if</b> (<a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a>
+<a name='L111'><font color='darkred'>#if</font> <a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a> &gt; <a href='../D/4733.html' title='Multiple defined in 3 places.'>SIZEOF_INT</a>
+<a name='L112'>        || l_new_lineno &gt; <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a>
+<a name='L113'>        || l_new_lineno &lt; INT_MIN
+<a name='L114'><font color='darkred'>#endif</font>
+<a name='L115'>       ) <font color='red'>{</font>
+<a name='L116'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L117'>                        "lineno out of range");
+<a name='L118'>        <b>return</b> -1;
+<a name='L119'>    <font color='red'>}</font>
+<a name='L120'>    new_lineno = (<b>int</b>)l_new_lineno;
+<a name='L121'>
+<a name='L122'>    <b>if</b> (new_lineno &lt; f-&gt;f_code-&gt;co_firstlineno) <font color='red'>{</font>
+<a name='L123'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L124'>                     "line %d comes before the current code block",
+<a name='L125'>                     new_lineno);
+<a name='L126'>        <b>return</b> -1;
+<a name='L127'>    <font color='red'>}</font>
+<a name='L128'>    <b>else</b> <b>if</b> (new_lineno == f-&gt;f_code-&gt;co_firstlineno) <font color='red'>{</font>
+<a name='L129'>        new_lasti = 0;
+<a name='L130'>        new_lineno = f-&gt;f_code-&gt;co_firstlineno;
+<a name='L131'>    <font color='red'>}</font>
+<a name='L132'>    <b>else</b> <font color='red'>{</font>
+<a name='L133'>        <i><font color='green'>/* Find the bytecode offset for the start of the given</font></i>
+<a name='L134'><i><font color='green'>         * line, or the first code-owning line after it. */</font></i>
+<a name='L135'>        <b>char</b> *tmp;
+<a name='L136'>        <a href='../S/2779.html#L528' title='Defined at 528 in Objects/bytesobject.c.'>PyBytes_AsStringAndSize</a>(f-&gt;f_code-&gt;co_lnotab,
+<a name='L137'>                                &amp;tmp, &amp;lnotab_len);
+<a name='L138'>        lnotab = (<b>unsigned</b> <b>char</b> *) tmp;
+<a name='L139'>        addr = 0;
+<a name='L140'>        line = f-&gt;f_code-&gt;co_firstlineno;
+<a name='L141'>        new_lasti = -1;
+<a name='L142'>        <b>for</b> (offset = 0; offset &lt; lnotab_len; offset += 2) <font color='red'>{</font>
+<a name='L143'>            addr += lnotab[offset];
+<a name='L144'>            line += lnotab[offset+1];
+<a name='L145'>            <b>if</b> (line &gt;= new_lineno) <font color='red'>{</font>
+<a name='L146'>                new_lasti = addr;
+<a name='L147'>                new_lineno = line;
+<a name='L148'>                <b>break</b>;
+<a name='L149'>            <font color='red'>}</font>
+<a name='L150'>        <font color='red'>}</font>
+<a name='L151'>    <font color='red'>}</font>
+<a name='L152'>
+<a name='L153'>    <i><font color='green'>/* If we didn't reach the requested line, return an error. */</font></i>
+<a name='L154'>    <b>if</b> (new_lasti == -1) <font color='red'>{</font>
+<a name='L155'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L156'>                     "line %d comes after the current code block",
+<a name='L157'>                     new_lineno);
+<a name='L158'>        <b>return</b> -1;
+<a name='L159'>    <font color='red'>}</font>
+<a name='L160'>
+<a name='L161'>    <i><font color='green'>/* We're now ready to look at the bytecode. */</font></i>
+<a name='L162'>    <a href='../S/2779.html#L528' title='Defined at 528 in Objects/bytesobject.c.'>PyBytes_AsStringAndSize</a>(f-&gt;f_code-&gt;co_code, (<b>char</b> **)&amp;<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>, &amp;code_len);
+<a name='L163'>    min_addr = <a href='../D/2125.html' title='Multiple defined in 11 places.'>MIN</a>(new_lasti, f-&gt;f_lasti);
+<a name='L164'>    max_addr = <a href='../D/2033.html' title='Multiple defined in 10 places.'>MAX</a>(new_lasti, f-&gt;f_lasti);
+<a name='L165'>
+<a name='L166'>    <i><font color='green'>/* You can't jump onto a line with an 'except' statement on it -</font></i>
+<a name='L167'><i><font color='green'>     * they expect to have an exception on the top of the stack, which</font></i>
+<a name='L168'><i><font color='green'>     * won't be true if you jump to them.  They always start with code</font></i>
+<a name='L169'><i><font color='green'>     * that either pops the exception using POP_TOP (plain 'except:'</font></i>
+<a name='L170'><i><font color='green'>     * lines do this) or duplicates the exception on the stack using</font></i>
+<a name='L171'><i><font color='green'>     * DUP_TOP (if there's an exception type specified).  See compile.c,</font></i>
+<a name='L172'><i><font color='green'>     * 'com_try_except' for the full details.  There aren't any other</font></i>
+<a name='L173'><i><font color='green'>     * cases (AFAIK) where a line's code can start with DUP_TOP or</font></i>
+<a name='L174'><i><font color='green'>     * POP_TOP, but if any ever appear, they'll be subject to the same</font></i>
+<a name='L175'><i><font color='green'>     * restriction (but with a different error message). */</font></i>
+<a name='L176'>    <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>[new_lasti] == <a href='../S/546.html#L14' title='Defined at 14 in Include/opcode.h.'>DUP_TOP</a> || <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>[new_lasti] == <a href='../S/546.html#L11' title='Defined at 11 in Include/opcode.h.'>POP_TOP</a>) <font color='red'>{</font>
+<a name='L177'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L178'>            "can't jump to 'except' line as there's no exception");
+<a name='L179'>        <b>return</b> -1;
+<a name='L180'>    <font color='red'>}</font>
+<a name='L181'>
+<a name='L182'>    <i><font color='green'>/* You can't jump into or out of a 'finally' block because the 'try'</font></i>
+<a name='L183'><i><font color='green'>     * block leaves something on the stack for the END_FINALLY to clean</font></i>
+<a name='L184'><i><font color='green'>     * up.      So we walk the bytecode, maintaining a simulated blockstack.</font></i>
+<a name='L185'><i><font color='green'>     * When we reach the old or new address and it's in a 'finally' block</font></i>
+<a name='L186'><i><font color='green'>     * we note the address of the corresponding SETUP_FINALLY.  The jump</font></i>
+<a name='L187'><i><font color='green'>     * is only legal if neither address is in a 'finally' block or</font></i>
+<a name='L188'><i><font color='green'>     * they're both in the same one.  'blockstack' is a stack of the</font></i>
+<a name='L189'><i><font color='green'>     * bytecode addresses of the SETUP_X opcodes, and 'in_finally' tracks</font></i>
+<a name='L190'><i><font color='green'>     * whether we're in a 'finally' block at each blockstack level. */</font></i>
+<a name='L191'>    f_lasti_setup_addr = -1;
+<a name='L192'>    new_lasti_setup_addr = -1;
+<a name='L193'>    memset(blockstack, '\0', <b>sizeof</b>(blockstack));
+<a name='L194'>    memset(in_finally, '\0', <b>sizeof</b>(in_finally));
+<a name='L195'>    blockstack_top = 0;
+<a name='L196'>    <b>for</b> (addr = 0; addr &lt; code_len; addr++) <font color='red'>{</font>
+<a name='L197'>        <b>unsigned</b> <b>char</b> op = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>[addr];
+<a name='L198'>        <b>switch</b> (op) <font color='red'>{</font>
+<a name='L199'>        <b>case</b> <a href='../S/546.html#L108' title='Defined at 108 in Include/opcode.h.'>SETUP_LOOP</a>:
+<a name='L200'>        <b>case</b> <a href='../S/546.html#L109' title='Defined at 109 in Include/opcode.h.'>SETUP_EXCEPT</a>:
+<a name='L201'>        <b>case</b> <a href='../S/546.html#L110' title='Defined at 110 in Include/opcode.h.'>SETUP_FINALLY</a>:
+<a name='L202'>            blockstack[blockstack_top++] = addr;
+<a name='L203'>            in_finally[blockstack_top-1] = 0;
+<a name='L204'>            <b>break</b>;
+<a name='L205'>
+<a name='L206'>        <b>case</b> <a href='../S/546.html#L69' title='Defined at 69 in Include/opcode.h.'>POP_BLOCK</a>:
+<a name='L207'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(blockstack_top &gt; 0);
+<a name='L208'>            setup_op = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>[blockstack[blockstack_top-1]];
+<a name='L209'>            <b>if</b> (setup_op == <a href='../S/546.html#L110' title='Defined at 110 in Include/opcode.h.'>SETUP_FINALLY</a>) <font color='red'>{</font>
+<a name='L210'>                in_finally[blockstack_top-1] = 1;
+<a name='L211'>            <font color='red'>}</font>
+<a name='L212'>            <b>else</b> <font color='red'>{</font>
+<a name='L213'>                blockstack_top--;
+<a name='L214'>            <font color='red'>}</font>
+<a name='L215'>            <b>break</b>;
+<a name='L216'>
+<a name='L217'>        <b>case</b> <a href='../S/546.html#L70' title='Defined at 70 in Include/opcode.h.'>END_FINALLY</a>:
+<a name='L218'>            <i><font color='green'>/* Ignore END_FINALLYs for SETUP_EXCEPTs - they exist</font></i>
+<a name='L219'><i><font color='green'>             * in the bytecode but don't correspond to an actual</font></i>
+<a name='L220'><i><font color='green'>             * 'finally' block.  (If blockstack_top is 0, we must</font></i>
+<a name='L221'><i><font color='green'>             * be seeing such an END_FINALLY.) */</font></i>
+<a name='L222'>            <b>if</b> (blockstack_top &gt; 0) <font color='red'>{</font>
+<a name='L223'>                setup_op = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>[blockstack[blockstack_top-1]];
+<a name='L224'>                <b>if</b> (setup_op == <a href='../S/546.html#L110' title='Defined at 110 in Include/opcode.h.'>SETUP_FINALLY</a>) <font color='red'>{</font>
+<a name='L225'>                    blockstack_top--;
+<a name='L226'>                <font color='red'>}</font>
+<a name='L227'>            <font color='red'>}</font>
+<a name='L228'>            <b>break</b>;
+<a name='L229'>        <font color='red'>}</font>
+<a name='L230'>
+<a name='L231'>        <i><font color='green'>/* For the addresses we're interested in, see whether they're</font></i>
+<a name='L232'><i><font color='green'>         * within a 'finally' block and if so, remember the address</font></i>
+<a name='L233'><i><font color='green'>         * of the SETUP_FINALLY. */</font></i>
+<a name='L234'>        <b>if</b> (addr == new_lasti || addr == f-&gt;f_lasti) <font color='red'>{</font>
+<a name='L235'>            <b>int</b> i = 0;
+<a name='L236'>            <b>int</b> setup_addr = -1;
+<a name='L237'>            <b>for</b> (i = blockstack_top-1; i &gt;= 0; i--) <font color='red'>{</font>
+<a name='L238'>                <b>if</b> (in_finally[i]) <font color='red'>{</font>
+<a name='L239'>                    setup_addr = blockstack[i];
+<a name='L240'>                    <b>break</b>;
+<a name='L241'>                <font color='red'>}</font>
+<a name='L242'>            <font color='red'>}</font>
+<a name='L243'>
+<a name='L244'>            <b>if</b> (setup_addr != -1) <font color='red'>{</font>
+<a name='L245'>                <b>if</b> (addr == new_lasti) <font color='red'>{</font>
+<a name='L246'>                    new_lasti_setup_addr = setup_addr;
+<a name='L247'>                <font color='red'>}</font>
+<a name='L248'>
+<a name='L249'>                <b>if</b> (addr == f-&gt;f_lasti) <font color='red'>{</font>
+<a name='L250'>                    f_lasti_setup_addr = setup_addr;
+<a name='L251'>                <font color='red'>}</font>
+<a name='L252'>            <font color='red'>}</font>
+<a name='L253'>        <font color='red'>}</font>
+<a name='L254'>
+<a name='L255'>        <b>if</b> (op &gt;= <a href='../S/546.html#L73' title='Defined at 73 in Include/opcode.h.'>HAVE_ARGUMENT</a>) <font color='red'>{</font>
+<a name='L256'>            addr += 2;
+<a name='L257'>        <font color='red'>}</font>
+<a name='L258'>    <font color='red'>}</font>
+<a name='L259'>
+<a name='L260'>    <i><font color='green'>/* Verify that the blockstack tracking code didn't get lost. */</font></i>
+<a name='L261'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(blockstack_top == 0);
+<a name='L262'>
+<a name='L263'>    <i><font color='green'>/* After all that, are we jumping into / out of a 'finally' block? */</font></i>
+<a name='L264'>    <b>if</b> (new_lasti_setup_addr != f_lasti_setup_addr) <font color='red'>{</font>
+<a name='L265'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L266'>                    "can't jump into or out of a 'finally' block");
+<a name='L267'>        <b>return</b> -1;
+<a name='L268'>    <font color='red'>}</font>
+<a name='L269'>
+<a name='L270'>
+<a name='L271'>    <i><font color='green'>/* Police block-jumping (you can't jump into the middle of a block)</font></i>
+<a name='L272'><i><font color='green'>     * and ensure that the blockstack finishes up in a sensible state (by</font></i>
+<a name='L273'><i><font color='green'>     * popping any blocks we're jumping out of).  We look at all the</font></i>
+<a name='L274'><i><font color='green'>     * blockstack operations between the current position and the new</font></i>
+<a name='L275'><i><font color='green'>     * one, and keep track of how many blocks we drop out of on the way.</font></i>
+<a name='L276'><i><font color='green'>     * By also keeping track of the lowest blockstack position we see, we</font></i>
+<a name='L277'><i><font color='green'>     * can tell whether the jump goes into any blocks without coming out</font></i>
+<a name='L278'><i><font color='green'>     * again - in that case we raise an exception below. */</font></i>
+<a name='L279'>    delta_iblock = 0;
+<a name='L280'>    <b>for</b> (addr = min_addr; addr &lt; max_addr; addr++) <font color='red'>{</font>
+<a name='L281'>        <b>unsigned</b> <b>char</b> op = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>[addr];
+<a name='L282'>        <b>switch</b> (op) <font color='red'>{</font>
+<a name='L283'>        <b>case</b> <a href='../S/546.html#L108' title='Defined at 108 in Include/opcode.h.'>SETUP_LOOP</a>:
+<a name='L284'>        <b>case</b> <a href='../S/546.html#L109' title='Defined at 109 in Include/opcode.h.'>SETUP_EXCEPT</a>:
+<a name='L285'>        <b>case</b> <a href='../S/546.html#L110' title='Defined at 110 in Include/opcode.h.'>SETUP_FINALLY</a>:
+<a name='L286'>            delta_iblock++;
+<a name='L287'>            <b>break</b>;
+<a name='L288'>
+<a name='L289'>        <b>case</b> <a href='../S/546.html#L69' title='Defined at 69 in Include/opcode.h.'>POP_BLOCK</a>:
+<a name='L290'>            delta_iblock--;
+<a name='L291'>            <b>break</b>;
+<a name='L292'>        <font color='red'>}</font>
+<a name='L293'>
+<a name='L294'>        min_delta_iblock = <a href='../D/2125.html' title='Multiple defined in 11 places.'>MIN</a>(min_delta_iblock, delta_iblock);
+<a name='L295'>
+<a name='L296'>        <b>if</b> (op &gt;= <a href='../S/546.html#L73' title='Defined at 73 in Include/opcode.h.'>HAVE_ARGUMENT</a>) <font color='red'>{</font>
+<a name='L297'>            addr += 2;
+<a name='L298'>        <font color='red'>}</font>
+<a name='L299'>    <font color='red'>}</font>
+<a name='L300'>
+<a name='L301'>    <i><font color='green'>/* Derive the absolute iblock values from the deltas. */</font></i>
+<a name='L302'>    min_iblock = f-&gt;f_iblock + min_delta_iblock;
+<a name='L303'>    <b>if</b> (new_lasti &gt; f-&gt;f_lasti) <font color='red'>{</font>
+<a name='L304'>        <i><font color='green'>/* Forwards jump. */</font></i>
+<a name='L305'>        new_iblock = f-&gt;f_iblock + delta_iblock;
+<a name='L306'>    <font color='red'>}</font>
+<a name='L307'>    <b>else</b> <font color='red'>{</font>
+<a name='L308'>        <i><font color='green'>/* Backwards jump. */</font></i>
+<a name='L309'>        new_iblock = f-&gt;f_iblock - delta_iblock;
+<a name='L310'>    <font color='red'>}</font>
+<a name='L311'>
+<a name='L312'>    <i><font color='green'>/* Are we jumping into a block? */</font></i>
+<a name='L313'>    <b>if</b> (new_iblock &gt; min_iblock) <font color='red'>{</font>
+<a name='L314'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L315'>                        "can't jump into the middle of a block");
+<a name='L316'>        <b>return</b> -1;
+<a name='L317'>    <font color='red'>}</font>
+<a name='L318'>
+<a name='L319'>    <i><font color='green'>/* Pop any blocks that we're jumping out of. */</font></i>
+<a name='L320'>    <b>while</b> (f-&gt;f_iblock &gt; new_iblock) <font color='red'>{</font>
+<a name='L321'>        <a href='../S/526.html#L15' title='Defined at 15 in Include/frameobject.h.'>PyTryBlock</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = &amp;f-&gt;f_blockstack[--f-&gt;f_iblock];
+<a name='L322'>        <b>while</b> ((f-&gt;f_stacktop - f-&gt;f_valuestack) &gt; <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;b_level) <font color='red'>{</font>
+<a name='L323'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = (*--f-&gt;f_stacktop);
+<a name='L324'>            Py_DECREF(v);
+<a name='L325'>        <font color='red'>}</font>
+<a name='L326'>    <font color='red'>}</font>
+<a name='L327'>
+<a name='L328'>    <i><font color='green'>/* Finally set the new f_lineno and f_lasti and return OK. */</font></i>
+<a name='L329'>    f-&gt;f_lineno = new_lineno;
+<a name='L330'>    f-&gt;f_lasti = new_lasti;
+<a name='L331'>    <b>return</b> 0;
+<a name='L332'><font color='red'>}</font>
+<a name='L333'>
+<a name='L334'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L335'><a href='../S/2792.html#L368' title='Refered from 368 in Objects/frameobject.c.'>frame_gettrace</a>(PyFrameObject *f, <b>void</b> *closure)
+<a name='L336'><font color='red'>{</font>
+<a name='L337'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* trace = f-&gt;f_trace;
+<a name='L338'>
+<a name='L339'>    <b>if</b> (trace == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L340'>        trace = Py_None;
+<a name='L341'>
+<a name='L342'>    Py_INCREF(trace);
+<a name='L343'>
+<a name='L344'>    <b>return</b> trace;
+<a name='L345'><font color='red'>}</font>
+<a name='L346'>
+<a name='L347'><b>static</b> <b>int</b>
+<a name='L348'><a href='../S/2792.html#L368' title='Refered from 368 in Objects/frameobject.c.'>frame_settrace</a>(PyFrameObject *f, PyObject* v, <b>void</b> *closure)
+<a name='L349'><font color='red'>{</font>
+<a name='L350'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* old_value;
+<a name='L351'>
+<a name='L352'>    <i><font color='green'>/* We rely on f_lineno being accurate when f_trace is set. */</font></i>
+<a name='L353'>    f-&gt;f_lineno = <a href='../S/2792.html#L35' title='Defined at 35 in Objects/frameobject.c.'>PyFrame_GetLineNumber</a>(f);
+<a name='L354'>
+<a name='L355'>    old_value = f-&gt;f_trace;
+<a name='L356'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(v);
+<a name='L357'>    f-&gt;f_trace = v;
+<a name='L358'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(old_value);
+<a name='L359'>
+<a name='L360'>    <b>return</b> 0;
+<a name='L361'><font color='red'>}</font>
+<a name='L362'>
+<a name='L363'>
+<a name='L364'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> frame_getsetlist[] = <font color='red'>{</font>
+<a name='L365'>    <font color='red'>{</font>"f_locals",        (getter)<a href='../S/2792.html#L27' title='Defined at 27 in Objects/frameobject.c.'>frame_getlocals</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L366'>    <font color='red'>{</font>"f_lineno",        (getter)<a href='../S/2792.html#L44' title='Defined at 44 in Objects/frameobject.c.'>frame_getlineno</a>,
+<a name='L367'>                    (setter)<a href='../S/2792.html#L65' title='Defined at 65 in Objects/frameobject.c.'>frame_setlineno</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L368'>    <font color='red'>{</font>"f_trace",         (getter)<a href='../S/2792.html#L335' title='Defined at 335 in Objects/frameobject.c.'>frame_gettrace</a>, (setter)<a href='../S/2792.html#L348' title='Defined at 348 in Objects/frameobject.c.'>frame_settrace</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L369'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L370'><font color='red'>}</font>;
+<a name='L371'>
+<a name='L372'><i><font color='green'>/* Stack frames are allocated and deallocated at a considerable rate.</font></i>
+<a name='L373'><i><font color='green'>   In an attempt to improve the speed of function calls, we:</font></i>
+<a name='L374'><i><font color='green'></font></i>
+<a name='L375'><i><font color='green'>   1. Hold a single "zombie" frame on each code object. This retains</font></i>
+<a name='L376'><i><font color='green'>   the allocated and initialised frame object from an invocation of</font></i>
+<a name='L377'><i><font color='green'>   the code object. The zombie is reanimated the next time we need a</font></i>
+<a name='L378'><i><font color='green'>   frame object for that code object. Doing this saves the malloc/</font></i>
+<a name='L379'><i><font color='green'>   realloc required when using a free_list frame that isn't the</font></i>
+<a name='L380'><i><font color='green'>   correct size. It also saves some field initialisation.</font></i>
+<a name='L381'><i><font color='green'></font></i>
+<a name='L382'><i><font color='green'>   In zombie mode, no field of PyFrameObject holds a reference, but</font></i>
+<a name='L383'><i><font color='green'>   the following fields are still valid:</font></i>
+<a name='L384'><i><font color='green'></font></i>
+<a name='L385'><i><font color='green'>     * ob_type, ob_size, f_code, f_valuestack;</font></i>
+<a name='L386'><i><font color='green'></font></i>
+<a name='L387'><i><font color='green'>     * f_locals, f_trace,</font></i>
+<a name='L388'><i><font color='green'>       f_exc_type, f_exc_value, f_exc_traceback are NULL;</font></i>
+<a name='L389'><i><font color='green'></font></i>
+<a name='L390'><i><font color='green'>     * f_localsplus does not require re-allocation and</font></i>
+<a name='L391'><i><font color='green'>       the local variables in f_localsplus are NULL.</font></i>
+<a name='L392'><i><font color='green'></font></i>
+<a name='L393'><i><font color='green'>   2. We also maintain a separate free list of stack frames (just like</font></i>
+<a name='L394'><i><font color='green'>   floats are allocated in a special way -- see floatobject.c).  When</font></i>
+<a name='L395'><i><font color='green'>   a stack frame is on the free list, only the following members have</font></i>
+<a name='L396'><i><font color='green'>   a meaning:</font></i>
+<a name='L397'><i><font color='green'>    ob_type             == &amp;Frametype</font></i>
+<a name='L398'><i><font color='green'>    f_back              next item on free list, or NULL</font></i>
+<a name='L399'><i><font color='green'>    f_stacksize         size of value stack</font></i>
+<a name='L400'><i><font color='green'>    ob_size             size of localsplus</font></i>
+<a name='L401'><i><font color='green'>   Note that the value and block stacks are preserved -- this can save</font></i>
+<a name='L402'><i><font color='green'>   another malloc() call or two (and two free() calls as well!).</font></i>
+<a name='L403'><i><font color='green'>   Also note that, unlike for integers, each frame object is a</font></i>
+<a name='L404'><i><font color='green'>   malloc'ed object in its own right -- it is only the actual calls to</font></i>
+<a name='L405'><i><font color='green'>   malloc() that we are trying to save here, not the administration.</font></i>
+<a name='L406'><i><font color='green'>   After all, while a typical program may make millions of calls, a</font></i>
+<a name='L407'><i><font color='green'>   call depth of more than 20 or 30 is probably already exceptional</font></i>
+<a name='L408'><i><font color='green'>   unless the program contains run-away recursion.  I hope.</font></i>
+<a name='L409'><i><font color='green'></font></i>
+<a name='L410'><i><font color='green'>   Later, PyFrame_MAXFREELIST was added to bound the # of frames saved on</font></i>
+<a name='L411'><i><font color='green'>   free_list.  Else programs creating lots of cyclic trash involving</font></i>
+<a name='L412'><i><font color='green'>   frames could provoke free_list into growing without bound.</font></i>
+<a name='L413'><i><font color='green'>*/</font></i>
+<a name='L414'>
+<a name='L415'><b>static</b> <a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a> *free_list = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L416'><b>static</b> <b>int</b> numfree = 0;         <i><font color='green'>/* number of frames currently in free_list */</font></i>
+<a name='L417'><i><font color='green'>/* max value for numfree */</font></i>
+<a name='L418'><font color='darkred'>#define</font> <a href='../S/2792.html#L451' title='Refered from 451 in Objects/frameobject.c.'>PyFrame_MAXFREELIST</a> 200
+<a name='L419'>
+<a name='L420'><b>static</b> <b>void</b>
+<a name='L421'><a href='../S/2792.html#L554' title='Refered from 554 in Objects/frameobject.c.'>frame_dealloc</a>(PyFrameObject *f)
+<a name='L422'><font color='red'>{</font>
+<a name='L423'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **p, **valuestack;
+<a name='L424'>    <a href='../S/511.html#L32' title='Defined at 32 in Include/code.h.'>PyCodeObject</a> *co;
+<a name='L425'>
+<a name='L426'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(f);
+<a name='L427'>    Py_TRASHCAN_SAFE_BEGIN(f)
+<a name='L428'>    <i><font color='green'>/* Kill all local variables */</font></i>
+<a name='L429'>    valuestack = f-&gt;f_valuestack;
+<a name='L430'>    <b>for</b> (p = f-&gt;f_localsplus; p &lt; valuestack; p++)
+<a name='L431'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(*p);
+<a name='L432'>
+<a name='L433'>    <i><font color='green'>/* Free stack */</font></i>
+<a name='L434'>    <b>if</b> (f-&gt;f_stacktop != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L435'>        <b>for</b> (p = valuestack; p &lt; f-&gt;f_stacktop; p++)
+<a name='L436'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(*p);
+<a name='L437'>    <font color='red'>}</font>
+<a name='L438'>
+<a name='L439'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(f-&gt;f_back);
+<a name='L440'>    Py_DECREF(f-&gt;f_builtins);
+<a name='L441'>    Py_DECREF(f-&gt;f_globals);
+<a name='L442'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_locals);
+<a name='L443'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_trace);
+<a name='L444'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_exc_type);
+<a name='L445'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_exc_value);
+<a name='L446'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_exc_traceback);
+<a name='L447'>
+<a name='L448'>    co = f-&gt;f_code;
+<a name='L449'>    <b>if</b> (co-&gt;co_zombieframe == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L450'>        co-&gt;co_zombieframe = f;
+<a name='L451'>    <b>else</b> <b>if</b> (numfree &lt; <a href='../S/2792.html#L418' title='Defined at 418 in Objects/frameobject.c.'>PyFrame_MAXFREELIST</a>) <font color='red'>{</font>
+<a name='L452'>        ++numfree;
+<a name='L453'>        f-&gt;f_back = free_list;
+<a name='L454'>        free_list = f;
+<a name='L455'>    <font color='red'>}</font>
+<a name='L456'>    <b>else</b>
+<a name='L457'>        <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(f);
+<a name='L458'>
+<a name='L459'>    Py_DECREF(co);
+<a name='L460'>    <a href='../S/544.html#L914' title='Defined at 914 in Include/object.h.'>Py_TRASHCAN_SAFE_END</a>(f)
+<a name='L461'><font color='red'>}</font>
+<a name='L462'>
+<a name='L463'><b>static</b> <b>int</b>
+<a name='L464'><a href='../S/2792.html#L571' title='Refered from 571 in Objects/frameobject.c.'>frame_traverse</a>(PyFrameObject *f, visitproc visit, <b>void</b> *arg)
+<a name='L465'><font color='red'>{</font>
+<a name='L466'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **fastlocals, **p;
+<a name='L467'>    <b>int</b> i, slots;
+<a name='L468'>
+<a name='L469'>    Py_VISIT(f-&gt;f_back);
+<a name='L470'>    Py_VISIT(f-&gt;f_code);
+<a name='L471'>    Py_VISIT(f-&gt;f_builtins);
+<a name='L472'>    Py_VISIT(f-&gt;f_globals);
+<a name='L473'>    Py_VISIT(f-&gt;f_locals);
+<a name='L474'>    Py_VISIT(f-&gt;f_trace);
+<a name='L475'>    Py_VISIT(f-&gt;f_exc_type);
+<a name='L476'>    Py_VISIT(f-&gt;f_exc_value);
+<a name='L477'>    Py_VISIT(f-&gt;f_exc_traceback);
+<a name='L478'>
+<a name='L479'>    <i><font color='green'>/* locals */</font></i>
+<a name='L480'>    slots = f-&gt;f_code-&gt;co_nlocals + PyTuple_GET_SIZE(f-&gt;f_code-&gt;co_cellvars) + PyTuple_GET_SIZE(f-&gt;f_code-&gt;co_freevars);
+<a name='L481'>    fastlocals = f-&gt;f_localsplus;
+<a name='L482'>    <b>for</b> (i = slots; --i &gt;= 0; ++fastlocals)
+<a name='L483'>        Py_VISIT(*fastlocals);
+<a name='L484'>
+<a name='L485'>    <i><font color='green'>/* stack */</font></i>
+<a name='L486'>    <b>if</b> (f-&gt;f_stacktop != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L487'>        <b>for</b> (p = f-&gt;f_valuestack; p &lt; f-&gt;f_stacktop; p++)
+<a name='L488'>            Py_VISIT(*p);
+<a name='L489'>    <font color='red'>}</font>
+<a name='L490'>    <b>return</b> 0;
+<a name='L491'><font color='red'>}</font>
+<a name='L492'>
+<a name='L493'><b>static</b> <b>void</b>
+<a name='L494'><a href='../S/2792.html#L572' title='Refered from 572 in Objects/frameobject.c.'>frame_clear</a>(PyFrameObject *f)
+<a name='L495'><font color='red'>{</font>
+<a name='L496'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **fastlocals, **p, **oldtop;
+<a name='L497'>    <b>int</b> i, slots;
+<a name='L498'>
+<a name='L499'>    <i><font color='green'>/* Before anything else, make sure that this frame is clearly marked</font></i>
+<a name='L500'><i><font color='green'>     * as being defunct!  Else, e.g., a generator reachable from this</font></i>
+<a name='L501'><i><font color='green'>     * frame may also point to this frame, believe itself to still be</font></i>
+<a name='L502'><i><font color='green'>     * active, and try cleaning up this frame again.</font></i>
+<a name='L503'><i><font color='green'>     */</font></i>
+<a name='L504'>    oldtop = f-&gt;f_stacktop;
+<a name='L505'>    f-&gt;f_stacktop = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L506'>
+<a name='L507'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_exc_type);
+<a name='L508'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_exc_value);
+<a name='L509'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_exc_traceback);
+<a name='L510'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(f-&gt;f_trace);
+<a name='L511'>
+<a name='L512'>    <i><font color='green'>/* locals */</font></i>
+<a name='L513'>    slots = f-&gt;f_code-&gt;co_nlocals + PyTuple_GET_SIZE(f-&gt;f_code-&gt;co_cellvars) + PyTuple_GET_SIZE(f-&gt;f_code-&gt;co_freevars);
+<a name='L514'>    fastlocals = f-&gt;f_localsplus;
+<a name='L515'>    <b>for</b> (i = slots; --i &gt;= 0; ++fastlocals)
+<a name='L516'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(*fastlocals);
+<a name='L517'>
+<a name='L518'>    <i><font color='green'>/* stack */</font></i>
+<a name='L519'>    <b>if</b> (oldtop != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L520'>        <b>for</b> (p = f-&gt;f_valuestack; p &lt; oldtop; p++)
+<a name='L521'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(*p);
+<a name='L522'>    <font color='red'>}</font>
+<a name='L523'><font color='red'>}</font>
+<a name='L524'>
+<a name='L525'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L526'><a href='../S/2792.html#L544' title='Refered from 544 in Objects/frameobject.c.'>frame_sizeof</a>(PyFrameObject *f)
+<a name='L527'><font color='red'>{</font>
+<a name='L528'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> res, extras, ncells, nfrees;
+<a name='L529'>
+<a name='L530'>    ncells = PyTuple_GET_SIZE(f-&gt;f_code-&gt;co_cellvars);
+<a name='L531'>    nfrees = PyTuple_GET_SIZE(f-&gt;f_code-&gt;co_freevars);
+<a name='L532'>    extras = f-&gt;f_code-&gt;co_stacksize + f-&gt;f_code-&gt;co_nlocals +
+<a name='L533'>             ncells + nfrees;
+<a name='L534'>    <i><font color='green'>/* subtract one as it is already included in PyFrameObject */</font></i>
+<a name='L535'>    res = <b>sizeof</b>(<a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a>) + (extras-1) * <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *);
+<a name='L536'>
+<a name='L537'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(res);
+<a name='L538'><font color='red'>}</font>
+<a name='L539'>
+<a name='L540'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(sizeof__doc__,
+<a name='L541'>"F.__sizeof__() -&gt; size of F in memory, in bytes");
+<a name='L542'>
+<a name='L543'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> frame_methods[] = <font color='red'>{</font>
+<a name='L544'>    <font color='red'>{</font>"__sizeof__",      (PyCFunction)<a href='../S/2792.html#L526' title='Defined at 526 in Objects/frameobject.c.'>frame_sizeof</a>,      <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L545'>     sizeof__doc__<font color='red'>}</font>,
+<a name='L546'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>   <i><font color='green'>/* sentinel */</font></i>
+<a name='L547'><font color='red'>}</font>;
+<a name='L548'>
+<a name='L549'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyFrame_Type = <font color='red'>{</font>
+<a name='L550'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L551'>    "frame",
+<a name='L552'>    <b>sizeof</b>(<a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a>),
+<a name='L553'>    <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *),
+<a name='L554'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2792.html#L421' title='Defined at 421 in Objects/frameobject.c.'>frame_dealloc</a>,                  <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L555'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L556'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L557'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L558'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L559'>    0,                                          <i><font color='green'>/* tp_repr */</font></i>
+<a name='L560'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L561'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L562'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L563'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L564'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L565'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L566'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L567'>    <a href='../S/2803.html#L1130' title='Defined at 1130 in Objects/object.c.'>PyObject_GenericSetAttr</a>,                    <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L568'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L569'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,<i><font color='green'>/* tp_flags */</font></i>
+<a name='L570'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L571'>    (traverseproc)<a href='../S/2792.html#L464' title='Defined at 464 in Objects/frameobject.c.'>frame_traverse</a>,               <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L572'>    (inquiry)<a href='../S/2792.html#L494' title='Defined at 494 in Objects/frameobject.c.'>frame_clear</a>,                       <i><font color='green'>/* tp_clear */</font></i>
+<a name='L573'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L574'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L575'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L576'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L577'>    frame_methods,                              <i><font color='green'>/* tp_methods */</font></i>
+<a name='L578'>    frame_memberlist,                           <i><font color='green'>/* tp_members */</font></i>
+<a name='L579'>    frame_getsetlist,                           <i><font color='green'>/* tp_getset */</font></i>
+<a name='L580'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L581'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L582'><font color='red'>}</font>;
+<a name='L583'>
+<a name='L584'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *builtin_object;
+<a name='L585'>
+<a name='L586'><b>int</b> <a href='../S/3138.html#L231' title='Refered from 231 in Python/pythonrun.c.'>_PyFrame_Init</a>()
+<a name='L587'><font color='red'>{</font>
+<a name='L588'>    builtin_object = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("__builtins__");
+<a name='L589'>    <b>if</b> (builtin_object == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L590'>        <b>return</b> 0;
+<a name='L591'>    <b>return</b> 1;
+<a name='L592'><font color='red'>}</font>
+<a name='L593'>
+<a name='L594'><a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a> *
+<a name='L595'><a href='../R/2965.html' title='Multiple refered from 4 places.'>PyFrame_New</a>(PyThreadState *tstate, PyCodeObject *code, PyObject *globals,
+<a name='L596'>            PyObject *locals)
+<a name='L597'><font color='red'>{</font>
+<a name='L598'>    <a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a> *back = tstate-&gt;frame;
+<a name='L599'>    <a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a> *f;
+<a name='L600'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *builtins;
+<a name='L601'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L602'>
+<a name='L603'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L604'>    <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || globals == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !PyDict_Check(globals) ||
+<a name='L605'>        (locals != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; !<a href='../S/2775.html#L1987' title='Defined at 1987 in Objects/abstract.c.'>PyMapping_Check</a>(locals))) <font color='red'>{</font>
+<a name='L606'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L607'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L608'>    <font color='red'>}</font>
+<a name='L609'><font color='darkred'>#endif</font>
+<a name='L610'>    <b>if</b> (back == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || back-&gt;f_globals != globals) <font color='red'>{</font>
+<a name='L611'>        builtins = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(globals, builtin_object);
+<a name='L612'>        <b>if</b> (builtins) <font color='red'>{</font>
+<a name='L613'>            <b>if</b> (PyModule_Check(builtins)) <font color='red'>{</font>
+<a name='L614'>                builtins = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(builtins);
+<a name='L615'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(!builtins || PyDict_Check(builtins));
+<a name='L616'>            <font color='red'>}</font>
+<a name='L617'>            <b>else</b> <b>if</b> (!PyDict_Check(builtins))
+<a name='L618'>                builtins = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L619'>        <font color='red'>}</font>
+<a name='L620'>        <b>if</b> (builtins == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L621'>            <i><font color='green'>/* No builtins!              Make up a minimal one</font></i>
+<a name='L622'><i><font color='green'>               Give them 'None', at least. */</font></i>
+<a name='L623'>            builtins = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L624'>            <b>if</b> (builtins == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L625'>                <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(
+<a name='L626'>                    builtins, "None", Py_None) &lt; 0)
+<a name='L627'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L628'>        <font color='red'>}</font>
+<a name='L629'>        <b>else</b>
+<a name='L630'>            Py_INCREF(builtins);
+<a name='L631'>
+<a name='L632'>    <font color='red'>}</font>
+<a name='L633'>    <b>else</b> <font color='red'>{</font>
+<a name='L634'>        <i><font color='green'>/* If we share the globals, we share the builtins.</font></i>
+<a name='L635'><i><font color='green'>           Save a lookup and a call. */</font></i>
+<a name='L636'>        builtins = back-&gt;f_builtins;
+<a name='L637'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(builtins != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; PyDict_Check(builtins));
+<a name='L638'>        Py_INCREF(builtins);
+<a name='L639'>    <font color='red'>}</font>
+<a name='L640'>    <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_zombieframe != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L641'>        f = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_zombieframe;
+<a name='L642'>        <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_zombieframe = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L643'>        <a href='../S/2803.html#L1650' title='Defined at 1650 in Objects/object.c.'>_Py_NewReference</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)f);
+<a name='L644'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(f-&gt;f_code == <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L645'>    <font color='red'>}</font>
+<a name='L646'>    <b>else</b> <font color='red'>{</font>
+<a name='L647'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> extras, ncells, nfrees;
+<a name='L648'>        ncells = PyTuple_GET_SIZE(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_cellvars);
+<a name='L649'>        nfrees = PyTuple_GET_SIZE(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_freevars);
+<a name='L650'>        extras = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_stacksize + <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_nlocals + ncells +
+<a name='L651'>            nfrees;
+<a name='L652'>        <b>if</b> (free_list == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L653'>            f = PyObject_GC_NewVar(<a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a>, &amp;PyFrame_Type,
+<a name='L654'>            extras);
+<a name='L655'>            <b>if</b> (f == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L656'>                Py_DECREF(builtins);
+<a name='L657'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L658'>            <font color='red'>}</font>
+<a name='L659'>        <font color='red'>}</font>
+<a name='L660'>        <b>else</b> <font color='red'>{</font>
+<a name='L661'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(numfree &gt; 0);
+<a name='L662'>            --numfree;
+<a name='L663'>            f = free_list;
+<a name='L664'>            free_list = free_list-&gt;f_back;
+<a name='L665'>            <b>if</b> (<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(f) &lt; extras) <font color='red'>{</font>
+<a name='L666'>                f = PyObject_GC_Resize(<a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a>, f, extras);
+<a name='L667'>                <b>if</b> (f == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L668'>                    Py_DECREF(builtins);
+<a name='L669'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L670'>                <font color='red'>}</font>
+<a name='L671'>            <font color='red'>}</font>
+<a name='L672'>            <a href='../S/2803.html#L1650' title='Defined at 1650 in Objects/object.c.'>_Py_NewReference</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)f);
+<a name='L673'>        <font color='red'>}</font>
+<a name='L674'>
+<a name='L675'>        f-&gt;f_code = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>;
+<a name='L676'>        extras = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_nlocals + ncells + nfrees;
+<a name='L677'>        f-&gt;f_valuestack = f-&gt;f_localsplus + extras;
+<a name='L678'>        <b>for</b> (i=0; i&lt;extras; i++)
+<a name='L679'>            f-&gt;f_localsplus[i] = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L680'>        f-&gt;f_locals = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L681'>        f-&gt;f_trace = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L682'>        f-&gt;f_exc_type = f-&gt;f_exc_value = f-&gt;f_exc_traceback = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L683'>    <font color='red'>}</font>
+<a name='L684'>    f-&gt;f_stacktop = f-&gt;f_valuestack;
+<a name='L685'>    f-&gt;f_builtins = builtins;
+<a name='L686'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(back);
+<a name='L687'>    f-&gt;f_back = back;
+<a name='L688'>    Py_INCREF(<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>);
+<a name='L689'>    Py_INCREF(globals);
+<a name='L690'>    f-&gt;f_globals = globals;
+<a name='L691'>    <i><font color='green'>/* Most functions have CO_NEWLOCALS and CO_OPTIMIZED set. */</font></i>
+<a name='L692'>    <b>if</b> ((<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_flags &amp; (<a href='../S/511.html#L36' title='Defined at 36 in Include/code.h.'>CO_NEWLOCALS</a> | <a href='../S/511.html#L35' title='Defined at 35 in Include/code.h.'>CO_OPTIMIZED</a>)) ==
+<a name='L693'>        (<a href='../S/511.html#L36' title='Defined at 36 in Include/code.h.'>CO_NEWLOCALS</a> | <a href='../S/511.html#L35' title='Defined at 35 in Include/code.h.'>CO_OPTIMIZED</a>))
+<a name='L694'>        ; <i><font color='green'>/* f_locals = NULL; will be set by PyFrame_FastToLocals() */</font></i>
+<a name='L695'>    <b>else</b> <b>if</b> (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_flags &amp; <a href='../S/511.html#L36' title='Defined at 36 in Include/code.h.'>CO_NEWLOCALS</a>) <font color='red'>{</font>
+<a name='L696'>        locals = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L697'>        <b>if</b> (locals == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L698'>            Py_DECREF(f);
+<a name='L699'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L700'>        <font color='red'>}</font>
+<a name='L701'>        f-&gt;f_locals = locals;
+<a name='L702'>    <font color='red'>}</font>
+<a name='L703'>    <b>else</b> <font color='red'>{</font>
+<a name='L704'>        <b>if</b> (locals == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L705'>            locals = globals;
+<a name='L706'>        Py_INCREF(locals);
+<a name='L707'>        f-&gt;f_locals = locals;
+<a name='L708'>    <font color='red'>}</font>
+<a name='L709'>    f-&gt;f_tstate = tstate;
+<a name='L710'>
+<a name='L711'>    f-&gt;f_lasti = -1;
+<a name='L712'>    f-&gt;f_lineno = <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a>-&gt;co_firstlineno;
+<a name='L713'>    f-&gt;f_iblock = 0;
+<a name='L714'>
+<a name='L715'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(f);
+<a name='L716'>    <b>return</b> f;
+<a name='L717'><font color='red'>}</font>
+<a name='L718'>
+<a name='L719'><i><font color='green'>/* Block management */</font></i>
+<a name='L720'>
+<a name='L721'><b>void</b>
+<a name='L722'><a href='../R/2958.html' title='Multiple refered from 3 places.'>PyFrame_BlockSetup</a>(PyFrameObject *f, <b>int</b> type, <b>int</b> handler, <b>int</b> level)
+<a name='L723'><font color='red'>{</font>
+<a name='L724'>    <a href='../S/526.html#L15' title='Defined at 15 in Include/frameobject.h.'>PyTryBlock</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L725'>    <b>if</b> (f-&gt;f_iblock &gt;= <a href='../S/511.html#L65' title='Defined at 65 in Include/code.h.'>CO_MAXBLOCKS</a>)
+<a name='L726'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("XXX block stack overflow");
+<a name='L727'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = &amp;f-&gt;f_blockstack[f-&gt;f_iblock++];
+<a name='L728'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;b_type = type;
+<a name='L729'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;b_level = level;
+<a name='L730'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;b_handler = handler;
+<a name='L731'><font color='red'>}</font>
+<a name='L732'>
+<a name='L733'><a href='../S/526.html#L15' title='Defined at 15 in Include/frameobject.h.'>PyTryBlock</a> *
+<a name='L734'><a href='../R/2957.html' title='Multiple refered from 3 places.'>PyFrame_BlockPop</a>(PyFrameObject *f)
+<a name='L735'><font color='red'>{</font>
+<a name='L736'>    <a href='../S/526.html#L15' title='Defined at 15 in Include/frameobject.h.'>PyTryBlock</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L737'>    <b>if</b> (f-&gt;f_iblock &lt;= 0)
+<a name='L738'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("XXX block stack underflow");
+<a name='L739'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = &amp;f-&gt;f_blockstack[--f-&gt;f_iblock];
+<a name='L740'>    <b>return</b> <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L741'><font color='red'>}</font>
+<a name='L742'>
+<a name='L743'><i><font color='green'>/* Convert between "fast" version of locals and dictionary version.</font></i>
+<a name='L744'><i><font color='green'></font></i>
+<a name='L745'><i><font color='green'>   map and values are input arguments.  map is a tuple of strings.</font></i>
+<a name='L746'><i><font color='green'>   values is an array of PyObject*.  At index i, map[i] is the name of</font></i>
+<a name='L747'><i><font color='green'>   the variable with value values[i].  The function copies the first</font></i>
+<a name='L748'><i><font color='green'>   nmap variable from map/values into dict.  If values[i] is NULL,</font></i>
+<a name='L749'><i><font color='green'>   the variable is deleted from dict.</font></i>
+<a name='L750'><i><font color='green'></font></i>
+<a name='L751'><i><font color='green'>   If deref is true, then the values being copied are cell variables</font></i>
+<a name='L752'><i><font color='green'>   and the value is extracted from the cell variable before being put</font></i>
+<a name='L753'><i><font color='green'>   in dict.</font></i>
+<a name='L754'><i><font color='green'></font></i>
+<a name='L755'><i><font color='green'>   Exceptions raised while modifying the dict are silently ignored,</font></i>
+<a name='L756'><i><font color='green'>   because there is no good way to report them.</font></i>
+<a name='L757'><i><font color='green'> */</font></i>
+<a name='L758'>
+<a name='L759'><b>static</b> <b>void</b>
+<a name='L760'><a href='../R/8873.html' title='Multiple refered from 3 places.'>map_to_dict</a>(PyObject *map, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> nmap, PyObject *dict, PyObject **values,
+<a name='L761'>            <b>int</b> deref)
+<a name='L762'><font color='red'>{</font>
+<a name='L763'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> j;
+<a name='L764'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyTuple_Check(map));
+<a name='L765'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyDict_Check(dict));
+<a name='L766'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2823.html#L112' title='Defined at 112 in Objects/tupleobject.c.'>PyTuple_Size</a>(map) &gt;= nmap);
+<a name='L767'>    <b>for</b> (j = nmap; --j &gt;= 0; ) <font color='red'>{</font>
+<a name='L768'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = PyTuple_GET_ITEM(map, j);
+<a name='L769'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = values[j];
+<a name='L770'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyUnicode_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>));
+<a name='L771'>        <b>if</b> (deref) <font color='red'>{</font>
+<a name='L772'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyCell_Check(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>));
+<a name='L773'>            <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = PyCell_GET(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L774'>        <font color='red'>}</font>
+<a name='L775'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L776'>            <b>if</b> (<a href='../S/2775.html#L173' title='Defined at 173 in Objects/abstract.c.'>PyObject_DelItem</a>(dict, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>) != 0)
+<a name='L777'>                <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L778'>        <font color='red'>}</font>
+<a name='L779'>        <b>else</b> <font color='red'>{</font>
+<a name='L780'>            <b>if</b> (<a href='../S/2775.html#L141' title='Defined at 141 in Objects/abstract.c.'>PyObject_SetItem</a>(dict, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) != 0)
+<a name='L781'>                <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L782'>        <font color='red'>}</font>
+<a name='L783'>    <font color='red'>}</font>
+<a name='L784'><font color='red'>}</font>
+<a name='L785'>
+<a name='L786'><i><font color='green'>/* Copy values from the "locals" dict into the fast locals.</font></i>
+<a name='L787'><i><font color='green'></font></i>
+<a name='L788'><i><font color='green'>   dict is an input argument containing string keys representing</font></i>
+<a name='L789'><i><font color='green'>   variables names and arbitrary PyObject* as values.</font></i>
+<a name='L790'><i><font color='green'></font></i>
+<a name='L791'><i><font color='green'>   map and values are input arguments.  map is a tuple of strings.</font></i>
+<a name='L792'><i><font color='green'>   values is an array of PyObject*.  At index i, map[i] is the name of</font></i>
+<a name='L793'><i><font color='green'>   the variable with value values[i].  The function copies the first</font></i>
+<a name='L794'><i><font color='green'>   nmap variable from map/values into dict.  If values[i] is NULL,</font></i>
+<a name='L795'><i><font color='green'>   the variable is deleted from dict.</font></i>
+<a name='L796'><i><font color='green'></font></i>
+<a name='L797'><i><font color='green'>   If deref is true, then the values being copied are cell variables</font></i>
+<a name='L798'><i><font color='green'>   and the value is extracted from the cell variable before being put</font></i>
+<a name='L799'><i><font color='green'>   in dict.  If clear is true, then variables in map but not in dict</font></i>
+<a name='L800'><i><font color='green'>   are set to NULL in map; if clear is false, variables missing in</font></i>
+<a name='L801'><i><font color='green'>   dict are ignored.</font></i>
+<a name='L802'><i><font color='green'></font></i>
+<a name='L803'><i><font color='green'>   Exceptions raised while modifying the dict are silently ignored,</font></i>
+<a name='L804'><i><font color='green'>   because there is no good way to report them.</font></i>
+<a name='L805'><i><font color='green'>*/</font></i>
+<a name='L806'>
+<a name='L807'><b>static</b> <b>void</b>
+<a name='L808'><a href='../R/7345.html' title='Multiple refered from 3 places.'>dict_to_map</a>(PyObject *map, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> nmap, PyObject *dict, PyObject **values,
+<a name='L809'>            <b>int</b> deref, <b>int</b> clear)
+<a name='L810'><font color='red'>{</font>
+<a name='L811'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> j;
+<a name='L812'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyTuple_Check(map));
+<a name='L813'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyDict_Check(dict));
+<a name='L814'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2823.html#L112' title='Defined at 112 in Objects/tupleobject.c.'>PyTuple_Size</a>(map) &gt;= nmap);
+<a name='L815'>    <b>for</b> (j = nmap; --j &gt;= 0; ) <font color='red'>{</font>
+<a name='L816'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = PyTuple_GET_ITEM(map, j);
+<a name='L817'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2775.html#L113' title='Defined at 113 in Objects/abstract.c.'>PyObject_GetItem</a>(dict, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L818'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyUnicode_Check(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>));
+<a name='L819'>        <i><font color='green'>/* We only care about NULLs if clear is true. */</font></i>
+<a name='L820'>        <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L821'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L822'>            <b>if</b> (!clear)
+<a name='L823'>                <b>continue</b>;
+<a name='L824'>        <font color='red'>}</font>
+<a name='L825'>        <b>if</b> (deref) <font color='red'>{</font>
+<a name='L826'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyCell_Check(values[j]));
+<a name='L827'>            <b>if</b> (PyCell_GET(values[j]) != <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) <font color='red'>{</font>
+<a name='L828'>                <b>if</b> (<a href='../S/2781.html#L32' title='Defined at 32 in Objects/cellobject.c.'>PyCell_Set</a>(values[j], <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) &lt; 0)
+<a name='L829'>                    <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L830'>            <font color='red'>}</font>
+<a name='L831'>        <font color='red'>}</font> <b>else</b> <b>if</b> (values[j] != <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) <font color='red'>{</font>
+<a name='L832'>            <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L833'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(values[j]);
+<a name='L834'>            values[j] = <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L835'>        <font color='red'>}</font>
+<a name='L836'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L837'>    <font color='red'>}</font>
+<a name='L838'><font color='red'>}</font>
+<a name='L839'>
+<a name='L840'><b>void</b>
+<a name='L841'><a href='../R/2960.html' title='Multiple refered from 4 places.'>PyFrame_FastToLocals</a>(PyFrameObject *f)
+<a name='L842'><font color='red'>{</font>
+<a name='L843'>    <i><font color='green'>/* Merge fast locals into f-&gt;f_locals */</font></i>
+<a name='L844'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *locals, *map;
+<a name='L845'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **fast;
+<a name='L846'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *error_type, *error_value, *error_traceback;
+<a name='L847'>    <a href='../S/511.html#L32' title='Defined at 32 in Include/code.h.'>PyCodeObject</a> *co;
+<a name='L848'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> j;
+<a name='L849'>    <b>int</b> ncells, nfreevars;
+<a name='L850'>    <b>if</b> (f == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L851'>        <b>return</b>;
+<a name='L852'>    locals = f-&gt;f_locals;
+<a name='L853'>    <b>if</b> (locals == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L854'>        locals = f-&gt;f_locals = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L855'>        <b>if</b> (locals == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L856'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>(); <i><font color='green'>/* Can't report it :-( */</font></i>
+<a name='L857'>            <b>return</b>;
+<a name='L858'>        <font color='red'>}</font>
+<a name='L859'>    <font color='red'>}</font>
+<a name='L860'>    co = f-&gt;f_code;
+<a name='L861'>    map = co-&gt;co_varnames;
+<a name='L862'>    <b>if</b> (!PyTuple_Check(map))
+<a name='L863'>        <b>return</b>;
+<a name='L864'>    <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;error_type, &amp;error_value, &amp;error_traceback);
+<a name='L865'>    fast = f-&gt;f_localsplus;
+<a name='L866'>    j = PyTuple_GET_SIZE(map);
+<a name='L867'>    <b>if</b> (j &gt; co-&gt;co_nlocals)
+<a name='L868'>        j = co-&gt;co_nlocals;
+<a name='L869'>    <b>if</b> (co-&gt;co_nlocals)
+<a name='L870'>        <a href='../S/2792.html#L760' title='Defined at 760 in Objects/frameobject.c.'>map_to_dict</a>(map, j, locals, fast, 0);
+<a name='L871'>    ncells = PyTuple_GET_SIZE(co-&gt;co_cellvars);
+<a name='L872'>    nfreevars = PyTuple_GET_SIZE(co-&gt;co_freevars);
+<a name='L873'>    <b>if</b> (ncells || nfreevars) <font color='red'>{</font>
+<a name='L874'>        <a href='../S/2792.html#L760' title='Defined at 760 in Objects/frameobject.c.'>map_to_dict</a>(co-&gt;co_cellvars, ncells,
+<a name='L875'>                    locals, fast + co-&gt;co_nlocals, 1);
+<a name='L876'>        <i><font color='green'>/* If the namespace is unoptimized, then one of the</font></i>
+<a name='L877'><i><font color='green'>           following cases applies:</font></i>
+<a name='L878'><i><font color='green'>           1. It does not contain free variables, because it</font></i>
+<a name='L879'><i><font color='green'>              uses import * or is a top-level namespace.</font></i>
+<a name='L880'><i><font color='green'>           2. It is a class namespace.</font></i>
+<a name='L881'><i><font color='green'>           We don't want to accidentally copy free variables</font></i>
+<a name='L882'><i><font color='green'>           into the locals dict used by the class.</font></i>
+<a name='L883'><i><font color='green'>        */</font></i>
+<a name='L884'>        <b>if</b> (co-&gt;co_flags &amp; <a href='../S/511.html#L35' title='Defined at 35 in Include/code.h.'>CO_OPTIMIZED</a>) <font color='red'>{</font>
+<a name='L885'>            <a href='../S/2792.html#L760' title='Defined at 760 in Objects/frameobject.c.'>map_to_dict</a>(co-&gt;co_freevars, nfreevars,
+<a name='L886'>                        locals, fast + co-&gt;co_nlocals + ncells, 1);
+<a name='L887'>        <font color='red'>}</font>
+<a name='L888'>    <font color='red'>}</font>
+<a name='L889'>    <a href='../S/3106.html#L25' title='Defined at 25 in Python/errors.c.'>PyErr_Restore</a>(error_type, error_value, error_traceback);
+<a name='L890'><font color='red'>}</font>
+<a name='L891'>
+<a name='L892'><b>void</b>
+<a name='L893'><a href='../R/2963.html' title='Multiple refered from 2 places.'>PyFrame_LocalsToFast</a>(PyFrameObject *f, <b>int</b> clear)
+<a name='L894'><font color='red'>{</font>
+<a name='L895'>    <i><font color='green'>/* Merge f-&gt;f_locals into fast locals */</font></i>
+<a name='L896'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *locals, *map;
+<a name='L897'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **fast;
+<a name='L898'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *error_type, *error_value, *error_traceback;
+<a name='L899'>    <a href='../S/511.html#L32' title='Defined at 32 in Include/code.h.'>PyCodeObject</a> *co;
+<a name='L900'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> j;
+<a name='L901'>    <b>int</b> ncells, nfreevars;
+<a name='L902'>    <b>if</b> (f == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L903'>        <b>return</b>;
+<a name='L904'>    locals = f-&gt;f_locals;
+<a name='L905'>    co = f-&gt;f_code;
+<a name='L906'>    map = co-&gt;co_varnames;
+<a name='L907'>    <b>if</b> (locals == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L908'>        <b>return</b>;
+<a name='L909'>    <b>if</b> (!PyTuple_Check(map))
+<a name='L910'>        <b>return</b>;
+<a name='L911'>    <a href='../S/3106.html#L304' title='Defined at 304 in Python/errors.c.'>PyErr_Fetch</a>(&amp;error_type, &amp;error_value, &amp;error_traceback);
+<a name='L912'>    fast = f-&gt;f_localsplus;
+<a name='L913'>    j = PyTuple_GET_SIZE(map);
+<a name='L914'>    <b>if</b> (j &gt; co-&gt;co_nlocals)
+<a name='L915'>        j = co-&gt;co_nlocals;
+<a name='L916'>    <b>if</b> (co-&gt;co_nlocals)
+<a name='L917'>        <a href='../S/2792.html#L808' title='Defined at 808 in Objects/frameobject.c.'>dict_to_map</a>(co-&gt;co_varnames, j, locals, fast, 0, clear);
+<a name='L918'>    ncells = PyTuple_GET_SIZE(co-&gt;co_cellvars);
+<a name='L919'>    nfreevars = PyTuple_GET_SIZE(co-&gt;co_freevars);
+<a name='L920'>    <b>if</b> (ncells || nfreevars) <font color='red'>{</font>
+<a name='L921'>        <a href='../S/2792.html#L808' title='Defined at 808 in Objects/frameobject.c.'>dict_to_map</a>(co-&gt;co_cellvars, ncells,
+<a name='L922'>                    locals, fast + co-&gt;co_nlocals, 1, clear);
+<a name='L923'>        <i><font color='green'>/* Same test as in PyFrame_FastToLocals() above. */</font></i>
+<a name='L924'>        <b>if</b> (co-&gt;co_flags &amp; <a href='../S/511.html#L35' title='Defined at 35 in Include/code.h.'>CO_OPTIMIZED</a>) <font color='red'>{</font>
+<a name='L925'>            <a href='../S/2792.html#L808' title='Defined at 808 in Objects/frameobject.c.'>dict_to_map</a>(co-&gt;co_freevars, nfreevars,
+<a name='L926'>                locals, fast + co-&gt;co_nlocals + ncells, 1,
+<a name='L927'>                clear);
+<a name='L928'>        <font color='red'>}</font>
+<a name='L929'>    <font color='red'>}</font>
+<a name='L930'>    <a href='../S/3106.html#L25' title='Defined at 25 in Python/errors.c.'>PyErr_Restore</a>(error_type, error_value, error_traceback);
+<a name='L931'><font color='red'>}</font>
+<a name='L932'>
+<a name='L933'><i><font color='green'>/* Clear out the free list */</font></i>
+<a name='L934'><b>int</b>
+<a name='L935'><a href='../R/2959.html' title='Multiple refered from 2 places.'>PyFrame_ClearFreeList</a>(<b>void</b>)
+<a name='L936'><font color='red'>{</font>
+<a name='L937'>    <b>int</b> freelist_size = numfree;
+<a name='L938'>
+<a name='L939'>    <b>while</b> (free_list != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L940'>        <a href='../S/526.html#L51' title='Defined at 51 in Include/frameobject.h.'>PyFrameObject</a> *f = free_list;
+<a name='L941'>        free_list = free_list-&gt;f_back;
+<a name='L942'>        <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(f);
+<a name='L943'>        --numfree;
+<a name='L944'>    <font color='red'>}</font>
+<a name='L945'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(numfree == 0);
+<a name='L946'>    <b>return</b> freelist_size;
+<a name='L947'><font color='red'>}</font>
+<a name='L948'>
+<a name='L949'><b>void</b>
+<a name='L950'><a href='../S/3138.html#L496' title='Refered from 496 in Python/pythonrun.c.'>PyFrame_Fini</a>(<b>void</b>)
+<a name='L951'><font color='red'>{</font>
+<a name='L952'>    (<b>void</b>)<a href='../S/2792.html#L935' title='Defined at 935 in Objects/frameobject.c.'>PyFrame_ClearFreeList</a>();
+<a name='L953'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(builtin_object);
+<a name='L954'>    builtin_object = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L955'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L27'>[^]</a><a href='#L950'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

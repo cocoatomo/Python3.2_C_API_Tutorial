@@ -1,0 +1,763 @@
+<html>
+<head>
+<title>Modules/_localemodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/_localemodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L47'>[^]</a><a href='#L662'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L47' title='Defined at 47.'>str2uni</a>
+<li><a href='#L89' title='Defined at 89.'>copy_grouping</a>
+<li><a href='#L127' title='Defined at 127.'>PyLocale_setlocale</a>
+<li><a href='#L171' title='Defined at 171.'>PyLocale_localeconv</a>
+<li><a href='#L241' title='Defined at 241.'>PyLocale_strcoll</a>
+<li><a href='#L272' title='Defined at 272.'>PyLocale_strxfrm</a>
+<li><a href='#L325' title='Defined at 325.'>PyLocale_getdefaultlocale</a>
+<li><a href='#L474' title='Defined at 474.'>PyLocale_nl_langinfo</a>
+<li><a href='#L502' title='Defined at 502.'>PyIntl_gettext</a>
+<li><a href='#L515' title='Defined at 515.'>PyIntl_dgettext</a>
+<li><a href='#L528' title='Defined at 528.'>PyIntl_dcgettext</a>
+<li><a href='#L542' title='Defined at 542.'>PyIntl_textdomain</a>
+<li><a href='#L560' title='Defined at 560.'>PyIntl_bindtextdomain</a>
+<li><a href='#L595' title='Defined at 595.'>PyIntl_bind_textdomain_codeset</a>
+<li><a href='#L662' title='Defined at 662.'>PyInit__locale</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/***********************************************************</font></i>
+<a name='L2'><i><font color='green'>Copyright (C) 1997, 2002, 2003, 2007, 2008 Martin von Loewis</font></i>
+<a name='L3'><i><font color='green'></font></i>
+<a name='L4'><i><font color='green'>Permission to use, copy, modify, and distribute this software and its</font></i>
+<a name='L5'><i><font color='green'>documentation for any purpose and without fee is hereby granted,</font></i>
+<a name='L6'><i><font color='green'>provided that the above copyright notice appear in all copies.</font></i>
+<a name='L7'><i><font color='green'></font></i>
+<a name='L8'><i><font color='green'>This software comes with no warranty. Use at your own risk.</font></i>
+<a name='L9'><i><font color='green'></font></i>
+<a name='L10'><i><font color='green'>******************************************************************/</font></i>
+<a name='L11'>
+<a name='L12'><font color='darkred'>#define</font> <a href='../R/2388.html' title='Multiple refered from 2 places.'>PY_SSIZE_T_CLEAN</a>
+<a name='L13'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L14'>
+<a name='L15'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L16'><font color='darkred'>#include</font> &lt;locale.h&gt;
+<a name='L17'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L18'><font color='darkred'>#include</font> &lt;<a href='2809.html'>ctype.h</a>&gt;
+<a name='L19'>
+<a name='L20'><font color='darkred'>#ifdef</font> <a href='../D/1482.html' title='Multiple defined in 3 places.'>HAVE_ERRNO_H</a>
+<a name='L21'><font color='darkred'>#include</font> &lt;errno.h&gt;
+<a name='L22'><font color='darkred'>#endif</font>
+<a name='L23'>
+<a name='L24'><font color='darkred'>#ifdef</font> HAVE_LANGINFO_H
+<a name='L25'><font color='darkred'>#include</font> &lt;langinfo.h&gt;
+<a name='L26'><font color='darkred'>#endif</font>
+<a name='L27'>
+<a name='L28'><font color='darkred'>#ifdef</font> HAVE_LIBINTL_H
+<a name='L29'><font color='darkred'>#include</font> &lt;libintl.h&gt;
+<a name='L30'><font color='darkred'>#endif</font>
+<a name='L31'>
+<a name='L32'><font color='darkred'>#ifdef</font> <a href='../D/1607.html' title='Multiple defined in 2 places.'>HAVE_WCHAR_H</a>
+<a name='L33'><font color='darkred'>#include</font> &lt;wchar.h&gt;
+<a name='L34'><font color='darkred'>#endif</font>
+<a name='L35'>
+<a name='L36'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>)
+<a name='L37'><font color='darkred'>#define</font> WIN32_LEAN_AND_MEAN
+<a name='L38'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L39'><font color='darkred'>#endif</font>
+<a name='L40'>
+<a name='L41'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(locale__doc__, "Support for POSIX locales.");
+<a name='L42'>
+<a name='L43'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *Error;
+<a name='L44'>
+<a name='L45'><i><font color='green'>/* Convert a char* to a Unicode object according to the current locale */</font></i>
+<a name='L46'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L47'><a href='../R/10534.html' title='Multiple refered from 10 places.'>str2uni</a>(<b>const</b> <b>char</b>* s)
+<a name='L48'><font color='red'>{</font>
+<a name='L49'><font color='darkred'>#ifdef</font> HAVE_BROKEN_MBSTOWCS
+<a name='L50'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> needed = strlen(s);
+<a name='L51'><font color='darkred'>#else</font>
+<a name='L52'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> needed = mbstowcs(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, s, 0);
+<a name='L53'><font color='darkred'>#endif</font>
+<a name='L54'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> res1;
+<a name='L55'>    wchar_t smallbuf[30];
+<a name='L56'>    wchar_t *dest;
+<a name='L57'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res2;
+<a name='L58'>    <b>if</b> (needed == (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)-1) <font color='red'>{</font>
+<a name='L59'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "Cannot convert byte to string");
+<a name='L60'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L61'>    <font color='red'>}</font>
+<a name='L62'>    <b>if</b> (needed*<b>sizeof</b>(wchar_t) &lt; <b>sizeof</b>(smallbuf))
+<a name='L63'>        dest = smallbuf;
+<a name='L64'>    <b>else</b> <font color='red'>{</font>
+<a name='L65'>        dest = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>((needed+1)*<b>sizeof</b>(wchar_t));
+<a name='L66'>        <b>if</b> (!dest)
+<a name='L67'>            <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L68'>    <font color='red'>}</font>
+<a name='L69'>    <i><font color='green'>/* This shouldn't fail now */</font></i>
+<a name='L70'>    res1 = mbstowcs(dest, s, needed+1);
+<a name='L71'><font color='darkred'>#ifdef</font> HAVE_BROKEN_MBSTOWCS
+<a name='L72'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(res1 != (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)-1);
+<a name='L73'><font color='darkred'>#else</font>
+<a name='L74'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(res1 == needed);
+<a name='L75'><font color='darkred'>#endif</font>
+<a name='L76'>    res2 = <a href='../D/4015.html' title='Multiple defined in 4 places.'>PyUnicode_FromWideChar</a>(dest, res1);
+<a name='L77'>    <b>if</b> (dest != smallbuf)
+<a name='L78'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(dest);
+<a name='L79'>    <b>return</b> res2;
+<a name='L80'><font color='red'>}</font>
+<a name='L81'>
+<a name='L82'><i><font color='green'>/* support functions for formatting floating point numbers */</font></i>
+<a name='L83'>
+<a name='L84'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(setlocale__doc__,
+<a name='L85'>"(integer,string=None) -&gt; string. Activates/queries locale processing.");
+<a name='L86'>
+<a name='L87'><i><font color='green'>/* the grouping is terminated by either 0 or CHAR_MAX */</font></i>
+<a name='L88'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L89'><a href='../R/7016.html' title='Multiple refered from 2 places.'>copy_grouping</a>(<b>char</b>* s)
+<a name='L90'><font color='red'>{</font>
+<a name='L91'>    <b>int</b> i;
+<a name='L92'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, *val = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L93'>
+<a name='L94'>    <b>if</b> (s[0] == '\0')
+<a name='L95'>        <i><font color='green'>/* empty string: no grouping at all */</font></i>
+<a name='L96'>        <b>return</b> <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L97'>
+<a name='L98'>    <b>for</b> (i = 0; s[i] != '\0' &amp;&amp; s[i] != CHAR_MAX; i++)
+<a name='L99'>        ; <i><font color='green'>/* nothing */</font></i>
+<a name='L100'>
+<a name='L101'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(i+1);
+<a name='L102'>    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)
+<a name='L103'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L104'>
+<a name='L105'>    i = -1;
+<a name='L106'>    <b>do</b> <font color='red'>{</font>
+<a name='L107'>        i++;
+<a name='L108'>        val = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(s[i]);
+<a name='L109'>        <b>if</b> (!val)
+<a name='L110'>            <b>break</b>;
+<a name='L111'>        <b>if</b> (<a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, i, val)) <font color='red'>{</font>
+<a name='L112'>            Py_DECREF(val);
+<a name='L113'>            val = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L114'>            <b>break</b>;
+<a name='L115'>        <font color='red'>}</font>
+<a name='L116'>    <font color='red'>}</font> <b>while</b> (s[i] != '\0' &amp;&amp; s[i] != CHAR_MAX);
+<a name='L117'>
+<a name='L118'>    <b>if</b> (!val) <font color='red'>{</font>
+<a name='L119'>        Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L120'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L121'>    <font color='red'>}</font>
+<a name='L122'>
+<a name='L123'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L124'><font color='red'>}</font>
+<a name='L125'>
+<a name='L126'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L127'><a href='../S/2577.html#L610' title='Refered from 610 in Modules/_localemodule.c.'>PyLocale_setlocale</a>(PyObject* self, PyObject* args)
+<a name='L128'><font color='red'>{</font>
+<a name='L129'>    <b>int</b> category;
+<a name='L130'>    <b>char</b> *locale = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L131'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *result_object;
+<a name='L132'>
+<a name='L133'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i|z:setlocale", &amp;category, &amp;locale))
+<a name='L134'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L135'>
+<a name='L136'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>)
+<a name='L137'>    <b>if</b> (category &lt; LC_MIN || category &gt; LC_MAX)
+<a name='L138'>    <font color='red'>{</font>
+<a name='L139'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(Error, "invalid locale category");
+<a name='L140'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L141'>    <font color='red'>}</font>
+<a name='L142'><font color='darkred'>#endif</font>
+<a name='L143'>
+<a name='L144'>    <b>if</b> (locale) <font color='red'>{</font>
+<a name='L145'>        <i><font color='green'>/* set locale */</font></i>
+<a name='L146'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = setlocale(category, locale);
+<a name='L147'>        <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L148'>            <i><font color='green'>/* operation failed, no setting was changed */</font></i>
+<a name='L149'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(Error, "unsupported locale setting");
+<a name='L150'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L151'>        <font color='red'>}</font>
+<a name='L152'>        result_object = <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L153'>        <b>if</b> (!result_object)
+<a name='L154'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L155'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L156'>        <i><font color='green'>/* get locale */</font></i>
+<a name='L157'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = setlocale(category, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L158'>        <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <font color='red'>{</font>
+<a name='L159'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(Error, "locale query failed");
+<a name='L160'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L161'>        <font color='red'>}</font>
+<a name='L162'>        result_object = <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L163'>    <font color='red'>}</font>
+<a name='L164'>    <b>return</b> result_object;
+<a name='L165'><font color='red'>}</font>
+<a name='L166'>
+<a name='L167'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(localeconv__doc__,
+<a name='L168'>"() -&gt; dict. Returns numeric and monetary locale-specific parameters.");
+<a name='L169'>
+<a name='L170'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L171'><a href='../S/2577.html#L612' title='Refered from 612 in Modules/_localemodule.c.'>PyLocale_localeconv</a>(PyObject* self)
+<a name='L172'><font color='red'>{</font>
+<a name='L173'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L174'>    <b>struct</b> lconv *l;
+<a name='L175'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *x;
+<a name='L176'>
+<a name='L177'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L178'>    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)
+<a name='L179'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L180'>
+<a name='L181'>    <i><font color='green'>/* if LC_NUMERIC is different in the C library, use saved value */</font></i>
+<a name='L182'>    l = localeconv();
+<a name='L183'>
+<a name='L184'>    <i><font color='green'>/* hopefully, the localeconv result survives the C library calls</font></i>
+<a name='L185'><i><font color='green'>       involved herein */</font></i>
+<a name='L186'>
+<a name='L187'><font color='darkred'>#define</font> <a href='../R/3955.html' title='Multiple refered from 8 places.'>RESULT_STRING</a>(s)\
+<a name='L188'>    x = <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(l-&gt;s);   \
+<a name='L189'>    <b>if</b> (!x) <b>goto</b> failed;\
+<a name='L190'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, #s, x);\
+<a name='L191'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x)
+<a name='L192'>
+<a name='L193'><font color='darkred'>#define</font> <a href='../R/3954.html' title='Multiple refered from 8 places.'>RESULT_INT</a>(i)\
+<a name='L194'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(l-&gt;i);\
+<a name='L195'>    <b>if</b> (!x) <b>goto</b> failed;\
+<a name='L196'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, #i, x);\
+<a name='L197'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x)
+<a name='L198'>
+<a name='L199'>    <i><font color='green'>/* Numeric information */</font></i>
+<a name='L200'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(decimal_point);
+<a name='L201'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(thousands_sep);
+<a name='L202'>    x = <a href='../S/2577.html#L89' title='Defined at 89 in Modules/_localemodule.c.'>copy_grouping</a>(l-&gt;grouping);
+<a name='L203'>    <b>if</b> (!x)
+<a name='L204'>        <b>goto</b> failed;
+<a name='L205'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, "grouping", x);
+<a name='L206'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L207'>
+<a name='L208'>    <i><font color='green'>/* Monetary information */</font></i>
+<a name='L209'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(int_curr_symbol);
+<a name='L210'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(currency_symbol);
+<a name='L211'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(mon_decimal_point);
+<a name='L212'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(mon_thousands_sep);
+<a name='L213'>    x = <a href='../S/2577.html#L89' title='Defined at 89 in Modules/_localemodule.c.'>copy_grouping</a>(l-&gt;mon_grouping);
+<a name='L214'>    <b>if</b> (!x)
+<a name='L215'>        <b>goto</b> failed;
+<a name='L216'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, "mon_grouping", x);
+<a name='L217'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L218'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(positive_sign);
+<a name='L219'>    <a href='../S/2577.html#L187' title='Defined at 187 in Modules/_localemodule.c.'>RESULT_STRING</a>(negative_sign);
+<a name='L220'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(int_frac_digits);
+<a name='L221'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(frac_digits);
+<a name='L222'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(p_cs_precedes);
+<a name='L223'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(p_sep_by_space);
+<a name='L224'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(n_cs_precedes);
+<a name='L225'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(n_sep_by_space);
+<a name='L226'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(p_sign_posn);
+<a name='L227'>    <a href='../S/2577.html#L193' title='Defined at 193 in Modules/_localemodule.c.'>RESULT_INT</a>(n_sign_posn);
+<a name='L228'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L229'>
+<a name='L230'>  failed:
+<a name='L231'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L232'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L233'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L234'><font color='red'>}</font>
+<a name='L235'>
+<a name='L236'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L643' title='Defined at 643 in PC/pyconfig.h.'>HAVE_WCSCOLL</a>)
+<a name='L237'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(strcoll__doc__,
+<a name='L238'>"string,string -&gt; int. Compares two strings according to the locale.");
+<a name='L239'>
+<a name='L240'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L241'><a href='../S/2577.html#L615' title='Refered from 615 in Modules/_localemodule.c.'>PyLocale_strcoll</a>(PyObject* self, PyObject* args)
+<a name='L242'><font color='red'>{</font>
+<a name='L243'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *os1, *os2, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L244'>    wchar_t *ws1 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *ws2 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L245'>
+<a name='L246'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "UU:strcoll", &amp;os1, &amp;os2))
+<a name='L247'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L248'>    <i><font color='green'>/* Convert the unicode strings to wchar[]. */</font></i>
+<a name='L249'>    ws1 = <a href='../D/3964.html' title='Multiple defined in 3 places.'>PyUnicode_AsWideCharString</a>(os1, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L250'>    <b>if</b> (ws1 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L251'>        <b>goto</b> done;
+<a name='L252'>    ws2 = <a href='../D/3964.html' title='Multiple defined in 3 places.'>PyUnicode_AsWideCharString</a>(os2, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L253'>    <b>if</b> (ws2 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L254'>        <b>goto</b> done;
+<a name='L255'>    <i><font color='green'>/* Collate the strings. */</font></i>
+<a name='L256'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(wcscoll(ws1, ws2));
+<a name='L257'>  done:
+<a name='L258'>    <i><font color='green'>/* Deallocate everything. */</font></i>
+<a name='L259'>    <b>if</b> (ws1) PyMem_FREE(ws1);
+<a name='L260'>    <b>if</b> (ws2) PyMem_FREE(ws2);
+<a name='L261'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L262'><font color='red'>}</font>
+<a name='L263'><font color='darkred'>#endif</font>
+<a name='L264'>
+<a name='L265'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L648' title='Defined at 648 in PC/pyconfig.h.'>HAVE_WCSXFRM</a>
+<a name='L266'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(strxfrm__doc__,
+<a name='L267'>"strxfrm(string) -&gt; string.\n\
+<a name='L268'>\n\
+<a name='L269'>Return a string that can be used as a key for locale-aware comparisons.");
+<a name='L270'>
+<a name='L271'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L272'><a href='../S/2577.html#L619' title='Refered from 619 in Modules/_localemodule.c.'>PyLocale_strxfrm</a>(PyObject* self, PyObject* args)
+<a name='L273'><font color='red'>{</font>
+<a name='L274'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *s0;
+<a name='L275'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n0;
+<a name='L276'>    wchar_t *s, *buf = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L277'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> n1, n2;
+<a name='L278'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L279'><font color='darkred'>#if</font> <a href='../D/4282.html' title='Multiple defined in 3 places.'>Py_UNICODE_SIZE</a> != <a href='../S/2906.html#L727' title='Defined at 727 in PC/pyconfig.h.'>SIZEOF_WCHAR_T</a>
+<a name='L280'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L281'><font color='darkred'>#endif</font>
+<a name='L282'>
+<a name='L283'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "u#:strxfrm", &amp;s0, &amp;n0))
+<a name='L284'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L285'>
+<a name='L286'><font color='darkred'>#if</font> <a href='../D/4282.html' title='Multiple defined in 3 places.'>Py_UNICODE_SIZE</a> == <a href='../S/2906.html#L727' title='Defined at 727 in PC/pyconfig.h.'>SIZEOF_WCHAR_T</a>
+<a name='L287'>    s = (wchar_t *) s0;
+<a name='L288'><font color='darkred'>#else</font>
+<a name='L289'>    s = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>((n0+1)*<b>sizeof</b>(wchar_t));
+<a name='L290'>    <b>if</b> (!s)
+<a name='L291'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L292'>    <b>for</b> (i=0; i&lt;=n0; i++)
+<a name='L293'>        s[i] = s0[i];
+<a name='L294'><font color='darkred'>#endif</font>
+<a name='L295'>
+<a name='L296'>    <i><font color='green'>/* assume no change in size, first */</font></i>
+<a name='L297'>    n1 = wcslen(s) + 1;
+<a name='L298'>    buf = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(n1*<b>sizeof</b>(wchar_t));
+<a name='L299'>    <b>if</b> (!buf) <font color='red'>{</font>
+<a name='L300'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L301'>        <b>goto</b> exit;
+<a name='L302'>    <font color='red'>}</font>
+<a name='L303'>    n2 = wcsxfrm(buf, s, n1);
+<a name='L304'>    <b>if</b> (n2 &gt;= n1) <font color='red'>{</font>
+<a name='L305'>        <i><font color='green'>/* more space needed */</font></i>
+<a name='L306'>        buf = <a href='../S/2803.html#L1775' title='Defined at 1775 in Objects/object.c.'>PyMem_Realloc</a>(buf, (n2+1)*<b>sizeof</b>(wchar_t));
+<a name='L307'>        <b>if</b> (!buf) <font color='red'>{</font>
+<a name='L308'>            <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L309'>            <b>goto</b> exit;
+<a name='L310'>        <font color='red'>}</font>
+<a name='L311'>        n2 = wcsxfrm(buf, s, n2+1);
+<a name='L312'>    <font color='red'>}</font>
+<a name='L313'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4015.html' title='Multiple defined in 4 places.'>PyUnicode_FromWideChar</a>(buf, n2);
+<a name='L314'> exit:
+<a name='L315'>    <b>if</b> (buf) <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(buf);
+<a name='L316'><font color='darkred'>#if</font> <a href='../D/4282.html' title='Multiple defined in 3 places.'>Py_UNICODE_SIZE</a> != <a href='../S/2906.html#L727' title='Defined at 727 in PC/pyconfig.h.'>SIZEOF_WCHAR_T</a>
+<a name='L317'>    <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(s);
+<a name='L318'><font color='darkred'>#endif</font>
+<a name='L319'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L320'><font color='red'>}</font>
+<a name='L321'><font color='darkred'>#endif</font>
+<a name='L322'>
+<a name='L323'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>)
+<a name='L324'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L325'><a href='../S/2577.html#L623' title='Refered from 623 in Modules/_localemodule.c.'>PyLocale_getdefaultlocale</a>(PyObject* self)
+<a name='L326'><font color='red'>{</font>
+<a name='L327'>    <b>char</b> <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>[100];
+<a name='L328'>    <b>char</b> locale[100];
+<a name='L329'>
+<a name='L330'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>, <b>sizeof</b>(<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>), "cp%d", GetACP());
+<a name='L331'>
+<a name='L332'>    <b>if</b> (GetLocaleInfo(LOCALE_USER_DEFAULT,
+<a name='L333'>                      LOCALE_SISO639LANGNAME,
+<a name='L334'>                      locale, <b>sizeof</b>(locale))) <font color='red'>{</font>
+<a name='L335'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i = strlen(locale);
+<a name='L336'>        locale[i++] = '_';
+<a name='L337'>        <b>if</b> (GetLocaleInfo(LOCALE_USER_DEFAULT,
+<a name='L338'>                          LOCALE_SISO3166CTRYNAME,
+<a name='L339'>                          locale+i, (<b>int</b>)(<b>sizeof</b>(locale)-i)))
+<a name='L340'>            <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("ss", locale, <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L341'>    <font color='red'>}</font>
+<a name='L342'>
+<a name='L343'>    <i><font color='green'>/* If we end up here, this windows version didn't know about</font></i>
+<a name='L344'><i><font color='green'>       ISO639/ISO3166 names (it's probably Windows 95).  Return the</font></i>
+<a name='L345'><i><font color='green'>       Windows language identifier instead (a hexadecimal number) */</font></i>
+<a name='L346'>
+<a name='L347'>    locale[0] = '0';
+<a name='L348'>    locale[1] = 'x';
+<a name='L349'>    <b>if</b> (GetLocaleInfo(LOCALE_USER_DEFAULT, LOCALE_IDEFAULTLANGUAGE,
+<a name='L350'>                      locale+2, <b>sizeof</b>(locale)-2)) <font color='red'>{</font>
+<a name='L351'>        <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("ss", locale, <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L352'>    <font color='red'>}</font>
+<a name='L353'>
+<a name='L354'>    <i><font color='green'>/* cannot determine the language code (very unlikely) */</font></i>
+<a name='L355'>    Py_INCREF(Py_None);
+<a name='L356'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("Os", Py_None, <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>);
+<a name='L357'><font color='red'>}</font>
+<a name='L358'><font color='darkred'>#endif</font>
+<a name='L359'>
+<a name='L360'><font color='darkred'>#ifdef</font> HAVE_LANGINFO_H
+<a name='L361'><font color='darkred'>#define</font> <a href='../R/1693.html' title='Multiple refered from 56 places.'>LANGINFO</a>(X) <font color='red'>{</font>#X, X<font color='red'>}</font>
+<a name='L362'><b>static</b> <b>struct</b> langinfo_constant<font color='red'>{</font>
+<a name='L363'>    <b>char</b>* name;
+<a name='L364'>    <b>int</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L365'><font color='red'>}</font> langinfo_constants[] =
+<a name='L366'><font color='red'>{</font>
+<a name='L367'>    <i><font color='green'>/* These constants should exist on any langinfo implementation */</font></i>
+<a name='L368'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(DAY_1),
+<a name='L369'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(DAY_2),
+<a name='L370'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(DAY_3),
+<a name='L371'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(DAY_4),
+<a name='L372'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(DAY_5),
+<a name='L373'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(DAY_6),
+<a name='L374'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(DAY_7),
+<a name='L375'>
+<a name='L376'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABDAY_1),
+<a name='L377'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABDAY_2),
+<a name='L378'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABDAY_3),
+<a name='L379'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABDAY_4),
+<a name='L380'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABDAY_5),
+<a name='L381'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABDAY_6),
+<a name='L382'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABDAY_7),
+<a name='L383'>
+<a name='L384'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_1),
+<a name='L385'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_2),
+<a name='L386'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_3),
+<a name='L387'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_4),
+<a name='L388'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_5),
+<a name='L389'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_6),
+<a name='L390'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_7),
+<a name='L391'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_8),
+<a name='L392'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_9),
+<a name='L393'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_10),
+<a name='L394'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_11),
+<a name='L395'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(MON_12),
+<a name='L396'>
+<a name='L397'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_1),
+<a name='L398'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_2),
+<a name='L399'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_3),
+<a name='L400'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_4),
+<a name='L401'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_5),
+<a name='L402'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_6),
+<a name='L403'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_7),
+<a name='L404'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_8),
+<a name='L405'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_9),
+<a name='L406'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_10),
+<a name='L407'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_11),
+<a name='L408'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ABMON_12),
+<a name='L409'>
+<a name='L410'><font color='darkred'>#ifdef</font> RADIXCHAR
+<a name='L411'>    <i><font color='green'>/* The following are not available with glibc 2.0 */</font></i>
+<a name='L412'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(RADIXCHAR),
+<a name='L413'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(THOUSEP),
+<a name='L414'>    <i><font color='green'>/* YESSTR and NOSTR are deprecated in glibc, since they are</font></i>
+<a name='L415'><i><font color='green'>       a special case of message translation, which should be rather</font></i>
+<a name='L416'><i><font color='green'>       done using gettext. So we don't expose it to Python in the</font></i>
+<a name='L417'><i><font color='green'>       first place.</font></i>
+<a name='L418'><i><font color='green'>    LANGINFO(YESSTR),</font></i>
+<a name='L419'><i><font color='green'>    LANGINFO(NOSTR),</font></i>
+<a name='L420'><i><font color='green'>    */</font></i>
+<a name='L421'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(CRNCYSTR),
+<a name='L422'><font color='darkred'>#endif</font>
+<a name='L423'>
+<a name='L424'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(D_T_FMT),
+<a name='L425'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(D_FMT),
+<a name='L426'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(T_FMT),
+<a name='L427'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(AM_STR),
+<a name='L428'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(PM_STR),
+<a name='L429'>
+<a name='L430'>    <i><font color='green'>/* The following constants are available only with XPG4, but...</font></i>
+<a name='L431'><i><font color='green'>       AIX 3.2. only has CODESET.</font></i>
+<a name='L432'><i><font color='green'>       OpenBSD doesn't have CODESET but has T_FMT_AMPM, and doesn't have</font></i>
+<a name='L433'><i><font color='green'>       a few of the others.</font></i>
+<a name='L434'><i><font color='green'>       Solution: ifdef-test them all. */</font></i>
+<a name='L435'><font color='darkred'>#ifdef</font> CODESET
+<a name='L436'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(CODESET),
+<a name='L437'><font color='darkred'>#endif</font>
+<a name='L438'><font color='darkred'>#ifdef</font> T_FMT_AMPM
+<a name='L439'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(T_FMT_AMPM),
+<a name='L440'><font color='darkred'>#endif</font>
+<a name='L441'><font color='darkred'>#ifdef</font> ERA
+<a name='L442'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ERA),
+<a name='L443'><font color='darkred'>#endif</font>
+<a name='L444'><font color='darkred'>#ifdef</font> ERA_D_FMT
+<a name='L445'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ERA_D_FMT),
+<a name='L446'><font color='darkred'>#endif</font>
+<a name='L447'><font color='darkred'>#ifdef</font> ERA_D_T_FMT
+<a name='L448'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ERA_D_T_FMT),
+<a name='L449'><font color='darkred'>#endif</font>
+<a name='L450'><font color='darkred'>#ifdef</font> ERA_T_FMT
+<a name='L451'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ERA_T_FMT),
+<a name='L452'><font color='darkred'>#endif</font>
+<a name='L453'><font color='darkred'>#ifdef</font> ALT_DIGITS
+<a name='L454'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(ALT_DIGITS),
+<a name='L455'><font color='darkred'>#endif</font>
+<a name='L456'><font color='darkred'>#ifdef</font> YESEXPR
+<a name='L457'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(YESEXPR),
+<a name='L458'><font color='darkred'>#endif</font>
+<a name='L459'><font color='darkred'>#ifdef</font> NOEXPR
+<a name='L460'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(NOEXPR),
+<a name='L461'><font color='darkred'>#endif</font>
+<a name='L462'><font color='darkred'>#ifdef</font> _DATE_FMT
+<a name='L463'>    <i><font color='green'>/* This is not available in all glibc versions that have CODESET. */</font></i>
+<a name='L464'>    <a href='../S/2577.html#L361' title='Defined at 361 in Modules/_localemodule.c.'>LANGINFO</a>(_DATE_FMT),
+<a name='L465'><font color='darkred'>#endif</font>
+<a name='L466'>    <font color='red'>{</font>0, 0<font color='red'>}</font>
+<a name='L467'><font color='red'>}</font>;
+<a name='L468'>
+<a name='L469'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(nl_langinfo__doc__,
+<a name='L470'>"nl_langinfo(key) -&gt; string\n"
+<a name='L471'>"Return the value for the locale information associated with key.");
+<a name='L472'>
+<a name='L473'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L474'><a href='../S/2577.html#L626' title='Refered from 626 in Modules/_localemodule.c.'>PyLocale_nl_langinfo</a>(PyObject* self, PyObject* args)
+<a name='L475'><font color='red'>{</font>
+<a name='L476'>    <b>int</b> item, i;
+<a name='L477'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:nl_langinfo", &amp;item))
+<a name='L478'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L479'>    <i><font color='green'>/* Check whether this is a supported constant. GNU libc sometimes</font></i>
+<a name='L480'><i><font color='green'>       returns numeric values in the char* return value, which would</font></i>
+<a name='L481'><i><font color='green'>       crash PyUnicode_FromString.  */</font></i>
+<a name='L482'>    <b>for</b> (i = 0; langinfo_constants[i].name; i++)
+<a name='L483'>        <b>if</b> (langinfo_constants[i].<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == item) <font color='red'>{</font>
+<a name='L484'>            <i><font color='green'>/* Check NULL as a workaround for GNU libc's returning NULL</font></i>
+<a name='L485'><i><font color='green'>               instead of an empty string for nl_langinfo(ERA).  */</font></i>
+<a name='L486'>            <b>const</b> <b>char</b> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = nl_langinfo(item);
+<a name='L487'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ? <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> : "";
+<a name='L488'>            <b>return</b> <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L489'>        <font color='red'>}</font>
+<a name='L490'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "unsupported langinfo constant");
+<a name='L491'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L492'><font color='red'>}</font>
+<a name='L493'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_LANGINFO_H */</font></i>
+<a name='L494'>
+<a name='L495'><font color='darkred'>#ifdef</font> HAVE_LIBINTL_H
+<a name='L496'>
+<a name='L497'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(gettext__doc__,
+<a name='L498'>"gettext(msg) -&gt; string\n"
+<a name='L499'>"Return translation of msg.");
+<a name='L500'>
+<a name='L501'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L502'><a href='../S/2577.html#L630' title='Refered from 630 in Modules/_localemodule.c.'>PyIntl_gettext</a>(PyObject* self, PyObject *args)
+<a name='L503'><font color='red'>{</font>
+<a name='L504'>    <b>char</b> *in;
+<a name='L505'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "s", &amp;in))
+<a name='L506'>        <b>return</b> 0;
+<a name='L507'>    <b>return</b> <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(gettext(in));
+<a name='L508'><font color='red'>}</font>
+<a name='L509'>
+<a name='L510'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dgettext__doc__,
+<a name='L511'>"dgettext(domain, msg) -&gt; string\n"
+<a name='L512'>"Return translation of msg in domain.");
+<a name='L513'>
+<a name='L514'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L515'><a href='../S/2577.html#L632' title='Refered from 632 in Modules/_localemodule.c.'>PyIntl_dgettext</a>(PyObject* self, PyObject *args)
+<a name='L516'><font color='red'>{</font>
+<a name='L517'>    <b>char</b> *domain, *in;
+<a name='L518'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "zs", &amp;domain, &amp;in))
+<a name='L519'>        <b>return</b> 0;
+<a name='L520'>    <b>return</b> <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(dgettext(domain, in));
+<a name='L521'><font color='red'>}</font>
+<a name='L522'>
+<a name='L523'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(dcgettext__doc__,
+<a name='L524'>"dcgettext(domain, msg, category) -&gt; string\n"
+<a name='L525'>"Return translation of msg in domain and category.");
+<a name='L526'>
+<a name='L527'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L528'><a href='../S/2577.html#L634' title='Refered from 634 in Modules/_localemodule.c.'>PyIntl_dcgettext</a>(PyObject *self, PyObject *args)
+<a name='L529'><font color='red'>{</font>
+<a name='L530'>    <b>char</b> *domain, *msgid;
+<a name='L531'>    <b>int</b> category;
+<a name='L532'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "zsi", &amp;domain, &amp;msgid, &amp;category))
+<a name='L533'>        <b>return</b> 0;
+<a name='L534'>    <b>return</b> <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(dcgettext(domain,msgid,category));
+<a name='L535'><font color='red'>}</font>
+<a name='L536'>
+<a name='L537'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(textdomain__doc__,
+<a name='L538'>"textdomain(domain) -&gt; string\n"
+<a name='L539'>"Set the C library's textdmain to domain, returning the new domain.");
+<a name='L540'>
+<a name='L541'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L542'><a href='../S/2577.html#L636' title='Refered from 636 in Modules/_localemodule.c.'>PyIntl_textdomain</a>(PyObject* self, PyObject* args)
+<a name='L543'><font color='red'>{</font>
+<a name='L544'>    <b>char</b> *domain;
+<a name='L545'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "z", &amp;domain))
+<a name='L546'>        <b>return</b> 0;
+<a name='L547'>    domain = textdomain(domain);
+<a name='L548'>    <b>if</b> (!domain) <font color='red'>{</font>
+<a name='L549'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L550'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L551'>    <font color='red'>}</font>
+<a name='L552'>    <b>return</b> <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(domain);
+<a name='L553'><font color='red'>}</font>
+<a name='L554'>
+<a name='L555'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(bindtextdomain__doc__,
+<a name='L556'>"bindtextdomain(domain, dir) -&gt; string\n"
+<a name='L557'>"Bind the C library's domain to dir.");
+<a name='L558'>
+<a name='L559'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L560'><a href='../S/2577.html#L638' title='Refered from 638 in Modules/_localemodule.c.'>PyIntl_bindtextdomain</a>(PyObject* self,PyObject*args)
+<a name='L561'><font color='red'>{</font>
+<a name='L562'>    <b>char</b> *domain, *dirname, *current_dirname;
+<a name='L563'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dirname_obj, *dirname_bytes = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L564'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "sO", &amp;domain, &amp;dirname_obj))
+<a name='L565'>        <b>return</b> 0;
+<a name='L566'>    <b>if</b> (!strlen(domain)) <font color='red'>{</font>
+<a name='L567'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(Error, "domain must be a non-empty string");
+<a name='L568'>        <b>return</b> 0;
+<a name='L569'>    <font color='red'>}</font>
+<a name='L570'>    <b>if</b> (dirname_obj != Py_None) <font color='red'>{</font>
+<a name='L571'>        <b>if</b> (!<a href='../D/4003.html' title='Multiple defined in 3 places.'>PyUnicode_FSConverter</a>(dirname_obj, &amp;dirname_bytes))
+<a name='L572'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L573'>        dirname = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(dirname_bytes);
+<a name='L574'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L575'>        dirname_bytes = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L576'>        dirname = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L577'>    <font color='red'>}</font>
+<a name='L578'>    current_dirname = bindtextdomain(domain, dirname);
+<a name='L579'>    <b>if</b> (current_dirname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L580'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dirname_bytes);
+<a name='L581'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L582'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L583'>    <font color='red'>}</font>
+<a name='L584'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(current_dirname);
+<a name='L585'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dirname_bytes);
+<a name='L586'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L587'><font color='red'>}</font>
+<a name='L588'>
+<a name='L589'><font color='darkred'>#ifdef</font> HAVE_BIND_TEXTDOMAIN_CODESET
+<a name='L590'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(bind_textdomain_codeset__doc__,
+<a name='L591'>"bind_textdomain_codeset(domain, codeset) -&gt; string\n"
+<a name='L592'>"Bind the C library's domain to codeset.");
+<a name='L593'>
+<a name='L594'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L595'><a href='../S/2577.html#L641' title='Refered from 641 in Modules/_localemodule.c.'>PyIntl_bind_textdomain_codeset</a>(PyObject* self,PyObject*args)
+<a name='L596'><font color='red'>{</font>
+<a name='L597'>    <b>char</b> *domain,*codeset;
+<a name='L598'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "sz", &amp;domain, &amp;codeset))
+<a name='L599'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L600'>    codeset = bind_textdomain_codeset(domain, codeset);
+<a name='L601'>    <b>if</b> (codeset)
+<a name='L602'>        <b>return</b> <a href='../S/2577.html#L47' title='Defined at 47 in Modules/_localemodule.c.'>str2uni</a>(codeset);
+<a name='L603'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L604'><font color='red'>}</font>
+<a name='L605'><font color='darkred'>#endif</font>
+<a name='L606'>
+<a name='L607'><font color='darkred'>#endif</font>
+<a name='L608'>
+<a name='L609'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> PyLocale_Methods[] = <font color='red'>{</font>
+<a name='L610'>  <font color='red'>{</font>"setlocale", (PyCFunction) <a href='../S/2577.html#L127' title='Defined at 127 in Modules/_localemodule.c.'>PyLocale_setlocale</a>,
+<a name='L611'>   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, setlocale__doc__<font color='red'>}</font>,
+<a name='L612'>  <font color='red'>{</font>"localeconv", (PyCFunction) <a href='../S/2577.html#L171' title='Defined at 171 in Modules/_localemodule.c.'>PyLocale_localeconv</a>,
+<a name='L613'>   <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, localeconv__doc__<font color='red'>}</font>,
+<a name='L614'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L643' title='Defined at 643 in PC/pyconfig.h.'>HAVE_WCSCOLL</a>
+<a name='L615'>  <font color='red'>{</font>"strcoll", (PyCFunction) <a href='../S/2577.html#L241' title='Defined at 241 in Modules/_localemodule.c.'>PyLocale_strcoll</a>,
+<a name='L616'>   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, strcoll__doc__<font color='red'>}</font>,
+<a name='L617'><font color='darkred'>#endif</font>
+<a name='L618'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L648' title='Defined at 648 in PC/pyconfig.h.'>HAVE_WCSXFRM</a>
+<a name='L619'>  <font color='red'>{</font>"strxfrm", (PyCFunction) <a href='../S/2577.html#L272' title='Defined at 272 in Modules/_localemodule.c.'>PyLocale_strxfrm</a>,
+<a name='L620'>   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, strxfrm__doc__<font color='red'>}</font>,
+<a name='L621'><font color='darkred'>#endif</font>
+<a name='L622'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>)
+<a name='L623'>  <font color='red'>{</font>"_getdefaultlocale", (PyCFunction) <a href='../S/2577.html#L325' title='Defined at 325 in Modules/_localemodule.c.'>PyLocale_getdefaultlocale</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L624'><font color='darkred'>#endif</font>
+<a name='L625'><font color='darkred'>#ifdef</font> HAVE_LANGINFO_H
+<a name='L626'>  <font color='red'>{</font>"nl_langinfo", (PyCFunction) <a href='../S/2577.html#L474' title='Defined at 474 in Modules/_localemodule.c.'>PyLocale_nl_langinfo</a>,
+<a name='L627'>   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, nl_langinfo__doc__<font color='red'>}</font>,
+<a name='L628'><font color='darkred'>#endif</font>
+<a name='L629'><font color='darkred'>#ifdef</font> HAVE_LIBINTL_H
+<a name='L630'>  <font color='red'>{</font>"gettext",(PyCFunction)<a href='../S/2577.html#L502' title='Defined at 502 in Modules/_localemodule.c.'>PyIntl_gettext</a>,<a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L631'>    gettext__doc__<font color='red'>}</font>,
+<a name='L632'>  <font color='red'>{</font>"dgettext",(PyCFunction)<a href='../S/2577.html#L515' title='Defined at 515 in Modules/_localemodule.c.'>PyIntl_dgettext</a>,<a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L633'>   dgettext__doc__<font color='red'>}</font>,
+<a name='L634'>  <font color='red'>{</font>"dcgettext",(PyCFunction)<a href='../S/2577.html#L528' title='Defined at 528 in Modules/_localemodule.c.'>PyIntl_dcgettext</a>,<a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L635'>    dcgettext__doc__<font color='red'>}</font>,
+<a name='L636'>  <font color='red'>{</font>"textdomain",(PyCFunction)<a href='../S/2577.html#L542' title='Defined at 542 in Modules/_localemodule.c.'>PyIntl_textdomain</a>,<a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L637'>   textdomain__doc__<font color='red'>}</font>,
+<a name='L638'>  <font color='red'>{</font>"bindtextdomain",(PyCFunction)<a href='../S/2577.html#L560' title='Defined at 560 in Modules/_localemodule.c.'>PyIntl_bindtextdomain</a>,<a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L639'>   bindtextdomain__doc__<font color='red'>}</font>,
+<a name='L640'><font color='darkred'>#ifdef</font> HAVE_BIND_TEXTDOMAIN_CODESET
+<a name='L641'>  <font color='red'>{</font>"bind_textdomain_codeset",(PyCFunction)<a href='../S/2577.html#L595' title='Defined at 595 in Modules/_localemodule.c.'>PyIntl_bind_textdomain_codeset</a>,
+<a name='L642'>   <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, bind_textdomain_codeset__doc__<font color='red'>}</font>,
+<a name='L643'><font color='darkred'>#endif</font>
+<a name='L644'><font color='darkred'>#endif</font>
+<a name='L645'>  <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L646'><font color='red'>}</font>;
+<a name='L647'>
+<a name='L648'>
+<a name='L649'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _localemodule = <font color='red'>{</font>
+<a name='L650'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L651'>    "_locale",
+<a name='L652'>    locale__doc__,
+<a name='L653'>    -1,
+<a name='L654'>    PyLocale_Methods,
+<a name='L655'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L656'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L657'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L658'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L659'><font color='red'>}</font>;
+<a name='L660'>
+<a name='L661'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L662'><a href='../R/3029.html' title='Multiple refered from 2 places.'>PyInit__locale</a>(<b>void</b>)
+<a name='L663'><font color='red'>{</font>
+<a name='L664'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m, *d, *x;
+<a name='L665'><font color='darkred'>#ifdef</font> HAVE_LANGINFO_H
+<a name='L666'>    <b>int</b> i;
+<a name='L667'><font color='darkred'>#endif</font>
+<a name='L668'>
+<a name='L669'>    m = PyModule_Create(&amp;_localemodule);
+<a name='L670'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L671'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L672'>
+<a name='L673'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(m);
+<a name='L674'>
+<a name='L675'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(LC_CTYPE);
+<a name='L676'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LC_CTYPE", x);
+<a name='L677'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L678'>
+<a name='L679'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(LC_TIME);
+<a name='L680'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LC_TIME", x);
+<a name='L681'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L682'>
+<a name='L683'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(LC_COLLATE);
+<a name='L684'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LC_COLLATE", x);
+<a name='L685'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L686'>
+<a name='L687'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(LC_MONETARY);
+<a name='L688'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LC_MONETARY", x);
+<a name='L689'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L690'>
+<a name='L691'><font color='darkred'>#ifdef</font> LC_MESSAGES
+<a name='L692'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(LC_MESSAGES);
+<a name='L693'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LC_MESSAGES", x);
+<a name='L694'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L695'><font color='darkred'>#endif</font> <i><font color='green'>/* LC_MESSAGES */</font></i>
+<a name='L696'>
+<a name='L697'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(LC_NUMERIC);
+<a name='L698'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LC_NUMERIC", x);
+<a name='L699'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L700'>
+<a name='L701'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(LC_ALL);
+<a name='L702'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LC_ALL", x);
+<a name='L703'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L704'>
+<a name='L705'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(CHAR_MAX);
+<a name='L706'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "CHAR_MAX", x);
+<a name='L707'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L708'>
+<a name='L709'>    Error = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("locale.Error", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L710'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "Error", Error);
+<a name='L711'>
+<a name='L712'><font color='darkred'>#ifdef</font> HAVE_LANGINFO_H
+<a name='L713'>    <b>for</b> (i = 0; langinfo_constants[i].name; i++) <font color='red'>{</font>
+<a name='L714'>        <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, langinfo_constants[i].name,
+<a name='L715'>                                langinfo_constants[i].<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L716'>    <font color='red'>}</font>
+<a name='L717'><font color='darkred'>#endif</font>
+<a name='L718'>    <b>return</b> m;
+<a name='L719'><font color='red'>}</font>
+<a name='L720'>
+<a name='L721'><i><font color='green'>/*</font></i>
+<a name='L722'><i><font color='green'>Local variables:</font></i>
+<a name='L723'><i><font color='green'>c-basic-offset: 4</font></i>
+<a name='L724'><i><font color='green'>indent-tabs-mode: nil</font></i>
+<a name='L725'><i><font color='green'>End:</font></i>
+<a name='L726'><i><font color='green'>*/</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L47'>[^]</a><a href='#L662'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

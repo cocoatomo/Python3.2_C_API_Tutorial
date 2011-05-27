@@ -1,0 +1,1388 @@
+<html>
+<head>
+<title>Modules/_threadmodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/_threadmodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L29'>[^]</a><a href='#L1283'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L29' title='Defined at 29.'>lock_dealloc</a>
+<li><a href='#L50' title='Defined at 50.'>acquire_timed</a>
+<li><a href='#L96' title='Defined at 96.'>lock_PyThread_acquire_lock</a>
+<li><a href='#L152' title='Defined at 152.'>lock_PyThread_release_lock</a>
+<li><a href='#L175' title='Defined at 175.'>lock_locked_lock</a>
+<li><a href='#L253' title='Defined at 253.'>rlock_dealloc</a>
+<li><a href='#L267' title='Defined at 267.'>rlock_acquire</a>
+<li><a href='#L352' title='Defined at 352.'>rlock_release</a>
+<li><a href='#L381' title='Defined at 381.'>rlock_acquire_restore</a>
+<li><a href='#L411' title='Defined at 411.'>rlock_release_save</a>
+<li><a href='#L431' title='Defined at 431.'>rlock_is_owned</a>
+<li><a href='#L447' title='Defined at 447.'>rlock_new</a>
+<li><a href='#L468' title='Defined at 468.'>rlock_repr</a>
+<li><a href='#L537' title='Defined at 537.'>newlockobject</a>
+<li><a href='#L603' title='Defined at 603.'>localdummy_dealloc</a>
+<li><a href='#L658' title='Defined at 658.'>_local_create_dummy</a>
+<li><a href='#L704' title='Defined at 704.'>local_new</a>
+<li><a href='#L757' title='Defined at 757.'>local_traverse</a>
+<li><a href='#L766' title='Defined at 766.'>local_clear</a>
+<li><a href='#L788' title='Defined at 788.'>local_dealloc</a>
+<li><a href='#L804' title='Defined at 804.'>_ldict</a>
+<li><a href='#L840' title='Defined at 840.'>local_setattro</a>
+<li><a href='#L909' title='Defined at 909.'>local_getattro</a>
+<li><a href='#L942' title='Defined at 942.'>_localdummy_destroyed</a>
+<li><a href='#L979' title='Defined at 979.'>t_bootstrap</a>
+<li><a href='#L1021' title='Defined at 1021.'>thread_PyThread_start_new_thread</a>
+<li><a href='#L1086' title='Defined at 1086.'>thread_PyThread_exit_thread</a>
+<li><a href='#L1100' title='Defined at 1100.'>thread_PyThread_interrupt_main</a>
+<li><a href='#L1117' title='Defined at 1117.'>thread_PyThread_allocate_lock</a>
+<li><a href='#L1129' title='Defined at 1129.'>thread_get_ident</a>
+<li><a href='#L1152' title='Defined at 1152.'>thread__count</a>
+<li><a href='#L1170' title='Defined at 1170.'>thread_stack_size</a>
+<li><a href='#L1283' title='Defined at 1283.'>PyInit__thread</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Thread module */</font></i>
+<a name='L3'><i><font color='green'>/* Interface to Sjoerd's portable C thread library */</font></i>
+<a name='L4'>
+<a name='L5'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L6'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>" <i><font color='green'>/* offsetof */</font></i>
+<a name='L7'>
+<a name='L8'><font color='darkred'>#ifndef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L9'><font color='darkred'>#error</font> "Error!  The rest of Python is not compiled with thread support."
+<a name='L10'><font color='darkred'>#error</font> "Rerun configure, adding a --with-threads option."
+<a name='L11'><font color='darkred'>#error</font> "Then run `make clean' followed by `make'."
+<a name='L12'><font color='darkred'>#endif</font>
+<a name='L13'>
+<a name='L14'><font color='darkred'>#include</font> "<a href='572.html'>pythread.h</a>"
+<a name='L15'>
+<a name='L16'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ThreadError;
+<a name='L17'><b>static</b> <b>long</b> nb_threads = 0;
+<a name='L18'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *str_dict;
+<a name='L19'>
+<a name='L20'><i><font color='green'>/* Lock objects */</font></i>
+<a name='L21'>
+<a name='L22'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L23'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L24'>    <a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a> lock_lock;
+<a name='L25'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *in_weakreflist;
+<a name='L26'><font color='red'>}</font> <a href='../R/8753.html' title='Multiple refered from 6 places.'>lockobject</a>;
+<a name='L27'>
+<a name='L28'><b>static</b> <b>void</b>
+<a name='L29'><a href='../S/2615.html#L216' title='Refered from 216 in Modules/_threadmodule.c.'>lock_dealloc</a>(lockobject *self)
+<a name='L30'><font color='red'>{</font>
+<a name='L31'>    <b>if</b> (self-&gt;in_weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L32'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) self);
+<a name='L33'>    <b>if</b> (self-&gt;lock_lock != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L34'>        <i><font color='green'>/* Unlock the lock so it's safe to free it */</font></i>
+<a name='L35'>        <a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(self-&gt;lock_lock, 0);
+<a name='L36'>        <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(self-&gt;lock_lock);
+<a name='L37'>
+<a name='L38'>        <a href='../D/3853.html' title='Multiple defined in 11 places.'>PyThread_free_lock</a>(self-&gt;lock_lock);
+<a name='L39'>    <font color='red'>}</font>
+<a name='L40'>    PyObject_Del(self);
+<a name='L41'><font color='red'>}</font>
+<a name='L42'>
+<a name='L43'><i><font color='green'>/* Helper to acquire an interruptible lock with a timeout.  If the lock acquire</font></i>
+<a name='L44'><i><font color='green'> * is interrupted, signal handlers are run, and if they raise an exception,</font></i>
+<a name='L45'><i><font color='green'> * PY_LOCK_INTR is returned.  Otherwise, PY_LOCK_ACQUIRED or PY_LOCK_FAILURE</font></i>
+<a name='L46'><i><font color='green'> * are returned, depending on whether the lock can be acquired withing the</font></i>
+<a name='L47'><i><font color='green'> * timeout.</font></i>
+<a name='L48'><i><font color='green'> */</font></i>
+<a name='L49'><b>static</b> <a href='../D/3446.html' title='Multiple defined in 2 places.'>PyLockStatus</a>
+<a name='L50'><a href='../R/5909.html' title='Multiple refered from 2 places.'>acquire_timed</a>(PyThread_type_lock lock, PY_TIMEOUT_T microseconds)
+<a name='L51'><font color='red'>{</font>
+<a name='L52'>    <a href='../D/3446.html' title='Multiple defined in 2 places.'>PyLockStatus</a> r;
+<a name='L53'>    <a href='../D/6194.html' title='Multiple defined in 2 places.'>_PyTime_timeval</a> curtime;
+<a name='L54'>    <a href='../D/6194.html' title='Multiple defined in 2 places.'>_PyTime_timeval</a> endtime;
+<a name='L55'>
+<a name='L56'>    <b>if</b> (microseconds &gt; 0) <font color='red'>{</font>
+<a name='L57'>        <a href='../S/3139.html#L23' title='Defined at 23 in Python/pytime.c.'>_PyTime_gettimeofday</a>(&amp;endtime);
+<a name='L58'>        endtime.tv_sec += microseconds / (1000 * 1000);
+<a name='L59'>        endtime.tv_usec += microseconds % (1000 * 1000);
+<a name='L60'>    <font color='red'>}</font>
+<a name='L61'>
+<a name='L62'>
+<a name='L63'>    <b>do</b> <font color='red'>{</font>
+<a name='L64'>        <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L65'>        r = <a href='../D/3847.html' title='Multiple defined in 3 places.'>PyThread_acquire_lock_timed</a>(<a href='../S/3148.html#L9' title='Defined at 9 in Python/thread_lwp.h.'>lock</a>, microseconds, 1);
+<a name='L66'>        <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L67'>
+<a name='L68'>        <b>if</b> (r == <a href='../S/572.html#L17' title='Defined at 17 in Include/pythread.h.'>PY_LOCK_INTR</a>) <font color='red'>{</font>
+<a name='L69'>            <i><font color='green'>/* Run signal handlers if we were interrupted.  Propagate</font></i>
+<a name='L70'><i><font color='green'>             * exceptions from signal handlers, such as KeyboardInterrupt, by</font></i>
+<a name='L71'><i><font color='green'>             * passing up PY_LOCK_INTR.  */</font></i>
+<a name='L72'>            <b>if</b> (<a href='../D/4194.html' title='Multiple defined in 2 places.'>Py_MakePendingCalls</a>() &lt; 0) <font color='red'>{</font>
+<a name='L73'>                <b>return</b> <a href='../S/572.html#L17' title='Defined at 17 in Include/pythread.h.'>PY_LOCK_INTR</a>;
+<a name='L74'>            <font color='red'>}</font>
+<a name='L75'>
+<a name='L76'>            <i><font color='green'>/* If we're using a timeout, recompute the timeout after processing</font></i>
+<a name='L77'><i><font color='green'>             * signals, since those can take time.  */</font></i>
+<a name='L78'>            <b>if</b> (microseconds &gt;= 0) <font color='red'>{</font>
+<a name='L79'>                <a href='../S/3139.html#L23' title='Defined at 23 in Python/pytime.c.'>_PyTime_gettimeofday</a>(&amp;curtime);
+<a name='L80'>                microseconds = ((endtime.tv_sec - curtime.tv_sec) * 1000000 +
+<a name='L81'>                                (endtime.tv_usec - curtime.tv_usec));
+<a name='L82'>
+<a name='L83'>                <i><font color='green'>/* Check for negative values, since those mean block forever.</font></i>
+<a name='L84'><i><font color='green'>                 */</font></i>
+<a name='L85'>                <b>if</b> (microseconds &lt;= 0) <font color='red'>{</font>
+<a name='L86'>                    r = <a href='../S/572.html#L15' title='Defined at 15 in Include/pythread.h.'>PY_LOCK_FAILURE</a>;
+<a name='L87'>                <font color='red'>}</font>
+<a name='L88'>            <font color='red'>}</font>
+<a name='L89'>        <font color='red'>}</font>
+<a name='L90'>    <font color='red'>}</font> <b>while</b> (r == <a href='../S/572.html#L17' title='Defined at 17 in Include/pythread.h.'>PY_LOCK_INTR</a>);  <i><font color='green'>/* Retry if we were interrupted. */</font></i>
+<a name='L91'>
+<a name='L92'>    <b>return</b> r;
+<a name='L93'><font color='red'>}</font>
+<a name='L94'>
+<a name='L95'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L96'><a href='../R/8748.html' title='Multiple refered from 3 places.'>lock_PyThread_acquire_lock</a>(lockobject *self, PyObject *args, PyObject *kwds)
+<a name='L97'><font color='red'>{</font>
+<a name='L98'>    <b>char</b> *kwlist[] = <font color='red'>{</font>"blocking", "timeout", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L99'>    <b>int</b> blocking = 1;
+<a name='L100'>    <b>double</b> timeout = -1;
+<a name='L101'>    PY_TIMEOUT_T microseconds;
+<a name='L102'>    <a href='../D/3446.html' title='Multiple defined in 2 places.'>PyLockStatus</a> r;
+<a name='L103'>
+<a name='L104'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "|id:acquire", kwlist,
+<a name='L105'>                                     &amp;blocking, &amp;timeout))
+<a name='L106'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L107'>
+<a name='L108'>    <b>if</b> (!blocking &amp;&amp; timeout != -1) <font color='red'>{</font>
+<a name='L109'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "can't specify a timeout "
+<a name='L110'>                        "for a non-blocking call");
+<a name='L111'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L112'>    <font color='red'>}</font>
+<a name='L113'>    <b>if</b> (timeout &lt; 0 &amp;&amp; timeout != -1) <font color='red'>{</font>
+<a name='L114'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "timeout value must be "
+<a name='L115'>                        "strictly positive");
+<a name='L116'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L117'>    <font color='red'>}</font>
+<a name='L118'>    <b>if</b> (!blocking)
+<a name='L119'>        microseconds = 0;
+<a name='L120'>    <b>else</b> <b>if</b> (timeout == -1)
+<a name='L121'>        microseconds = -1;
+<a name='L122'>    <b>else</b> <font color='red'>{</font>
+<a name='L123'>        timeout *= 1e6;
+<a name='L124'>        <b>if</b> (timeout &gt;= (<b>double</b>) PY_TIMEOUT_MAX) <font color='red'>{</font>
+<a name='L125'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L126'>                            "timeout value is too large");
+<a name='L127'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L128'>        <font color='red'>}</font>
+<a name='L129'>        microseconds = (PY_TIMEOUT_T) timeout;
+<a name='L130'>    <font color='red'>}</font>
+<a name='L131'>
+<a name='L132'>    r = <a href='../S/2615.html#L50' title='Defined at 50 in Modules/_threadmodule.c.'>acquire_timed</a>(self-&gt;lock_lock, microseconds);
+<a name='L133'>    <b>if</b> (r == <a href='../S/572.html#L17' title='Defined at 17 in Include/pythread.h.'>PY_LOCK_INTR</a>) <font color='red'>{</font>
+<a name='L134'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L135'>    <font color='red'>}</font>
+<a name='L136'>
+<a name='L137'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(r == <a href='../S/572.html#L16' title='Defined at 16 in Include/pythread.h.'>PY_LOCK_ACQUIRED</a>);
+<a name='L138'><font color='red'>}</font>
+<a name='L139'>
+<a name='L140'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(acquire_doc,
+<a name='L141'>"acquire([wait]) -&gt; None or bool\n\
+<a name='L142'>(acquire_lock() is an obsolete synonym)\n\
+<a name='L143'>\n\
+<a name='L144'>Lock the lock.  Without argument, this blocks if the lock is already\n\
+<a name='L145'>locked (even by the same thread), waiting for another thread to release\n\
+<a name='L146'>the lock, and return None once the lock is acquired.\n\
+<a name='L147'>With an argument, this will only block if the argument is true,\n\
+<a name='L148'>and the return value reflects whether the lock is acquired.\n\
+<a name='L149'>The blocking operation is interruptible.");
+<a name='L150'>
+<a name='L151'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L152'><a href='../R/8749.html' title='Multiple refered from 3 places.'>lock_PyThread_release_lock</a>(lockobject *self)
+<a name='L153'><font color='red'>{</font>
+<a name='L154'>    <i><font color='green'>/* Sanity check: the lock must be locked */</font></i>
+<a name='L155'>    <b>if</b> (<a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(self-&gt;lock_lock, 0)) <font color='red'>{</font>
+<a name='L156'>        <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(self-&gt;lock_lock);
+<a name='L157'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ThreadError, "release unlocked lock");
+<a name='L158'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L159'>    <font color='red'>}</font>
+<a name='L160'>
+<a name='L161'>    <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(self-&gt;lock_lock);
+<a name='L162'>    Py_INCREF(Py_None);
+<a name='L163'>    <b>return</b> Py_None;
+<a name='L164'><font color='red'>}</font>
+<a name='L165'>
+<a name='L166'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(release_doc,
+<a name='L167'>"release()\n\
+<a name='L168'>(release_lock() is an obsolete synonym)\n\
+<a name='L169'>\n\
+<a name='L170'>Release the lock, allowing another thread that is blocked waiting for\n\
+<a name='L171'>the lock to acquire the lock.  The lock must be in the locked state,\n\
+<a name='L172'>but it needn't be locked by the same thread that unlocks it.");
+<a name='L173'>
+<a name='L174'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L175'><a href='../R/8751.html' title='Multiple refered from 2 places.'>lock_locked_lock</a>(lockobject *self)
+<a name='L176'><font color='red'>{</font>
+<a name='L177'>    <b>if</b> (<a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(self-&gt;lock_lock, 0)) <font color='red'>{</font>
+<a name='L178'>        <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(self-&gt;lock_lock);
+<a name='L179'>        <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(0L);
+<a name='L180'>    <font color='red'>}</font>
+<a name='L181'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(1L);
+<a name='L182'><font color='red'>}</font>
+<a name='L183'>
+<a name='L184'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(locked_doc,
+<a name='L185'>"locked() -&gt; bool\n\
+<a name='L186'>(locked_lock() is an obsolete synonym)\n\
+<a name='L187'>\n\
+<a name='L188'>Return whether the lock is in the locked state.");
+<a name='L189'>
+<a name='L190'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> lock_methods[] = <font color='red'>{</font>
+<a name='L191'>    <font color='red'>{</font>"acquire_lock", (PyCFunction)<a href='../S/2615.html#L96' title='Defined at 96 in Modules/_threadmodule.c.'>lock_PyThread_acquire_lock</a>,
+<a name='L192'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, acquire_doc<font color='red'>}</font>,
+<a name='L193'>    <font color='red'>{</font>"acquire",      (PyCFunction)<a href='../S/2615.html#L96' title='Defined at 96 in Modules/_threadmodule.c.'>lock_PyThread_acquire_lock</a>,
+<a name='L194'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, acquire_doc<font color='red'>}</font>,
+<a name='L195'>    <font color='red'>{</font>"release_lock", (PyCFunction)<a href='../S/2615.html#L152' title='Defined at 152 in Modules/_threadmodule.c.'>lock_PyThread_release_lock</a>,
+<a name='L196'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, release_doc<font color='red'>}</font>,
+<a name='L197'>    <font color='red'>{</font>"release",      (PyCFunction)<a href='../S/2615.html#L152' title='Defined at 152 in Modules/_threadmodule.c.'>lock_PyThread_release_lock</a>,
+<a name='L198'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, release_doc<font color='red'>}</font>,
+<a name='L199'>    <font color='red'>{</font>"locked_lock",  (PyCFunction)<a href='../S/2615.html#L175' title='Defined at 175 in Modules/_threadmodule.c.'>lock_locked_lock</a>,
+<a name='L200'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, locked_doc<font color='red'>}</font>,
+<a name='L201'>    <font color='red'>{</font>"locked",       (PyCFunction)<a href='../S/2615.html#L175' title='Defined at 175 in Modules/_threadmodule.c.'>lock_locked_lock</a>,
+<a name='L202'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, locked_doc<font color='red'>}</font>,
+<a name='L203'>    <font color='red'>{</font>"__enter__",    (PyCFunction)<a href='../S/2615.html#L96' title='Defined at 96 in Modules/_threadmodule.c.'>lock_PyThread_acquire_lock</a>,
+<a name='L204'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, acquire_doc<font color='red'>}</font>,
+<a name='L205'>    <font color='red'>{</font>"__exit__",    (PyCFunction)<a href='../S/2615.html#L152' title='Defined at 152 in Modules/_threadmodule.c.'>lock_PyThread_release_lock</a>,
+<a name='L206'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, release_doc<font color='red'>}</font>,
+<a name='L207'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,           <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>              <i><font color='green'>/* sentinel */</font></i>
+<a name='L208'><font color='red'>}</font>;
+<a name='L209'>
+<a name='L210'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> Locktype = <font color='red'>{</font>
+<a name='L211'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L212'>    "_thread.lock",                     <i><font color='green'>/*tp_name*/</font></i>
+<a name='L213'>    <b>sizeof</b>(<a href='../S/2615.html#L26' title='Defined at 26 in Modules/_threadmodule.c.'>lockobject</a>),                 <i><font color='green'>/*tp_size*/</font></i>
+<a name='L214'>    0,                                  <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L215'>    <i><font color='green'>/* methods */</font></i>
+<a name='L216'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2615.html#L29' title='Defined at 29 in Modules/_threadmodule.c.'>lock_dealloc</a>,           <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L217'>    0,                                  <i><font color='green'>/*tp_print*/</font></i>
+<a name='L218'>    0,                                  <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L219'>    0,                                  <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L220'>    0,                                  <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L221'>    0,                                  <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L222'>    0,                                  <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L223'>    0,                                  <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L224'>    0,                                  <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L225'>    0,                                  <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L226'>    0,                                  <i><font color='green'>/*tp_call*/</font></i>
+<a name='L227'>    0,                                  <i><font color='green'>/*tp_str*/</font></i>
+<a name='L228'>    0,                                  <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L229'>    0,                                  <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L230'>    0,                                  <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L231'>    Py_TPFLAGS_DEFAULT,                 <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L232'>    0,                                  <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L233'>    0,                                  <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L234'>    0,                                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L235'>    0,                                  <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L236'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2615.html#L26' title='Defined at 26 in Modules/_threadmodule.c.'>lockobject</a>, in_weakreflist), <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L237'>    0,                                  <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L238'>    0,                                  <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L239'>    lock_methods,                       <i><font color='green'>/*tp_methods*/</font></i>
+<a name='L240'><font color='red'>}</font>;
+<a name='L241'>
+<a name='L242'><i><font color='green'>/* Recursive lock objects */</font></i>
+<a name='L243'>
+<a name='L244'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L245'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L246'>    <a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a> rlock_lock;
+<a name='L247'>    <b>long</b> rlock_owner;
+<a name='L248'>    <b>unsigned</b> <b>long</b> rlock_count;
+<a name='L249'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *in_weakreflist;
+<a name='L250'><font color='red'>}</font> <a href='../R/10060.html' title='Multiple refered from 4 places.'>rlockobject</a>;
+<a name='L251'>
+<a name='L252'><b>static</b> <b>void</b>
+<a name='L253'><a href='../S/2615.html#L500' title='Refered from 500 in Modules/_threadmodule.c.'>rlock_dealloc</a>(rlockobject *self)
+<a name='L254'><font color='red'>{</font>
+<a name='L255'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;rlock_lock);
+<a name='L256'>    <b>if</b> (self-&gt;in_weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L257'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) self);
+<a name='L258'>    <i><font color='green'>/* Unlock the lock so it's safe to free it */</font></i>
+<a name='L259'>    <b>if</b> (self-&gt;rlock_count &gt; 0)
+<a name='L260'>        <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(self-&gt;rlock_lock);
+<a name='L261'>
+<a name='L262'>    <a href='../D/3853.html' title='Multiple defined in 11 places.'>PyThread_free_lock</a>(self-&gt;rlock_lock);
+<a name='L263'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free(self);
+<a name='L264'><font color='red'>}</font>
+<a name='L265'>
+<a name='L266'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L267'><a href='../R/10052.html' title='Multiple refered from 2 places.'>rlock_acquire</a>(rlockobject *self, PyObject *args, PyObject *kwds)
+<a name='L268'><font color='red'>{</font>
+<a name='L269'>    <b>char</b> *kwlist[] = <font color='red'>{</font>"blocking", "timeout", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L270'>    <b>int</b> blocking = 1;
+<a name='L271'>    <b>double</b> timeout = -1;
+<a name='L272'>    PY_TIMEOUT_T microseconds;
+<a name='L273'>    <b>long</b> tid;
+<a name='L274'>    <a href='../D/3446.html' title='Multiple defined in 2 places.'>PyLockStatus</a> r = <a href='../S/572.html#L16' title='Defined at 16 in Include/pythread.h.'>PY_LOCK_ACQUIRED</a>;
+<a name='L275'>
+<a name='L276'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "|id:acquire", kwlist,
+<a name='L277'>                                     &amp;blocking, &amp;timeout))
+<a name='L278'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L279'>
+<a name='L280'>    <b>if</b> (!blocking &amp;&amp; timeout != -1) <font color='red'>{</font>
+<a name='L281'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "can't specify a timeout "
+<a name='L282'>                        "for a non-blocking call");
+<a name='L283'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L284'>    <font color='red'>}</font>
+<a name='L285'>    <b>if</b> (timeout &lt; 0 &amp;&amp; timeout != -1) <font color='red'>{</font>
+<a name='L286'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "timeout value must be "
+<a name='L287'>                        "strictly positive");
+<a name='L288'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L289'>    <font color='red'>}</font>
+<a name='L290'>    <b>if</b> (!blocking)
+<a name='L291'>        microseconds = 0;
+<a name='L292'>    <b>else</b> <b>if</b> (timeout == -1)
+<a name='L293'>        microseconds = -1;
+<a name='L294'>    <b>else</b> <font color='red'>{</font>
+<a name='L295'>        timeout *= 1e6;
+<a name='L296'>        <b>if</b> (timeout &gt;= (<b>double</b>) PY_TIMEOUT_MAX) <font color='red'>{</font>
+<a name='L297'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L298'>                            "timeout value is too large");
+<a name='L299'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L300'>        <font color='red'>}</font>
+<a name='L301'>        microseconds = (PY_TIMEOUT_T) timeout;
+<a name='L302'>    <font color='red'>}</font>
+<a name='L303'>
+<a name='L304'>    tid = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L305'>    <b>if</b> (self-&gt;rlock_count &gt; 0 &amp;&amp; tid == self-&gt;rlock_owner) <font color='red'>{</font>
+<a name='L306'>        <b>unsigned</b> <b>long</b> count = self-&gt;rlock_count + 1;
+<a name='L307'>        <b>if</b> (count &lt;= self-&gt;rlock_count) <font color='red'>{</font>
+<a name='L308'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L309'>                            "Internal lock count overflowed");
+<a name='L310'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L311'>        <font color='red'>}</font>
+<a name='L312'>        self-&gt;rlock_count = count;
+<a name='L313'>        Py_RETURN_TRUE;
+<a name='L314'>    <font color='red'>}</font>
+<a name='L315'>
+<a name='L316'>    <b>if</b> (self-&gt;rlock_count &gt; 0 ||
+<a name='L317'>        !<a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(self-&gt;rlock_lock, 0)) <font color='red'>{</font>
+<a name='L318'>        <b>if</b> (microseconds == 0) <font color='red'>{</font>
+<a name='L319'>            Py_RETURN_FALSE;
+<a name='L320'>        <font color='red'>}</font>
+<a name='L321'>        r = <a href='../S/2615.html#L50' title='Defined at 50 in Modules/_threadmodule.c.'>acquire_timed</a>(self-&gt;rlock_lock, microseconds);
+<a name='L322'>    <font color='red'>}</font>
+<a name='L323'>    <b>if</b> (r == <a href='../S/572.html#L16' title='Defined at 16 in Include/pythread.h.'>PY_LOCK_ACQUIRED</a>) <font color='red'>{</font>
+<a name='L324'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;rlock_count == 0);
+<a name='L325'>        self-&gt;rlock_owner = tid;
+<a name='L326'>        self-&gt;rlock_count = 1;
+<a name='L327'>    <font color='red'>}</font>
+<a name='L328'>    <b>else</b> <b>if</b> (r == <a href='../S/572.html#L17' title='Defined at 17 in Include/pythread.h.'>PY_LOCK_INTR</a>) <font color='red'>{</font>
+<a name='L329'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L330'>    <font color='red'>}</font>
+<a name='L331'>
+<a name='L332'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(r == <a href='../S/572.html#L16' title='Defined at 16 in Include/pythread.h.'>PY_LOCK_ACQUIRED</a>);
+<a name='L333'><font color='red'>}</font>
+<a name='L334'>
+<a name='L335'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(rlock_acquire_doc,
+<a name='L336'>"acquire(blocking=True) -&gt; bool\n\
+<a name='L337'>\n\
+<a name='L338'>Lock the lock.  `blocking` indicates whether we should wait\n\
+<a name='L339'>for the lock to be available or not.  If `blocking` is False\n\
+<a name='L340'>and another thread holds the lock, the method will return False\n\
+<a name='L341'>immediately.  If `blocking` is True and another thread holds\n\
+<a name='L342'>the lock, the method will wait for the lock to be released,\n\
+<a name='L343'>take it and then return True.\n\
+<a name='L344'>(note: the blocking operation is interruptible.)\n\
+<a name='L345'>\n\
+<a name='L346'>In all other cases, the method will return True immediately.\n\
+<a name='L347'>Precisely, if the current thread already holds the lock, its\n\
+<a name='L348'>internal counter is simply incremented. If nobody holds the lock,\n\
+<a name='L349'>the lock is taken and its internal counter initialized to 1.");
+<a name='L350'>
+<a name='L351'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L352'><a href='../R/10057.html' title='Multiple refered from 2 places.'>rlock_release</a>(rlockobject *self)
+<a name='L353'><font color='red'>{</font>
+<a name='L354'>    <b>long</b> tid = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L355'>
+<a name='L356'>    <b>if</b> (self-&gt;rlock_count == 0 || self-&gt;rlock_owner != tid) <font color='red'>{</font>
+<a name='L357'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L358'>                        "cannot release un-acquired lock");
+<a name='L359'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L360'>    <font color='red'>}</font>
+<a name='L361'>    <b>if</b> (--self-&gt;rlock_count == 0) <font color='red'>{</font>
+<a name='L362'>        self-&gt;rlock_owner = 0;
+<a name='L363'>        <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(self-&gt;rlock_lock);
+<a name='L364'>    <font color='red'>}</font>
+<a name='L365'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L366'><font color='red'>}</font>
+<a name='L367'>
+<a name='L368'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(rlock_release_doc,
+<a name='L369'>"release()\n\
+<a name='L370'>\n\
+<a name='L371'>Release the lock, allowing another thread that is blocked waiting for\n\
+<a name='L372'>the lock to acquire the lock.  The lock must be in the locked state,\n\
+<a name='L373'>and must be locked by the same thread that unlocks it; otherwise a\n\
+<a name='L374'>`RuntimeError` is raised.\n\
+<a name='L375'>\n\
+<a name='L376'>Do note that if the lock was acquire()d several times in a row by the\n\
+<a name='L377'>current thread, release() needs to be called as many times for the lock\n\
+<a name='L378'>to be available for other threads.");
+<a name='L379'>
+<a name='L380'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L381'><a href='../S/2615.html#L482' title='Refered from 482 in Modules/_threadmodule.c.'>rlock_acquire_restore</a>(rlockobject *self, PyObject *arg)
+<a name='L382'><font color='red'>{</font>
+<a name='L383'>    <b>long</b> owner;
+<a name='L384'>    <b>unsigned</b> <b>long</b> count;
+<a name='L385'>    <b>int</b> r = 1;
+<a name='L386'>
+<a name='L387'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, "kl:_acquire_restore", &amp;count, &amp;owner))
+<a name='L388'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L389'>
+<a name='L390'>    <b>if</b> (!<a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(self-&gt;rlock_lock, 0)) <font color='red'>{</font>
+<a name='L391'>        <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L392'>        r = <a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(self-&gt;rlock_lock, 1);
+<a name='L393'>        <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L394'>    <font color='red'>}</font>
+<a name='L395'>    <b>if</b> (!r) <font color='red'>{</font>
+<a name='L396'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ThreadError, "couldn't acquire lock");
+<a name='L397'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L398'>    <font color='red'>}</font>
+<a name='L399'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;rlock_count == 0);
+<a name='L400'>    self-&gt;rlock_owner = owner;
+<a name='L401'>    self-&gt;rlock_count = count;
+<a name='L402'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L403'><font color='red'>}</font>
+<a name='L404'>
+<a name='L405'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(rlock_acquire_restore_doc,
+<a name='L406'>"_acquire_restore(state) -&gt; None\n\
+<a name='L407'>\n\
+<a name='L408'>For internal use by `threading.Condition`.");
+<a name='L409'>
+<a name='L410'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L411'><a href='../S/2615.html#L484' title='Refered from 484 in Modules/_threadmodule.c.'>rlock_release_save</a>(rlockobject *self)
+<a name='L412'><font color='red'>{</font>
+<a name='L413'>    <b>long</b> owner;
+<a name='L414'>    <b>unsigned</b> <b>long</b> count;
+<a name='L415'>
+<a name='L416'>    owner = self-&gt;rlock_owner;
+<a name='L417'>    count = self-&gt;rlock_count;
+<a name='L418'>    self-&gt;rlock_count = 0;
+<a name='L419'>    self-&gt;rlock_owner = 0;
+<a name='L420'>    <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(self-&gt;rlock_lock);
+<a name='L421'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("kl", count, owner);
+<a name='L422'><font color='red'>}</font>
+<a name='L423'>
+<a name='L424'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(rlock_release_save_doc,
+<a name='L425'>"_release_save() -&gt; tuple\n\
+<a name='L426'>\n\
+<a name='L427'>For internal use by `threading.Condition`.");
+<a name='L428'>
+<a name='L429'>
+<a name='L430'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L431'><a href='../S/2615.html#L480' title='Refered from 480 in Modules/_threadmodule.c.'>rlock_is_owned</a>(rlockobject *self)
+<a name='L432'><font color='red'>{</font>
+<a name='L433'>    <b>long</b> tid = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L434'>
+<a name='L435'>    <b>if</b> (self-&gt;rlock_count &gt; 0 &amp;&amp; self-&gt;rlock_owner == tid) <font color='red'>{</font>
+<a name='L436'>        Py_RETURN_TRUE;
+<a name='L437'>    <font color='red'>}</font>
+<a name='L438'>    Py_RETURN_FALSE;
+<a name='L439'><font color='red'>}</font>
+<a name='L440'>
+<a name='L441'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(rlock_is_owned_doc,
+<a name='L442'>"_is_owned() -&gt; bool\n\
+<a name='L443'>\n\
+<a name='L444'>For internal use by `threading.Condition`.");
+<a name='L445'>
+<a name='L446'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L447'><a href='../S/2615.html#L533' title='Refered from 533 in Modules/_threadmodule.c.'>rlock_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds)
+<a name='L448'><font color='red'>{</font>
+<a name='L449'>    <a href='../S/2615.html#L250' title='Defined at 250 in Modules/_threadmodule.c.'>rlockobject</a> *self;
+<a name='L450'>
+<a name='L451'>    self = (<a href='../S/2615.html#L250' title='Defined at 250 in Modules/_threadmodule.c.'>rlockobject</a> *) type-&gt;tp_alloc(type, 0);
+<a name='L452'>    <b>if</b> (self != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L453'>        self-&gt;rlock_lock = <a href='../D/3848.html' title='Multiple defined in 11 places.'>PyThread_allocate_lock</a>();
+<a name='L454'>        <b>if</b> (self-&gt;rlock_lock == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L455'>            type-&gt;tp_free(self);
+<a name='L456'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ThreadError, "can't allocate lock");
+<a name='L457'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L458'>        <font color='red'>}</font>
+<a name='L459'>        self-&gt;in_weakreflist = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L460'>        self-&gt;rlock_owner = 0;
+<a name='L461'>        self-&gt;rlock_count = 0;
+<a name='L462'>    <font color='red'>}</font>
+<a name='L463'>
+<a name='L464'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) self;
+<a name='L465'><font color='red'>}</font>
+<a name='L466'>
+<a name='L467'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L468'><a href='../S/2615.html#L505' title='Refered from 505 in Modules/_threadmodule.c.'>rlock_repr</a>(rlockobject *self)
+<a name='L469'><font color='red'>{</font>
+<a name='L470'>    <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;%s owner=%ld count=%lu&gt;",
+<a name='L471'>        <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_name, self-&gt;rlock_owner, self-&gt;rlock_count);
+<a name='L472'><font color='red'>}</font>
+<a name='L473'>
+<a name='L474'>
+<a name='L475'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> rlock_methods[] = <font color='red'>{</font>
+<a name='L476'>    <font color='red'>{</font>"acquire",      (PyCFunction)<a href='../S/2615.html#L267' title='Defined at 267 in Modules/_threadmodule.c.'>rlock_acquire</a>,
+<a name='L477'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, rlock_acquire_doc<font color='red'>}</font>,
+<a name='L478'>    <font color='red'>{</font>"release",      (PyCFunction)<a href='../S/2615.html#L352' title='Defined at 352 in Modules/_threadmodule.c.'>rlock_release</a>,
+<a name='L479'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, rlock_release_doc<font color='red'>}</font>,
+<a name='L480'>    <font color='red'>{</font>"_is_owned",     (PyCFunction)<a href='../S/2615.html#L431' title='Defined at 431 in Modules/_threadmodule.c.'>rlock_is_owned</a>,
+<a name='L481'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, rlock_is_owned_doc<font color='red'>}</font>,
+<a name='L482'>    <font color='red'>{</font>"_acquire_restore", (PyCFunction)<a href='../S/2615.html#L381' title='Defined at 381 in Modules/_threadmodule.c.'>rlock_acquire_restore</a>,
+<a name='L483'>     METH_O, rlock_acquire_restore_doc<font color='red'>}</font>,
+<a name='L484'>    <font color='red'>{</font>"_release_save", (PyCFunction)<a href='../S/2615.html#L411' title='Defined at 411 in Modules/_threadmodule.c.'>rlock_release_save</a>,
+<a name='L485'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, rlock_release_save_doc<font color='red'>}</font>,
+<a name='L486'>    <font color='red'>{</font>"__enter__",    (PyCFunction)<a href='../S/2615.html#L267' title='Defined at 267 in Modules/_threadmodule.c.'>rlock_acquire</a>,
+<a name='L487'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS, rlock_acquire_doc<font color='red'>}</font>,
+<a name='L488'>    <font color='red'>{</font>"__exit__",    (PyCFunction)<a href='../S/2615.html#L352' title='Defined at 352 in Modules/_threadmodule.c.'>rlock_release</a>,
+<a name='L489'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, rlock_release_doc<font color='red'>}</font>,
+<a name='L490'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,           <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>              <i><font color='green'>/* sentinel */</font></i>
+<a name='L491'><font color='red'>}</font>;
+<a name='L492'>
+<a name='L493'>
+<a name='L494'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> RLocktype = <font color='red'>{</font>
+<a name='L495'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L496'>    "_thread.RLock",                    <i><font color='green'>/*tp_name*/</font></i>
+<a name='L497'>    <b>sizeof</b>(<a href='../S/2615.html#L250' title='Defined at 250 in Modules/_threadmodule.c.'>rlockobject</a>),                <i><font color='green'>/*tp_size*/</font></i>
+<a name='L498'>    0,                                  <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L499'>    <i><font color='green'>/* methods */</font></i>
+<a name='L500'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2615.html#L253' title='Defined at 253 in Modules/_threadmodule.c.'>rlock_dealloc</a>,          <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L501'>    0,                                  <i><font color='green'>/*tp_print*/</font></i>
+<a name='L502'>    0,                                  <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L503'>    0,                                  <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L504'>    0,                                  <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L505'>    (reprfunc)<a href='../S/2615.html#L468' title='Defined at 468 in Modules/_threadmodule.c.'>rlock_repr</a>,               <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L506'>    0,                                  <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L507'>    0,                                  <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L508'>    0,                                  <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L509'>    0,                                  <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L510'>    0,                                  <i><font color='green'>/*tp_call*/</font></i>
+<a name='L511'>    0,                                  <i><font color='green'>/*tp_str*/</font></i>
+<a name='L512'>    0,                                  <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L513'>    0,                                  <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L514'>    0,                                  <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L515'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L516'>    0,                                  <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L517'>    0,                                  <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L518'>    0,                                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L519'>    0,                                  <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L520'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2615.html#L250' title='Defined at 250 in Modules/_threadmodule.c.'>rlockobject</a>, in_weakreflist), <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L521'>    0,                                  <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L522'>    0,                                  <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L523'>    rlock_methods,                      <i><font color='green'>/*tp_methods*/</font></i>
+<a name='L524'>    0,                                  <i><font color='green'>/* tp_members */</font></i>
+<a name='L525'>    0,                                  <i><font color='green'>/* tp_getset */</font></i>
+<a name='L526'>    0,                                  <i><font color='green'>/* tp_base */</font></i>
+<a name='L527'>    0,                                  <i><font color='green'>/* tp_dict */</font></i>
+<a name='L528'>    0,                                  <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L529'>    0,                                  <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L530'>    0,                                  <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L531'>    0,                                  <i><font color='green'>/* tp_init */</font></i>
+<a name='L532'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,                <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L533'>    <a href='../S/2615.html#L447' title='Defined at 447 in Modules/_threadmodule.c.'>rlock_new</a>                           <i><font color='green'>/* tp_new */</font></i>
+<a name='L534'><font color='red'>}</font>;
+<a name='L535'>
+<a name='L536'><b>static</b> <a href='../S/2615.html#L26' title='Defined at 26 in Modules/_threadmodule.c.'>lockobject</a> *
+<a name='L537'><a href='../R/9220.html' title='Multiple refered from 2 places.'>newlockobject</a>(<b>void</b>)
+<a name='L538'><font color='red'>{</font>
+<a name='L539'>    <a href='../S/2615.html#L26' title='Defined at 26 in Modules/_threadmodule.c.'>lockobject</a> *self;
+<a name='L540'>    self = PyObject_New(<a href='../S/2615.html#L26' title='Defined at 26 in Modules/_threadmodule.c.'>lockobject</a>, &amp;Locktype);
+<a name='L541'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L542'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L543'>    self-&gt;lock_lock = <a href='../D/3848.html' title='Multiple defined in 11 places.'>PyThread_allocate_lock</a>();
+<a name='L544'>    self-&gt;in_weakreflist = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L545'>    <b>if</b> (self-&gt;lock_lock == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L546'>        Py_DECREF(self);
+<a name='L547'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ThreadError, "can't allocate lock");
+<a name='L548'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L549'>    <font color='red'>}</font>
+<a name='L550'>    <b>return</b> self;
+<a name='L551'><font color='red'>}</font>
+<a name='L552'>
+<a name='L553'><i><font color='green'>/* Thread-local objects */</font></i>
+<a name='L554'>
+<a name='L555'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L556'>
+<a name='L557'><i><font color='green'>/* Quick overview:</font></i>
+<a name='L558'><i><font color='green'></font></i>
+<a name='L559'><i><font color='green'>   We need to be able to reclaim reference cycles as soon as possible</font></i>
+<a name='L560'><i><font color='green'>   (both when a thread is being terminated, or a thread-local object</font></i>
+<a name='L561'><i><font color='green'>    becomes unreachable from user data).  Constraints:</font></i>
+<a name='L562'><i><font color='green'>   - it must not be possible for thread-state dicts to be involved in</font></i>
+<a name='L563'><i><font color='green'>     reference cycles (otherwise the cyclic GC will refuse to consider</font></i>
+<a name='L564'><i><font color='green'>     objects referenced from a reachable thread-state dict, even though</font></i>
+<a name='L565'><i><font color='green'>     local_dealloc would clear them)</font></i>
+<a name='L566'><i><font color='green'>   - the death of a thread-state dict must still imply destruction of the</font></i>
+<a name='L567'><i><font color='green'>     corresponding local dicts in all thread-local objects.</font></i>
+<a name='L568'><i><font color='green'></font></i>
+<a name='L569'><i><font color='green'>   Our implementation uses small "localdummy" objects in order to break</font></i>
+<a name='L570'><i><font color='green'>   the reference chain. These trivial objects are hashable (using the</font></i>
+<a name='L571'><i><font color='green'>   default scheme of identity hashing) and weakrefable.</font></i>
+<a name='L572'><i><font color='green'>   Each thread-state holds a separate localdummy for each local object</font></i>
+<a name='L573'><i><font color='green'>   (as a /strong reference/),</font></i>
+<a name='L574'><i><font color='green'>   and each thread-local object holds a dict mapping /weak references/</font></i>
+<a name='L575'><i><font color='green'>   of localdummies to local dicts.</font></i>
+<a name='L576'><i><font color='green'></font></i>
+<a name='L577'><i><font color='green'>   Therefore:</font></i>
+<a name='L578'><i><font color='green'>   - only the thread-state dict holds a strong reference to the dummies</font></i>
+<a name='L579'><i><font color='green'>   - only the thread-local object holds a strong reference to the local dicts</font></i>
+<a name='L580'><i><font color='green'>   - only outside objects (application- or library-level) hold strong</font></i>
+<a name='L581'><i><font color='green'>     references to the thread-local objects</font></i>
+<a name='L582'><i><font color='green'>   - as soon as a thread-state dict is destroyed, the weakref callbacks of all</font></i>
+<a name='L583'><i><font color='green'>     dummies attached to that thread are called, and destroy the corresponding</font></i>
+<a name='L584'><i><font color='green'>     local dicts from thread-local objects</font></i>
+<a name='L585'><i><font color='green'>   - as soon as a thread-local object is destroyed, its local dicts are</font></i>
+<a name='L586'><i><font color='green'>     destroyed and its dummies are manually removed from all thread states</font></i>
+<a name='L587'><i><font color='green'>   - the GC can do its work correctly when a thread-local object is dangling,</font></i>
+<a name='L588'><i><font color='green'>     without any interference from the thread-state dicts</font></i>
+<a name='L589'><i><font color='green'></font></i>
+<a name='L590'><i><font color='green'>   As an additional optimization, each localdummy holds a borrowed reference</font></i>
+<a name='L591'><i><font color='green'>   to the corresponding localdict.  This borrowed reference is only used</font></i>
+<a name='L592'><i><font color='green'>   by the thread-local object which has created the localdummy, which should</font></i>
+<a name='L593'><i><font color='green'>   guarantee that the localdict still exists when accessed.</font></i>
+<a name='L594'><i><font color='green'>*/</font></i>
+<a name='L595'>
+<a name='L596'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L597'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L598'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *localdict;        <i><font color='green'>/* Borrowed reference! */</font></i>
+<a name='L599'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *weakreflist;      <i><font color='green'>/* List of weak references to self */</font></i>
+<a name='L600'><font color='red'>}</font> <a href='../R/8745.html' title='Multiple refered from 5 places.'>localdummyobject</a>;
+<a name='L601'>
+<a name='L602'><b>static</b> <b>void</b>
+<a name='L603'><a href='../S/2615.html#L615' title='Refered from 615 in Modules/_threadmodule.c.'>localdummy_dealloc</a>(localdummyobject *self)
+<a name='L604'><font color='red'>{</font>
+<a name='L605'>    <b>if</b> (self-&gt;weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L606'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) self);
+<a name='L607'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self);
+<a name='L608'><font color='red'>}</font>
+<a name='L609'>
+<a name='L610'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> localdummytype = <font color='red'>{</font>
+<a name='L611'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L612'>    <i><font color='green'>/* tp_name           */</font></i> "_thread._localdummy",
+<a name='L613'>    <i><font color='green'>/* tp_basicsize      */</font></i> <b>sizeof</b>(<a href='../S/2615.html#L600' title='Defined at 600 in Modules/_threadmodule.c.'>localdummyobject</a>),
+<a name='L614'>    <i><font color='green'>/* tp_itemsize       */</font></i> 0,
+<a name='L615'>    <i><font color='green'>/* tp_dealloc        */</font></i> (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2615.html#L603' title='Defined at 603 in Modules/_threadmodule.c.'>localdummy_dealloc</a>,
+<a name='L616'>    <i><font color='green'>/* tp_print          */</font></i> 0,
+<a name='L617'>    <i><font color='green'>/* tp_getattr        */</font></i> 0,
+<a name='L618'>    <i><font color='green'>/* tp_setattr        */</font></i> 0,
+<a name='L619'>    <i><font color='green'>/* tp_reserved       */</font></i> 0,
+<a name='L620'>    <i><font color='green'>/* tp_repr           */</font></i> 0,
+<a name='L621'>    <i><font color='green'>/* tp_as_number      */</font></i> 0,
+<a name='L622'>    <i><font color='green'>/* tp_as_sequence    */</font></i> 0,
+<a name='L623'>    <i><font color='green'>/* tp_as_mapping     */</font></i> 0,
+<a name='L624'>    <i><font color='green'>/* tp_hash           */</font></i> 0,
+<a name='L625'>    <i><font color='green'>/* tp_call           */</font></i> 0,
+<a name='L626'>    <i><font color='green'>/* tp_str            */</font></i> 0,
+<a name='L627'>    <i><font color='green'>/* tp_getattro       */</font></i> 0,
+<a name='L628'>    <i><font color='green'>/* tp_setattro       */</font></i> 0,
+<a name='L629'>    <i><font color='green'>/* tp_as_buffer      */</font></i> 0,
+<a name='L630'>    <i><font color='green'>/* tp_flags          */</font></i> Py_TPFLAGS_DEFAULT,
+<a name='L631'>    <i><font color='green'>/* tp_doc            */</font></i> "Thread-local dummy",
+<a name='L632'>    <i><font color='green'>/* tp_traverse       */</font></i> 0,
+<a name='L633'>    <i><font color='green'>/* tp_clear          */</font></i> 0,
+<a name='L634'>    <i><font color='green'>/* tp_richcompare    */</font></i> 0,
+<a name='L635'>    <i><font color='green'>/* tp_weaklistoffset */</font></i> <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2615.html#L600' title='Defined at 600 in Modules/_threadmodule.c.'>localdummyobject</a>, weakreflist)
+<a name='L636'><font color='red'>}</font>;
+<a name='L637'>
+<a name='L638'>
+<a name='L639'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L640'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L641'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L642'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L643'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *kw;
+<a name='L644'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *weakreflist;      <i><font color='green'>/* List of weak references to self */</font></i>
+<a name='L645'>    <i><font color='green'>/* A {localdummy weakref -&gt; localdict} dict */</font></i>
+<a name='L646'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dummies;
+<a name='L647'>    <i><font color='green'>/* The callback for weakrefs to localdummies */</font></i>
+<a name='L648'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *wr_callback;
+<a name='L649'><font color='red'>}</font> <a href='../R/8746.html' title='Multiple refered from 6 places.'>localobject</a>;
+<a name='L650'>
+<a name='L651'><i><font color='green'>/* Forward declaration */</font></i>
+<a name='L652'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2615.html#L804' title='Defined at 804 in Modules/_threadmodule.c.'>_ldict</a>(localobject *self);
+<a name='L653'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2615.html#L942' title='Defined at 942 in Modules/_threadmodule.c.'>_localdummy_destroyed</a>(PyObject *meth_self, PyObject *dummyweakref);
+<a name='L654'>
+<a name='L655'><i><font color='green'>/* Create and register the dummy for the current thread.</font></i>
+<a name='L656'><i><font color='green'>   Returns a borrowed reference of the corresponding local dict */</font></i>
+<a name='L657'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L658'><a href='../R/5794.html' title='Multiple refered from 2 places.'>_local_create_dummy</a>(localobject *self)
+<a name='L659'><font color='red'>{</font>
+<a name='L660'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tdict, *ldict = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *wr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L661'>    <a href='../S/2615.html#L600' title='Defined at 600 in Modules/_threadmodule.c.'>localdummyobject</a> *dummy = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L662'>    <b>int</b> r;
+<a name='L663'>
+<a name='L664'>    tdict = <a href='../S/3134.html#L412' title='Defined at 412 in Python/pystate.c.'>PyThreadState_GetDict</a>();
+<a name='L665'>    <b>if</b> (tdict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L666'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L667'>                        "Couldn't get thread-state dictionary");
+<a name='L668'>        <b>goto</b> err;
+<a name='L669'>    <font color='red'>}</font>
+<a name='L670'>
+<a name='L671'>    ldict = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L672'>    <b>if</b> (ldict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L673'>        <b>goto</b> err;
+<a name='L674'>    dummy = (<a href='../S/2615.html#L600' title='Defined at 600 in Modules/_threadmodule.c.'>localdummyobject</a> *) localdummytype.tp_alloc(&amp;localdummytype, 0);
+<a name='L675'>    <b>if</b> (dummy == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L676'>        <b>goto</b> err;
+<a name='L677'>    dummy-&gt;localdict = ldict;
+<a name='L678'>    wr = <a href='../S/2830.html#L719' title='Defined at 719 in Objects/weakrefobject.c.'>PyWeakref_NewRef</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) dummy, self-&gt;wr_callback);
+<a name='L679'>    <b>if</b> (wr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L680'>        <b>goto</b> err;
+<a name='L681'>
+<a name='L682'>    <i><font color='green'>/* As a side-effect, this will cache the weakref's hash before the</font></i>
+<a name='L683'><i><font color='green'>       dummy gets deleted */</font></i>
+<a name='L684'>    r = <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(self-&gt;dummies, wr, ldict);
+<a name='L685'>    <b>if</b> (r &lt; 0)
+<a name='L686'>        <b>goto</b> err;
+<a name='L687'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(wr);
+<a name='L688'>    r = <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(tdict, self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) dummy);
+<a name='L689'>    <b>if</b> (r &lt; 0)
+<a name='L690'>        <b>goto</b> err;
+<a name='L691'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(dummy);
+<a name='L692'>
+<a name='L693'>    Py_DECREF(ldict);
+<a name='L694'>    <b>return</b> ldict;
+<a name='L695'>
+<a name='L696'>err:
+<a name='L697'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(ldict);
+<a name='L698'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(wr);
+<a name='L699'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dummy);
+<a name='L700'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L701'><font color='red'>}</font>
+<a name='L702'>
+<a name='L703'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L704'><a href='../S/2615.html#L903' title='Refered from 903 in Modules/_threadmodule.c.'>local_new</a>(PyTypeObject *type, PyObject *args, PyObject *kw)
+<a name='L705'><font color='red'>{</font>
+<a name='L706'>    <a href='../S/2615.html#L649' title='Defined at 649 in Modules/_threadmodule.c.'>localobject</a> *self;
+<a name='L707'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *wr;
+<a name='L708'>    <b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> wr_callback_def = <font color='red'>{</font>
+<a name='L709'>        "_localdummy_destroyed", (PyCFunction) <a href='../S/2615.html#L942' title='Defined at 942 in Modules/_threadmodule.c.'>_localdummy_destroyed</a>, METH_O
+<a name='L710'>    <font color='red'>}</font>;
+<a name='L711'>
+<a name='L712'>    <b>if</b> (type-&gt;tp_init == PyBaseObject_Type.tp_init
+<a name='L713'>        &amp;&amp; ((<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> &amp;&amp; <a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>))
+<a name='L714'>        || (kw &amp;&amp; <a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(kw)))) <font color='red'>{</font>
+<a name='L715'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L716'>                  "Initialization arguments are not supported");
+<a name='L717'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L718'>    <font color='red'>}</font>
+<a name='L719'>
+<a name='L720'>    self = (<a href='../S/2615.html#L649' title='Defined at 649 in Modules/_threadmodule.c.'>localobject</a> *)type-&gt;tp_alloc(type, 0);
+<a name='L721'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L722'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L723'>
+<a name='L724'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L725'>    self-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L726'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(kw);
+<a name='L727'>    self-&gt;kw = kw;
+<a name='L728'>    self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("thread.local.%p", self);
+<a name='L729'>    <b>if</b> (self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L730'>        <b>goto</b> err;
+<a name='L731'>
+<a name='L732'>    self-&gt;dummies = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L733'>    <b>if</b> (self-&gt;dummies == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L734'>        <b>goto</b> err;
+<a name='L735'>
+<a name='L736'>    <i><font color='green'>/* We use a weak reference to self in the callback closure</font></i>
+<a name='L737'><i><font color='green'>       in order to avoid spurious reference cycles */</font></i>
+<a name='L738'>    wr = <a href='../S/2830.html#L719' title='Defined at 719 in Objects/weakrefobject.c.'>PyWeakref_NewRef</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) self, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L739'>    <b>if</b> (wr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L740'>        <b>goto</b> err;
+<a name='L741'>    self-&gt;wr_callback = <a href='../D/2860.html' title='Multiple defined in 2 places.'>PyCFunction_New</a>(&amp;wr_callback_def, wr);
+<a name='L742'>    Py_DECREF(wr);
+<a name='L743'>    <b>if</b> (self-&gt;wr_callback == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L744'>        <b>goto</b> err;
+<a name='L745'>
+<a name='L746'>    <b>if</b> (<a href='../S/2615.html#L658' title='Defined at 658 in Modules/_threadmodule.c.'>_local_create_dummy</a>(self) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L747'>        <b>goto</b> err;
+<a name='L748'>
+<a name='L749'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L750'>
+<a name='L751'>  err:
+<a name='L752'>    Py_DECREF(self);
+<a name='L753'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L754'><font color='red'>}</font>
+<a name='L755'>
+<a name='L756'><b>static</b> <b>int</b>
+<a name='L757'><a href='../S/2615.html#L887' title='Refered from 887 in Modules/_threadmodule.c.'>local_traverse</a>(localobject *self, visitproc visit, <b>void</b> *arg)
+<a name='L758'><font color='red'>{</font>
+<a name='L759'>    Py_VISIT(self-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L760'>    Py_VISIT(self-&gt;kw);
+<a name='L761'>    Py_VISIT(self-&gt;dummies);
+<a name='L762'>    <b>return</b> 0;
+<a name='L763'><font color='red'>}</font>
+<a name='L764'>
+<a name='L765'><b>static</b> <b>int</b>
+<a name='L766'><a href='../R/8738.html' title='Multiple refered from 2 places.'>local_clear</a>(localobject *self)
+<a name='L767'><font color='red'>{</font>
+<a name='L768'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate;
+<a name='L769'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L770'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;kw);
+<a name='L771'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;dummies);
+<a name='L772'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;wr_callback);
+<a name='L773'>    <i><font color='green'>/* Remove all strong references to dummies from the thread states */</font></i>
+<a name='L774'>    <b>if</b> (self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>
+<a name='L775'>        &amp;&amp; (tstate = <a href='../S/3134.html#L368' title='Defined at 368 in Python/pystate.c.'>PyThreadState_Get</a>())
+<a name='L776'>        &amp;&amp; tstate-&gt;interp) <font color='red'>{</font>
+<a name='L777'>        <b>for</b>(tstate = <a href='../S/3134.html#L488' title='Defined at 488 in Python/pystate.c.'>PyInterpreterState_ThreadHead</a>(tstate-&gt;interp);
+<a name='L778'>            tstate;
+<a name='L779'>            tstate = <a href='../S/3134.html#L493' title='Defined at 493 in Python/pystate.c.'>PyThreadState_Next</a>(tstate))
+<a name='L780'>            <b>if</b> (tstate-&gt;dict &amp;&amp;
+<a name='L781'>                <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(tstate-&gt;dict, self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>))
+<a name='L782'>                <a href='../S/2787.html#L832' title='Defined at 832 in Objects/dictobject.c.'>PyDict_DelItem</a>(tstate-&gt;dict, self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L783'>    <font color='red'>}</font>
+<a name='L784'>    <b>return</b> 0;
+<a name='L785'><font color='red'>}</font>
+<a name='L786'>
+<a name='L787'><b>static</b> <b>void</b>
+<a name='L788'><a href='../S/2615.html#L869' title='Refered from 869 in Modules/_threadmodule.c.'>local_dealloc</a>(localobject *self)
+<a name='L789'><font color='red'>{</font>
+<a name='L790'>    <i><font color='green'>/* Weakrefs must be invalidated right now, otherwise they can be used</font></i>
+<a name='L791'><i><font color='green'>       from code called below, which is very dangerous since Py_REFCNT(self) == 0 */</font></i>
+<a name='L792'>    <b>if</b> (self-&gt;weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L793'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) self);
+<a name='L794'>
+<a name='L795'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(self);
+<a name='L796'>
+<a name='L797'>    <a href='../S/2615.html#L766' title='Defined at 766 in Modules/_threadmodule.c.'>local_clear</a>(self);
+<a name='L798'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L799'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self);
+<a name='L800'><font color='red'>}</font>
+<a name='L801'>
+<a name='L802'><i><font color='green'>/* Returns a borrowed reference to the local dict, creating it if necessary */</font></i>
+<a name='L803'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L804'><a href='../R/5791.html' title='Multiple refered from 3 places.'>_ldict</a>(localobject *self)
+<a name='L805'><font color='red'>{</font>
+<a name='L806'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tdict, *ldict, *dummy;
+<a name='L807'>
+<a name='L808'>    tdict = <a href='../S/3134.html#L412' title='Defined at 412 in Python/pystate.c.'>PyThreadState_GetDict</a>();
+<a name='L809'>    <b>if</b> (tdict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L810'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L811'>                        "Couldn't get thread-state dictionary");
+<a name='L812'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L813'>    <font color='red'>}</font>
+<a name='L814'>
+<a name='L815'>    dummy = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(tdict, self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L816'>    <b>if</b> (dummy == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L817'>        ldict = <a href='../S/2615.html#L658' title='Defined at 658 in Modules/_threadmodule.c.'>_local_create_dummy</a>(self);
+<a name='L818'>        <b>if</b> (ldict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L819'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L820'>
+<a name='L821'>        <b>if</b> (<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_init != PyBaseObject_Type.tp_init &amp;&amp;
+<a name='L822'>            <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_init((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self,
+<a name='L823'>                                   self-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, self-&gt;kw) &lt; 0) <font color='red'>{</font>
+<a name='L824'>            <i><font color='green'>/* we need to get rid of ldict from thread so</font></i>
+<a name='L825'><i><font color='green'>               we create a new one the next time we do an attr</font></i>
+<a name='L826'><i><font color='green'>               acces */</font></i>
+<a name='L827'>            <a href='../S/2787.html#L832' title='Defined at 832 in Objects/dictobject.c.'>PyDict_DelItem</a>(tdict, self-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L828'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L829'>        <font color='red'>}</font>
+<a name='L830'>    <font color='red'>}</font>
+<a name='L831'>    <b>else</b> <font color='red'>{</font>
+<a name='L832'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(dummy) == &amp;localdummytype);
+<a name='L833'>        ldict = ((<a href='../S/2615.html#L600' title='Defined at 600 in Modules/_threadmodule.c.'>localdummyobject</a> *) dummy)-&gt;localdict;
+<a name='L834'>    <font color='red'>}</font>
+<a name='L835'>
+<a name='L836'>    <b>return</b> ldict;
+<a name='L837'><font color='red'>}</font>
+<a name='L838'>
+<a name='L839'><b>static</b> <b>int</b>
+<a name='L840'><a href='../S/2615.html#L882' title='Refered from 882 in Modules/_threadmodule.c.'>local_setattro</a>(localobject *self, PyObject *name, PyObject *v)
+<a name='L841'><font color='red'>{</font>
+<a name='L842'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ldict;
+<a name='L843'>    <b>int</b> r;
+<a name='L844'>
+<a name='L845'>    ldict = <a href='../S/2615.html#L804' title='Defined at 804 in Modules/_threadmodule.c.'>_ldict</a>(self);
+<a name='L846'>    <b>if</b> (ldict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L847'>        <b>return</b> -1;
+<a name='L848'>
+<a name='L849'>    r = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(name, str_dict, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L850'>    <b>if</b> (r == 1) <font color='red'>{</font>
+<a name='L851'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_AttributeError,
+<a name='L852'>                     "'%.50s' object attribute '%U' is read-only",
+<a name='L853'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_name, name);
+<a name='L854'>        <b>return</b> -1;
+<a name='L855'>    <font color='red'>}</font>
+<a name='L856'>    <b>if</b> (r == -1)
+<a name='L857'>        <b>return</b> -1;
+<a name='L858'>
+<a name='L859'>    <b>return</b> <a href='../S/2803.html#L1052' title='Defined at 1052 in Objects/object.c.'>_PyObject_GenericSetAttrWithDict</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self, name, v, ldict);
+<a name='L860'><font color='red'>}</font>
+<a name='L861'>
+<a name='L862'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2615.html#L909' title='Defined at 909 in Modules/_threadmodule.c.'>local_getattro</a>(localobject *, PyObject *);
+<a name='L863'>
+<a name='L864'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> localtype = <font color='red'>{</font>
+<a name='L865'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L866'>    <i><font color='green'>/* tp_name           */</font></i> "_thread._local",
+<a name='L867'>    <i><font color='green'>/* tp_basicsize      */</font></i> <b>sizeof</b>(<a href='../S/2615.html#L649' title='Defined at 649 in Modules/_threadmodule.c.'>localobject</a>),
+<a name='L868'>    <i><font color='green'>/* tp_itemsize       */</font></i> 0,
+<a name='L869'>    <i><font color='green'>/* tp_dealloc        */</font></i> (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2615.html#L788' title='Defined at 788 in Modules/_threadmodule.c.'>local_dealloc</a>,
+<a name='L870'>    <i><font color='green'>/* tp_print          */</font></i> 0,
+<a name='L871'>    <i><font color='green'>/* tp_getattr        */</font></i> 0,
+<a name='L872'>    <i><font color='green'>/* tp_setattr        */</font></i> 0,
+<a name='L873'>    <i><font color='green'>/* tp_reserved       */</font></i> 0,
+<a name='L874'>    <i><font color='green'>/* tp_repr           */</font></i> 0,
+<a name='L875'>    <i><font color='green'>/* tp_as_number      */</font></i> 0,
+<a name='L876'>    <i><font color='green'>/* tp_as_sequence    */</font></i> 0,
+<a name='L877'>    <i><font color='green'>/* tp_as_mapping     */</font></i> 0,
+<a name='L878'>    <i><font color='green'>/* tp_hash           */</font></i> 0,
+<a name='L879'>    <i><font color='green'>/* tp_call           */</font></i> 0,
+<a name='L880'>    <i><font color='green'>/* tp_str            */</font></i> 0,
+<a name='L881'>    <i><font color='green'>/* tp_getattro       */</font></i> (getattrofunc)<a href='../S/2615.html#L909' title='Defined at 909 in Modules/_threadmodule.c.'>local_getattro</a>,
+<a name='L882'>    <i><font color='green'>/* tp_setattro       */</font></i> (setattrofunc)<a href='../S/2615.html#L840' title='Defined at 840 in Modules/_threadmodule.c.'>local_setattro</a>,
+<a name='L883'>    <i><font color='green'>/* tp_as_buffer      */</font></i> 0,
+<a name='L884'>    <i><font color='green'>/* tp_flags          */</font></i> Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE
+<a name='L885'>                                               | Py_TPFLAGS_HAVE_GC,
+<a name='L886'>    <i><font color='green'>/* tp_doc            */</font></i> "Thread-local data",
+<a name='L887'>    <i><font color='green'>/* tp_traverse       */</font></i> (traverseproc)<a href='../S/2615.html#L757' title='Defined at 757 in Modules/_threadmodule.c.'>local_traverse</a>,
+<a name='L888'>    <i><font color='green'>/* tp_clear          */</font></i> (inquiry)<a href='../S/2615.html#L766' title='Defined at 766 in Modules/_threadmodule.c.'>local_clear</a>,
+<a name='L889'>    <i><font color='green'>/* tp_richcompare    */</font></i> 0,
+<a name='L890'>    <i><font color='green'>/* tp_weaklistoffset */</font></i> <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2615.html#L649' title='Defined at 649 in Modules/_threadmodule.c.'>localobject</a>, weakreflist),
+<a name='L891'>    <i><font color='green'>/* tp_iter           */</font></i> 0,
+<a name='L892'>    <i><font color='green'>/* tp_iternext       */</font></i> 0,
+<a name='L893'>    <i><font color='green'>/* tp_methods        */</font></i> 0,
+<a name='L894'>    <i><font color='green'>/* tp_members        */</font></i> 0,
+<a name='L895'>    <i><font color='green'>/* tp_getset         */</font></i> 0,
+<a name='L896'>    <i><font color='green'>/* tp_base           */</font></i> 0,
+<a name='L897'>    <i><font color='green'>/* tp_dict           */</font></i> 0, <i><font color='green'>/* internal use */</font></i>
+<a name='L898'>    <i><font color='green'>/* tp_descr_get      */</font></i> 0,
+<a name='L899'>    <i><font color='green'>/* tp_descr_set      */</font></i> 0,
+<a name='L900'>    <i><font color='green'>/* tp_dictoffset     */</font></i> 0,
+<a name='L901'>    <i><font color='green'>/* tp_init           */</font></i> 0,
+<a name='L902'>    <i><font color='green'>/* tp_alloc          */</font></i> 0,
+<a name='L903'>    <i><font color='green'>/* tp_new            */</font></i> <a href='../S/2615.html#L704' title='Defined at 704 in Modules/_threadmodule.c.'>local_new</a>,
+<a name='L904'>    <i><font color='green'>/* tp_free           */</font></i> 0, <i><font color='green'>/* Low-level free-mem routine */</font></i>
+<a name='L905'>    <i><font color='green'>/* tp_is_gc          */</font></i> 0, <i><font color='green'>/* For PyObject_IS_GC */</font></i>
+<a name='L906'><font color='red'>}</font>;
+<a name='L907'>
+<a name='L908'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L909'><a href='../R/8740.html' title='Multiple refered from 2 places.'>local_getattro</a>(localobject *self, PyObject *name)
+<a name='L910'><font color='red'>{</font>
+<a name='L911'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ldict, *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L912'>    <b>int</b> r;
+<a name='L913'>
+<a name='L914'>    ldict = <a href='../S/2615.html#L804' title='Defined at 804 in Modules/_threadmodule.c.'>_ldict</a>(self);
+<a name='L915'>    <b>if</b> (ldict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L916'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L917'>
+<a name='L918'>    r = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(name, str_dict, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L919'>    <b>if</b> (r == 1) <font color='red'>{</font>
+<a name='L920'>        Py_INCREF(ldict);
+<a name='L921'>        <b>return</b> ldict;
+<a name='L922'>    <font color='red'>}</font>
+<a name='L923'>    <b>if</b> (r == -1)
+<a name='L924'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L925'>
+<a name='L926'>    <b>if</b> (<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self) != &amp;localtype)
+<a name='L927'>        <i><font color='green'>/* use generic lookup for subtypes */</font></i>
+<a name='L928'>        <b>return</b> <a href='../S/2803.html#L956' title='Defined at 956 in Objects/object.c.'>_PyObject_GenericGetAttrWithDict</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self, name, ldict);
+<a name='L929'>
+<a name='L930'>    <i><font color='green'>/* Optimization: just look in dict ourselves */</font></i>
+<a name='L931'>    <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(ldict, name);
+<a name='L932'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L933'>        <i><font color='green'>/* Fall back on generic to get __class__ and __dict__ */</font></i>
+<a name='L934'>        <b>return</b> <a href='../S/2803.html#L956' title='Defined at 956 in Objects/object.c.'>_PyObject_GenericGetAttrWithDict</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self, name, ldict);
+<a name='L935'>
+<a name='L936'>    Py_INCREF(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L937'>    <b>return</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L938'><font color='red'>}</font>
+<a name='L939'>
+<a name='L940'><i><font color='green'>/* Called when a dummy is destroyed. */</font></i>
+<a name='L941'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L942'><a href='../R/5795.html' title='Multiple refered from 2 places.'>_localdummy_destroyed</a>(PyObject *localweakref, PyObject *dummyweakref)
+<a name='L943'><font color='red'>{</font>
+<a name='L944'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L945'>    <a href='../S/2615.html#L649' title='Defined at 649 in Modules/_threadmodule.c.'>localobject</a> *self;
+<a name='L946'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyWeakref_CheckRef(localweakref));
+<a name='L947'>    obj = PyWeakref_GET_OBJECT(localweakref);
+<a name='L948'>    <b>if</b> (obj == Py_None)
+<a name='L949'>        <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L950'>    Py_INCREF(obj);
+<a name='L951'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyObject_TypeCheck(obj, &amp;localtype));
+<a name='L952'>    <i><font color='green'>/* If the thread-local object is still alive and not being cleared,</font></i>
+<a name='L953'><i><font color='green'>       remove the corresponding local dict */</font></i>
+<a name='L954'>    self = (<a href='../S/2615.html#L649' title='Defined at 649 in Modules/_threadmodule.c.'>localobject</a> *) obj;
+<a name='L955'>    <b>if</b> (self-&gt;dummies != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L956'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ldict;
+<a name='L957'>        ldict = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(self-&gt;dummies, dummyweakref);
+<a name='L958'>        <b>if</b> (ldict != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L959'>            <a href='../S/2787.html#L832' title='Defined at 832 in Objects/dictobject.c.'>PyDict_DelItem</a>(self-&gt;dummies, dummyweakref);
+<a name='L960'>        <font color='red'>}</font>
+<a name='L961'>        <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L962'>            <a href='../S/3106.html#L708' title='Defined at 708 in Python/errors.c.'>PyErr_WriteUnraisable</a>(obj);
+<a name='L963'>    <font color='red'>}</font>
+<a name='L964'>    Py_DECREF(obj);
+<a name='L965'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L966'><font color='red'>}</font>
+<a name='L967'>
+<a name='L968'><i><font color='green'>/* Module functions */</font></i>
+<a name='L969'>
+<a name='L970'><b>struct</b> <a href='../R/6261.html' title='Multiple refered from 3 places.'>bootstate</a> <font color='red'>{</font>
+<a name='L971'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *interp;
+<a name='L972'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func;
+<a name='L973'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L974'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *keyw;
+<a name='L975'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate;
+<a name='L976'><font color='red'>}</font>;
+<a name='L977'>
+<a name='L978'><b>static</b> <b>void</b>
+<a name='L979'><a href='../S/2615.html#L1061' title='Refered from 1061 in Modules/_threadmodule.c.'>t_bootstrap</a>(<b>void</b> *boot_raw)
+<a name='L980'><font color='red'>{</font>
+<a name='L981'>    <b>struct</b> <a href='../S/2615.html#L970' title='Defined at 970 in Modules/_threadmodule.c.'>bootstate</a> *boot = (<b>struct</b> <a href='../S/2615.html#L970' title='Defined at 970 in Modules/_threadmodule.c.'>bootstate</a> *) boot_raw;
+<a name='L982'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate;
+<a name='L983'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L984'>
+<a name='L985'>    tstate = boot-&gt;tstate;
+<a name='L986'>    tstate-&gt;thread_id = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L987'>    <a href='../S/3134.html#L228' title='Defined at 228 in Python/pystate.c.'>_PyThreadState_Init</a>(tstate);
+<a name='L988'>    <a href='../S/3091.html#L345' title='Defined at 345 in Python/ceval.c.'>PyEval_AcquireThread</a>(tstate);
+<a name='L989'>    nb_threads++;
+<a name='L990'>    res = <a href='../S/3091.html#L3731' title='Defined at 3731 in Python/ceval.c.'>PyEval_CallObjectWithKeywords</a>(
+<a name='L991'>        boot-&gt;func, boot-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, boot-&gt;keyw);
+<a name='L992'>    <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L993'>        <b>if</b> (<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_SystemExit))
+<a name='L994'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L995'>        <b>else</b> <font color='red'>{</font>
+<a name='L996'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *file;
+<a name='L997'>            <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>(
+<a name='L998'>                "Unhandled exception in thread started by ");
+<a name='L999'>            file = <a href='../S/3144.html#L44' title='Defined at 44 in Python/sysmodule.c.'>PySys_GetObject</a>("stderr");
+<a name='L1000'>            <b>if</b> (file != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; file != Py_None)
+<a name='L1001'>                <a href='../S/2790.html#L131' title='Defined at 131 in Objects/fileobject.c.'>PyFile_WriteObject</a>(boot-&gt;func, file, 0);
+<a name='L1002'>            <b>else</b>
+<a name='L1003'>                <a href='../S/2803.html#L261' title='Defined at 261 in Objects/object.c.'>PyObject_Print</a>(boot-&gt;func, stderr, 0);
+<a name='L1004'>            <a href='../D/3819.html' title='Multiple defined in 2 places.'>PySys_WriteStderr</a>("\n");
+<a name='L1005'>            <a href='../S/3138.html#L1431' title='Defined at 1431 in Python/pythonrun.c.'>PyErr_PrintEx</a>(0);
+<a name='L1006'>        <font color='red'>}</font>
+<a name='L1007'>    <font color='red'>}</font>
+<a name='L1008'>    <b>else</b>
+<a name='L1009'>        Py_DECREF(res);
+<a name='L1010'>    Py_DECREF(boot-&gt;func);
+<a name='L1011'>    Py_DECREF(boot-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1012'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(boot-&gt;keyw);
+<a name='L1013'>    PyMem_DEL(boot_raw);
+<a name='L1014'>    nb_threads--;
+<a name='L1015'>    <a href='../S/3134.html#L271' title='Defined at 271 in Python/pystate.c.'>PyThreadState_Clear</a>(tstate);
+<a name='L1016'>    <a href='../S/3134.html#L351' title='Defined at 351 in Python/pystate.c.'>PyThreadState_DeleteCurrent</a>();
+<a name='L1017'>    <a href='../D/3852.html' title='Multiple defined in 10 places.'>PyThread_exit_thread</a>();
+<a name='L1018'><font color='red'>}</font>
+<a name='L1019'>
+<a name='L1020'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1021'><a href='../R/10872.html' title='Multiple refered from 2 places.'>thread_PyThread_start_new_thread</a>(PyObject *self, PyObject *fargs)
+<a name='L1022'><font color='red'>{</font>
+<a name='L1023'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func, *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, *keyw = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1024'>    <b>struct</b> <a href='../S/2615.html#L970' title='Defined at 970 in Modules/_threadmodule.c.'>bootstate</a> *boot;
+<a name='L1025'>    <b>long</b> ident;
+<a name='L1026'>
+<a name='L1027'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(fargs, "start_new_thread", 2, 3,
+<a name='L1028'>                           &amp;func, &amp;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, &amp;keyw))
+<a name='L1029'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1030'>    <b>if</b> (!<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(func)) <font color='red'>{</font>
+<a name='L1031'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1032'>                        "first arg must be callable");
+<a name='L1033'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1034'>    <font color='red'>}</font>
+<a name='L1035'>    <b>if</b> (!PyTuple_Check(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>)) <font color='red'>{</font>
+<a name='L1036'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1037'>                        "2nd arg must be a tuple");
+<a name='L1038'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1039'>    <font color='red'>}</font>
+<a name='L1040'>    <b>if</b> (keyw != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; !PyDict_Check(keyw)) <font color='red'>{</font>
+<a name='L1041'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1042'>                        "optional 3rd arg must be a dictionary");
+<a name='L1043'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1044'>    <font color='red'>}</font>
+<a name='L1045'>    boot = PyMem_NEW(<b>struct</b> <a href='../S/2615.html#L970' title='Defined at 970 in Modules/_threadmodule.c.'>bootstate</a>, 1);
+<a name='L1046'>    <b>if</b> (boot == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1047'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1048'>    boot-&gt;interp = <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>()-&gt;interp;
+<a name='L1049'>    boot-&gt;func = func;
+<a name='L1050'>    boot-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L1051'>    boot-&gt;keyw = keyw;
+<a name='L1052'>    boot-&gt;tstate = <a href='../S/3134.html#L222' title='Defined at 222 in Python/pystate.c.'>_PyThreadState_Prealloc</a>(boot-&gt;interp);
+<a name='L1053'>    <b>if</b> (boot-&gt;tstate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1054'>        PyMem_DEL(boot);
+<a name='L1055'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L1056'>    <font color='red'>}</font>
+<a name='L1057'>    Py_INCREF(func);
+<a name='L1058'>    Py_INCREF(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1059'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(keyw);
+<a name='L1060'>    <a href='../S/3091.html#L304' title='Defined at 304 in Python/ceval.c.'>PyEval_InitThreads</a>(); <i><font color='green'>/* Start the interpreter's thread-awareness */</font></i>
+<a name='L1061'>    ident = <a href='../D/3861.html' title='Multiple defined in 10 places.'>PyThread_start_new_thread</a>(<a href='../S/2615.html#L979' title='Defined at 979 in Modules/_threadmodule.c.'>t_bootstrap</a>, (<b>void</b>*) boot);
+<a name='L1062'>    <b>if</b> (ident == -1) <font color='red'>{</font>
+<a name='L1063'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ThreadError, "can't start new thread");
+<a name='L1064'>        Py_DECREF(func);
+<a name='L1065'>        Py_DECREF(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1066'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(keyw);
+<a name='L1067'>        <a href='../S/3134.html#L271' title='Defined at 271 in Python/pystate.c.'>PyThreadState_Clear</a>(boot-&gt;tstate);
+<a name='L1068'>        PyMem_DEL(boot);
+<a name='L1069'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1070'>    <font color='red'>}</font>
+<a name='L1071'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ident);
+<a name='L1072'><font color='red'>}</font>
+<a name='L1073'>
+<a name='L1074'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(start_new_doc,
+<a name='L1075'>"start_new_thread(function, args[, kwargs])\n\
+<a name='L1076'>(start_new() is an obsolete synonym)\n\
+<a name='L1077'>\n\
+<a name='L1078'>Start a new thread and return its identifier.  The thread will call the\n\
+<a name='L1079'>function with positional arguments from the tuple args and keyword arguments\n\
+<a name='L1080'>taken from the optional dictionary kwargs.  The thread exits when the\n\
+<a name='L1081'>function returns; the return value is ignored.  The thread will also exit\n\
+<a name='L1082'>when the function raises an unhandled exception; a stack trace will be\n\
+<a name='L1083'>printed unless the exception is SystemExit.\n");
+<a name='L1084'>
+<a name='L1085'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1086'><a href='../R/10870.html' title='Multiple refered from 2 places.'>thread_PyThread_exit_thread</a>(PyObject *self)
+<a name='L1087'><font color='red'>{</font>
+<a name='L1088'>    <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_SystemExit);
+<a name='L1089'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1090'><font color='red'>}</font>
+<a name='L1091'>
+<a name='L1092'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(exit_doc,
+<a name='L1093'>"exit()\n\
+<a name='L1094'>(PyThread_exit_thread() is an obsolete synonym)\n\
+<a name='L1095'>\n\
+<a name='L1096'>This is synonymous to ``raise SystemExit''.  It will cause the current\n\
+<a name='L1097'>thread to exit silently unless the exception is caught.");
+<a name='L1098'>
+<a name='L1099'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1100'><a href='../S/2615.html#L1238' title='Refered from 1238 in Modules/_threadmodule.c.'>thread_PyThread_interrupt_main</a>(PyObject * self)
+<a name='L1101'><font color='red'>{</font>
+<a name='L1102'>    <a href='../D/3171.html' title='Multiple defined in 2 places.'>PyErr_SetInterrupt</a>();
+<a name='L1103'>    Py_INCREF(Py_None);
+<a name='L1104'>    <b>return</b> Py_None;
+<a name='L1105'><font color='red'>}</font>
+<a name='L1106'>
+<a name='L1107'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(interrupt_doc,
+<a name='L1108'>"interrupt_main()\n\
+<a name='L1109'>\n\
+<a name='L1110'>Raise a KeyboardInterrupt in the main thread.\n\
+<a name='L1111'>A subthread can use this function to interrupt the main thread."
+<a name='L1112'>);
+<a name='L1113'>
+<a name='L1114'><b>static</b> <a href='../S/2615.html#L26' title='Defined at 26 in Modules/_threadmodule.c.'>lockobject</a> *<a href='../S/2615.html#L537' title='Defined at 537 in Modules/_threadmodule.c.'>newlockobject</a>(<b>void</b>);
+<a name='L1115'>
+<a name='L1116'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1117'><a href='../R/10869.html' title='Multiple refered from 2 places.'>thread_PyThread_allocate_lock</a>(PyObject *self)
+<a name='L1118'><font color='red'>{</font>
+<a name='L1119'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) <a href='../S/2615.html#L537' title='Defined at 537 in Modules/_threadmodule.c.'>newlockobject</a>();
+<a name='L1120'><font color='red'>}</font>
+<a name='L1121'>
+<a name='L1122'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(allocate_doc,
+<a name='L1123'>"allocate_lock() -&gt; lock object\n\
+<a name='L1124'>(allocate() is an obsolete synonym)\n\
+<a name='L1125'>\n\
+<a name='L1126'>Create a new lock object.  See help(LockType) for information about locks.");
+<a name='L1127'>
+<a name='L1128'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1129'><a href='../S/2615.html#L1240' title='Refered from 1240 in Modules/_threadmodule.c.'>thread_get_ident</a>(PyObject *self)
+<a name='L1130'><font color='red'>{</font>
+<a name='L1131'>    <b>long</b> ident;
+<a name='L1132'>    ident = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L1133'>    <b>if</b> (ident == -1) <font color='red'>{</font>
+<a name='L1134'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ThreadError, "no current thread ident");
+<a name='L1135'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1136'>    <font color='red'>}</font>
+<a name='L1137'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ident);
+<a name='L1138'><font color='red'>}</font>
+<a name='L1139'>
+<a name='L1140'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(get_ident_doc,
+<a name='L1141'>"get_ident() -&gt; integer\n\
+<a name='L1142'>\n\
+<a name='L1143'>Return a non-zero integer that uniquely identifies the current thread\n\
+<a name='L1144'>amongst other threads that exist simultaneously.\n\
+<a name='L1145'>This may be used to identify per-thread resources.\n\
+<a name='L1146'>Even though on some platforms threads identities may appear to be\n\
+<a name='L1147'>allocated consecutive numbers starting at 1, this behavior should not\n\
+<a name='L1148'>be relied upon, and the number should be seen purely as a magic cookie.\n\
+<a name='L1149'>A thread's identity may be reused for another thread after it exits.");
+<a name='L1150'>
+<a name='L1151'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1152'><a href='../S/2615.html#L1242' title='Refered from 1242 in Modules/_threadmodule.c.'>thread__count</a>(PyObject *self)
+<a name='L1153'><font color='red'>{</font>
+<a name='L1154'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(nb_threads);
+<a name='L1155'><font color='red'>}</font>
+<a name='L1156'>
+<a name='L1157'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(_count_doc,
+<a name='L1158'>"_count() -&gt; integer\n\
+<a name='L1159'>\n\
+<a name='L1160'>\
+<a name='L1161'>Return the number of currently running Python threads, excluding \n\
+<a name='L1162'>the main thread. The returned number comprises all threads created\n\
+<a name='L1163'>through `start_new_thread()` as well as `threading.Thread`, and not\n\
+<a name='L1164'>yet finished.\n\
+<a name='L1165'>\n\
+<a name='L1166'>This function is meant for internal and specialized purposes only.\n\
+<a name='L1167'>In most applications `threading.enumerate()` should be used instead.");
+<a name='L1168'>
+<a name='L1169'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1170'><a href='../S/2615.html#L1244' title='Refered from 1244 in Modules/_threadmodule.c.'>thread_stack_size</a>(PyObject *self, PyObject *args)
+<a name='L1171'><font color='red'>{</font>
+<a name='L1172'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> old_size;
+<a name='L1173'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> new_size = 0;
+<a name='L1174'>    <b>int</b> rc;
+<a name='L1175'>
+<a name='L1176'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|n:stack_size", &amp;new_size))
+<a name='L1177'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1178'>
+<a name='L1179'>    <b>if</b> (new_size &lt; 0) <font color='red'>{</font>
+<a name='L1180'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L1181'>                        "size must be 0 or a positive value");
+<a name='L1182'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1183'>    <font color='red'>}</font>
+<a name='L1184'>
+<a name='L1185'>    old_size = <a href='../S/3145.html#L146' title='Defined at 146 in Python/thread.c.'>PyThread_get_stacksize</a>();
+<a name='L1186'>
+<a name='L1187'>    rc = <a href='../S/3145.html#L157' title='Defined at 157 in Python/thread.c.'>PyThread_set_stacksize</a>((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>) new_size);
+<a name='L1188'>    <b>if</b> (rc == -1) <font color='red'>{</font>
+<a name='L1189'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L1190'>                     "size not valid: %zd bytes",
+<a name='L1191'>                     new_size);
+<a name='L1192'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1193'>    <font color='red'>}</font>
+<a name='L1194'>    <b>if</b> (rc == -2) <font color='red'>{</font>
+<a name='L1195'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(ThreadError,
+<a name='L1196'>                        "setting stack size not supported");
+<a name='L1197'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1198'>    <font color='red'>}</font>
+<a name='L1199'>
+<a name='L1200'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>((<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>) old_size);
+<a name='L1201'><font color='red'>}</font>
+<a name='L1202'>
+<a name='L1203'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stack_size_doc,
+<a name='L1204'>"stack_size([size]) -&gt; size\n\
+<a name='L1205'>\n\
+<a name='L1206'>Return the thread stack size used when creating new threads.  The\n\
+<a name='L1207'>optional size argument specifies the stack size (in bytes) to be used\n\
+<a name='L1208'>for subsequently created threads, and must be 0 (use platform or\n\
+<a name='L1209'>configured default) or a positive integer value of at least 32,768 (32k).\n\
+<a name='L1210'>If changing the thread stack size is unsupported, a ThreadError\n\
+<a name='L1211'>exception is raised.  If the specified size is invalid, a ValueError\n\
+<a name='L1212'>exception is raised, and the stack size is unmodified.  32k bytes\n\
+<a name='L1213'> currently the minimum supported stack size value to guarantee\n\
+<a name='L1214'>sufficient stack space for the interpreter itself.\n\
+<a name='L1215'>\n\
+<a name='L1216'>Note that some platforms may have particular restrictions on values for\n\
+<a name='L1217'>the stack size, such as requiring a minimum stack size larger than 32kB or\n\
+<a name='L1218'>requiring allocation in multiples of the system memory page size\n\
+<a name='L1219'>- platform documentation should be referred to for more information\n\
+<a name='L1220'>(4kB pages are common; using multiples of 4096 for the stack size is\n\
+<a name='L1221'>the suggested approach in the absence of more specific information).");
+<a name='L1222'>
+<a name='L1223'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> thread_methods[] = <font color='red'>{</font>
+<a name='L1224'>    <font color='red'>{</font>"start_new_thread",        (PyCFunction)<a href='../S/2615.html#L1021' title='Defined at 1021 in Modules/_threadmodule.c.'>thread_PyThread_start_new_thread</a>,
+<a name='L1225'>                            <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1226'>                            start_new_doc<font color='red'>}</font>,
+<a name='L1227'>    <font color='red'>{</font>"start_new",               (PyCFunction)<a href='../S/2615.html#L1021' title='Defined at 1021 in Modules/_threadmodule.c.'>thread_PyThread_start_new_thread</a>,
+<a name='L1228'>                            <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1229'>                            start_new_doc<font color='red'>}</font>,
+<a name='L1230'>    <font color='red'>{</font>"allocate_lock",           (PyCFunction)<a href='../S/2615.html#L1117' title='Defined at 1117 in Modules/_threadmodule.c.'>thread_PyThread_allocate_lock</a>,
+<a name='L1231'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, allocate_doc<font color='red'>}</font>,
+<a name='L1232'>    <font color='red'>{</font>"allocate",                (PyCFunction)<a href='../S/2615.html#L1117' title='Defined at 1117 in Modules/_threadmodule.c.'>thread_PyThread_allocate_lock</a>,
+<a name='L1233'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, allocate_doc<font color='red'>}</font>,
+<a name='L1234'>    <font color='red'>{</font>"exit_thread",             (PyCFunction)<a href='../S/2615.html#L1086' title='Defined at 1086 in Modules/_threadmodule.c.'>thread_PyThread_exit_thread</a>,
+<a name='L1235'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, exit_doc<font color='red'>}</font>,
+<a name='L1236'>    <font color='red'>{</font>"exit",                    (PyCFunction)<a href='../S/2615.html#L1086' title='Defined at 1086 in Modules/_threadmodule.c.'>thread_PyThread_exit_thread</a>,
+<a name='L1237'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, exit_doc<font color='red'>}</font>,
+<a name='L1238'>    <font color='red'>{</font>"interrupt_main",          (PyCFunction)<a href='../S/2615.html#L1100' title='Defined at 1100 in Modules/_threadmodule.c.'>thread_PyThread_interrupt_main</a>,
+<a name='L1239'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, interrupt_doc<font color='red'>}</font>,
+<a name='L1240'>    <font color='red'>{</font>"get_ident",               (PyCFunction)<a href='../S/2615.html#L1129' title='Defined at 1129 in Modules/_threadmodule.c.'>thread_get_ident</a>,
+<a name='L1241'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, get_ident_doc<font color='red'>}</font>,
+<a name='L1242'>    <font color='red'>{</font>"_count",                  (PyCFunction)<a href='../S/2615.html#L1152' title='Defined at 1152 in Modules/_threadmodule.c.'>thread__count</a>,
+<a name='L1243'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, _count_doc<font color='red'>}</font>,
+<a name='L1244'>    <font color='red'>{</font>"stack_size",              (PyCFunction)<a href='../S/2615.html#L1170' title='Defined at 1170 in Modules/_threadmodule.c.'>thread_stack_size</a>,
+<a name='L1245'>                            <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L1246'>                            stack_size_doc<font color='red'>}</font>,
+<a name='L1247'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,                      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L1248'><font color='red'>}</font>;
+<a name='L1249'>
+<a name='L1250'>
+<a name='L1251'><i><font color='green'>/* Initialization function */</font></i>
+<a name='L1252'>
+<a name='L1253'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(thread_doc,
+<a name='L1254'>"This module provides primitive operations to write multi-threaded programs.\n\
+<a name='L1255'>The 'threading' module provides a more convenient interface.");
+<a name='L1256'>
+<a name='L1257'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(lock_doc,
+<a name='L1258'>"A lock object is a synchronization primitive.  To create a lock,\n\
+<a name='L1259'>call the PyThread_allocate_lock() function.  Methods are:\n\
+<a name='L1260'>\n\
+<a name='L1261'>acquire() -- lock the lock, possibly blocking until it can be obtained\n\
+<a name='L1262'>release() -- unlock of the lock\n\
+<a name='L1263'>locked() -- test whether the lock is currently locked\n\
+<a name='L1264'>\n\
+<a name='L1265'>A lock is not owned by the thread that locked it; another thread may\n\
+<a name='L1266'>unlock it.  A thread attempting to lock a lock that it has already locked\n\
+<a name='L1267'>will block until another thread unlocks it.  Deadlocks may ensue.");
+<a name='L1268'>
+<a name='L1269'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> threadmodule = <font color='red'>{</font>
+<a name='L1270'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L1271'>    "_thread",
+<a name='L1272'>    thread_doc,
+<a name='L1273'>    -1,
+<a name='L1274'>    thread_methods,
+<a name='L1275'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1276'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1277'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1278'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L1279'><font color='red'>}</font>;
+<a name='L1280'>
+<a name='L1281'>
+<a name='L1282'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L1283'><a href='../R/3043.html' title='Multiple refered from 2 places.'>PyInit__thread</a>(<b>void</b>)
+<a name='L1284'><font color='red'>{</font>
+<a name='L1285'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m, *d, *timeout_max;
+<a name='L1286'>
+<a name='L1287'>    <i><font color='green'>/* Initialize types: */</font></i>
+<a name='L1288'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;localdummytype) &lt; 0)
+<a name='L1289'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1290'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;localtype) &lt; 0)
+<a name='L1291'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1292'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;Locktype) &lt; 0)
+<a name='L1293'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1294'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;RLocktype) &lt; 0)
+<a name='L1295'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1296'>
+<a name='L1297'>    <i><font color='green'>/* Create the module and add the functions */</font></i>
+<a name='L1298'>    m = PyModule_Create(&amp;threadmodule);
+<a name='L1299'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1300'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1301'>
+<a name='L1302'>    timeout_max = <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(PY_TIMEOUT_MAX / 1000000);
+<a name='L1303'>    <b>if</b> (!timeout_max)
+<a name='L1304'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1305'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "TIMEOUT_MAX", timeout_max) &lt; 0)
+<a name='L1306'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1307'>
+<a name='L1308'>    <i><font color='green'>/* Add a symbolic constant */</font></i>
+<a name='L1309'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(m);
+<a name='L1310'>    ThreadError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("_thread.error", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1311'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "error", ThreadError);
+<a name='L1312'>    Locktype.tp_doc = lock_doc;
+<a name='L1313'>    Py_INCREF(&amp;Locktype);
+<a name='L1314'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "LockType", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;Locktype);
+<a name='L1315'>
+<a name='L1316'>    Py_INCREF(&amp;RLocktype);
+<a name='L1317'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "RLock", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;RLocktype) &lt; 0)
+<a name='L1318'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1319'>
+<a name='L1320'>    Py_INCREF(&amp;localtype);
+<a name='L1321'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "_local", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;localtype) &lt; 0)
+<a name='L1322'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1323'>
+<a name='L1324'>    nb_threads = 0;
+<a name='L1325'>
+<a name='L1326'>    str_dict = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("__dict__");
+<a name='L1327'>    <b>if</b> (str_dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1328'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1329'>
+<a name='L1330'>    <i><font color='green'>/* Initialize the C thread library */</font></i>
+<a name='L1331'>    <a href='../S/3145.html#L73' title='Defined at 73 in Python/thread.c.'>PyThread_init_thread</a>();
+<a name='L1332'>    <b>return</b> m;
+<a name='L1333'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L29'>[^]</a><a href='#L1283'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

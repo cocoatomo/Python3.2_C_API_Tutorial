@@ -1,0 +1,597 @@
+<html>
+<head>
+<title>Modules/sha1module.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/sha1module.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L107'>[^]</a><a href='#L554'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L107' title='Defined at 107.'>sha1_compress</a>
+<li><a href='#L187' title='Defined at 187.'>sha1_init</a>
+<li><a href='#L205' title='Defined at 205.'>sha1_process</a>
+<li><a href='#L240' title='Defined at 240.'>sha1_done</a>
+<li><a href='#L296' title='Defined at 296.'>newSHA1object</a>
+<li><a href='#L305' title='Defined at 305.'>SHA1_dealloc</a>
+<li><a href='#L316' title='Defined at 316.'>SHA1_copy</a>
+<li><a href='#L336' title='Defined at 336.'>SHA1_digest</a>
+<li><a href='#L350' title='Defined at 350.'>SHA1_hexdigest</a>
+<li><a href='#L389' title='Defined at 389.'>SHA1_update</a>
+<li><a href='#L415' title='Defined at 415.'>SHA1_get_block_size</a>
+<li><a href='#L421' title='Defined at 421.'>SHA1_get_name</a>
+<li><a href='#L427' title='Defined at 427.'>sha1_get_digest_size</a>
+<li><a href='#L490' title='Defined at 490.'>SHA1_new</a>
+<li><a href='#L554' title='Defined at 554.'>PyInit__sha1</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* SHA1 module */</font></i>
+<a name='L2'>
+<a name='L3'><i><font color='green'>/* This module provides an interface to the SHA1 algorithm */</font></i>
+<a name='L4'>
+<a name='L5'><i><font color='green'>/* See below for information about the original code this module was</font></i>
+<a name='L6'><i><font color='green'>   based upon. Additional work performed by:</font></i>
+<a name='L7'><i><font color='green'></font></i>
+<a name='L8'><i><font color='green'>   Andrew Kuchling (amk@amk.ca)</font></i>
+<a name='L9'><i><font color='green'>   Greg Stein (gstein@lyra.org)</font></i>
+<a name='L10'><i><font color='green'>   Trevor Perrin (trevp@trevp.net)</font></i>
+<a name='L11'><i><font color='green'></font></i>
+<a name='L12'><i><font color='green'>   Copyright (C) 2005-2007   Gregory P. Smith (greg@krypto.org)</font></i>
+<a name='L13'><i><font color='green'>   Licensed to PSF under a Contributor Agreement.</font></i>
+<a name='L14'><i><font color='green'></font></i>
+<a name='L15'><i><font color='green'>*/</font></i>
+<a name='L16'>
+<a name='L17'><i><font color='green'>/* SHA1 objects */</font></i>
+<a name='L18'>
+<a name='L19'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L20'><font color='darkred'>#include</font> "<a href='2682.html'>hashlib.h</a>"
+<a name='L21'>
+<a name='L22'>
+<a name='L23'><i><font color='green'>/* Some useful types */</font></i>
+<a name='L24'>
+<a name='L25'><font color='darkred'>#if</font> <a href='../D/4733.html' title='Multiple defined in 3 places.'>SIZEOF_INT</a> == 4
+<a name='L26'><b>typedef</b> <b>unsigned</b> <b>int</b> <a href='../R/4093.html' title='Multiple refered from 2 places.'>SHA1_INT32</a>;        <i><font color='green'>/* 32-bit integer */</font></i>
+<a name='L27'><b>typedef</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a> <a href='../S/2707.html#L40' title='Refered from 40 in Modules/sha1module.c.'>SHA1_INT64</a>;        <i><font color='green'>/* 64-bit integer */</font></i>
+<a name='L28'><font color='darkred'>#else</font>
+<a name='L29'><i><font color='green'>/* not defined. compilation will die. */</font></i>
+<a name='L30'><font color='darkred'>#endif</font>
+<a name='L31'>
+<a name='L32'><i><font color='green'>/* The SHA1 block size and message digest sizes, in bytes */</font></i>
+<a name='L33'>
+<a name='L34'><font color='darkred'>#define</font> <a href='../R/4091.html' title='Multiple refered from 9 places.'>SHA1_BLOCKSIZE</a>    64
+<a name='L35'><font color='darkred'>#define</font> <a href='../R/4092.html' title='Multiple refered from 6 places.'>SHA1_DIGESTSIZE</a>   20
+<a name='L36'>
+<a name='L37'><i><font color='green'>/* The structure for storing SHA1 info */</font></i>
+<a name='L38'>
+<a name='L39'><b>struct</b> <a href='../R/10287.html' title='Multiple refered from 3 places.'>sha1_state</a> <font color='red'>{</font>
+<a name='L40'>    <a href='../S/2707.html#L27' title='Defined at 27 in Modules/sha1module.c.'>SHA1_INT64</a> length;
+<a name='L41'>    <a href='../S/2707.html#L26' title='Defined at 26 in Modules/sha1module.c.'>SHA1_INT32</a> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[5], curlen;
+<a name='L42'>    <b>unsigned</b> <b>char</b> buf[<a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a>];
+<a name='L43'><font color='red'>}</font>;
+<a name='L44'>
+<a name='L45'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L46'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L47'>
+<a name='L48'>    <b>struct</b> <a href='../S/2707.html#L39' title='Defined at 39 in Modules/sha1module.c.'>sha1_state</a> hash_state;
+<a name='L49'><font color='red'>}</font> <a href='../R/4103.html' title='Multiple refered from 5 places.'>SHA1object</a>;
+<a name='L50'>
+<a name='L51'>
+<a name='L52'><i><font color='green'>/* ------------------------------------------------------------------------</font></i>
+<a name='L53'><i><font color='green'> *</font></i>
+<a name='L54'><i><font color='green'> * This code for the SHA1 algorithm was noted as public domain. The</font></i>
+<a name='L55'><i><font color='green'> * original headers are pasted below.</font></i>
+<a name='L56'><i><font color='green'> *</font></i>
+<a name='L57'><i><font color='green'> * Several changes have been made to make it more compatible with the</font></i>
+<a name='L58'><i><font color='green'> * Python environment and desired interface.</font></i>
+<a name='L59'><i><font color='green'> *</font></i>
+<a name='L60'><i><font color='green'> */</font></i>
+<a name='L61'>
+<a name='L62'><i><font color='green'>/* LibTomCrypt, modular cryptographic library -- Tom St Denis</font></i>
+<a name='L63'><i><font color='green'> *</font></i>
+<a name='L64'><i><font color='green'> * LibTomCrypt is a library that provides various cryptographic</font></i>
+<a name='L65'><i><font color='green'> * algorithms in a highly modular and flexible manner.</font></i>
+<a name='L66'><i><font color='green'> *</font></i>
+<a name='L67'><i><font color='green'> * The library is free for all purposes without any express</font></i>
+<a name='L68'><i><font color='green'> * guarantee it works.</font></i>
+<a name='L69'><i><font color='green'> *</font></i>
+<a name='L70'><i><font color='green'> * Tom St Denis, tomstdenis@gmail.com, http://libtom.org</font></i>
+<a name='L71'><i><font color='green'> */</font></i>
+<a name='L72'>
+<a name='L73'><i><font color='green'>/* rotate the hard way (platform optimizations could be done) */</font></i>
+<a name='L74'><font color='darkred'>#define</font> <a href='../S/2707.html#L125' title='Refered from 125 in Modules/sha1module.c.'>ROL</a>(x, y) ( (((<b>unsigned</b> <b>long</b>)(x)&lt;&lt;(<b>unsigned</b> <b>long</b>)((y)&amp;31)) | (((<b>unsigned</b> <b>long</b>)(x)&amp;0xFFFFFFFFUL)&gt;&gt;(<b>unsigned</b> <b>long</b>)(32-((y)&amp;31)))) &amp; 0xFFFFFFFFUL)
+<a name='L75'><font color='darkred'>#define</font> <a href='../R/3975.html' title='Multiple refered from 8 places.'>ROLc</a>(x, y) ( (((<b>unsigned</b> <b>long</b>)(x)&lt;&lt;(<b>unsigned</b> <b>long</b>)((y)&amp;31)) | (((<b>unsigned</b> <b>long</b>)(x)&amp;0xFFFFFFFFUL)&gt;&gt;(<b>unsigned</b> <b>long</b>)(32-((y)&amp;31)))) &amp; 0xFFFFFFFFUL)
+<a name='L76'>
+<a name='L77'><i><font color='green'>/* Endian Neutral macros that work on all platforms */</font></i>
+<a name='L78'>
+<a name='L79'><font color='darkred'>#define</font> <a href='../S/2707.html#L277' title='Refered from 277 in Modules/sha1module.c.'>STORE32H</a>(x, y)                                                                     \
+<a name='L80'>     <font color='red'>{</font> (y)[0] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;24)&amp;255); (y)[1] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;16)&amp;255);   \
+<a name='L81'>       (y)[2] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;8)&amp;255); (y)[3] = (<b>unsigned</b> <b>char</b>)((x)&amp;255); <font color='red'>}</font>
+<a name='L82'>
+<a name='L83'><font color='darkred'>#define</font> <a href='../S/2707.html#L113' title='Refered from 113 in Modules/sha1module.c.'>LOAD32H</a>(x, y)                            \
+<a name='L84'>     <font color='red'>{</font> x = ((<b>unsigned</b> <b>long</b>)((y)[0] &amp; 255)&lt;&lt;24) | \
+<a name='L85'>           ((<b>unsigned</b> <b>long</b>)((y)[1] &amp; 255)&lt;&lt;16) | \
+<a name='L86'>           ((<b>unsigned</b> <b>long</b>)((y)[2] &amp; 255)&lt;&lt;8)  | \
+<a name='L87'>           ((<b>unsigned</b> <b>long</b>)((y)[3] &amp; 255)); <font color='red'>}</font>
+<a name='L88'>
+<a name='L89'><font color='darkred'>#define</font> <a href='../S/2707.html#L272' title='Refered from 272 in Modules/sha1module.c.'>STORE64H</a>(x, y)                                                                     \
+<a name='L90'>   <font color='red'>{</font> (y)[0] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;56)&amp;255); (y)[1] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;48)&amp;255);     \
+<a name='L91'>     (y)[2] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;40)&amp;255); (y)[3] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;32)&amp;255);     \
+<a name='L92'>     (y)[4] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;24)&amp;255); (y)[5] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;16)&amp;255);     \
+<a name='L93'>     (y)[6] = (<b>unsigned</b> <b>char</b>)(((x)&gt;&gt;8)&amp;255); (y)[7] = (<b>unsigned</b> <b>char</b>)((x)&amp;255); <font color='red'>}</font>
+<a name='L94'>
+<a name='L95'><font color='darkred'>#ifndef</font> <a href='../D/2125.html' title='Multiple defined in 11 places.'>MIN</a>
+<a name='L96'><font color='darkred'>   #define</font> <a href='../R/1923.html' title='Multiple refered from 20 places.'>MIN</a>(x, y) ( ((x)&lt;(y))?(x):(y) )
+<a name='L97'><font color='darkred'>#endif</font>
+<a name='L98'>
+<a name='L99'>
+<a name='L100'><i><font color='green'>/* SHA1 macros */</font></i>
+<a name='L101'>
+<a name='L102'><font color='darkred'>#define</font> <a href='../S/2707.html#L130' title='Refered from 130 in Modules/sha1module.c.'>F0</a>(x,y,z)  (z ^ (x &amp; (y ^ z)))
+<a name='L103'><font color='darkred'>#define</font> <a href='../S/2707.html#L131' title='Refered from 131 in Modules/sha1module.c.'>F1</a>(x,y,z)  (x ^ y ^ z)
+<a name='L104'><font color='darkred'>#define</font> <a href='../S/2707.html#L132' title='Refered from 132 in Modules/sha1module.c.'>F2</a>(x,y,z)  ((x &amp; y) | (z &amp; (x | y)))
+<a name='L105'><font color='darkred'>#define</font> <a href='../S/2707.html#L133' title='Refered from 133 in Modules/sha1module.c.'>F3</a>(x,y,z)  (x ^ y ^ z)
+<a name='L106'>
+<a name='L107'><b>static</b> <b>void</b> <a href='../R/10282.html' title='Multiple refered from 4 places.'>sha1_compress</a>(<b>struct</b> sha1_state *sha1, <b>unsigned</b> <b>char</b> *buf)
+<a name='L108'><font color='red'>{</font>
+<a name='L109'>    <a href='../S/2707.html#L26' title='Defined at 26 in Modules/sha1module.c.'>SHA1_INT32</a> a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,W[80],i;
+<a name='L110'>
+<a name='L111'>    <i><font color='green'>/* copy the state into 512-bits into W[0..15] */</font></i>
+<a name='L112'>    <b>for</b> (i = 0; i &lt; 16; i++) <font color='red'>{</font>
+<a name='L113'>        <a href='../S/2707.html#L83' title='Defined at 83 in Modules/sha1module.c.'>LOAD32H</a>(W[i], buf + (4*i));
+<a name='L114'>    <font color='red'>}</font>
+<a name='L115'>
+<a name='L116'>    <i><font color='green'>/* copy state */</font></i>
+<a name='L117'>    a = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[0];
+<a name='L118'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[1];
+<a name='L119'>    c = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[2];
+<a name='L120'>    d = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[3];
+<a name='L121'>    e = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[4];
+<a name='L122'>
+<a name='L123'>    <i><font color='green'>/* expand it */</font></i>
+<a name='L124'>    <b>for</b> (i = 16; i &lt; 80; i++) <font color='red'>{</font>
+<a name='L125'>        W[i] = <a href='../S/2707.html#L74' title='Defined at 74 in Modules/sha1module.c.'>ROL</a>(W[i-3] ^ W[i-8] ^ W[i-14] ^ W[i-16], 1);
+<a name='L126'>    <font color='red'>}</font>
+<a name='L127'>
+<a name='L128'>    <i><font color='green'>/* compress */</font></i>
+<a name='L129'>    <i><font color='green'>/* round one */</font></i>
+<a name='L130'><font color='darkred'>    #define</font> <a href='../R/1106.html' title='Multiple refered from 5 places.'>FF_0</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i) e = (<a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(a, 5) + <a href='../S/2707.html#L102' title='Defined at 102 in Modules/sha1module.c.'>F0</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d) + e + W[i] + 0x5a827999UL); <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(b, 30);
+<a name='L131'><font color='darkred'>    #define</font> <a href='../R/1107.html' title='Multiple refered from 5 places.'>FF_1</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i) e = (<a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(a, 5) + <a href='../S/2707.html#L103' title='Defined at 103 in Modules/sha1module.c.'>F1</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d) + e + W[i] + 0x6ed9eba1UL); <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(b, 30);
+<a name='L132'><font color='darkred'>    #define</font> <a href='../R/1108.html' title='Multiple refered from 5 places.'>FF_2</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i) e = (<a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(a, 5) + <a href='../S/2707.html#L104' title='Defined at 104 in Modules/sha1module.c.'>F2</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d) + e + W[i] + 0x8f1bbcdcUL); <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(b, 30);
+<a name='L133'><font color='darkred'>    #define</font> <a href='../R/1109.html' title='Multiple refered from 5 places.'>FF_3</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i) e = (<a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(a, 5) + <a href='../S/2707.html#L105' title='Defined at 105 in Modules/sha1module.c.'>F3</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d) + e + W[i] + 0xca62c1d6UL); <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/4507.html' title='Multiple defined in 2 places.'>ROLc</a>(b, 30);
+<a name='L134'>
+<a name='L135'>    <b>for</b> (i = 0; i &lt; 20; ) <font color='red'>{</font>
+<a name='L136'>       <a href='../D/1230.html' title='Multiple defined in 2 places.'>FF_0</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i++);
+<a name='L137'>       <a href='../D/1230.html' title='Multiple defined in 2 places.'>FF_0</a>(e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,i++);
+<a name='L138'>       <a href='../D/1230.html' title='Multiple defined in 2 places.'>FF_0</a>(d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,i++);
+<a name='L139'>       <a href='../D/1230.html' title='Multiple defined in 2 places.'>FF_0</a>(c,d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,i++);
+<a name='L140'>       <a href='../D/1230.html' title='Multiple defined in 2 places.'>FF_0</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,a,i++);
+<a name='L141'>    <font color='red'>}</font>
+<a name='L142'>
+<a name='L143'>    <i><font color='green'>/* round two */</font></i>
+<a name='L144'>    <b>for</b> (; i &lt; 40; )  <font color='red'>{</font>
+<a name='L145'>       <a href='../D/1231.html' title='Multiple defined in 2 places.'>FF_1</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i++);
+<a name='L146'>       <a href='../D/1231.html' title='Multiple defined in 2 places.'>FF_1</a>(e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,i++);
+<a name='L147'>       <a href='../D/1231.html' title='Multiple defined in 2 places.'>FF_1</a>(d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,i++);
+<a name='L148'>       <a href='../D/1231.html' title='Multiple defined in 2 places.'>FF_1</a>(c,d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,i++);
+<a name='L149'>       <a href='../D/1231.html' title='Multiple defined in 2 places.'>FF_1</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,a,i++);
+<a name='L150'>    <font color='red'>}</font>
+<a name='L151'>
+<a name='L152'>    <i><font color='green'>/* round three */</font></i>
+<a name='L153'>    <b>for</b> (; i &lt; 60; )  <font color='red'>{</font>
+<a name='L154'>       <a href='../D/1232.html' title='Multiple defined in 2 places.'>FF_2</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i++);
+<a name='L155'>       <a href='../D/1232.html' title='Multiple defined in 2 places.'>FF_2</a>(e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,i++);
+<a name='L156'>       <a href='../D/1232.html' title='Multiple defined in 2 places.'>FF_2</a>(d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,i++);
+<a name='L157'>       <a href='../D/1232.html' title='Multiple defined in 2 places.'>FF_2</a>(c,d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,i++);
+<a name='L158'>       <a href='../D/1232.html' title='Multiple defined in 2 places.'>FF_2</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,a,i++);
+<a name='L159'>    <font color='red'>}</font>
+<a name='L160'>
+<a name='L161'>    <i><font color='green'>/* round four */</font></i>
+<a name='L162'>    <b>for</b> (; i &lt; 80; )  <font color='red'>{</font>
+<a name='L163'>       <a href='../D/1233.html' title='Multiple defined in 2 places.'>FF_3</a>(a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,i++);
+<a name='L164'>       <a href='../D/1233.html' title='Multiple defined in 2 places.'>FF_3</a>(e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,i++);
+<a name='L165'>       <a href='../D/1233.html' title='Multiple defined in 2 places.'>FF_3</a>(d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,i++);
+<a name='L166'>       <a href='../D/1233.html' title='Multiple defined in 2 places.'>FF_3</a>(c,d,e,a,<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,i++);
+<a name='L167'>       <a href='../D/1233.html' title='Multiple defined in 2 places.'>FF_3</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>,c,d,e,a,i++);
+<a name='L168'>    <font color='red'>}</font>
+<a name='L169'>
+<a name='L170'><font color='darkred'>    #undef</font> <a href='../R/1106.html' title='Multiple refered from 5 places.'>FF_0</a>
+<a name='L171'><font color='darkred'>    #undef</font> <a href='../R/1107.html' title='Multiple refered from 5 places.'>FF_1</a>
+<a name='L172'><font color='darkred'>    #undef</font> <a href='../R/1108.html' title='Multiple refered from 5 places.'>FF_2</a>
+<a name='L173'><font color='darkred'>    #undef</font> <a href='../R/1109.html' title='Multiple refered from 5 places.'>FF_3</a>
+<a name='L174'>
+<a name='L175'>    <i><font color='green'>/* store */</font></i>
+<a name='L176'>    sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[0] = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[0] + a;
+<a name='L177'>    sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[1] = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[1] + <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L178'>    sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[2] = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[2] + c;
+<a name='L179'>    sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[3] = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[3] + d;
+<a name='L180'>    sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[4] = sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[4] + e;
+<a name='L181'><font color='red'>}</font>
+<a name='L182'>
+<a name='L183'><i><font color='green'>/**</font></i>
+<a name='L184'><i><font color='green'>   Initialize the hash state</font></i>
+<a name='L185'><i><font color='green'>   @param sha1   The hash state you wish to initialize</font></i>
+<a name='L186'><i><font color='green'>*/</font></i>
+<a name='L187'><b>void</b> <a href='../S/2707.html#L511' title='Refered from 511 in Modules/sha1module.c.'>sha1_init</a>(<b>struct</b> sha1_state *sha1)
+<a name='L188'><font color='red'>{</font>
+<a name='L189'>   <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(sha1 != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L190'>   sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[0] = 0x67452301UL;
+<a name='L191'>   sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[1] = 0xefcdab89UL;
+<a name='L192'>   sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[2] = 0x98badcfeUL;
+<a name='L193'>   sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[3] = 0x10325476UL;
+<a name='L194'>   sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[4] = 0xc3d2e1f0UL;
+<a name='L195'>   sha1-&gt;curlen = 0;
+<a name='L196'>   sha1-&gt;length = 0;
+<a name='L197'><font color='red'>}</font>
+<a name='L198'>
+<a name='L199'><i><font color='green'>/**</font></i>
+<a name='L200'><i><font color='green'>   Process a block of memory though the hash</font></i>
+<a name='L201'><i><font color='green'>   @param sha1   The hash state</font></i>
+<a name='L202'><i><font color='green'>   @param in     The data to hash</font></i>
+<a name='L203'><i><font color='green'>   @param inlen  The length of the data (octets)</font></i>
+<a name='L204'><i><font color='green'>*/</font></i>
+<a name='L205'><b>void</b> <a href='../R/10286.html' title='Multiple refered from 2 places.'>sha1_process</a>(<b>struct</b> sha1_state *sha1,
+<a name='L206'>                  <b>const</b> <b>unsigned</b> <b>char</b> *in, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> inlen)
+<a name='L207'><font color='red'>{</font>
+<a name='L208'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n;
+<a name='L209'>
+<a name='L210'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(sha1 != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L211'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(in != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L212'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(sha1-&gt;curlen &lt;= <b>sizeof</b>(sha1-&gt;buf));
+<a name='L213'>
+<a name='L214'>    <b>while</b> (inlen &gt; 0) <font color='red'>{</font>
+<a name='L215'>        <b>if</b> (sha1-&gt;curlen == 0 &amp;&amp; inlen &gt;= <a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a>) <font color='red'>{</font>
+<a name='L216'>           <a href='../S/2707.html#L107' title='Defined at 107 in Modules/sha1module.c.'>sha1_compress</a>(sha1, (<b>unsigned</b> <b>char</b> *)in);
+<a name='L217'>           sha1-&gt;length   += <a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a> * 8;
+<a name='L218'>           in             += <a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a>;
+<a name='L219'>           inlen          -= <a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a>;
+<a name='L220'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L221'>           n = <a href='../D/2125.html' title='Multiple defined in 11 places.'>MIN</a>(inlen, (<a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a> - sha1-&gt;curlen));
+<a name='L222'>           <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(sha1-&gt;buf + sha1-&gt;curlen, in, (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)n);
+<a name='L223'>           sha1-&gt;curlen   += n;
+<a name='L224'>           in             += n;
+<a name='L225'>           inlen          -= n;
+<a name='L226'>           <b>if</b> (sha1-&gt;curlen == <a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a>) <font color='red'>{</font>
+<a name='L227'>              <a href='../S/2707.html#L107' title='Defined at 107 in Modules/sha1module.c.'>sha1_compress</a>(sha1, sha1-&gt;buf);
+<a name='L228'>              sha1-&gt;length += 8*<a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a>;
+<a name='L229'>              sha1-&gt;curlen = 0;
+<a name='L230'>           <font color='red'>}</font>
+<a name='L231'>       <font color='red'>}</font>
+<a name='L232'>    <font color='red'>}</font>
+<a name='L233'><font color='red'>}</font>
+<a name='L234'>
+<a name='L235'><i><font color='green'>/**</font></i>
+<a name='L236'><i><font color='green'>   Terminate the hash to get the digest</font></i>
+<a name='L237'><i><font color='green'>   @param sha1  The hash state</font></i>
+<a name='L238'><i><font color='green'>   @param out [out] The destination of the hash (20 bytes)</font></i>
+<a name='L239'><i><font color='green'>*/</font></i>
+<a name='L240'><b>void</b> <a href='../R/10283.html' title='Multiple refered from 2 places.'>sha1_done</a>(<b>struct</b> sha1_state *sha1, <b>unsigned</b> <b>char</b> *out)
+<a name='L241'><font color='red'>{</font>
+<a name='L242'>    <b>int</b> i;
+<a name='L243'>
+<a name='L244'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(sha1 != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L245'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(out != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L246'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(sha1-&gt;curlen &lt; <b>sizeof</b>(sha1-&gt;buf));
+<a name='L247'>
+<a name='L248'>    <i><font color='green'>/* increase the length of the message */</font></i>
+<a name='L249'>    sha1-&gt;length += sha1-&gt;curlen * 8;
+<a name='L250'>
+<a name='L251'>    <i><font color='green'>/* append the '1' bit */</font></i>
+<a name='L252'>    sha1-&gt;buf[sha1-&gt;curlen++] = (<b>unsigned</b> <b>char</b>)0x80;
+<a name='L253'>
+<a name='L254'>    <i><font color='green'>/* if the length is currently above 56 bytes we append zeros</font></i>
+<a name='L255'><i><font color='green'>     * then compress.  Then we can fall back to padding zeros and length</font></i>
+<a name='L256'><i><font color='green'>     * encoding like normal.</font></i>
+<a name='L257'><i><font color='green'>     */</font></i>
+<a name='L258'>    <b>if</b> (sha1-&gt;curlen &gt; 56) <font color='red'>{</font>
+<a name='L259'>        <b>while</b> (sha1-&gt;curlen &lt; 64) <font color='red'>{</font>
+<a name='L260'>            sha1-&gt;buf[sha1-&gt;curlen++] = (<b>unsigned</b> <b>char</b>)0;
+<a name='L261'>        <font color='red'>}</font>
+<a name='L262'>        <a href='../S/2707.html#L107' title='Defined at 107 in Modules/sha1module.c.'>sha1_compress</a>(sha1, sha1-&gt;buf);
+<a name='L263'>        sha1-&gt;curlen = 0;
+<a name='L264'>    <font color='red'>}</font>
+<a name='L265'>
+<a name='L266'>    <i><font color='green'>/* pad upto 56 bytes of zeroes */</font></i>
+<a name='L267'>    <b>while</b> (sha1-&gt;curlen &lt; 56) <font color='red'>{</font>
+<a name='L268'>        sha1-&gt;buf[sha1-&gt;curlen++] = (<b>unsigned</b> <b>char</b>)0;
+<a name='L269'>    <font color='red'>}</font>
+<a name='L270'>
+<a name='L271'>    <i><font color='green'>/* store length */</font></i>
+<a name='L272'>    <a href='../S/2707.html#L89' title='Defined at 89 in Modules/sha1module.c.'>STORE64H</a>(sha1-&gt;length, sha1-&gt;buf+56);
+<a name='L273'>    <a href='../S/2707.html#L107' title='Defined at 107 in Modules/sha1module.c.'>sha1_compress</a>(sha1, sha1-&gt;buf);
+<a name='L274'>
+<a name='L275'>    <i><font color='green'>/* copy output */</font></i>
+<a name='L276'>    <b>for</b> (i = 0; i &lt; 5; i++) <font color='red'>{</font>
+<a name='L277'>        <a href='../S/2707.html#L79' title='Defined at 79 in Modules/sha1module.c.'>STORE32H</a>(sha1-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>[i], out+(4*i));
+<a name='L278'>    <font color='red'>}</font>
+<a name='L279'><font color='red'>}</font>
+<a name='L280'>
+<a name='L281'>
+<a name='L282'><i><font color='green'>/* .Source: /cvs/libtom/libtomcrypt/src/hashes/sha1.c,v $ */</font></i>
+<a name='L283'><i><font color='green'>/* .Revision: 1.10 $ */</font></i>
+<a name='L284'><i><font color='green'>/* .Date: 2007/05/12 14:25:28 $ */</font></i>
+<a name='L285'>
+<a name='L286'><i><font color='green'>/*</font></i>
+<a name='L287'><i><font color='green'> * End of copied SHA1 code.</font></i>
+<a name='L288'><i><font color='green'> *</font></i>
+<a name='L289'><i><font color='green'> * ------------------------------------------------------------------------</font></i>
+<a name='L290'><i><font color='green'> */</font></i>
+<a name='L291'>
+<a name='L292'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> SHA1type;
+<a name='L293'>
+<a name='L294'>
+<a name='L295'><b>static</b> <a href='../S/2707.html#L49' title='Defined at 49 in Modules/sha1module.c.'>SHA1object</a> *
+<a name='L296'><a href='../R/9188.html' title='Multiple refered from 3 places.'>newSHA1object</a>(<b>void</b>)
+<a name='L297'><font color='red'>{</font>
+<a name='L298'>    <b>return</b> (<a href='../S/2707.html#L49' title='Defined at 49 in Modules/sha1module.c.'>SHA1object</a> *)PyObject_New(<a href='../S/2707.html#L49' title='Defined at 49 in Modules/sha1module.c.'>SHA1object</a>, &amp;SHA1type);
+<a name='L299'><font color='red'>}</font>
+<a name='L300'>
+<a name='L301'>
+<a name='L302'><i><font color='green'>/* Internal methods for a hash object */</font></i>
+<a name='L303'>
+<a name='L304'><b>static</b> <b>void</b>
+<a name='L305'><a href='../S/2707.html#L455' title='Refered from 455 in Modules/sha1module.c.'>SHA1_dealloc</a>(PyObject *ptr)
+<a name='L306'><font color='red'>{</font>
+<a name='L307'>    PyObject_Del(ptr);
+<a name='L308'><font color='red'>}</font>
+<a name='L309'>
+<a name='L310'>
+<a name='L311'><i><font color='green'>/* External methods for a hash object */</font></i>
+<a name='L312'>
+<a name='L313'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA1_copy__doc__, "Return a copy of the hash object.");
+<a name='L314'>
+<a name='L315'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L316'><a href='../S/2707.html#L407' title='Refered from 407 in Modules/sha1module.c.'>SHA1_copy</a>(SHA1object *self, PyObject *unused)
+<a name='L317'><font color='red'>{</font>
+<a name='L318'>    <a href='../S/2707.html#L49' title='Defined at 49 in Modules/sha1module.c.'>SHA1object</a> *newobj;
+<a name='L319'>
+<a name='L320'>    <b>if</b> (<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self) == &amp;SHA1type) <font color='red'>{</font>
+<a name='L321'>        <b>if</b> ( (newobj = <a href='../S/2707.html#L296' title='Defined at 296 in Modules/sha1module.c.'>newSHA1object</a>())==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L322'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L323'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L324'>        <b>if</b> ( (newobj = <a href='../S/2707.html#L296' title='Defined at 296 in Modules/sha1module.c.'>newSHA1object</a>())==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L325'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L326'>    <font color='red'>}</font>
+<a name='L327'>
+<a name='L328'>    newobj-&gt;hash_state = self-&gt;hash_state;
+<a name='L329'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)newobj;
+<a name='L330'><font color='red'>}</font>
+<a name='L331'>
+<a name='L332'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA1_digest__doc__,
+<a name='L333'>"Return the digest value as a string of binary data.");
+<a name='L334'>
+<a name='L335'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L336'><a href='../S/2707.html#L408' title='Refered from 408 in Modules/sha1module.c.'>SHA1_digest</a>(SHA1object *self, PyObject *unused)
+<a name='L337'><font color='red'>{</font>
+<a name='L338'>    <b>unsigned</b> <b>char</b> digest[<a href='../S/2707.html#L35' title='Defined at 35 in Modules/sha1module.c.'>SHA1_DIGESTSIZE</a>];
+<a name='L339'>    <b>struct</b> <a href='../S/2707.html#L39' title='Defined at 39 in Modules/sha1module.c.'>sha1_state</a> temp;
+<a name='L340'>
+<a name='L341'>    temp = self-&gt;hash_state;
+<a name='L342'>    <a href='../S/2707.html#L240' title='Defined at 240 in Modules/sha1module.c.'>sha1_done</a>(&amp;temp, digest);
+<a name='L343'>    <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>((<b>const</b> <b>char</b> *)digest, <a href='../S/2707.html#L35' title='Defined at 35 in Modules/sha1module.c.'>SHA1_DIGESTSIZE</a>);
+<a name='L344'><font color='red'>}</font>
+<a name='L345'>
+<a name='L346'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA1_hexdigest__doc__,
+<a name='L347'>"Return the digest value as a string of hexadecimal digits.");
+<a name='L348'>
+<a name='L349'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L350'><a href='../S/2707.html#L409' title='Refered from 409 in Modules/sha1module.c.'>SHA1_hexdigest</a>(SHA1object *self, PyObject *unused)
+<a name='L351'><font color='red'>{</font>
+<a name='L352'>    <b>unsigned</b> <b>char</b> digest[<a href='../S/2707.html#L35' title='Defined at 35 in Modules/sha1module.c.'>SHA1_DIGESTSIZE</a>];
+<a name='L353'>    <b>struct</b> <a href='../S/2707.html#L39' title='Defined at 39 in Modules/sha1module.c.'>sha1_state</a> temp;
+<a name='L354'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *retval;
+<a name='L355'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *hex_digest;
+<a name='L356'>    <b>int</b> i, j;
+<a name='L357'>
+<a name='L358'>    <i><font color='green'>/* Get the raw (binary) digest value */</font></i>
+<a name='L359'>    temp = self-&gt;hash_state;
+<a name='L360'>    <a href='../S/2707.html#L240' title='Defined at 240 in Modules/sha1module.c.'>sha1_done</a>(&amp;temp, digest);
+<a name='L361'>
+<a name='L362'>    <i><font color='green'>/* Create a new string */</font></i>
+<a name='L363'>    retval = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2707.html#L35' title='Defined at 35 in Modules/sha1module.c.'>SHA1_DIGESTSIZE</a> * 2);
+<a name='L364'>    <b>if</b> (!retval)
+<a name='L365'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L366'>    hex_digest = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(retval);
+<a name='L367'>    <b>if</b> (!hex_digest) <font color='red'>{</font>
+<a name='L368'>            Py_DECREF(retval);
+<a name='L369'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L370'>    <font color='red'>}</font>
+<a name='L371'>
+<a name='L372'>    <i><font color='green'>/* Make hex version of the digest */</font></i>
+<a name='L373'>    <b>for</b>(i=j=0; i&lt;<a href='../S/2707.html#L35' title='Defined at 35 in Modules/sha1module.c.'>SHA1_DIGESTSIZE</a>; i++) <font color='red'>{</font>
+<a name='L374'>        <b>char</b> c;
+<a name='L375'>        c = (digest[i] &gt;&gt; 4) &amp; 0xf;
+<a name='L376'>        c = (c&gt;9) ? c+'a'-10 : c + '0';
+<a name='L377'>        hex_digest[j++] = c;
+<a name='L378'>        c = (digest[i] &amp; 0xf);
+<a name='L379'>        c = (c&gt;9) ? c+'a'-10 : c + '0';
+<a name='L380'>        hex_digest[j++] = c;
+<a name='L381'>    <font color='red'>}</font>
+<a name='L382'>    <b>return</b> retval;
+<a name='L383'><font color='red'>}</font>
+<a name='L384'>
+<a name='L385'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA1_update__doc__,
+<a name='L386'>"Update this hash object's state with the provided string.");
+<a name='L387'>
+<a name='L388'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L389'><a href='../S/2707.html#L410' title='Refered from 410 in Modules/sha1module.c.'>SHA1_update</a>(SHA1object *self, PyObject *args)
+<a name='L390'><font color='red'>{</font>
+<a name='L391'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L392'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> buf;
+<a name='L393'>
+<a name='L394'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O:update", &amp;obj))
+<a name='L395'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L396'>
+<a name='L397'>    <a href='../S/2682.html#L8' title='Defined at 8 in Modules/hashlib.h.'>GET_BUFFER_VIEW_OR_ERROUT</a>(obj, &amp;buf);
+<a name='L398'>
+<a name='L399'>    <a href='../S/2707.html#L205' title='Defined at 205 in Modules/sha1module.c.'>sha1_process</a>(&amp;self-&gt;hash_state, buf.buf, buf.len);
+<a name='L400'>
+<a name='L401'>    <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L402'>    Py_INCREF(Py_None);
+<a name='L403'>    <b>return</b> Py_None;
+<a name='L404'><font color='red'>}</font>
+<a name='L405'>
+<a name='L406'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> SHA1_methods[] = <font color='red'>{</font>
+<a name='L407'>    <font color='red'>{</font>"copy",      (PyCFunction)<a href='../S/2707.html#L316' title='Defined at 316 in Modules/sha1module.c.'>SHA1_copy</a>,      <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,  SHA1_copy__doc__<font color='red'>}</font>,
+<a name='L408'>    <font color='red'>{</font>"digest",    (PyCFunction)<a href='../S/2707.html#L336' title='Defined at 336 in Modules/sha1module.c.'>SHA1_digest</a>,    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,  SHA1_digest__doc__<font color='red'>}</font>,
+<a name='L409'>    <font color='red'>{</font>"hexdigest", (PyCFunction)<a href='../S/2707.html#L350' title='Defined at 350 in Modules/sha1module.c.'>SHA1_hexdigest</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,  SHA1_hexdigest__doc__<font color='red'>}</font>,
+<a name='L410'>    <font color='red'>{</font>"update",    (PyCFunction)<a href='../S/2707.html#L389' title='Defined at 389 in Modules/sha1module.c.'>SHA1_update</a>,    <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, SHA1_update__doc__<font color='red'>}</font>,
+<a name='L411'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>         <i><font color='green'>/* sentinel */</font></i>
+<a name='L412'><font color='red'>}</font>;
+<a name='L413'>
+<a name='L414'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L415'><a href='../S/2707.html#L435' title='Refered from 435 in Modules/sha1module.c.'>SHA1_get_block_size</a>(PyObject *self, <b>void</b> *closure)
+<a name='L416'><font color='red'>{</font>
+<a name='L417'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/2707.html#L34' title='Defined at 34 in Modules/sha1module.c.'>SHA1_BLOCKSIZE</a>);
+<a name='L418'><font color='red'>}</font>
+<a name='L419'>
+<a name='L420'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L421'><a href='../S/2707.html#L439' title='Refered from 439 in Modules/sha1module.c.'>SHA1_get_name</a>(PyObject *self, <b>void</b> *closure)
+<a name='L422'><font color='red'>{</font>
+<a name='L423'>    <b>return</b> <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>("SHA1", 3);
+<a name='L424'><font color='red'>}</font>
+<a name='L425'>
+<a name='L426'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L427'><a href='../S/2707.html#L443' title='Refered from 443 in Modules/sha1module.c.'>sha1_get_digest_size</a>(PyObject *self, <b>void</b> *closure)
+<a name='L428'><font color='red'>{</font>
+<a name='L429'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/2707.html#L35' title='Defined at 35 in Modules/sha1module.c.'>SHA1_DIGESTSIZE</a>);
+<a name='L430'><font color='red'>}</font>
+<a name='L431'>
+<a name='L432'>
+<a name='L433'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> SHA1_getseters[] = <font color='red'>{</font>
+<a name='L434'>    <font color='red'>{</font>"block_size",
+<a name='L435'>     (getter)<a href='../S/2707.html#L415' title='Defined at 415 in Modules/sha1module.c.'>SHA1_get_block_size</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L436'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L437'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L438'>    <font color='red'>{</font>"name",
+<a name='L439'>     (getter)<a href='../S/2707.html#L421' title='Defined at 421 in Modules/sha1module.c.'>SHA1_get_name</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L440'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L441'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L442'>    <font color='red'>{</font>"digest_size",
+<a name='L443'>     (getter)<a href='../S/2707.html#L427' title='Defined at 427 in Modules/sha1module.c.'>sha1_get_digest_size</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L444'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L445'>     <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L446'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>  <i><font color='green'>/* Sentinel */</font></i>
+<a name='L447'><font color='red'>}</font>;
+<a name='L448'>
+<a name='L449'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> SHA1type = <font color='red'>{</font>
+<a name='L450'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L451'>    "_sha1.sha1",               <i><font color='green'>/*tp_name*/</font></i>
+<a name='L452'>    <b>sizeof</b>(<a href='../S/2707.html#L49' title='Defined at 49 in Modules/sha1module.c.'>SHA1object</a>), <i><font color='green'>/*tp_size*/</font></i>
+<a name='L453'>    0,                  <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L454'>    <i><font color='green'>/* methods */</font></i>
+<a name='L455'>    <a href='../S/2707.html#L305' title='Defined at 305 in Modules/sha1module.c.'>SHA1_dealloc</a>,       <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L456'>    0,                  <i><font color='green'>/*tp_print*/</font></i>
+<a name='L457'>    0,                  <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L458'>    0,                  <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L459'>    0,                  <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L460'>    0,                  <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L461'>    0,                  <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L462'>    0,                  <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L463'>    0,                  <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L464'>    0,                  <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L465'>    0,                  <i><font color='green'>/*tp_call*/</font></i>
+<a name='L466'>    0,                  <i><font color='green'>/*tp_str*/</font></i>
+<a name='L467'>    0,                  <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L468'>    0,                  <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L469'>    0,                  <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L470'>    Py_TPFLAGS_DEFAULT, <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L471'>    0,                  <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L472'>    0,                  <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L473'>    0,                  <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L474'>    0,                  <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L475'>    0,                  <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L476'>    0,                  <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L477'>    0,                  <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L478'>    SHA1_methods,       <i><font color='green'>/* tp_methods */</font></i>
+<a name='L479'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,               <i><font color='green'>/* tp_members */</font></i>
+<a name='L480'>    SHA1_getseters,      <i><font color='green'>/* tp_getset */</font></i>
+<a name='L481'><font color='red'>}</font>;
+<a name='L482'>
+<a name='L483'>
+<a name='L484'><i><font color='green'>/* The single module-level function: new() */</font></i>
+<a name='L485'>
+<a name='L486'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(SHA1_new__doc__,
+<a name='L487'>"Return a new SHA1 hash object; optionally initialized with a string.");
+<a name='L488'>
+<a name='L489'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L490'><a href='../S/2707.html#L531' title='Refered from 531 in Modules/sha1module.c.'>SHA1_new</a>(PyObject *self, PyObject *args, PyObject *kwdict)
+<a name='L491'><font color='red'>{</font>
+<a name='L492'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"string", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L493'>    <a href='../S/2707.html#L49' title='Defined at 49 in Modules/sha1module.c.'>SHA1object</a> *new;
+<a name='L494'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *data_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L495'>    <a href='../S/544.html#L163' title='Defined at 163 in Include/object.h.'>Py_buffer</a> buf;
+<a name='L496'>
+<a name='L497'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdict, "|O:new", kwlist,
+<a name='L498'>                                     &amp;data_obj)) <font color='red'>{</font>
+<a name='L499'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L500'>    <font color='red'>}</font>
+<a name='L501'>
+<a name='L502'>    <b>if</b> (data_obj)
+<a name='L503'>        <a href='../S/2682.html#L8' title='Defined at 8 in Modules/hashlib.h.'>GET_BUFFER_VIEW_OR_ERROUT</a>(data_obj, &amp;buf);
+<a name='L504'>
+<a name='L505'>    <b>if</b> ((new = <a href='../S/2707.html#L296' title='Defined at 296 in Modules/sha1module.c.'>newSHA1object</a>()) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L506'>        <b>if</b> (data_obj)
+<a name='L507'>            <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L508'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L509'>    <font color='red'>}</font>
+<a name='L510'>
+<a name='L511'>    <a href='../S/2707.html#L187' title='Defined at 187 in Modules/sha1module.c.'>sha1_init</a>(&amp;new-&gt;hash_state);
+<a name='L512'>
+<a name='L513'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L514'>        Py_DECREF(new);
+<a name='L515'>        <b>if</b> (data_obj)
+<a name='L516'>            <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L517'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L518'>    <font color='red'>}</font>
+<a name='L519'>    <b>if</b> (data_obj) <font color='red'>{</font>
+<a name='L520'>        <a href='../S/2707.html#L205' title='Defined at 205 in Modules/sha1module.c.'>sha1_process</a>(&amp;new-&gt;hash_state, buf.buf, buf.len);
+<a name='L521'>        <a href='../S/2775.html#L684' title='Defined at 684 in Objects/abstract.c.'>PyBuffer_Release</a>(&amp;buf);
+<a name='L522'>    <font color='red'>}</font>
+<a name='L523'>
+<a name='L524'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)new;
+<a name='L525'><font color='red'>}</font>
+<a name='L526'>
+<a name='L527'>
+<a name='L528'><i><font color='green'>/* List of functions exported by this module */</font></i>
+<a name='L529'>
+<a name='L530'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> SHA1_functions[] = <font color='red'>{</font>
+<a name='L531'>    <font color='red'>{</font>"sha1",(PyCFunction)<a href='../S/2707.html#L490' title='Defined at 490 in Modules/sha1module.c.'>SHA1_new</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>|METH_KEYWORDS,SHA1_new__doc__<font color='red'>}</font>,
+<a name='L532'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>            <i><font color='green'>/* Sentinel */</font></i>
+<a name='L533'><font color='red'>}</font>;
+<a name='L534'>
+<a name='L535'>
+<a name='L536'><i><font color='green'>/* Initialize this module. */</font></i>
+<a name='L537'>
+<a name='L538'><font color='darkred'>#define</font> <a href='../S/3031.html#L1713' title='Refered from 1713 in PC/winreg.c.'>insint</a>(n,v) <font color='red'>{</font> <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m,n,v); <font color='red'>}</font>
+<a name='L539'>
+<a name='L540'>
+<a name='L541'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _sha1module = <font color='red'>{</font>
+<a name='L542'>        <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L543'>        "_sha1",
+<a name='L544'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L545'>        -1,
+<a name='L546'>        SHA1_functions,
+<a name='L547'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L548'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L549'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L550'>        <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L551'><font color='red'>}</font>;
+<a name='L552'>
+<a name='L553'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L554'><a href='../R/3035.html' title='Multiple refered from 2 places.'>PyInit__sha1</a>(<b>void</b>)
+<a name='L555'><font color='red'>{</font>
+<a name='L556'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(&amp;SHA1type) = &amp;PyType_Type;
+<a name='L557'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;SHA1type) &lt; 0)
+<a name='L558'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L559'>    <b>return</b> PyModule_Create(&amp;_sha1module);
+<a name='L560'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L107'>[^]</a><a href='#L554'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

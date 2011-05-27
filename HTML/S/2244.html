@@ -1,0 +1,1734 @@
+<html>
+<head>
+<title>Modules/_collectionsmodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/_collectionsmodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L59'>[^]</a><a href='#L1639'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L59' title='Defined at 59.'>newblock</a>
+<li><a href='#L89' title='Defined at 89.'>freeblock</a>
+<li><a href='#L130' title='Defined at 130.'>deque_new</a>
+<li><a href='#L160' title='Defined at 160.'>deque_pop</a>
+<li><a href='#L196' title='Defined at 196.'>deque_popleft</a>
+<li><a href='#L234' title='Defined at 234.'>deque_append</a>
+<li><a href='#L257' title='Defined at 257.'>deque_appendleft</a>
+<li><a href='#L283' title='Defined at 283.'>consume_iterator</a>
+<li><a href='#L297' title='Defined at 297.'>deque_extend</a>
+<li><a href='#L349' title='Defined at 349.'>deque_extendleft</a>
+<li><a href='#L401' title='Defined at 401.'>deque_inplace_concat</a>
+<li><a href='#L414' title='Defined at 414.'>_deque_rotate</a>
+<li><a href='#L451' title='Defined at 451.'>deque_rotate</a>
+<li><a href='#L466' title='Defined at 466.'>deque_reverse</a>
+<li><a href='#L510' title='Defined at 510.'>deque_count</a>
+<li><a href='#L551' title='Defined at 551.'>deque_len</a>
+<li><a href='#L557' title='Defined at 557.'>deque_remove</a>
+<li><a href='#L592' title='Defined at 592.'>deque_clear</a>
+<li><a href='#L608' title='Defined at 608.'>deque_item</a>
+<li><a href='#L654' title='Defined at 654.'>deque_del_item</a>
+<li><a href='#L670' title='Defined at 670.'>deque_ass_item</a>
+<li><a href='#L705' title='Defined at 705.'>deque_clearmethod</a>
+<li><a href='#L717' title='Defined at 717.'>deque_dealloc</a>
+<li><a href='#L733' title='Defined at 733.'>deque_traverse</a>
+<li><a href='#L755' title='Defined at 755.'>deque_copy</a>
+<li><a href='#L767' title='Defined at 767.'>deque_reduce</a>
+<li><a href='#L798' title='Defined at 798.'>deque_repr</a>
+<li><a href='#L827' title='Defined at 827.'>deque_richcompare</a>
+<li><a href='#L906' title='Defined at 906.'>deque_init</a>
+<li><a href='#L936' title='Defined at 936.'>deque_get_maxlen</a>
+<li><a href='#L1065' title='Defined at 1065.'>deque_iter</a>
+<li><a href='#L1083' title='Defined at 1083.'>dequeiter_traverse</a>
+<li><a href='#L1090' title='Defined at 1090.'>dequeiter_dealloc</a>
+<li><a href='#L1097' title='Defined at 1097.'>dequeiter_next</a>
+<li><a href='#L1125' title='Defined at 1125.'>dequeiter_len</a>
+<li><a href='#L1175' title='Defined at 1175.'>deque_reviter</a>
+<li><a href='#L1193' title='Defined at 1193.'>dequereviter_next</a>
+<li><a href='#L1270' title='Defined at 1270.'>defdict_missing</a>
+<li><a href='#L1296' title='Defined at 1296.'>defdict_copy</a>
+<li><a href='#L1310' title='Defined at 1310.'>defdict_reduce</a>
+<li><a href='#L1383' title='Defined at 1383.'>defdict_dealloc</a>
+<li><a href='#L1390' title='Defined at 1390.'>defdict_repr</a>
+<li><a href='#L1424' title='Defined at 1424.'>defdict_traverse</a>
+<li><a href='#L1431' title='Defined at 1431.'>defdict_tp_clear</a>
+<li><a href='#L1438' title='Defined at 1438.'>defdict_init</a>
+<li><a href='#L1532' title='Defined at 1532.'>_count_elements</a>
+<li><a href='#L1639' title='Defined at 1639.'>PyInit__collections</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L2'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L3'>
+<a name='L4'><i><font color='green'>/* collections module implementation of a deque() datatype</font></i>
+<a name='L5'><i><font color='green'>   Written and maintained by Raymond D. Hettinger &lt;python@rcn.com&gt;</font></i>
+<a name='L6'><i><font color='green'>   Copyright (c) 2004 Python Software Foundation.</font></i>
+<a name='L7'><i><font color='green'>   All rights reserved.</font></i>
+<a name='L8'><i><font color='green'>*/</font></i>
+<a name='L9'>
+<a name='L10'><i><font color='green'>/* The block length may be set to any number over 1.  Larger numbers</font></i>
+<a name='L11'><i><font color='green'> * reduce the number of calls to the memory allocator but take more</font></i>
+<a name='L12'><i><font color='green'> * memory.  Ideally, BLOCKLEN should be set with an eye to the</font></i>
+<a name='L13'><i><font color='green'> * length of a cache line.</font></i>
+<a name='L14'><i><font color='green'> */</font></i>
+<a name='L15'>
+<a name='L16'><font color='darkred'>#define</font> <a href='../R/269.html' title='Multiple refered from 22 places.'>BLOCKLEN</a> 62
+<a name='L17'><font color='darkred'>#define</font> <a href='../R/461.html' title='Multiple refered from 6 places.'>CENTER</a> ((<a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> - 1) / 2)
+<a name='L18'>
+<a name='L19'><i><font color='green'>/* A `dequeobject` is composed of a doubly-linked list of `block` nodes.</font></i>
+<a name='L20'><i><font color='green'> * This list is not circular (the leftmost block has leftlink==NULL,</font></i>
+<a name='L21'><i><font color='green'> * and the rightmost block has rightlink==NULL).  A deque d's first</font></i>
+<a name='L22'><i><font color='green'> * element is at d.leftblock[leftindex] and its last element is at</font></i>
+<a name='L23'><i><font color='green'> * d.rightblock[rightindex]; note that, unlike as for Python slice</font></i>
+<a name='L24'><i><font color='green'> * indices, these indices are inclusive on both ends.  By being inclusive</font></i>
+<a name='L25'><i><font color='green'> * on both ends, algorithms for left and right operations become</font></i>
+<a name='L26'><i><font color='green'> * symmetrical which simplifies the design.</font></i>
+<a name='L27'><i><font color='green'> *</font></i>
+<a name='L28'><i><font color='green'> * The list of blocks is never empty, so d.leftblock and d.rightblock</font></i>
+<a name='L29'><i><font color='green'> * are never equal to NULL.</font></i>
+<a name='L30'><i><font color='green'> *</font></i>
+<a name='L31'><i><font color='green'> * The indices, d.leftindex and d.rightindex are always in the range</font></i>
+<a name='L32'><i><font color='green'> *     0 &lt;= index &lt; BLOCKLEN.</font></i>
+<a name='L33'><i><font color='green'> * Their exact relationship is:</font></i>
+<a name='L34'><i><font color='green'> *     (d.leftindex + d.len - 1) % BLOCKLEN == d.rightindex.</font></i>
+<a name='L35'><i><font color='green'> *</font></i>
+<a name='L36'><i><font color='green'> * Empty deques have d.len == 0; d.leftblock==d.rightblock;</font></i>
+<a name='L37'><i><font color='green'> * d.leftindex == CENTER+1; and d.rightindex == CENTER.</font></i>
+<a name='L38'><i><font color='green'> * Checking for d.len == 0 is the intended way to see whether d is empty.</font></i>
+<a name='L39'><i><font color='green'> *</font></i>
+<a name='L40'><i><font color='green'> * Whenever d.leftblock == d.rightblock,</font></i>
+<a name='L41'><i><font color='green'> *     d.leftindex + d.len - 1 == d.rightindex.</font></i>
+<a name='L42'><i><font color='green'> *</font></i>
+<a name='L43'><i><font color='green'> * However, when d.leftblock != d.rightblock, d.leftindex and d.rightindex</font></i>
+<a name='L44'><i><font color='green'> * become indices into distinct blocks and either may be larger than the</font></i>
+<a name='L45'><i><font color='green'> * other.</font></i>
+<a name='L46'><i><font color='green'> */</font></i>
+<a name='L47'>
+<a name='L48'><b>typedef</b> <b>struct</b> <a href='../R/268.html' title='Multiple refered from 14 places.'>BLOCK</a> <font color='red'>{</font>
+<a name='L49'>    <b>struct</b> <a href='../D/292.html' title='Multiple defined in 2 places.'>BLOCK</a> *leftlink;
+<a name='L50'>    <b>struct</b> <a href='../D/292.html' title='Multiple defined in 2 places.'>BLOCK</a> *rightlink;
+<a name='L51'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *data[<a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>];
+<a name='L52'><font color='red'>}</font> <a href='../R/6245.html' title='Multiple refered from 103 places.'>block</a>;
+<a name='L53'>
+<a name='L54'><font color='darkred'>#define</font> <a href='../R/1839.html' title='Multiple refered from 2 places.'>MAXFREEBLOCKS</a> 10
+<a name='L55'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> numfreeblocks = 0;
+<a name='L56'><b>static</b> <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *freeblocks[<a href='../S/2244.html#L54' title='Defined at 54 in Modules/_collectionsmodule.c.'>MAXFREEBLOCKS</a>];
+<a name='L57'>
+<a name='L58'><b>static</b> <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *
+<a name='L59'><a href='../R/9216.html' title='Multiple refered from 5 places.'>newblock</a>(block *leftlink, block *rightlink, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len) <font color='red'>{</font>
+<a name='L60'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L61'>    <i><font color='green'>/* To prevent len from overflowing PY_SSIZE_T_MAX on 64-bit machines, we</font></i>
+<a name='L62'><i><font color='green'>     * refuse to allocate new blocks if the current len is dangerously</font></i>
+<a name='L63'><i><font color='green'>     * close.  There is some extra margin to prevent spurious arithmetic</font></i>
+<a name='L64'><i><font color='green'>     * overflows at various places.  The following check ensures that</font></i>
+<a name='L65'><i><font color='green'>     * the blocks allocated to the deque, in the worst case, can only</font></i>
+<a name='L66'><i><font color='green'>     * have PY_SSIZE_T_MAX-2 entries in total.</font></i>
+<a name='L67'><i><font color='green'>     */</font></i>
+<a name='L68'>    <b>if</b> (len &gt;= <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a> - 2*<a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>) <font color='red'>{</font>
+<a name='L69'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L70'>                        "cannot add more blocks to the deque");
+<a name='L71'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L72'>    <font color='red'>}</font>
+<a name='L73'>    <b>if</b> (numfreeblocks) <font color='red'>{</font>
+<a name='L74'>        numfreeblocks -= 1;
+<a name='L75'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = freeblocks[numfreeblocks];
+<a name='L76'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L77'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(<b>sizeof</b>(<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>));
+<a name='L78'>        <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L79'>            <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L80'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L81'>        <font color='red'>}</font>
+<a name='L82'>    <font color='red'>}</font>
+<a name='L83'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;leftlink = leftlink;
+<a name='L84'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;rightlink = rightlink;
+<a name='L85'>    <b>return</b> <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L86'><font color='red'>}</font>
+<a name='L87'>
+<a name='L88'><b>static</b> <b>void</b>
+<a name='L89'><a href='../R/7931.html' title='Multiple refered from 14 places.'>freeblock</a>(block *b)
+<a name='L90'><font color='red'>{</font>
+<a name='L91'>    <b>if</b> (numfreeblocks &lt; <a href='../S/2244.html#L54' title='Defined at 54 in Modules/_collectionsmodule.c.'>MAXFREEBLOCKS</a>) <font color='red'>{</font>
+<a name='L92'>        freeblocks[numfreeblocks] = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L93'>        numfreeblocks++;
+<a name='L94'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L95'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L96'>    <font color='red'>}</font>
+<a name='L97'><font color='red'>}</font>
+<a name='L98'>
+<a name='L99'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L100'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L101'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *leftblock;
+<a name='L102'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *rightblock;
+<a name='L103'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> leftindex;       <i><font color='green'>/* in range(BLOCKLEN) */</font></i>
+<a name='L104'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> rightindex;      <i><font color='green'>/* in range(BLOCKLEN) */</font></i>
+<a name='L105'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L106'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> maxlen;
+<a name='L107'>    <b>long</b> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;         <i><font color='green'>/* incremented whenever the indices move */</font></i>
+<a name='L108'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *weakreflist; <i><font color='green'>/* List of weak references */</font></i>
+<a name='L109'><font color='red'>}</font> <a href='../R/7302.html' title='Multiple refered from 11 places.'>dequeobject</a>;
+<a name='L110'>
+<a name='L111'><i><font color='green'>/* The deque's size limit is d.maxlen.  The limit can be zero or positive.</font></i>
+<a name='L112'><i><font color='green'> * If there is no limit, then d.maxlen == -1.</font></i>
+<a name='L113'><i><font color='green'> *</font></i>
+<a name='L114'><i><font color='green'> * After an item is added to a deque, we check to see if the size has grown past</font></i>
+<a name='L115'><i><font color='green'> * the limit. If it has, we get the size back down to the limit by popping an</font></i>
+<a name='L116'><i><font color='green'> * item off of the opposite end.  The methods that can trigger this are append(),</font></i>
+<a name='L117'><i><font color='green'> * appendleft(), extend(), and extendleft().</font></i>
+<a name='L118'><i><font color='green'> */</font></i>
+<a name='L119'>
+<a name='L120'><font color='darkred'>#define</font> <a href='../R/4566.html' title='Multiple refered from 4 places.'>TRIM</a>(d, popfunction)                                    \
+<a name='L121'>    <b>if</b> (d-&gt;maxlen != -1 &amp;&amp; d-&gt;len &gt; d-&gt;maxlen) <font color='red'>{</font>                \
+<a name='L122'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *rv = popfunction(d, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);                \
+<a name='L123'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(rv != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>  &amp;&amp;  d-&gt;len &lt;= d-&gt;maxlen);        \
+<a name='L124'>        Py_DECREF(rv);                                      \
+<a name='L125'>    <font color='red'>}</font>
+<a name='L126'>
+<a name='L127'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> deque_type;
+<a name='L128'>
+<a name='L129'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L130'><a href='../S/2244.html#L1047' title='Refered from 1047 in Modules/_collectionsmodule.c.'>deque_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds)
+<a name='L131'><font color='red'>{</font>
+<a name='L132'>    <a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *deque;
+<a name='L133'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L134'>
+<a name='L135'>    <i><font color='green'>/* create dequeobject structure */</font></i>
+<a name='L136'>    deque = (<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *)type-&gt;tp_alloc(type, 0);
+<a name='L137'>    <b>if</b> (deque == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L138'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L139'>
+<a name='L140'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../S/2244.html#L59' title='Defined at 59 in Modules/_collectionsmodule.c.'>newblock</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0);
+<a name='L141'>    <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L142'>        Py_DECREF(deque);
+<a name='L143'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L144'>    <font color='red'>}</font>
+<a name='L145'>
+<a name='L146'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> &gt;= 2);
+<a name='L147'>    deque-&gt;leftblock = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L148'>    deque-&gt;rightblock = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L149'>    deque-&gt;leftindex = <a href='../S/2244.html#L17' title='Defined at 17 in Modules/_collectionsmodule.c.'>CENTER</a> + 1;
+<a name='L150'>    deque-&gt;rightindex = <a href='../S/2244.html#L17' title='Defined at 17 in Modules/_collectionsmodule.c.'>CENTER</a>;
+<a name='L151'>    deque-&gt;len = 0;
+<a name='L152'>    deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = 0;
+<a name='L153'>    deque-&gt;weakreflist = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L154'>    deque-&gt;maxlen = -1;
+<a name='L155'>
+<a name='L156'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)deque;
+<a name='L157'><font color='red'>}</font>
+<a name='L158'>
+<a name='L159'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L160'><a href='../R/7287.html' title='Multiple refered from 5 places.'>deque_pop</a>(dequeobject *deque, PyObject *unused)
+<a name='L161'><font color='red'>{</font>
+<a name='L162'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L163'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *prevblock;
+<a name='L164'>
+<a name='L165'>    <b>if</b> (deque-&gt;len == 0) <font color='red'>{</font>
+<a name='L166'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError, "pop from an empty deque");
+<a name='L167'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L168'>    <font color='red'>}</font>
+<a name='L169'>    item = deque-&gt;rightblock-&gt;data[deque-&gt;rightindex];
+<a name='L170'>    deque-&gt;rightindex--;
+<a name='L171'>    deque-&gt;len--;
+<a name='L172'>    deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>++;
+<a name='L173'>
+<a name='L174'>    <b>if</b> (deque-&gt;rightindex == -1) <font color='red'>{</font>
+<a name='L175'>        <b>if</b> (deque-&gt;len == 0) <font color='red'>{</font>
+<a name='L176'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock == deque-&gt;rightblock);
+<a name='L177'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftindex == deque-&gt;rightindex+1);
+<a name='L178'>            <i><font color='green'>/* re-center instead of freeing a block */</font></i>
+<a name='L179'>            deque-&gt;leftindex = <a href='../S/2244.html#L17' title='Defined at 17 in Modules/_collectionsmodule.c.'>CENTER</a> + 1;
+<a name='L180'>            deque-&gt;rightindex = <a href='../S/2244.html#L17' title='Defined at 17 in Modules/_collectionsmodule.c.'>CENTER</a>;
+<a name='L181'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L182'>            prevblock = deque-&gt;rightblock-&gt;leftlink;
+<a name='L183'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock != deque-&gt;rightblock);
+<a name='L184'>            <a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>(deque-&gt;rightblock);
+<a name='L185'>            prevblock-&gt;rightlink = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L186'>            deque-&gt;rightblock = prevblock;
+<a name='L187'>            deque-&gt;rightindex = <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> - 1;
+<a name='L188'>        <font color='red'>}</font>
+<a name='L189'>    <font color='red'>}</font>
+<a name='L190'>    <b>return</b> item;
+<a name='L191'><font color='red'>}</font>
+<a name='L192'>
+<a name='L193'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(pop_doc, "Remove and return the rightmost element.");
+<a name='L194'>
+<a name='L195'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L196'><a href='../R/7288.html' title='Multiple refered from 6 places.'>deque_popleft</a>(dequeobject *deque, PyObject *unused)
+<a name='L197'><font color='red'>{</font>
+<a name='L198'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L199'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *prevblock;
+<a name='L200'>
+<a name='L201'>    <b>if</b> (deque-&gt;len == 0) <font color='red'>{</font>
+<a name='L202'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError, "pop from an empty deque");
+<a name='L203'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L204'>    <font color='red'>}</font>
+<a name='L205'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L206'>    item = deque-&gt;leftblock-&gt;data[deque-&gt;leftindex];
+<a name='L207'>    deque-&gt;leftindex++;
+<a name='L208'>    deque-&gt;len--;
+<a name='L209'>    deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>++;
+<a name='L210'>
+<a name='L211'>    <b>if</b> (deque-&gt;leftindex == <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>) <font color='red'>{</font>
+<a name='L212'>        <b>if</b> (deque-&gt;len == 0) <font color='red'>{</font>
+<a name='L213'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock == deque-&gt;rightblock);
+<a name='L214'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftindex == deque-&gt;rightindex+1);
+<a name='L215'>            <i><font color='green'>/* re-center instead of freeing a block */</font></i>
+<a name='L216'>            deque-&gt;leftindex = <a href='../S/2244.html#L17' title='Defined at 17 in Modules/_collectionsmodule.c.'>CENTER</a> + 1;
+<a name='L217'>            deque-&gt;rightindex = <a href='../S/2244.html#L17' title='Defined at 17 in Modules/_collectionsmodule.c.'>CENTER</a>;
+<a name='L218'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L219'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock != deque-&gt;rightblock);
+<a name='L220'>            prevblock = deque-&gt;leftblock-&gt;rightlink;
+<a name='L221'>            <a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>(deque-&gt;leftblock);
+<a name='L222'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(prevblock != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L223'>            prevblock-&gt;leftlink = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L224'>            deque-&gt;leftblock = prevblock;
+<a name='L225'>            deque-&gt;leftindex = 0;
+<a name='L226'>        <font color='red'>}</font>
+<a name='L227'>    <font color='red'>}</font>
+<a name='L228'>    <b>return</b> item;
+<a name='L229'><font color='red'>}</font>
+<a name='L230'>
+<a name='L231'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(popleft_doc, "Remove and return the leftmost element.");
+<a name='L232'>
+<a name='L233'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L234'><a href='../R/7269.html' title='Multiple refered from 2 places.'>deque_append</a>(dequeobject *deque, PyObject *item)
+<a name='L235'><font color='red'>{</font>
+<a name='L236'>    deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>++;
+<a name='L237'>    <b>if</b> (deque-&gt;rightindex == <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>-1) <font color='red'>{</font>
+<a name='L238'>        <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../S/2244.html#L59' title='Defined at 59 in Modules/_collectionsmodule.c.'>newblock</a>(deque-&gt;rightblock, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, deque-&gt;len);
+<a name='L239'>        <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L240'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L241'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;rightblock-&gt;rightlink == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L242'>        deque-&gt;rightblock-&gt;rightlink = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L243'>        deque-&gt;rightblock = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L244'>        deque-&gt;rightindex = -1;
+<a name='L245'>    <font color='red'>}</font>
+<a name='L246'>    Py_INCREF(item);
+<a name='L247'>    deque-&gt;len++;
+<a name='L248'>    deque-&gt;rightindex++;
+<a name='L249'>    deque-&gt;rightblock-&gt;data[deque-&gt;rightindex] = item;
+<a name='L250'>    <a href='../S/2244.html#L120' title='Defined at 120 in Modules/_collectionsmodule.c.'>TRIM</a>(deque, <a href='../S/2244.html#L196' title='Defined at 196 in Modules/_collectionsmodule.c.'>deque_popleft</a>);
+<a name='L251'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L252'><font color='red'>}</font>
+<a name='L253'>
+<a name='L254'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(append_doc, "Add an element to the right side of the deque.");
+<a name='L255'>
+<a name='L256'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L257'><a href='../R/7270.html' title='Multiple refered from 2 places.'>deque_appendleft</a>(dequeobject *deque, PyObject *item)
+<a name='L258'><font color='red'>{</font>
+<a name='L259'>    deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>++;
+<a name='L260'>    <b>if</b> (deque-&gt;leftindex == 0) <font color='red'>{</font>
+<a name='L261'>        <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../S/2244.html#L59' title='Defined at 59 in Modules/_collectionsmodule.c.'>newblock</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, deque-&gt;leftblock, deque-&gt;len);
+<a name='L262'>        <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L263'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L264'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock-&gt;leftlink == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L265'>        deque-&gt;leftblock-&gt;leftlink = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L266'>        deque-&gt;leftblock = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L267'>        deque-&gt;leftindex = <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>;
+<a name='L268'>    <font color='red'>}</font>
+<a name='L269'>    Py_INCREF(item);
+<a name='L270'>    deque-&gt;len++;
+<a name='L271'>    deque-&gt;leftindex--;
+<a name='L272'>    deque-&gt;leftblock-&gt;data[deque-&gt;leftindex] = item;
+<a name='L273'>    <a href='../S/2244.html#L120' title='Defined at 120 in Modules/_collectionsmodule.c.'>TRIM</a>(deque, <a href='../S/2244.html#L160' title='Defined at 160 in Modules/_collectionsmodule.c.'>deque_pop</a>);
+<a name='L274'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L275'><font color='red'>}</font>
+<a name='L276'>
+<a name='L277'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(appendleft_doc, "Add an element to the left side of the deque.");
+<a name='L278'>
+<a name='L279'>
+<a name='L280'><i><font color='green'>/* Run an iterator to exhaustion.  Shortcut for</font></i>
+<a name='L281'><i><font color='green'>   the extend/extendleft methods when maxlen == 0. */</font></i>
+<a name='L282'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L283'><a href='../R/6984.html' title='Multiple refered from 2 places.'>consume_iterator</a>(PyObject *it)
+<a name='L284'><font color='red'>{</font>
+<a name='L285'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L286'>
+<a name='L287'>    <b>while</b> ((item = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it)) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L288'>        Py_DECREF(item);
+<a name='L289'>    <font color='red'>}</font>
+<a name='L290'>    Py_DECREF(it);
+<a name='L291'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L292'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L293'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L294'><font color='red'>}</font>
+<a name='L295'>
+<a name='L296'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L297'><a href='../R/7278.html' title='Multiple refered from 4 places.'>deque_extend</a>(dequeobject *deque, PyObject *iterable)
+<a name='L298'><font color='red'>{</font>
+<a name='L299'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *it, *item;
+<a name='L300'>
+<a name='L301'>    <i><font color='green'>/* Handle case where id(deque) == id(iterable) */</font></i>
+<a name='L302'>    <b>if</b> ((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)deque == iterable) <font color='red'>{</font>
+<a name='L303'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L304'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *s = <a href='../S/2775.html#L1814' title='Defined at 1814 in Objects/abstract.c.'>PySequence_List</a>(iterable);
+<a name='L305'>        <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L306'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L307'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2244.html#L297' title='Defined at 297 in Modules/_collectionsmodule.c.'>deque_extend</a>(deque, s);
+<a name='L308'>        Py_DECREF(s);
+<a name='L309'>        <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L310'>    <font color='red'>}</font>
+<a name='L311'>
+<a name='L312'>    it = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(iterable);
+<a name='L313'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L314'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L315'>
+<a name='L316'>    <b>if</b> (deque-&gt;maxlen == 0)
+<a name='L317'>        <b>return</b> <a href='../S/2244.html#L283' title='Defined at 283 in Modules/_collectionsmodule.c.'>consume_iterator</a>(it);
+<a name='L318'>
+<a name='L319'>    <b>while</b> ((item = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it)) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L320'>        deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>++;
+<a name='L321'>        <b>if</b> (deque-&gt;rightindex == <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>-1) <font color='red'>{</font>
+<a name='L322'>            <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../S/2244.html#L59' title='Defined at 59 in Modules/_collectionsmodule.c.'>newblock</a>(deque-&gt;rightblock, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L323'>                                deque-&gt;len);
+<a name='L324'>            <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L325'>                Py_DECREF(item);
+<a name='L326'>                Py_DECREF(it);
+<a name='L327'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L328'>            <font color='red'>}</font>
+<a name='L329'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;rightblock-&gt;rightlink == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L330'>            deque-&gt;rightblock-&gt;rightlink = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L331'>            deque-&gt;rightblock = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L332'>            deque-&gt;rightindex = -1;
+<a name='L333'>        <font color='red'>}</font>
+<a name='L334'>        deque-&gt;len++;
+<a name='L335'>        deque-&gt;rightindex++;
+<a name='L336'>        deque-&gt;rightblock-&gt;data[deque-&gt;rightindex] = item;
+<a name='L337'>        <a href='../S/2244.html#L120' title='Defined at 120 in Modules/_collectionsmodule.c.'>TRIM</a>(deque, <a href='../S/2244.html#L196' title='Defined at 196 in Modules/_collectionsmodule.c.'>deque_popleft</a>);
+<a name='L338'>    <font color='red'>}</font>
+<a name='L339'>    Py_DECREF(it);
+<a name='L340'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L341'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L342'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L343'><font color='red'>}</font>
+<a name='L344'>
+<a name='L345'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(extend_doc,
+<a name='L346'>"Extend the right side of the deque with elements from the iterable");
+<a name='L347'>
+<a name='L348'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L349'><a href='../R/7279.html' title='Multiple refered from 2 places.'>deque_extendleft</a>(dequeobject *deque, PyObject *iterable)
+<a name='L350'><font color='red'>{</font>
+<a name='L351'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *it, *item;
+<a name='L352'>
+<a name='L353'>    <i><font color='green'>/* Handle case where id(deque) == id(iterable) */</font></i>
+<a name='L354'>    <b>if</b> ((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)deque == iterable) <font color='red'>{</font>
+<a name='L355'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L356'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *s = <a href='../S/2775.html#L1814' title='Defined at 1814 in Objects/abstract.c.'>PySequence_List</a>(iterable);
+<a name='L357'>        <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L358'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L359'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2244.html#L349' title='Defined at 349 in Modules/_collectionsmodule.c.'>deque_extendleft</a>(deque, s);
+<a name='L360'>        Py_DECREF(s);
+<a name='L361'>        <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L362'>    <font color='red'>}</font>
+<a name='L363'>
+<a name='L364'>    it = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(iterable);
+<a name='L365'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L366'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L367'>
+<a name='L368'>    <b>if</b> (deque-&gt;maxlen == 0)
+<a name='L369'>        <b>return</b> <a href='../S/2244.html#L283' title='Defined at 283 in Modules/_collectionsmodule.c.'>consume_iterator</a>(it);
+<a name='L370'>
+<a name='L371'>    <b>while</b> ((item = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it)) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L372'>        deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>++;
+<a name='L373'>        <b>if</b> (deque-&gt;leftindex == 0) <font color='red'>{</font>
+<a name='L374'>            <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../S/2244.html#L59' title='Defined at 59 in Modules/_collectionsmodule.c.'>newblock</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, deque-&gt;leftblock,
+<a name='L375'>                                deque-&gt;len);
+<a name='L376'>            <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L377'>                Py_DECREF(item);
+<a name='L378'>                Py_DECREF(it);
+<a name='L379'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L380'>            <font color='red'>}</font>
+<a name='L381'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock-&gt;leftlink == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L382'>            deque-&gt;leftblock-&gt;leftlink = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L383'>            deque-&gt;leftblock = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L384'>            deque-&gt;leftindex = <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>;
+<a name='L385'>        <font color='red'>}</font>
+<a name='L386'>        deque-&gt;len++;
+<a name='L387'>        deque-&gt;leftindex--;
+<a name='L388'>        deque-&gt;leftblock-&gt;data[deque-&gt;leftindex] = item;
+<a name='L389'>        <a href='../S/2244.html#L120' title='Defined at 120 in Modules/_collectionsmodule.c.'>TRIM</a>(deque, <a href='../S/2244.html#L160' title='Defined at 160 in Modules/_collectionsmodule.c.'>deque_pop</a>);
+<a name='L390'>    <font color='red'>}</font>
+<a name='L391'>    Py_DECREF(it);
+<a name='L392'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L393'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L394'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L395'><font color='red'>}</font>
+<a name='L396'>
+<a name='L397'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(extendleft_doc,
+<a name='L398'>"Extend the left side of the deque with elements from the iterable");
+<a name='L399'>
+<a name='L400'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L401'><a href='../S/2244.html#L958' title='Refered from 958 in Modules/_collectionsmodule.c.'>deque_inplace_concat</a>(dequeobject *deque, PyObject *other)
+<a name='L402'><font color='red'>{</font>
+<a name='L403'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L404'>
+<a name='L405'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2244.html#L297' title='Defined at 297 in Modules/_collectionsmodule.c.'>deque_extend</a>(deque, <a href='../S/2669.html#L1431' title='Defined at 1431 in Modules/expat/xmltok_impl.c.'>other</a>);
+<a name='L406'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L407'>        <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L408'>    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L409'>    Py_INCREF(deque);
+<a name='L410'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)deque;
+<a name='L411'><font color='red'>}</font>
+<a name='L412'>
+<a name='L413'><b>static</b> <b>int</b>
+<a name='L414'><a href='../R/5744.html' title='Multiple refered from 6 places.'>_deque_rotate</a>(dequeobject *deque, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n)
+<a name='L415'><font color='red'>{</font>
+<a name='L416'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, len=deque-&gt;len, halflen=(len+1)&gt;&gt;1;
+<a name='L417'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item, *rv;
+<a name='L418'>
+<a name='L419'>    <b>if</b> (len == 0)
+<a name='L420'>        <b>return</b> 0;
+<a name='L421'>    <b>if</b> (n &gt; halflen || n &lt; -halflen) <font color='red'>{</font>
+<a name='L422'>        n %= len;
+<a name='L423'>        <b>if</b> (n &gt; halflen)
+<a name='L424'>            n -= len;
+<a name='L425'>        <b>else</b> <b>if</b> (n &lt; -halflen)
+<a name='L426'>            n += len;
+<a name='L427'>    <font color='red'>}</font>
+<a name='L428'>
+<a name='L429'>    <b>for</b> (i=0 ; i&lt;n ; i++) <font color='red'>{</font>
+<a name='L430'>        item = <a href='../S/2244.html#L160' title='Defined at 160 in Modules/_collectionsmodule.c.'>deque_pop</a>(deque, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L431'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (item != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L432'>        rv = <a href='../S/2244.html#L257' title='Defined at 257 in Modules/_collectionsmodule.c.'>deque_appendleft</a>(deque, item);
+<a name='L433'>        Py_DECREF(item);
+<a name='L434'>        <b>if</b> (rv == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L435'>            <b>return</b> -1;
+<a name='L436'>        Py_DECREF(rv);
+<a name='L437'>    <font color='red'>}</font>
+<a name='L438'>    <b>for</b> (i=0 ; i&gt;n ; i--) <font color='red'>{</font>
+<a name='L439'>        item = <a href='../S/2244.html#L196' title='Defined at 196 in Modules/_collectionsmodule.c.'>deque_popleft</a>(deque, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L440'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (item != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L441'>        rv = <a href='../S/2244.html#L234' title='Defined at 234 in Modules/_collectionsmodule.c.'>deque_append</a>(deque, item);
+<a name='L442'>        Py_DECREF(item);
+<a name='L443'>        <b>if</b> (rv == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L444'>            <b>return</b> -1;
+<a name='L445'>        Py_DECREF(rv);
+<a name='L446'>    <font color='red'>}</font>
+<a name='L447'>    <b>return</b> 0;
+<a name='L448'><font color='red'>}</font>
+<a name='L449'>
+<a name='L450'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L451'><a href='../S/2244.html#L997' title='Refered from 997 in Modules/_collectionsmodule.c.'>deque_rotate</a>(dequeobject *deque, PyObject *args)
+<a name='L452'><font color='red'>{</font>
+<a name='L453'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n=1;
+<a name='L454'>
+<a name='L455'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|n:rotate", &amp;n))
+<a name='L456'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L457'>    <b>if</b> (<a href='../S/2244.html#L414' title='Defined at 414 in Modules/_collectionsmodule.c.'>_deque_rotate</a>(deque, n) == 0)
+<a name='L458'>        <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L459'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L460'><font color='red'>}</font>
+<a name='L461'>
+<a name='L462'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(rotate_doc,
+<a name='L463'>"Rotate the deque n steps to the right (default n=1).  If n is negative, rotates left.");
+<a name='L464'>
+<a name='L465'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L466'><a href='../S/2244.html#L995' title='Refered from 995 in Modules/_collectionsmodule.c.'>deque_reverse</a>(dequeobject *deque, PyObject *unused)
+<a name='L467'><font color='red'>{</font>
+<a name='L468'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *leftblock = deque-&gt;leftblock;
+<a name='L469'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *rightblock = deque-&gt;rightblock;
+<a name='L470'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> leftindex = deque-&gt;leftindex;
+<a name='L471'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> rightindex = deque-&gt;rightindex;
+<a name='L472'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n = (deque-&gt;len)/2;
+<a name='L473'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L474'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp;
+<a name='L475'>
+<a name='L476'>    <b>for</b> (i=0 ; i&lt;n ; i++) <font color='red'>{</font>
+<a name='L477'>        <i><font color='green'>/* Validate that pointers haven't met in the middle */</font></i>
+<a name='L478'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(leftblock != rightblock || leftindex &lt; rightindex);
+<a name='L479'>
+<a name='L480'>        <i><font color='green'>/* Swap */</font></i>
+<a name='L481'>        tmp = leftblock-&gt;data[leftindex];
+<a name='L482'>        leftblock-&gt;data[leftindex] = rightblock-&gt;data[rightindex];
+<a name='L483'>        rightblock-&gt;data[rightindex] = tmp;
+<a name='L484'>
+<a name='L485'>        <i><font color='green'>/* Advance left block/index pair */</font></i>
+<a name='L486'>        leftindex++;
+<a name='L487'>        <b>if</b> (leftindex == <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>) <font color='red'>{</font>
+<a name='L488'>            <b>if</b> (leftblock-&gt;rightlink == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L489'>                <b>break</b>;
+<a name='L490'>            leftblock = leftblock-&gt;rightlink;
+<a name='L491'>            leftindex = 0;
+<a name='L492'>        <font color='red'>}</font>
+<a name='L493'>
+<a name='L494'>        <i><font color='green'>/* Step backwards with the right block/index pair */</font></i>
+<a name='L495'>        rightindex--;
+<a name='L496'>        <b>if</b> (rightindex == -1) <font color='red'>{</font>
+<a name='L497'>            <b>if</b> (rightblock-&gt;leftlink == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L498'>                <b>break</b>;
+<a name='L499'>            rightblock = rightblock-&gt;leftlink;
+<a name='L500'>            rightindex = <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> - 1;
+<a name='L501'>        <font color='red'>}</font>
+<a name='L502'>    <font color='red'>}</font>
+<a name='L503'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L504'><font color='red'>}</font>
+<a name='L505'>
+<a name='L506'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(reverse_doc,
+<a name='L507'>"D.reverse() -- reverse *IN PLACE*");
+<a name='L508'>
+<a name='L509'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L510'><a href='../S/2244.html#L979' title='Refered from 979 in Modules/_collectionsmodule.c.'>deque_count</a>(dequeobject *deque, PyObject *v)
+<a name='L511'><font color='red'>{</font>
+<a name='L512'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *leftblock = deque-&gt;leftblock;
+<a name='L513'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> leftindex = deque-&gt;leftindex;
+<a name='L514'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n = deque-&gt;len;
+<a name='L515'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L516'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count = 0;
+<a name='L517'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L518'>    <b>long</b> start_state = deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L519'>    <b>int</b> <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a>;
+<a name='L520'>
+<a name='L521'>    <b>for</b> (i=0 ; i&lt;n ; i++) <font color='red'>{</font>
+<a name='L522'>        item = leftblock-&gt;data[leftindex];
+<a name='L523'>        <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(item, v, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L524'>        <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &gt; 0)
+<a name='L525'>            count++;
+<a name='L526'>        <b>else</b> <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &lt; 0)
+<a name='L527'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L528'>
+<a name='L529'>        <b>if</b> (start_state != deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>) <font color='red'>{</font>
+<a name='L530'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L531'>                            "deque mutated during iteration");
+<a name='L532'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L533'>        <font color='red'>}</font>
+<a name='L534'>
+<a name='L535'>        <i><font color='green'>/* Advance left block/index pair */</font></i>
+<a name='L536'>        leftindex++;
+<a name='L537'>        <b>if</b> (leftindex == <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>) <font color='red'>{</font>
+<a name='L538'>            <b>if</b> (leftblock-&gt;rightlink == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)  <i><font color='green'>/* can occur when i==n-1 */</font></i>
+<a name='L539'>                <b>break</b>;
+<a name='L540'>            leftblock = leftblock-&gt;rightlink;
+<a name='L541'>            leftindex = 0;
+<a name='L542'>        <font color='red'>}</font>
+<a name='L543'>    <font color='red'>}</font>
+<a name='L544'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(count);
+<a name='L545'><font color='red'>}</font>
+<a name='L546'>
+<a name='L547'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(count_doc,
+<a name='L548'>"D.count(value) -&gt; integer -- return number of occurrences of value");
+<a name='L549'>
+<a name='L550'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L551'><a href='../S/2244.html#L950' title='Refered from 950 in Modules/_collectionsmodule.c.'>deque_len</a>(dequeobject *deque)
+<a name='L552'><font color='red'>{</font>
+<a name='L553'>    <b>return</b> deque-&gt;len;
+<a name='L554'><font color='red'>}</font>
+<a name='L555'>
+<a name='L556'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L557'><a href='../S/2244.html#L991' title='Refered from 991 in Modules/_collectionsmodule.c.'>deque_remove</a>(dequeobject *deque, PyObject *value)
+<a name='L558'><font color='red'>{</font>
+<a name='L559'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, n=deque-&gt;len;
+<a name='L560'>
+<a name='L561'>    <b>for</b> (i=0 ; i&lt;n ; i++) <font color='red'>{</font>
+<a name='L562'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item = deque-&gt;leftblock-&gt;data[deque-&gt;leftindex];
+<a name='L563'>        <b>int</b> <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(item, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L564'>
+<a name='L565'>        <b>if</b> (deque-&gt;len != n) <font color='red'>{</font>
+<a name='L566'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L567'>                "deque mutated during remove().");
+<a name='L568'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L569'>        <font color='red'>}</font>
+<a name='L570'>        <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &gt; 0) <font color='red'>{</font>
+<a name='L571'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tgt = <a href='../S/2244.html#L196' title='Defined at 196 in Modules/_collectionsmodule.c.'>deque_popleft</a>(deque, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L572'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (tgt != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L573'>            Py_DECREF(tgt);
+<a name='L574'>            <b>if</b> (<a href='../S/2244.html#L414' title='Defined at 414 in Modules/_collectionsmodule.c.'>_deque_rotate</a>(deque, i) == -1)
+<a name='L575'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L576'>            <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L577'>        <font color='red'>}</font>
+<a name='L578'>        <b>else</b> <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &lt; 0) <font color='red'>{</font>
+<a name='L579'>            <a href='../S/2244.html#L414' title='Defined at 414 in Modules/_collectionsmodule.c.'>_deque_rotate</a>(deque, i);
+<a name='L580'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L581'>        <font color='red'>}</font>
+<a name='L582'>        <a href='../S/2244.html#L414' title='Defined at 414 in Modules/_collectionsmodule.c.'>_deque_rotate</a>(deque, -1);
+<a name='L583'>    <font color='red'>}</font>
+<a name='L584'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "deque.remove(x): x not in deque");
+<a name='L585'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L586'><font color='red'>}</font>
+<a name='L587'>
+<a name='L588'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(remove_doc,
+<a name='L589'>"D.remove(value) -- remove first occurrence of value.");
+<a name='L590'>
+<a name='L591'><b>static</b> <b>int</b>
+<a name='L592'><a href='../R/7272.html' title='Multiple refered from 4 places.'>deque_clear</a>(dequeobject *deque)
+<a name='L593'><font color='red'>{</font>
+<a name='L594'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L595'>
+<a name='L596'>    <b>while</b> (deque-&gt;len) <font color='red'>{</font>
+<a name='L597'>        item = <a href='../S/2244.html#L160' title='Defined at 160 in Modules/_collectionsmodule.c.'>deque_pop</a>(deque, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L598'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (item != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L599'>        Py_DECREF(item);
+<a name='L600'>    <font color='red'>}</font>
+<a name='L601'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock == deque-&gt;rightblock &amp;&amp;
+<a name='L602'>           deque-&gt;leftindex - 1 == deque-&gt;rightindex &amp;&amp;
+<a name='L603'>           deque-&gt;len == 0);
+<a name='L604'>    <b>return</b> 0;
+<a name='L605'><font color='red'>}</font>
+<a name='L606'>
+<a name='L607'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L608'><a href='../S/2244.html#L953' title='Refered from 953 in Modules/_collectionsmodule.c.'>deque_item</a>(dequeobject *deque, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i)
+<a name='L609'><font color='red'>{</font>
+<a name='L610'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L611'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L612'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n, index=i;
+<a name='L613'>
+<a name='L614'>    <b>if</b> (i &lt; 0 || i &gt;= deque-&gt;len) <font color='red'>{</font>
+<a name='L615'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L616'>                        "deque index out of range");
+<a name='L617'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L618'>    <font color='red'>}</font>
+<a name='L619'>
+<a name='L620'>    <b>if</b> (i == 0) <font color='red'>{</font>
+<a name='L621'>        i = deque-&gt;leftindex;
+<a name='L622'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;leftblock;
+<a name='L623'>    <font color='red'>}</font> <b>else</b> <b>if</b> (i == deque-&gt;len - 1) <font color='red'>{</font>
+<a name='L624'>        i = deque-&gt;rightindex;
+<a name='L625'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;rightblock;
+<a name='L626'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L627'>        i += deque-&gt;leftindex;
+<a name='L628'>        n = i / <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>;
+<a name='L629'>        i %= <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>;
+<a name='L630'>        <b>if</b> (index &lt; (deque-&gt;len &gt;&gt; 1)) <font color='red'>{</font>
+<a name='L631'>            <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;leftblock;
+<a name='L632'>            <b>while</b> (n--)
+<a name='L633'>                <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;rightlink;
+<a name='L634'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L635'>            n = (deque-&gt;leftindex + deque-&gt;len - 1) / <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> - n;
+<a name='L636'>            <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;rightblock;
+<a name='L637'>            <b>while</b> (n--)
+<a name='L638'>                <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;leftlink;
+<a name='L639'>        <font color='red'>}</font>
+<a name='L640'>    <font color='red'>}</font>
+<a name='L641'>    item = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;data[i];
+<a name='L642'>    Py_INCREF(item);
+<a name='L643'>    <b>return</b> item;
+<a name='L644'><font color='red'>}</font>
+<a name='L645'>
+<a name='L646'><i><font color='green'>/* delitem() implemented in terms of rotate for simplicity and reasonable</font></i>
+<a name='L647'><i><font color='green'>   performance near the end points.  If for some reason this method becomes</font></i>
+<a name='L648'><i><font color='green'>   popular, it is not hard to re-implement this using direct data movement</font></i>
+<a name='L649'><i><font color='green'>   (similar to code in list slice assignment) and achieve a two or threefold</font></i>
+<a name='L650'><i><font color='green'>   performance boost.</font></i>
+<a name='L651'><i><font color='green'>*/</font></i>
+<a name='L652'>
+<a name='L653'><b>static</b> <b>int</b>
+<a name='L654'><a href='../S/2244.html#L682' title='Refered from 682 in Modules/_collectionsmodule.c.'>deque_del_item</a>(dequeobject *deque, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i)
+<a name='L655'><font color='red'>{</font>
+<a name='L656'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L657'>
+<a name='L658'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (i &gt;= 0 &amp;&amp; i &lt; deque-&gt;len);
+<a name='L659'>    <b>if</b> (<a href='../S/2244.html#L414' title='Defined at 414 in Modules/_collectionsmodule.c.'>_deque_rotate</a>(deque, -i) == -1)
+<a name='L660'>        <b>return</b> -1;
+<a name='L661'>
+<a name='L662'>    item = <a href='../S/2244.html#L196' title='Defined at 196 in Modules/_collectionsmodule.c.'>deque_popleft</a>(deque, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L663'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (item != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L664'>    Py_DECREF(item);
+<a name='L665'>
+<a name='L666'>    <b>return</b> <a href='../S/2244.html#L414' title='Defined at 414 in Modules/_collectionsmodule.c.'>_deque_rotate</a>(deque, i);
+<a name='L667'><font color='red'>}</font>
+<a name='L668'>
+<a name='L669'><b>static</b> <b>int</b>
+<a name='L670'><a href='../S/2244.html#L955' title='Refered from 955 in Modules/_collectionsmodule.c.'>deque_ass_item</a>(dequeobject *deque, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, PyObject *v)
+<a name='L671'><font color='red'>{</font>
+<a name='L672'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *old_value;
+<a name='L673'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L674'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n, len=deque-&gt;len, halflen=(len+1)&gt;&gt;1, index=i;
+<a name='L675'>
+<a name='L676'>    <b>if</b> (i &lt; 0 || i &gt;= len) <font color='red'>{</font>
+<a name='L677'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L678'>                        "deque index out of range");
+<a name='L679'>        <b>return</b> -1;
+<a name='L680'>    <font color='red'>}</font>
+<a name='L681'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L682'>        <b>return</b> <a href='../S/2244.html#L654' title='Defined at 654 in Modules/_collectionsmodule.c.'>deque_del_item</a>(deque, i);
+<a name='L683'>
+<a name='L684'>    i += deque-&gt;leftindex;
+<a name='L685'>    n = i / <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>;
+<a name='L686'>    i %= <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a>;
+<a name='L687'>    <b>if</b> (index &lt;= halflen) <font color='red'>{</font>
+<a name='L688'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;leftblock;
+<a name='L689'>        <b>while</b> (n--)
+<a name='L690'>            <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;rightlink;
+<a name='L691'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L692'>        n = (deque-&gt;leftindex + len - 1) / <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> - n;
+<a name='L693'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;rightblock;
+<a name='L694'>        <b>while</b> (n--)
+<a name='L695'>            <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;leftlink;
+<a name='L696'>    <font color='red'>}</font>
+<a name='L697'>    Py_INCREF(v);
+<a name='L698'>    old_value = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;data[i];
+<a name='L699'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;data[i] = v;
+<a name='L700'>    Py_DECREF(old_value);
+<a name='L701'>    <b>return</b> 0;
+<a name='L702'><font color='red'>}</font>
+<a name='L703'>
+<a name='L704'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L705'><a href='../S/2244.html#L975' title='Refered from 975 in Modules/_collectionsmodule.c.'>deque_clearmethod</a>(dequeobject *deque)
+<a name='L706'><font color='red'>{</font>
+<a name='L707'>    <b>int</b> rv;
+<a name='L708'>
+<a name='L709'>    rv = <a href='../S/2244.html#L592' title='Defined at 592 in Modules/_collectionsmodule.c.'>deque_clear</a>(deque);
+<a name='L710'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (rv != -1);
+<a name='L711'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L712'><font color='red'>}</font>
+<a name='L713'>
+<a name='L714'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(clear_doc, "Remove all elements from the deque.");
+<a name='L715'>
+<a name='L716'><b>static</b> <b>void</b>
+<a name='L717'><a href='../S/2244.html#L1013' title='Refered from 1013 in Modules/_collectionsmodule.c.'>deque_dealloc</a>(dequeobject *deque)
+<a name='L718'><font color='red'>{</font>
+<a name='L719'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(deque);
+<a name='L720'>    <b>if</b> (deque-&gt;weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L721'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) deque);
+<a name='L722'>    <b>if</b> (deque-&gt;leftblock != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L723'>        <a href='../S/2244.html#L592' title='Defined at 592 in Modules/_collectionsmodule.c.'>deque_clear</a>(deque);
+<a name='L724'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(deque-&gt;leftblock != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L725'>        <a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>(deque-&gt;leftblock);
+<a name='L726'>    <font color='red'>}</font>
+<a name='L727'>    deque-&gt;leftblock = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L728'>    deque-&gt;rightblock = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L729'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(deque)-&gt;tp_free(deque);
+<a name='L730'><font color='red'>}</font>
+<a name='L731'>
+<a name='L732'><b>static</b> <b>int</b>
+<a name='L733'><a href='../S/2244.html#L1031' title='Refered from 1031 in Modules/_collectionsmodule.c.'>deque_traverse</a>(dequeobject *deque, visitproc visit, <b>void</b> *arg)
+<a name='L734'><font color='red'>{</font>
+<a name='L735'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L736'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L737'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> index;
+<a name='L738'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> indexlo = deque-&gt;leftindex;
+<a name='L739'>
+<a name='L740'>    <b>for</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;leftblock; <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;rightlink) <font color='red'>{</font>
+<a name='L741'>        <b>const</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> indexhi = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == deque-&gt;rightblock ?
+<a name='L742'>                                 deque-&gt;rightindex :
+<a name='L743'>                     <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> - 1;
+<a name='L744'>
+<a name='L745'>        <b>for</b> (index = indexlo; index &lt;= indexhi; ++index) <font color='red'>{</font>
+<a name='L746'>            item = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;data[index];
+<a name='L747'>            Py_VISIT(item);
+<a name='L748'>        <font color='red'>}</font>
+<a name='L749'>        indexlo = 0;
+<a name='L750'>    <font color='red'>}</font>
+<a name='L751'>    <b>return</b> 0;
+<a name='L752'><font color='red'>}</font>
+<a name='L753'>
+<a name='L754'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L755'><a href='../S/2244.html#L977' title='Refered from 977 in Modules/_collectionsmodule.c.'>deque_copy</a>(PyObject *deque)
+<a name='L756'><font color='red'>{</font>
+<a name='L757'>    <b>if</b> (((<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *)deque)-&gt;maxlen == -1)
+<a name='L758'>        <b>return</b> <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(deque)), "O", deque, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L759'>    <b>else</b>
+<a name='L760'>        <b>return</b> <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)(<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(deque)), "Oi",
+<a name='L761'>            deque, ((<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *)deque)-&gt;maxlen, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L762'><font color='red'>}</font>
+<a name='L763'>
+<a name='L764'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(copy_doc, "Return a shallow copy of a deque.");
+<a name='L765'>
+<a name='L766'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L767'><a href='../S/2244.html#L989' title='Refered from 989 in Modules/_collectionsmodule.c.'>deque_reduce</a>(dequeobject *deque)
+<a name='L768'><font color='red'>{</font>
+<a name='L769'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, *aslist;
+<a name='L770'>
+<a name='L771'>    dict = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)deque, "__dict__");
+<a name='L772'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L773'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L774'>    aslist = <a href='../S/2775.html#L1814' title='Defined at 1814 in Objects/abstract.c.'>PySequence_List</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)deque);
+<a name='L775'>    <b>if</b> (aslist == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L776'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dict);
+<a name='L777'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L778'>    <font color='red'>}</font>
+<a name='L779'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L780'>        <b>if</b> (deque-&gt;maxlen == -1)
+<a name='L781'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("O(O)", <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(deque), aslist);
+<a name='L782'>        <b>else</b>
+<a name='L783'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("O(On)", <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(deque), aslist, deque-&gt;maxlen);
+<a name='L784'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L785'>        <b>if</b> (deque-&gt;maxlen == -1)
+<a name='L786'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("O(OO)O", <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(deque), aslist, Py_None, dict);
+<a name='L787'>        <b>else</b>
+<a name='L788'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("O(On)O", <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(deque), aslist, deque-&gt;maxlen, dict);
+<a name='L789'>    <font color='red'>}</font>
+<a name='L790'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dict);
+<a name='L791'>    Py_DECREF(aslist);
+<a name='L792'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L793'><font color='red'>}</font>
+<a name='L794'>
+<a name='L795'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(reduce_doc, "Return state information for pickling.");
+<a name='L796'>
+<a name='L797'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L798'><a href='../S/2244.html#L1018' title='Refered from 1018 in Modules/_collectionsmodule.c.'>deque_repr</a>(PyObject *deque)
+<a name='L799'><font color='red'>{</font>
+<a name='L800'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *aslist, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L801'>    <b>int</b> i;
+<a name='L802'>
+<a name='L803'>    i = <a href='../S/2803.html#L1802' title='Defined at 1802 in Objects/object.c.'>Py_ReprEnter</a>(deque);
+<a name='L804'>    <b>if</b> (i != 0) <font color='red'>{</font>
+<a name='L805'>        <b>if</b> (i &lt; 0)
+<a name='L806'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L807'>        <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("[...]");
+<a name='L808'>    <font color='red'>}</font>
+<a name='L809'>
+<a name='L810'>    aslist = <a href='../S/2775.html#L1814' title='Defined at 1814 in Objects/abstract.c.'>PySequence_List</a>(deque);
+<a name='L811'>    <b>if</b> (aslist == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L812'>        <a href='../S/2803.html#L1830' title='Defined at 1830 in Objects/object.c.'>Py_ReprLeave</a>(deque);
+<a name='L813'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L814'>    <font color='red'>}</font>
+<a name='L815'>    <b>if</b> (((<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *)deque)-&gt;maxlen != -1)
+<a name='L816'>
+<a name='L817'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("deque(%R, maxlen=%zd)",
+<a name='L818'>                                      aslist, ((<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *)deque)-&gt;maxlen);
+<a name='L819'>    <b>else</b>
+<a name='L820'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("deque(%R)", aslist);
+<a name='L821'>    Py_DECREF(aslist);
+<a name='L822'>    <a href='../S/2803.html#L1830' title='Defined at 1830 in Objects/object.c.'>Py_ReprLeave</a>(deque);
+<a name='L823'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L824'><font color='red'>}</font>
+<a name='L825'>
+<a name='L826'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L827'><a href='../S/2244.html#L1033' title='Refered from 1033 in Modules/_collectionsmodule.c.'>deque_richcompare</a>(PyObject *v, PyObject *w, <b>int</b> op)
+<a name='L828'><font color='red'>{</font>
+<a name='L829'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *it1=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *it2=<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *x, *y;
+<a name='L830'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> vs, ws;
+<a name='L831'>    <b>int</b> <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>, <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a>=-1;
+<a name='L832'>
+<a name='L833'>    <b>if</b> (!PyObject_TypeCheck(v, &amp;deque_type) ||
+<a name='L834'>        !PyObject_TypeCheck(w, &amp;deque_type)) <font color='red'>{</font>
+<a name='L835'>        Py_INCREF(Py_NotImplemented);
+<a name='L836'>        <b>return</b> Py_NotImplemented;
+<a name='L837'>    <font color='red'>}</font>
+<a name='L838'>
+<a name='L839'>    <i><font color='green'>/* Shortcuts */</font></i>
+<a name='L840'>    vs = ((<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *)v)-&gt;len;
+<a name='L841'>    ws = ((<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *)w)-&gt;len;
+<a name='L842'>    <b>if</b> (op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>) <font color='red'>{</font>
+<a name='L843'>        <b>if</b> (v == w)
+<a name='L844'>            Py_RETURN_TRUE;
+<a name='L845'>        <b>if</b> (vs != ws)
+<a name='L846'>            Py_RETURN_FALSE;
+<a name='L847'>    <font color='red'>}</font>
+<a name='L848'>    <b>if</b> (op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>) <font color='red'>{</font>
+<a name='L849'>        <b>if</b> (v == w)
+<a name='L850'>            Py_RETURN_FALSE;
+<a name='L851'>        <b>if</b> (vs != ws)
+<a name='L852'>            Py_RETURN_TRUE;
+<a name='L853'>    <font color='red'>}</font>
+<a name='L854'>
+<a name='L855'>    <i><font color='green'>/* Search for the first index where items are different */</font></i>
+<a name='L856'>    it1 = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(v);
+<a name='L857'>    <b>if</b> (it1 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L858'>        <b>goto</b> done;
+<a name='L859'>    it2 = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(w);
+<a name='L860'>    <b>if</b> (it2 == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L861'>        <b>goto</b> done;
+<a name='L862'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L863'>        x = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it1);
+<a name='L864'>        <b>if</b> (x == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L865'>            <b>goto</b> done;
+<a name='L866'>        y = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it2);
+<a name='L867'>        <b>if</b> (x == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || y == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L868'>            <b>break</b>;
+<a name='L869'>        <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(x, y, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L870'>        <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == 0) <font color='red'>{</font>
+<a name='L871'>            <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(x, y, op);
+<a name='L872'>            Py_DECREF(x);
+<a name='L873'>            Py_DECREF(y);
+<a name='L874'>            <b>goto</b> done;
+<a name='L875'>        <font color='red'>}</font>
+<a name='L876'>        Py_DECREF(x);
+<a name='L877'>        Py_DECREF(y);
+<a name='L878'>        <b>if</b> (<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == -1)
+<a name='L879'>            <b>goto</b> done;
+<a name='L880'>    <font color='red'>}</font>
+<a name='L881'>    <i><font color='green'>/* We reached the end of one deque or both */</font></i>
+<a name='L882'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L883'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(y);
+<a name='L884'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L885'>        <b>goto</b> done;
+<a name='L886'>    <b>switch</b> (op) <font color='red'>{</font>
+<a name='L887'>    <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = y != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <b>break</b>;  <i><font color='green'>/* if w was longer */</font></i>
+<a name='L888'>    <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LE</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = x == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <b>break</b>;  <i><font color='green'>/* if v was not longer */</font></i>
+<a name='L889'>    <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = x == y;    <b>break</b>;  <i><font color='green'>/* if we reached the end of both */</font></i>
+<a name='L890'>    <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = x != y;    <b>break</b>;  <i><font color='green'>/* if one deque continues */</font></i>
+<a name='L891'>    <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GT</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = x != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <b>break</b>;  <i><font color='green'>/* if v was longer */</font></i>
+<a name='L892'>    <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GE</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = y == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <b>break</b>;  <i><font color='green'>/* if w was not longer */</font></i>
+<a name='L893'>    <font color='red'>}</font>
+<a name='L894'>
+<a name='L895'>done:
+<a name='L896'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(it1);
+<a name='L897'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(it2);
+<a name='L898'>    <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> == 1)
+<a name='L899'>        Py_RETURN_TRUE;
+<a name='L900'>    <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> == 0)
+<a name='L901'>        Py_RETURN_FALSE;
+<a name='L902'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L903'><font color='red'>}</font>
+<a name='L904'>
+<a name='L905'><b>static</b> <b>int</b>
+<a name='L906'><a href='../S/2244.html#L1045' title='Refered from 1045 in Modules/_collectionsmodule.c.'>deque_init</a>(dequeobject *deque, PyObject *args, PyObject *kwdargs)
+<a name='L907'><font color='red'>{</font>
+<a name='L908'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *iterable = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L909'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *maxlenobj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L910'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> maxlen = -1;
+<a name='L911'>    <b>char</b> *kwlist[] = <font color='red'>{</font>"iterable", "maxlen", 0<font color='red'>}</font>;
+<a name='L912'>
+<a name='L913'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwdargs, "|OO:deque", kwlist, &amp;iterable, &amp;maxlenobj))
+<a name='L914'>        <b>return</b> -1;
+<a name='L915'>    <b>if</b> (maxlenobj != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; maxlenobj != Py_None) <font color='red'>{</font>
+<a name='L916'>        maxlen = <a href='../S/2799.html#L433' title='Defined at 433 in Objects/longobject.c.'>PyLong_AsSsize_t</a>(maxlenobj);
+<a name='L917'>        <b>if</b> (maxlen == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L918'>            <b>return</b> -1;
+<a name='L919'>        <b>if</b> (maxlen &lt; 0) <font color='red'>{</font>
+<a name='L920'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "maxlen must be non-negative");
+<a name='L921'>            <b>return</b> -1;
+<a name='L922'>        <font color='red'>}</font>
+<a name='L923'>    <font color='red'>}</font>
+<a name='L924'>    deque-&gt;maxlen = maxlen;
+<a name='L925'>    <a href='../S/2244.html#L592' title='Defined at 592 in Modules/_collectionsmodule.c.'>deque_clear</a>(deque);
+<a name='L926'>    <b>if</b> (iterable != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L927'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *rv = <a href='../S/2244.html#L297' title='Defined at 297 in Modules/_collectionsmodule.c.'>deque_extend</a>(deque, iterable);
+<a name='L928'>        <b>if</b> (rv == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L929'>            <b>return</b> -1;
+<a name='L930'>        Py_DECREF(rv);
+<a name='L931'>    <font color='red'>}</font>
+<a name='L932'>    <b>return</b> 0;
+<a name='L933'><font color='red'>}</font>
+<a name='L934'>
+<a name='L935'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L936'><a href='../S/2244.html#L944' title='Refered from 944 in Modules/_collectionsmodule.c.'>deque_get_maxlen</a>(dequeobject *deque)
+<a name='L937'><font color='red'>{</font>
+<a name='L938'>    <b>if</b> (deque-&gt;maxlen == -1)
+<a name='L939'>        <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L940'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(deque-&gt;maxlen);
+<a name='L941'><font color='red'>}</font>
+<a name='L942'>
+<a name='L943'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> deque_getset[] = <font color='red'>{</font>
+<a name='L944'>    <font color='red'>{</font>"maxlen", (getter)<a href='../S/2244.html#L936' title='Defined at 936 in Modules/_collectionsmodule.c.'>deque_get_maxlen</a>, (setter)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L945'>     "maximum size of a deque or None if unbounded"<font color='red'>}</font>,
+<a name='L946'>    <font color='red'>{</font>0<font color='red'>}</font>
+<a name='L947'><font color='red'>}</font>;
+<a name='L948'>
+<a name='L949'><b>static</b> <a href='../S/544.html#L261' title='Defined at 261 in Include/object.h.'>PySequenceMethods</a> deque_as_sequence = <font color='red'>{</font>
+<a name='L950'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2244.html#L551' title='Defined at 551 in Modules/_collectionsmodule.c.'>deque_len</a>,                 <i><font color='green'>/* sq_length */</font></i>
+<a name='L951'>    0,                                  <i><font color='green'>/* sq_concat */</font></i>
+<a name='L952'>    0,                                  <i><font color='green'>/* sq_repeat */</font></i>
+<a name='L953'>    (ssizeargfunc)<a href='../S/2244.html#L608' title='Defined at 608 in Modules/_collectionsmodule.c.'>deque_item</a>,           <i><font color='green'>/* sq_item */</font></i>
+<a name='L954'>    0,                                  <i><font color='green'>/* sq_slice */</font></i>
+<a name='L955'>    (ssizeobjargproc)<a href='../S/2244.html#L670' title='Defined at 670 in Modules/_collectionsmodule.c.'>deque_ass_item</a>,            <i><font color='green'>/* sq_ass_item */</font></i>
+<a name='L956'>    0,                                  <i><font color='green'>/* sq_ass_slice */</font></i>
+<a name='L957'>    0,                                  <i><font color='green'>/* sq_contains */</font></i>
+<a name='L958'>    (binaryfunc)<a href='../S/2244.html#L401' title='Defined at 401 in Modules/_collectionsmodule.c.'>deque_inplace_concat</a>,           <i><font color='green'>/* sq_inplace_concat */</font></i>
+<a name='L959'>    0,                                  <i><font color='green'>/* sq_inplace_repeat */</font></i>
+<a name='L960'>
+<a name='L961'><font color='red'>}</font>;
+<a name='L962'>
+<a name='L963'><i><font color='green'>/* deque object ********************************************************/</font></i>
+<a name='L964'>
+<a name='L965'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2244.html#L1065' title='Defined at 1065 in Modules/_collectionsmodule.c.'>deque_iter</a>(dequeobject *deque);
+<a name='L966'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2244.html#L1175' title='Defined at 1175 in Modules/_collectionsmodule.c.'>deque_reviter</a>(dequeobject *deque);
+<a name='L967'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(reversed_doc,
+<a name='L968'>    "D.__reversed__() -- return a reverse iterator over the deque");
+<a name='L969'>
+<a name='L970'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> deque_methods[] = <font color='red'>{</font>
+<a name='L971'>    <font color='red'>{</font>"append",                  (PyCFunction)<a href='../S/2244.html#L234' title='Defined at 234 in Modules/_collectionsmodule.c.'>deque_append</a>,
+<a name='L972'>        METH_O,                  append_doc<font color='red'>}</font>,
+<a name='L973'>    <font color='red'>{</font>"appendleft",              (PyCFunction)<a href='../S/2244.html#L257' title='Defined at 257 in Modules/_collectionsmodule.c.'>deque_appendleft</a>,
+<a name='L974'>        METH_O,                  appendleft_doc<font color='red'>}</font>,
+<a name='L975'>    <font color='red'>{</font>"clear",                   (PyCFunction)<a href='../S/2244.html#L705' title='Defined at 705 in Modules/_collectionsmodule.c.'>deque_clearmethod</a>,
+<a name='L976'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,             clear_doc<font color='red'>}</font>,
+<a name='L977'>    <font color='red'>{</font>"__copy__",                (PyCFunction)<a href='../S/2244.html#L755' title='Defined at 755 in Modules/_collectionsmodule.c.'>deque_copy</a>,
+<a name='L978'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,             copy_doc<font color='red'>}</font>,
+<a name='L979'>    <font color='red'>{</font>"count",                   (PyCFunction)<a href='../S/2244.html#L510' title='Defined at 510 in Modules/_collectionsmodule.c.'>deque_count</a>,
+<a name='L980'>        METH_O,                         count_doc<font color='red'>}</font>,
+<a name='L981'>    <font color='red'>{</font>"extend",                  (PyCFunction)<a href='../S/2244.html#L297' title='Defined at 297 in Modules/_collectionsmodule.c.'>deque_extend</a>,
+<a name='L982'>        METH_O,                  extend_doc<font color='red'>}</font>,
+<a name='L983'>    <font color='red'>{</font>"extendleft",              (PyCFunction)<a href='../S/2244.html#L349' title='Defined at 349 in Modules/_collectionsmodule.c.'>deque_extendleft</a>,
+<a name='L984'>        METH_O,                  extendleft_doc<font color='red'>}</font>,
+<a name='L985'>    <font color='red'>{</font>"pop",                     (PyCFunction)<a href='../S/2244.html#L160' title='Defined at 160 in Modules/_collectionsmodule.c.'>deque_pop</a>,
+<a name='L986'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,             pop_doc<font color='red'>}</font>,
+<a name='L987'>    <font color='red'>{</font>"popleft",                 (PyCFunction)<a href='../S/2244.html#L196' title='Defined at 196 in Modules/_collectionsmodule.c.'>deque_popleft</a>,
+<a name='L988'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,             popleft_doc<font color='red'>}</font>,
+<a name='L989'>    <font color='red'>{</font>"__reduce__",      (PyCFunction)<a href='../S/2244.html#L767' title='Defined at 767 in Modules/_collectionsmodule.c.'>deque_reduce</a>,
+<a name='L990'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,             reduce_doc<font color='red'>}</font>,
+<a name='L991'>    <font color='red'>{</font>"remove",                  (PyCFunction)<a href='../S/2244.html#L557' title='Defined at 557 in Modules/_collectionsmodule.c.'>deque_remove</a>,
+<a name='L992'>        METH_O,                  remove_doc<font color='red'>}</font>,
+<a name='L993'>    <font color='red'>{</font>"__reversed__",            (PyCFunction)<a href='../S/2244.html#L1175' title='Defined at 1175 in Modules/_collectionsmodule.c.'>deque_reviter</a>,
+<a name='L994'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,             reversed_doc<font color='red'>}</font>,
+<a name='L995'>    <font color='red'>{</font>"reverse",                 (PyCFunction)<a href='../S/2244.html#L466' title='Defined at 466 in Modules/_collectionsmodule.c.'>deque_reverse</a>,
+<a name='L996'>        <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,             reverse_doc<font color='red'>}</font>,
+<a name='L997'>    <font color='red'>{</font>"rotate",                  (PyCFunction)<a href='../S/2244.html#L451' title='Defined at 451 in Modules/_collectionsmodule.c.'>deque_rotate</a>,
+<a name='L998'>        <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,           rotate_doc<font color='red'>}</font>,
+<a name='L999'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>   <i><font color='green'>/* sentinel */</font></i>
+<a name='L1000'><font color='red'>}</font>;
+<a name='L1001'>
+<a name='L1002'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(deque_doc,
+<a name='L1003'>"deque(iterable[, maxlen]) --&gt; deque object\n\
+<a name='L1004'>\n\
+<a name='L1005'>Build an ordered collection accessible from endpoints only.");
+<a name='L1006'>
+<a name='L1007'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> deque_type = <font color='red'>{</font>
+<a name='L1008'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L1009'>    "collections.deque",                <i><font color='green'>/* tp_name */</font></i>
+<a name='L1010'>    <b>sizeof</b>(<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a>),                <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L1011'>    0,                                  <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L1012'>    <i><font color='green'>/* methods */</font></i>
+<a name='L1013'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2244.html#L717' title='Defined at 717 in Modules/_collectionsmodule.c.'>deque_dealloc</a>,          <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L1014'>    0,                                  <i><font color='green'>/* tp_print */</font></i>
+<a name='L1015'>    0,                                  <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L1016'>    0,                                  <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L1017'>    0,                                  <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L1018'>    <a href='../S/2244.html#L798' title='Defined at 798 in Modules/_collectionsmodule.c.'>deque_repr</a>,                         <i><font color='green'>/* tp_repr */</font></i>
+<a name='L1019'>    0,                                  <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L1020'>    &amp;deque_as_sequence,                 <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L1021'>    0,                                  <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L1022'>    <a href='../S/2803.html#L750' title='Defined at 750 in Objects/object.c.'>PyObject_HashNotImplemented</a>,        <i><font color='green'>/* tp_hash */</font></i>
+<a name='L1023'>    0,                                  <i><font color='green'>/* tp_call */</font></i>
+<a name='L1024'>    0,                                  <i><font color='green'>/* tp_str */</font></i>
+<a name='L1025'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,            <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L1026'>    0,                                  <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L1027'>    0,                                  <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L1028'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC,
+<a name='L1029'>                                        <i><font color='green'>/* tp_flags */</font></i>
+<a name='L1030'>    deque_doc,                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L1031'>    (traverseproc)<a href='../S/2244.html#L733' title='Defined at 733 in Modules/_collectionsmodule.c.'>deque_traverse</a>,       <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1032'>    (inquiry)<a href='../S/2244.html#L592' title='Defined at 592 in Modules/_collectionsmodule.c.'>deque_clear</a>,               <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1033'>    (richcmpfunc)<a href='../S/2244.html#L827' title='Defined at 827 in Modules/_collectionsmodule.c.'>deque_richcompare</a>,     <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1034'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a>, weakreflist), <i><font color='green'>/* tp_weaklistoffset*/</font></i>
+<a name='L1035'>    (getiterfunc)<a href='../S/2244.html#L1065' title='Defined at 1065 in Modules/_collectionsmodule.c.'>deque_iter</a>,            <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1036'>    0,                                  <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1037'>    deque_methods,                      <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1038'>    0,                                  <i><font color='green'>/* tp_members */</font></i>
+<a name='L1039'>    deque_getset,                       <i><font color='green'>/* tp_getset */</font></i>
+<a name='L1040'>    0,                                  <i><font color='green'>/* tp_base */</font></i>
+<a name='L1041'>    0,                                  <i><font color='green'>/* tp_dict */</font></i>
+<a name='L1042'>    0,                                  <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L1043'>    0,                                  <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L1044'>    0,                                  <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L1045'>    (initproc)<a href='../S/2244.html#L906' title='Defined at 906 in Modules/_collectionsmodule.c.'>deque_init</a>,               <i><font color='green'>/* tp_init */</font></i>
+<a name='L1046'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,                <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L1047'>    <a href='../S/2244.html#L130' title='Defined at 130 in Modules/_collectionsmodule.c.'>deque_new</a>,                          <i><font color='green'>/* tp_new */</font></i>
+<a name='L1048'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>,                    <i><font color='green'>/* tp_free */</font></i>
+<a name='L1049'><font color='red'>}</font>;
+<a name='L1050'>
+<a name='L1051'><i><font color='green'>/*********************** Deque Iterator **************************/</font></i>
+<a name='L1052'>
+<a name='L1053'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L1054'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L1055'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> index;
+<a name='L1056'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L1057'>    <a href='../S/2244.html#L109' title='Defined at 109 in Modules/_collectionsmodule.c.'>dequeobject</a> *deque;
+<a name='L1058'>    <b>long</b> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;         <i><font color='green'>/* state when the iterator is created */</font></i>
+<a name='L1059'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> counter;    <i><font color='green'>/* number of items remaining for iteration */</font></i>
+<a name='L1060'><font color='red'>}</font> <a href='../R/7301.html' title='Multiple refered from 6 places.'>dequeiterobject</a>;
+<a name='L1061'>
+<a name='L1062'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> dequeiter_type;
+<a name='L1063'>
+<a name='L1064'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1065'><a href='../R/7284.html' title='Multiple refered from 2 places.'>deque_iter</a>(dequeobject *deque)
+<a name='L1066'><font color='red'>{</font>
+<a name='L1067'>    <a href='../S/2244.html#L1060' title='Defined at 1060 in Modules/_collectionsmodule.c.'>dequeiterobject</a> *it;
+<a name='L1068'>
+<a name='L1069'>    it = PyObject_GC_New(<a href='../S/2244.html#L1060' title='Defined at 1060 in Modules/_collectionsmodule.c.'>dequeiterobject</a>, &amp;dequeiter_type);
+<a name='L1070'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1071'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1072'>    it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;leftblock;
+<a name='L1073'>    it-&gt;index = deque-&gt;leftindex;
+<a name='L1074'>    Py_INCREF(deque);
+<a name='L1075'>    it-&gt;deque = deque;
+<a name='L1076'>    it-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1077'>    it-&gt;counter = deque-&gt;len;
+<a name='L1078'>    <a href='../D/3618.html' title='Multiple defined in 2 places.'>PyObject_GC_Track</a>(it);
+<a name='L1079'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)it;
+<a name='L1080'><font color='red'>}</font>
+<a name='L1081'>
+<a name='L1082'><b>static</b> <b>int</b>
+<a name='L1083'><a href='../R/7300.html' title='Multiple refered from 2 places.'>dequeiter_traverse</a>(dequeiterobject *dio, visitproc visit, <b>void</b> *arg)
+<a name='L1084'><font color='red'>{</font>
+<a name='L1085'>    Py_VISIT(dio-&gt;deque);
+<a name='L1086'>    <b>return</b> 0;
+<a name='L1087'><font color='red'>}</font>
+<a name='L1088'>
+<a name='L1089'><b>static</b> <b>void</b>
+<a name='L1090'><a href='../R/7297.html' title='Multiple refered from 2 places.'>dequeiter_dealloc</a>(dequeiterobject *dio)
+<a name='L1091'><font color='red'>{</font>
+<a name='L1092'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(dio-&gt;deque);
+<a name='L1093'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(dio);
+<a name='L1094'><font color='red'>}</font>
+<a name='L1095'>
+<a name='L1096'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1097'><a href='../S/2244.html#L1165' title='Refered from 1165 in Modules/_collectionsmodule.c.'>dequeiter_next</a>(dequeiterobject *it)
+<a name='L1098'><font color='red'>{</font>
+<a name='L1099'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L1100'>
+<a name='L1101'>    <b>if</b> (it-&gt;deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> != it-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>) <font color='red'>{</font>
+<a name='L1102'>        it-&gt;counter = 0;
+<a name='L1103'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L1104'>                        "deque mutated during iteration");
+<a name='L1105'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1106'>    <font color='red'>}</font>
+<a name='L1107'>    <b>if</b> (it-&gt;counter == 0)
+<a name='L1108'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1109'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (!(it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == it-&gt;deque-&gt;rightblock &amp;&amp;
+<a name='L1110'>              it-&gt;index &gt; it-&gt;deque-&gt;rightindex));
+<a name='L1111'>
+<a name='L1112'>    item = it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;data[it-&gt;index];
+<a name='L1113'>    it-&gt;index++;
+<a name='L1114'>    it-&gt;counter--;
+<a name='L1115'>    <b>if</b> (it-&gt;index == <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> &amp;&amp; it-&gt;counter &gt; 0) <font color='red'>{</font>
+<a name='L1116'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;rightlink != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1117'>        it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;rightlink;
+<a name='L1118'>        it-&gt;index = 0;
+<a name='L1119'>    <font color='red'>}</font>
+<a name='L1120'>    Py_INCREF(item);
+<a name='L1121'>    <b>return</b> item;
+<a name='L1122'><font color='red'>}</font>
+<a name='L1123'>
+<a name='L1124'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1125'><a href='../S/2244.html#L1133' title='Refered from 1133 in Modules/_collectionsmodule.c.'>dequeiter_len</a>(dequeiterobject *it)
+<a name='L1126'><font color='red'>{</font>
+<a name='L1127'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(it-&gt;counter);
+<a name='L1128'><font color='red'>}</font>
+<a name='L1129'>
+<a name='L1130'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(length_hint_doc, "Private method returning an estimate of len(list(it)).");
+<a name='L1131'>
+<a name='L1132'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> dequeiter_methods[] = <font color='red'>{</font>
+<a name='L1133'>    <font color='red'>{</font>"__length_hint__", (PyCFunction)<a href='../S/2244.html#L1125' title='Defined at 1125 in Modules/_collectionsmodule.c.'>dequeiter_len</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, length_hint_doc<font color='red'>}</font>,
+<a name='L1134'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L1135'><font color='red'>}</font>;
+<a name='L1136'>
+<a name='L1137'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> dequeiter_type = <font color='red'>{</font>
+<a name='L1138'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L1139'>    "deque_iterator",                           <i><font color='green'>/* tp_name */</font></i>
+<a name='L1140'>    <b>sizeof</b>(<a href='../S/2244.html#L1060' title='Defined at 1060 in Modules/_collectionsmodule.c.'>dequeiterobject</a>),                    <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L1141'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L1142'>    <i><font color='green'>/* methods */</font></i>
+<a name='L1143'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2244.html#L1090' title='Defined at 1090 in Modules/_collectionsmodule.c.'>dequeiter_dealloc</a>,              <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L1144'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L1145'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L1146'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L1147'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L1148'>    0,                                          <i><font color='green'>/* tp_repr */</font></i>
+<a name='L1149'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L1150'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L1151'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L1152'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L1153'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L1154'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L1155'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L1156'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L1157'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L1158'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,<i><font color='green'>/* tp_flags */</font></i>
+<a name='L1159'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L1160'>    (traverseproc)<a href='../S/2244.html#L1083' title='Defined at 1083 in Modules/_collectionsmodule.c.'>dequeiter_traverse</a>,           <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1161'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1162'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1163'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L1164'>    <a href='../S/2803.html#L933' title='Defined at 933 in Objects/object.c.'>PyObject_SelfIter</a>,                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1165'>    (iternextfunc)<a href='../S/2244.html#L1097' title='Defined at 1097 in Modules/_collectionsmodule.c.'>dequeiter_next</a>,               <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1166'>    dequeiter_methods,                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1167'>    0,
+<a name='L1168'><font color='red'>}</font>;
+<a name='L1169'>
+<a name='L1170'><i><font color='green'>/*********************** Deque Reverse Iterator **************************/</font></i>
+<a name='L1171'>
+<a name='L1172'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> dequereviter_type;
+<a name='L1173'>
+<a name='L1174'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1175'><a href='../R/7293.html' title='Multiple refered from 2 places.'>deque_reviter</a>(dequeobject *deque)
+<a name='L1176'><font color='red'>{</font>
+<a name='L1177'>    <a href='../S/2244.html#L1060' title='Defined at 1060 in Modules/_collectionsmodule.c.'>dequeiterobject</a> *it;
+<a name='L1178'>
+<a name='L1179'>    it = PyObject_GC_New(<a href='../S/2244.html#L1060' title='Defined at 1060 in Modules/_collectionsmodule.c.'>dequeiterobject</a>, &amp;dequereviter_type);
+<a name='L1180'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1181'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1182'>    it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = deque-&gt;rightblock;
+<a name='L1183'>    it-&gt;index = deque-&gt;rightindex;
+<a name='L1184'>    Py_INCREF(deque);
+<a name='L1185'>    it-&gt;deque = deque;
+<a name='L1186'>    it-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1187'>    it-&gt;counter = deque-&gt;len;
+<a name='L1188'>    <a href='../D/3618.html' title='Multiple defined in 2 places.'>PyObject_GC_Track</a>(it);
+<a name='L1189'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)it;
+<a name='L1190'><font color='red'>}</font>
+<a name='L1191'>
+<a name='L1192'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1193'><a href='../S/2244.html#L1248' title='Refered from 1248 in Modules/_collectionsmodule.c.'>dequereviter_next</a>(dequeiterobject *it)
+<a name='L1194'><font color='red'>{</font>
+<a name='L1195'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L1196'>    <b>if</b> (it-&gt;counter == 0)
+<a name='L1197'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1198'>
+<a name='L1199'>    <b>if</b> (it-&gt;deque-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> != it-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>) <font color='red'>{</font>
+<a name='L1200'>        it-&gt;counter = 0;
+<a name='L1201'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L1202'>                        "deque mutated during iteration");
+<a name='L1203'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1204'>    <font color='red'>}</font>
+<a name='L1205'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (!(it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == it-&gt;deque-&gt;leftblock &amp;&amp;
+<a name='L1206'>              it-&gt;index &lt; it-&gt;deque-&gt;leftindex));
+<a name='L1207'>
+<a name='L1208'>    item = it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;data[it-&gt;index];
+<a name='L1209'>    it-&gt;index--;
+<a name='L1210'>    it-&gt;counter--;
+<a name='L1211'>    <b>if</b> (it-&gt;index == -1 &amp;&amp; it-&gt;counter &gt; 0) <font color='red'>{</font>
+<a name='L1212'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a> (it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;leftlink != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1213'>        it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = it-&gt;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;leftlink;
+<a name='L1214'>        it-&gt;index = <a href='../S/2244.html#L16' title='Defined at 16 in Modules/_collectionsmodule.c.'>BLOCKLEN</a> - 1;
+<a name='L1215'>    <font color='red'>}</font>
+<a name='L1216'>    Py_INCREF(item);
+<a name='L1217'>    <b>return</b> item;
+<a name='L1218'><font color='red'>}</font>
+<a name='L1219'>
+<a name='L1220'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> dequereviter_type = <font color='red'>{</font>
+<a name='L1221'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L1222'>    "deque_reverse_iterator",                   <i><font color='green'>/* tp_name */</font></i>
+<a name='L1223'>    <b>sizeof</b>(<a href='../S/2244.html#L1060' title='Defined at 1060 in Modules/_collectionsmodule.c.'>dequeiterobject</a>),                    <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L1224'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L1225'>    <i><font color='green'>/* methods */</font></i>
+<a name='L1226'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2244.html#L1090' title='Defined at 1090 in Modules/_collectionsmodule.c.'>dequeiter_dealloc</a>,              <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L1227'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L1228'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L1229'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L1230'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L1231'>    0,                                          <i><font color='green'>/* tp_repr */</font></i>
+<a name='L1232'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L1233'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L1234'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L1235'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L1236'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L1237'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L1238'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L1239'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L1240'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L1241'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,<i><font color='green'>/* tp_flags */</font></i>
+<a name='L1242'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L1243'>    (traverseproc)<a href='../S/2244.html#L1083' title='Defined at 1083 in Modules/_collectionsmodule.c.'>dequeiter_traverse</a>,           <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1244'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1245'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1246'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L1247'>    <a href='../S/2803.html#L933' title='Defined at 933 in Objects/object.c.'>PyObject_SelfIter</a>,                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1248'>    (iternextfunc)<a href='../S/2244.html#L1193' title='Defined at 1193 in Modules/_collectionsmodule.c.'>dequereviter_next</a>,            <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1249'>    dequeiter_methods,                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1250'>    0,
+<a name='L1251'><font color='red'>}</font>;
+<a name='L1252'>
+<a name='L1253'><i><font color='green'>/* defaultdict type *********************************************************/</font></i>
+<a name='L1254'>
+<a name='L1255'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L1256'>    <a href='../S/517.html#L67' title='Defined at 67 in Include/dictobject.h.'>PyDictObject</a> dict;
+<a name='L1257'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *default_factory;
+<a name='L1258'><font color='red'>}</font> <a href='../R/7221.html' title='Multiple refered from 4 places.'>defdictobject</a>;
+<a name='L1259'>
+<a name='L1260'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> defdict_type; <i><font color='green'>/* Forward */</font></i>
+<a name='L1261'>
+<a name='L1262'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(defdict_missing_doc,
+<a name='L1263'>"__missing__(key) # Called by __getitem__ for missing key; pseudo-code:\n\
+<a name='L1264'>  if self.default_factory is None: raise KeyError((key,))\n\
+<a name='L1265'>  self[key] = value = self.default_factory()\n\
+<a name='L1266'>  return value\n\
+<a name='L1267'>");
+<a name='L1268'>
+<a name='L1269'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1270'><a href='../S/2244.html#L1364' title='Refered from 1364 in Modules/_collectionsmodule.c.'>defdict_missing</a>(defdictobject *dd, PyObject *key)
+<a name='L1271'><font color='red'>{</font>
+<a name='L1272'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *factory = dd-&gt;default_factory;
+<a name='L1273'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L1274'>    <b>if</b> (factory == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || factory == Py_None) <font color='red'>{</font>
+<a name='L1275'>        <i><font color='green'>/* XXX Call dict.__missing__(key) */</font></i>
+<a name='L1276'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tup;
+<a name='L1277'>        tup = <a href='../S/2823.html#L186' title='Defined at 186 in Objects/tupleobject.c.'>PyTuple_Pack</a>(1, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1278'>        <b>if</b> (!tup) <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1279'>        <a href='../S/3106.html#L53' title='Defined at 53 in Python/errors.c.'>PyErr_SetObject</a>(PyExc_KeyError, tup);
+<a name='L1280'>        Py_DECREF(tup);
+<a name='L1281'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1282'>    <font color='red'>}</font>
+<a name='L1283'>    <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = PyEval_CallObject(factory, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1284'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1285'>        <b>return</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L1286'>    <b>if</b> (<a href='../S/2775.html#L141' title='Defined at 141 in Objects/abstract.c.'>PyObject_SetItem</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)dd, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) &lt; 0) <font color='red'>{</font>
+<a name='L1287'>        Py_DECREF(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1288'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1289'>    <font color='red'>}</font>
+<a name='L1290'>    <b>return</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L1291'><font color='red'>}</font>
+<a name='L1292'>
+<a name='L1293'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(defdict_copy_doc, "D.copy() -&gt; a shallow copy of D.");
+<a name='L1294'>
+<a name='L1295'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1296'><a href='../R/7213.html' title='Multiple refered from 2 places.'>defdict_copy</a>(defdictobject *dd)
+<a name='L1297'><font color='red'>{</font>
+<a name='L1298'>    <i><font color='green'>/* This calls the object's class.  That only works for subclasses</font></i>
+<a name='L1299'><i><font color='green'>       whose class constructor has the same signature.  Subclasses that</font></i>
+<a name='L1300'><i><font color='green'>       define a different constructor signature must override copy().</font></i>
+<a name='L1301'><i><font color='green'>    */</font></i>
+<a name='L1302'>
+<a name='L1303'>    <b>if</b> (dd-&gt;default_factory == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1304'>        <b>return</b> <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(dd), Py_None, dd, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1305'>    <b>return</b> <a href='../S/2775.html#L2358' title='Defined at 2358 in Objects/abstract.c.'>PyObject_CallFunctionObjArgs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(dd),
+<a name='L1306'>                                        dd-&gt;default_factory, dd, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1307'><font color='red'>}</font>
+<a name='L1308'>
+<a name='L1309'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1310'><a href='../S/2244.html#L1370' title='Refered from 1370 in Modules/_collectionsmodule.c.'>defdict_reduce</a>(defdictobject *dd)
+<a name='L1311'><font color='red'>{</font>
+<a name='L1312'>    <i><font color='green'>/* __reduce__ must return a 5-tuple as follows:</font></i>
+<a name='L1313'><i><font color='green'></font></i>
+<a name='L1314'><i><font color='green'>       - factory function</font></i>
+<a name='L1315'><i><font color='green'>       - tuple of args for the factory function</font></i>
+<a name='L1316'><i><font color='green'>       - additional state (here None)</font></i>
+<a name='L1317'><i><font color='green'>       - sequence iterator (here None)</font></i>
+<a name='L1318'><i><font color='green'>       - dictionary iterator (yielding successive (key, value) pairs</font></i>
+<a name='L1319'><i><font color='green'></font></i>
+<a name='L1320'><i><font color='green'>       This API is used by pickle.py and copy.py.</font></i>
+<a name='L1321'><i><font color='green'></font></i>
+<a name='L1322'><i><font color='green'>       For this to be useful with pickle.py, the default_factory</font></i>
+<a name='L1323'><i><font color='green'>       must be picklable; e.g., None, a built-in, or a global</font></i>
+<a name='L1324'><i><font color='green'>       function in a module or package.</font></i>
+<a name='L1325'><i><font color='green'></font></i>
+<a name='L1326'><i><font color='green'>       Both shallow and deep copying are supported, but for deep</font></i>
+<a name='L1327'><i><font color='green'>       copying, the default_factory must be deep-copyable; e.g. None,</font></i>
+<a name='L1328'><i><font color='green'>       or a built-in (functions are not copyable at this time).</font></i>
+<a name='L1329'><i><font color='green'></font></i>
+<a name='L1330'><i><font color='green'>       This only works for subclasses as long as their constructor</font></i>
+<a name='L1331'><i><font color='green'>       signature is compatible; the first argument must be the</font></i>
+<a name='L1332'><i><font color='green'>       optional default_factory, defaulting to None.</font></i>
+<a name='L1333'><i><font color='green'>    */</font></i>
+<a name='L1334'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L1335'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *items;
+<a name='L1336'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *iter;
+<a name='L1337'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1338'>    <b>if</b> (dd-&gt;default_factory == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || dd-&gt;default_factory == Py_None)
+<a name='L1339'>        <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L1340'>    <b>else</b>
+<a name='L1341'>        <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = <a href='../S/2823.html#L186' title='Defined at 186 in Objects/tupleobject.c.'>PyTuple_Pack</a>(1, dd-&gt;default_factory);
+<a name='L1342'>    <b>if</b> (<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1343'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1344'>    items = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)dd, "items", "()");
+<a name='L1345'>    <b>if</b> (items == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1346'>        Py_DECREF(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1347'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1348'>    <font color='red'>}</font>
+<a name='L1349'>    iter = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(items);
+<a name='L1350'>    <b>if</b> (iter == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1351'>        Py_DECREF(items);
+<a name='L1352'>        Py_DECREF(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1353'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1354'>    <font color='red'>}</font>
+<a name='L1355'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2823.html#L186' title='Defined at 186 in Objects/tupleobject.c.'>PyTuple_Pack</a>(5, <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(dd), <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>,
+<a name='L1356'>                          Py_None, Py_None, iter);
+<a name='L1357'>    Py_DECREF(iter);
+<a name='L1358'>    Py_DECREF(items);
+<a name='L1359'>    Py_DECREF(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1360'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1361'><font color='red'>}</font>
+<a name='L1362'>
+<a name='L1363'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> defdict_methods[] = <font color='red'>{</font>
+<a name='L1364'>    <font color='red'>{</font>"__missing__", (PyCFunction)<a href='../S/2244.html#L1270' title='Defined at 1270 in Modules/_collectionsmodule.c.'>defdict_missing</a>, METH_O,
+<a name='L1365'>     defdict_missing_doc<font color='red'>}</font>,
+<a name='L1366'>    <font color='red'>{</font>"copy", (PyCFunction)<a href='../S/2244.html#L1296' title='Defined at 1296 in Modules/_collectionsmodule.c.'>defdict_copy</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L1367'>     defdict_copy_doc<font color='red'>}</font>,
+<a name='L1368'>    <font color='red'>{</font>"__copy__", (PyCFunction)<a href='../S/2244.html#L1296' title='Defined at 1296 in Modules/_collectionsmodule.c.'>defdict_copy</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L1369'>     defdict_copy_doc<font color='red'>}</font>,
+<a name='L1370'>    <font color='red'>{</font>"__reduce__", (PyCFunction)<a href='../S/2244.html#L1310' title='Defined at 1310 in Modules/_collectionsmodule.c.'>defdict_reduce</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L1371'>     reduce_doc<font color='red'>}</font>,
+<a name='L1372'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L1373'><font color='red'>}</font>;
+<a name='L1374'>
+<a name='L1375'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> defdict_members[] = <font color='red'>{</font>
+<a name='L1376'>    <font color='red'>{</font>"default_factory", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>,
+<a name='L1377'>     <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2244.html#L1258' title='Defined at 1258 in Modules/_collectionsmodule.c.'>defdictobject</a>, default_factory), 0,
+<a name='L1378'>     <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Factory for default value called by __missing__().")<font color='red'>}</font>,
+<a name='L1379'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L1380'><font color='red'>}</font>;
+<a name='L1381'>
+<a name='L1382'><b>static</b> <b>void</b>
+<a name='L1383'><a href='../S/2244.html#L1486' title='Refered from 1486 in Modules/_collectionsmodule.c.'>defdict_dealloc</a>(defdictobject *dd)
+<a name='L1384'><font color='red'>{</font>
+<a name='L1385'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(dd-&gt;default_factory);
+<a name='L1386'>    PyDict_Type.tp_dealloc((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)dd);
+<a name='L1387'><font color='red'>}</font>
+<a name='L1388'>
+<a name='L1389'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1390'><a href='../S/2244.html#L1491' title='Refered from 1491 in Modules/_collectionsmodule.c.'>defdict_repr</a>(defdictobject *dd)
+<a name='L1391'><font color='red'>{</font>
+<a name='L1392'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *baserepr;
+<a name='L1393'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *defrepr;
+<a name='L1394'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1395'>    baserepr = PyDict_Type.tp_repr((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)dd);
+<a name='L1396'>    <b>if</b> (baserepr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1397'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1398'>    <b>if</b> (dd-&gt;default_factory == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1399'>        defrepr = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("None");
+<a name='L1400'>    <b>else</b>
+<a name='L1401'>    <font color='red'>{</font>
+<a name='L1402'>        <b>int</b> status = <a href='../S/2803.html#L1802' title='Defined at 1802 in Objects/object.c.'>Py_ReprEnter</a>(dd-&gt;default_factory);
+<a name='L1403'>        <b>if</b> (status != 0) <font color='red'>{</font>
+<a name='L1404'>            <b>if</b> (status &lt; 0)
+<a name='L1405'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1406'>            defrepr = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("...");
+<a name='L1407'>        <font color='red'>}</font>
+<a name='L1408'>        <b>else</b>
+<a name='L1409'>            defrepr = <a href='../S/2803.html#L368' title='Defined at 368 in Objects/object.c.'>PyObject_Repr</a>(dd-&gt;default_factory);
+<a name='L1410'>        <a href='../S/2803.html#L1830' title='Defined at 1830 in Objects/object.c.'>Py_ReprLeave</a>(dd-&gt;default_factory);
+<a name='L1411'>    <font color='red'>}</font>
+<a name='L1412'>    <b>if</b> (defrepr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1413'>        Py_DECREF(baserepr);
+<a name='L1414'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1415'>    <font color='red'>}</font>
+<a name='L1416'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("defaultdict(%U, %U)",
+<a name='L1417'>                                  defrepr, baserepr);
+<a name='L1418'>    Py_DECREF(defrepr);
+<a name='L1419'>    Py_DECREF(baserepr);
+<a name='L1420'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1421'><font color='red'>}</font>
+<a name='L1422'>
+<a name='L1423'><b>static</b> <b>int</b>
+<a name='L1424'><a href='../S/2244.html#L1504' title='Refered from 1504 in Modules/_collectionsmodule.c.'>defdict_traverse</a>(PyObject *self, visitproc visit, <b>void</b> *arg)
+<a name='L1425'><font color='red'>{</font>
+<a name='L1426'>    Py_VISIT(((<a href='../S/2244.html#L1258' title='Defined at 1258 in Modules/_collectionsmodule.c.'>defdictobject</a> *)self)-&gt;default_factory);
+<a name='L1427'>    <b>return</b> PyDict_Type.tp_traverse(self, visit, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L1428'><font color='red'>}</font>
+<a name='L1429'>
+<a name='L1430'><b>static</b> <b>int</b>
+<a name='L1431'><a href='../S/2244.html#L1505' title='Refered from 1505 in Modules/_collectionsmodule.c.'>defdict_tp_clear</a>(defdictobject *dd)
+<a name='L1432'><font color='red'>{</font>
+<a name='L1433'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(dd-&gt;default_factory);
+<a name='L1434'>    <b>return</b> PyDict_Type.tp_clear((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)dd);
+<a name='L1435'><font color='red'>}</font>
+<a name='L1436'>
+<a name='L1437'><b>static</b> <b>int</b>
+<a name='L1438'><a href='../S/2244.html#L1518' title='Refered from 1518 in Modules/_collectionsmodule.c.'>defdict_init</a>(PyObject *self, PyObject *args, PyObject *kwds)
+<a name='L1439'><font color='red'>{</font>
+<a name='L1440'>    <a href='../S/2244.html#L1258' title='Defined at 1258 in Modules/_collectionsmodule.c.'>defdictobject</a> *dd = (<a href='../S/2244.html#L1258' title='Defined at 1258 in Modules/_collectionsmodule.c.'>defdictobject</a> *)self;
+<a name='L1441'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *olddefault = dd-&gt;default_factory;
+<a name='L1442'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newdefault = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1443'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newargs;
+<a name='L1444'>    <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1445'>    <b>if</b> (<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !PyTuple_Check(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>))
+<a name='L1446'>        newargs = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L1447'>    <b>else</b> <font color='red'>{</font>
+<a name='L1448'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n = PyTuple_GET_SIZE(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1449'>        <b>if</b> (n &gt; 0) <font color='red'>{</font>
+<a name='L1450'>            newdefault = PyTuple_GET_ITEM(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 0);
+<a name='L1451'>            <b>if</b> (!<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(newdefault) &amp;&amp; newdefault != Py_None) <font color='red'>{</font>
+<a name='L1452'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L1453'>                    "first argument must be callable");
+<a name='L1454'>                <b>return</b> -1;
+<a name='L1455'>            <font color='red'>}</font>
+<a name='L1456'>        <font color='red'>}</font>
+<a name='L1457'>        newargs = <a href='../S/2775.html#L1608' title='Defined at 1608 in Objects/abstract.c.'>PySequence_GetSlice</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, 1, n);
+<a name='L1458'>    <font color='red'>}</font>
+<a name='L1459'>    <b>if</b> (newargs == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1460'>        <b>return</b> -1;
+<a name='L1461'>    <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(newdefault);
+<a name='L1462'>    dd-&gt;default_factory = newdefault;
+<a name='L1463'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PyDict_Type.tp_init(self, newargs, kwds);
+<a name='L1464'>    Py_DECREF(newargs);
+<a name='L1465'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(olddefault);
+<a name='L1466'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1467'><font color='red'>}</font>
+<a name='L1468'>
+<a name='L1469'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(defdict_doc,
+<a name='L1470'>"defaultdict(default_factory) --&gt; dict with default factory\n\
+<a name='L1471'>\n\
+<a name='L1472'>The default factory is called without arguments to produce\n\
+<a name='L1473'>a new value when a key is not present, in __getitem__ only.\n\
+<a name='L1474'>A defaultdict compares equal to a dict with the same items.\n\
+<a name='L1475'>");
+<a name='L1476'>
+<a name='L1477'><i><font color='green'>/* See comment in xxsubtype.c */</font></i>
+<a name='L1478'><font color='darkred'>#define</font> <a href='../R/709.html' title='Multiple refered from 7 places.'>DEFERRED_ADDRESS</a>(ADDR) 0
+<a name='L1479'>
+<a name='L1480'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> defdict_type = <font color='red'>{</font>
+<a name='L1481'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../D/761.html' title='Multiple defined in 3 places.'>DEFERRED_ADDRESS</a>(&amp;PyType_Type), 0)
+<a name='L1482'>    "collections.defaultdict",          <i><font color='green'>/* tp_name */</font></i>
+<a name='L1483'>    <b>sizeof</b>(<a href='../S/2244.html#L1258' title='Defined at 1258 in Modules/_collectionsmodule.c.'>defdictobject</a>),              <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L1484'>    0,                                  <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L1485'>    <i><font color='green'>/* methods */</font></i>
+<a name='L1486'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2244.html#L1383' title='Defined at 1383 in Modules/_collectionsmodule.c.'>defdict_dealloc</a>,        <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L1487'>    0,                                  <i><font color='green'>/* tp_print */</font></i>
+<a name='L1488'>    0,                                  <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L1489'>    0,                                  <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L1490'>    0,                                  <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L1491'>    (reprfunc)<a href='../S/2244.html#L1390' title='Defined at 1390 in Modules/_collectionsmodule.c.'>defdict_repr</a>,             <i><font color='green'>/* tp_repr */</font></i>
+<a name='L1492'>    0,                                  <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L1493'>    0,                                  <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L1494'>    0,                                  <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L1495'>    0,                                  <i><font color='green'>/* tp_hash */</font></i>
+<a name='L1496'>    0,                                  <i><font color='green'>/* tp_call */</font></i>
+<a name='L1497'>    0,                                  <i><font color='green'>/* tp_str */</font></i>
+<a name='L1498'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,            <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L1499'>    0,                                  <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L1500'>    0,                                  <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L1501'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC,
+<a name='L1502'>                                    <i><font color='green'>/* tp_flags */</font></i>
+<a name='L1503'>    defdict_doc,                        <i><font color='green'>/* tp_doc */</font></i>
+<a name='L1504'>    <a href='../S/2244.html#L1424' title='Defined at 1424 in Modules/_collectionsmodule.c.'>defdict_traverse</a>,                   <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1505'>    (inquiry)<a href='../S/2244.html#L1431' title='Defined at 1431 in Modules/_collectionsmodule.c.'>defdict_tp_clear</a>,          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1506'>    0,                                  <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1507'>    0,                                  <i><font color='green'>/* tp_weaklistoffset*/</font></i>
+<a name='L1508'>    0,                                  <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1509'>    0,                                  <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1510'>    defdict_methods,                    <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1511'>    defdict_members,                    <i><font color='green'>/* tp_members */</font></i>
+<a name='L1512'>    0,                                  <i><font color='green'>/* tp_getset */</font></i>
+<a name='L1513'>    <a href='../D/761.html' title='Multiple defined in 3 places.'>DEFERRED_ADDRESS</a>(&amp;PyDict_Type),     <i><font color='green'>/* tp_base */</font></i>
+<a name='L1514'>    0,                                  <i><font color='green'>/* tp_dict */</font></i>
+<a name='L1515'>    0,                                  <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L1516'>    0,                                  <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L1517'>    0,                                  <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L1518'>    <a href='../S/2244.html#L1438' title='Defined at 1438 in Modules/_collectionsmodule.c.'>defdict_init</a>,                       <i><font color='green'>/* tp_init */</font></i>
+<a name='L1519'>    <a href='../S/2824.html#L700' title='Defined at 700 in Objects/typeobject.c.'>PyType_GenericAlloc</a>,                <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L1520'>    0,                                  <i><font color='green'>/* tp_new */</font></i>
+<a name='L1521'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>,                    <i><font color='green'>/* tp_free */</font></i>
+<a name='L1522'><font color='red'>}</font>;
+<a name='L1523'>
+<a name='L1524'><i><font color='green'>/* helper function for Counter  *********************************************/</font></i>
+<a name='L1525'>
+<a name='L1526'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(_count_elements_doc,
+<a name='L1527'>"_count_elements(mapping, iterable) -&gt; None\n\
+<a name='L1528'>\n\
+<a name='L1529'>Count elements in the iterable, updating the mappping");
+<a name='L1530'>
+<a name='L1531'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1532'><a href='../S/2244.html#L1622' title='Refered from 1622 in Modules/_collectionsmodule.c.'>_count_elements</a>(PyObject *self, PyObject *args)
+<a name='L1533'><font color='red'>{</font>
+<a name='L1534'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *it, *iterable, *mapping, *oldval;
+<a name='L1535'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1536'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1537'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *one = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1538'>
+<a name='L1539'>    <b>if</b> (!<a href='../S/3112.html#L1712' title='Defined at 1712 in Python/getargs.c.'>PyArg_UnpackTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "_count_elements", 2, 2, &amp;mapping, &amp;iterable))
+<a name='L1540'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1541'>
+<a name='L1542'>    it = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(iterable);
+<a name='L1543'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1544'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1545'>
+<a name='L1546'>    one = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(1);
+<a name='L1547'>    <b>if</b> (one == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1548'>        Py_DECREF(it);
+<a name='L1549'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1550'>    <font color='red'>}</font>
+<a name='L1551'>
+<a name='L1552'>    <b>if</b> (<a href='../D/3104.html' title='Multiple defined in 2 places.'>PyDict_CheckExact</a>(mapping)) <font color='red'>{</font>
+<a name='L1553'>        <b>while</b> (1) <font color='red'>{</font>
+<a name='L1554'>            <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it);
+<a name='L1555'>            <b>if</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1556'>                <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>() &amp;&amp; <a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_StopIteration))
+<a name='L1557'>                    <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1558'>                <b>else</b>
+<a name='L1559'>                    <b>break</b>;
+<a name='L1560'>            <font color='red'>}</font>
+<a name='L1561'>            oldval = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(mapping, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1562'>            <b>if</b> (oldval == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1563'>                <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(mapping, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, one) == -1)
+<a name='L1564'>                    <b>break</b>;
+<a name='L1565'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1566'>                newval = PyNumber_Add(oldval, one);
+<a name='L1567'>                <b>if</b> (newval == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1568'>                    <b>break</b>;
+<a name='L1569'>                <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(mapping, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, newval) == -1)
+<a name='L1570'>                    <b>break</b>;
+<a name='L1571'>                <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(newval);
+<a name='L1572'>            <font color='red'>}</font>
+<a name='L1573'>            Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1574'>        <font color='red'>}</font>
+<a name='L1575'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1576'>        <b>while</b> (1) <font color='red'>{</font>
+<a name='L1577'>            <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(it);
+<a name='L1578'>            <b>if</b> (<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1579'>                <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>() &amp;&amp; <a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_StopIteration))
+<a name='L1580'>                    <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1581'>                <b>else</b>
+<a name='L1582'>                    <b>break</b>;
+<a name='L1583'>            <font color='red'>}</font>
+<a name='L1584'>            oldval = <a href='../S/2775.html#L113' title='Defined at 113 in Objects/abstract.c.'>PyObject_GetItem</a>(mapping, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1585'>            <b>if</b> (oldval == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1586'>                <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>() || !<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_KeyError))
+<a name='L1587'>                    <b>break</b>;
+<a name='L1588'>                <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L1589'>                Py_INCREF(one);
+<a name='L1590'>                newval = one;
+<a name='L1591'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L1592'>                newval = PyNumber_Add(oldval, one);
+<a name='L1593'>                Py_DECREF(oldval);
+<a name='L1594'>                <b>if</b> (newval == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1595'>                    <b>break</b>;
+<a name='L1596'>            <font color='red'>}</font>
+<a name='L1597'>            <b>if</b> (<a href='../S/2775.html#L141' title='Defined at 141 in Objects/abstract.c.'>PyObject_SetItem</a>(mapping, <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, newval) == -1)
+<a name='L1598'>                <b>break</b>;
+<a name='L1599'>            <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(newval);
+<a name='L1600'>            Py_DECREF(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1601'>        <font color='red'>}</font>
+<a name='L1602'>    <font color='red'>}</font>
+<a name='L1603'>
+<a name='L1604'>    Py_DECREF(it);
+<a name='L1605'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L1606'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(newval);
+<a name='L1607'>    Py_DECREF(one);
+<a name='L1608'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L1609'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1610'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L1611'><font color='red'>}</font>
+<a name='L1612'>
+<a name='L1613'><i><font color='green'>/* module level code ********************************************************/</font></i>
+<a name='L1614'>
+<a name='L1615'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_doc,
+<a name='L1616'>"High performance data structures.\n\
+<a name='L1617'>- deque:        ordered collection accessible from endpoints only\n\
+<a name='L1618'>- defaultdict:  dict subclass with a default value factory\n\
+<a name='L1619'>");
+<a name='L1620'>
+<a name='L1621'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> module_functions[] = <font color='red'>{</font>
+<a name='L1622'>    <font color='red'>{</font>"_count_elements", <a href='../S/2244.html#L1532' title='Defined at 1532 in Modules/_collectionsmodule.c.'>_count_elements</a>,    <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,   _count_elements_doc<font color='red'>}</font>,
+<a name='L1623'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,       <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>          <i><font color='green'>/* sentinel */</font></i>
+<a name='L1624'><font color='red'>}</font>;
+<a name='L1625'>
+<a name='L1626'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _collectionsmodule = <font color='red'>{</font>
+<a name='L1627'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L1628'>    "_collections",
+<a name='L1629'>    module_doc,
+<a name='L1630'>    -1,
+<a name='L1631'>    module_functions,
+<a name='L1632'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1633'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1634'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L1635'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L1636'><font color='red'>}</font>;
+<a name='L1637'>
+<a name='L1638'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L1639'><a href='../R/3022.html' title='Multiple refered from 2 places.'>PyInit__collections</a>(<b>void</b>)
+<a name='L1640'><font color='red'>{</font>
+<a name='L1641'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m;
+<a name='L1642'>
+<a name='L1643'>    m = PyModule_Create(&amp;_collectionsmodule);
+<a name='L1644'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1645'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1646'>
+<a name='L1647'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;deque_type) &lt; 0)
+<a name='L1648'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1649'>    Py_INCREF(&amp;deque_type);
+<a name='L1650'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "deque", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;deque_type);
+<a name='L1651'>
+<a name='L1652'>    defdict_type.tp_base = &amp;PyDict_Type;
+<a name='L1653'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;defdict_type) &lt; 0)
+<a name='L1654'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1655'>    Py_INCREF(&amp;defdict_type);
+<a name='L1656'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "defaultdict", (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;defdict_type);
+<a name='L1657'>
+<a name='L1658'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;dequeiter_type) &lt; 0)
+<a name='L1659'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1660'>
+<a name='L1661'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;dequereviter_type) &lt; 0)
+<a name='L1662'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1663'>
+<a name='L1664'>    <b>return</b> m;
+<a name='L1665'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L59'>[^]</a><a href='#L1639'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

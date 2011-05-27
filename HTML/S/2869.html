@@ -1,0 +1,132 @@
+<html>
+<head>
+<title>PC/dl_nt.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3393.html'>PC</a>/dl_nt.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L47'>[^]</a><a href='#L79'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L47' title='Defined at 47.'>_LoadActCtxPointers</a>
+<li><a href='#L61' title='Defined at 61.'>_Py_ActivateActCtx</a>
+<li><a href='#L72' title='Defined at 72.'>_Py_DeactivateActCtx</a>
+<li><a href='#L79' title='Defined at 79.'>DllMain</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'></font></i>
+<a name='L3'><i><font color='green'>Entry point for the Windows NT DLL.</font></i>
+<a name='L4'><i><font color='green'></font></i>
+<a name='L5'><i><font color='green'>About the only reason for having this, is so initall() can automatically</font></i>
+<a name='L6'><i><font color='green'>be called, removing that burden (and possible source of frustration if</font></i>
+<a name='L7'><i><font color='green'>forgotten) from the programmer.</font></i>
+<a name='L8'><i><font color='green'></font></i>
+<a name='L9'><i><font color='green'>*/</font></i>
+<a name='L10'>
+<a name='L11'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L12'><font color='darkred'>#include</font> "windows.h"
+<a name='L13'>
+<a name='L14'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L307' title='Defined at 307 in PC/pyconfig.h.'>Py_ENABLE_SHARED</a>
+<a name='L15'><b>char</b> dllVersionBuffer[16] = ""; <i><font color='green'>// a private buffer</font></i>
+<a name='L16'>
+<a name='L17'><i><font color='green'>// Python Globals</font></i>
+<a name='L18'>HMODULE PyWin_DLLhModule = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L19'><b>const</b> <b>char</b> *PyWin_DLLVersionString = dllVersionBuffer;
+<a name='L20'>
+<a name='L21'><i><font color='green'>// Windows "Activation Context" work:</font></i>
+<a name='L22'><i><font color='green'>// Our .pyd extension modules are generally built without a manifest (ie,</font></i>
+<a name='L23'><i><font color='green'>// those included with Python and those built with a default distutils.</font></i>
+<a name='L24'><i><font color='green'>// This requires we perform some "activation context" magic when loading our</font></i>
+<a name='L25'><i><font color='green'>// extensions.  In summary:</font></i>
+<a name='L26'><i><font color='green'>// * As our DLL loads we save the context being used.</font></i>
+<a name='L27'><i><font color='green'>// * Before loading our extensions we re-activate our saved context.</font></i>
+<a name='L28'><i><font color='green'>// * After extension load is complete we restore the old context.</font></i>
+<a name='L29'><i><font color='green'>// As an added complication, this magic only works on XP or later - we simply</font></i>
+<a name='L30'><i><font color='green'>// use the existence (or not) of the relevant function pointers from kernel32.</font></i>
+<a name='L31'><i><font color='green'>// See bug 4566 (http://python.org/sf/4566) for more details.</font></i>
+<a name='L32'>
+<a name='L33'><b>typedef</b> <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> (WINAPI * PFN_GETCURRENTACTCTX)(HANDLE *);
+<a name='L34'><b>typedef</b> <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> (WINAPI * PFN_ACTIVATEACTCTX)(HANDLE, ULONG_PTR *);
+<a name='L35'><b>typedef</b> <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> (WINAPI * PFN_DEACTIVATEACTCTX)(DWORD, ULONG_PTR);
+<a name='L36'><b>typedef</b> <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> (WINAPI * PFN_ADDREFACTCTX)(HANDLE);
+<a name='L37'><b>typedef</b> <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> (WINAPI * PFN_RELEASEACTCTX)(HANDLE);
+<a name='L38'>
+<a name='L39'><i><font color='green'>// locals and function pointers for this activation context magic.</font></i>
+<a name='L40'><b>static</b> <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> PyWin_DLLhActivationContext = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <i><font color='green'>// one day it might be public</font></i>
+<a name='L41'><b>static</b> PFN_GETCURRENTACTCTX pfnGetCurrentActCtx = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L42'><b>static</b> PFN_ACTIVATEACTCTX pfnActivateActCtx = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L43'><b>static</b> PFN_DEACTIVATEACTCTX pfnDeactivateActCtx = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L44'><b>static</b> PFN_ADDREFACTCTX pfnAddRefActCtx = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L45'><b>static</b> PFN_RELEASEACTCTX pfnReleaseActCtx = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L46'>
+<a name='L47'><b>void</b> <a href='../S/2869.html#L91' title='Refered from 91 in PC/dl_nt.c.'>_LoadActCtxPointers</a>()
+<a name='L48'><font color='red'>{</font>
+<a name='L49'>    HINSTANCE hKernel32 = GetModuleHandleW(L"kernel32.dll");
+<a name='L50'>    <b>if</b> (hKernel32)
+<a name='L51'>        pfnGetCurrentActCtx = (PFN_GETCURRENTACTCTX) <a href='../D/1434.html' title='Multiple defined in 2 places.'>GetProcAddress</a>(hKernel32, "GetCurrentActCtx");
+<a name='L52'>    <i><font color='green'>// If we can't load GetCurrentActCtx (ie, pre XP) , don't bother with the rest.</font></i>
+<a name='L53'>    <b>if</b> (pfnGetCurrentActCtx) <font color='red'>{</font>
+<a name='L54'>        pfnActivateActCtx = (PFN_ACTIVATEACTCTX) <a href='../D/1434.html' title='Multiple defined in 2 places.'>GetProcAddress</a>(hKernel32, "ActivateActCtx");
+<a name='L55'>        pfnDeactivateActCtx = (PFN_DEACTIVATEACTCTX) <a href='../D/1434.html' title='Multiple defined in 2 places.'>GetProcAddress</a>(hKernel32, "DeactivateActCtx");
+<a name='L56'>        pfnAddRefActCtx = (PFN_ADDREFACTCTX) <a href='../D/1434.html' title='Multiple defined in 2 places.'>GetProcAddress</a>(hKernel32, "AddRefActCtx");
+<a name='L57'>        pfnReleaseActCtx = (PFN_RELEASEACTCTX) <a href='../D/1434.html' title='Multiple defined in 2 places.'>GetProcAddress</a>(hKernel32, "ReleaseActCtx");
+<a name='L58'>    <font color='red'>}</font>
+<a name='L59'><font color='red'>}</font>
+<a name='L60'>
+<a name='L61'>ULONG_PTR <a href='../R/5556.html' title='Multiple refered from 2 places.'>_Py_ActivateActCtx</a>()
+<a name='L62'><font color='red'>{</font>
+<a name='L63'>    ULONG_PTR ret = 0;
+<a name='L64'>    <b>if</b> (PyWin_DLLhActivationContext &amp;&amp; pfnActivateActCtx)
+<a name='L65'>        <b>if</b> (!(*pfnActivateActCtx)(PyWin_DLLhActivationContext, &amp;ret)) <font color='red'>{</font>
+<a name='L66'>            OutputDebugString("Python failed to activate the activation context before loading a DLL\n");
+<a name='L67'>            ret = 0; <i><font color='green'>// no promise the failing function didn't change it!</font></i>
+<a name='L68'>        <font color='red'>}</font>
+<a name='L69'>    <b>return</b> ret;
+<a name='L70'><font color='red'>}</font>
+<a name='L71'>
+<a name='L72'><b>void</b> <a href='../R/5562.html' title='Multiple refered from 2 places.'>_Py_DeactivateActCtx</a>(ULONG_PTR cookie)
+<a name='L73'><font color='red'>{</font>
+<a name='L74'>    <b>if</b> (cookie &amp;&amp; pfnDeactivateActCtx)
+<a name='L75'>        <b>if</b> (!(*pfnDeactivateActCtx)(0, cookie))
+<a name='L76'>            OutputDebugString("Python failed to de-activate the activation context\n");
+<a name='L77'><font color='red'>}</font>
+<a name='L78'>
+<a name='L79'><a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a>    WINAPI  DllMain (<a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> hInst,
+<a name='L80'>                                                ULONG ul_reason_for_call,
+<a name='L81'>                                                LPVOID lpReserved)
+<a name='L82'><font color='red'>{</font>
+<a name='L83'>    <b>switch</b> (ul_reason_for_call)
+<a name='L84'>    <font color='red'>{</font>
+<a name='L85'>        <b>case</b> DLL_PROCESS_ATTACH:
+<a name='L86'>            PyWin_DLLhModule = hInst;
+<a name='L87'>            <i><font color='green'>// 1000 is a magic number I picked out of the air.  Could do with a #define, I spose...</font></i>
+<a name='L88'>            LoadString(hInst, 1000, dllVersionBuffer, <b>sizeof</b>(dllVersionBuffer));
+<a name='L89'>
+<a name='L90'>            <i><font color='green'>// and capture our activation context for use when loading extensions.</font></i>
+<a name='L91'>            <a href='../S/2869.html#L47' title='Defined at 47 in PC/dl_nt.c.'>_LoadActCtxPointers</a>();
+<a name='L92'>            <b>if</b> (pfnGetCurrentActCtx &amp;&amp; pfnAddRefActCtx)
+<a name='L93'>                <b>if</b> ((*pfnGetCurrentActCtx)(&amp;PyWin_DLLhActivationContext))
+<a name='L94'>                    <b>if</b> (!(*pfnAddRefActCtx)(PyWin_DLLhActivationContext))
+<a name='L95'>                        OutputDebugString("Python failed to load the default activation context\n");
+<a name='L96'>            <b>break</b>;
+<a name='L97'>
+<a name='L98'>        <b>case</b> DLL_PROCESS_DETACH:
+<a name='L99'>            <b>if</b> (pfnReleaseActCtx)
+<a name='L100'>                (*pfnReleaseActCtx)(PyWin_DLLhActivationContext);
+<a name='L101'>            <b>break</b>;
+<a name='L102'>    <font color='red'>}</font>
+<a name='L103'>    <b>return</b> <a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>;
+<a name='L104'><font color='red'>}</font>
+<a name='L105'>
+<a name='L106'><font color='darkred'>#endif</font> <i><font color='green'>/* Py_ENABLE_SHARED */</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L47'>[^]</a><a href='#L79'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

@@ -1,0 +1,483 @@
+<html>
+<head>
+<title>Parser/parser.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3401.html'>Parser</a>/parser.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L30'>[^]</a><a href='#L387'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L30' title='Defined at 30.'>s_reset</a>
+<li><a href='#L38' title='Defined at 38.'>s_push</a>
+<li><a href='#L55' title='Defined at 55.'>s_pop</a>
+<li><a href='#L72' title='Defined at 72.'>PyParser_New</a>
+<li><a href='#L96' title='Defined at 96.'>PyParser_Delete</a>
+<li><a href='#L108' title='Defined at 108.'>shift</a>
+<li><a href='#L120' title='Defined at 120.'>push</a>
+<li><a href='#L137' title='Defined at 137.'>classify</a>
+<li><a href='#L186' title='Defined at 186.'>future_hack</a>
+<li><a href='#L228' title='Defined at 228.'>PyParser_AddToken</a>
+<li><a href='#L342' title='Defined at 342.'>dumptree</a>
+<li><a href='#L366' title='Defined at 366.'>showtree</a>
+<li><a href='#L387' title='Defined at 387.'>printtree</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Parser implementation */</font></i>
+<a name='L3'>
+<a name='L4'><i><font color='green'>/* For a description, see the comments at end of this file */</font></i>
+<a name='L5'>
+<a name='L6'><i><font color='green'>/* XXX To do: error recovery */</font></i>
+<a name='L7'>
+<a name='L8'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L9'><font color='darkred'>#include</font> "<a href='551.html'>pgenheaders.h</a>"
+<a name='L10'><font color='darkred'>#include</font> "<a href='582.html'>token.h</a>"
+<a name='L11'><font color='darkred'>#include</font> "<a href='530.html'>grammar.h</a>"
+<a name='L12'><font color='darkred'>#include</font> "<a href='543.html'>node.h</a>"
+<a name='L13'><font color='darkred'>#include</font> "<a href='2844.html'>parser.h</a>"
+<a name='L14'><font color='darkred'>#include</font> "<a href='521.html'>errcode.h</a>"
+<a name='L15'>
+<a name='L16'>
+<a name='L17'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L18'><b>extern</b> <b>int</b> Py_DebugFlag;
+<a name='L19'><font color='darkred'>#define</font> <a href='../R/657.html' title='Multiple refered from 23 places.'>D</a>(x) <b>if</b> (!Py_DebugFlag); <b>else</b> x
+<a name='L20'><font color='darkred'>#else</font>
+<a name='L21'><font color='darkred'>#define</font> <a href='../R/657.html' title='Multiple refered from 23 places.'>D</a>(x)
+<a name='L22'><font color='darkred'>#endif</font>
+<a name='L23'>
+<a name='L24'>
+<a name='L25'><i><font color='green'>/* STACK DATA TYPE */</font></i>
+<a name='L26'>
+<a name='L27'><b>static</b> <b>void</b> <a href='../S/2843.html#L30' title='Defined at 30 in Parser/parser.c.'>s_reset</a>(stack *);
+<a name='L28'>
+<a name='L29'><b>static</b> <b>void</b>
+<a name='L30'><a href='../R/10094.html' title='Multiple refered from 2 places.'>s_reset</a>(stack *s)
+<a name='L31'><font color='red'>{</font>
+<a name='L32'>    s-&gt;s_top = &amp;s-&gt;s_base[<a href='../S/2844.html#L10' title='Defined at 10 in Parser/parser.h.'>MAXSTACK</a>];
+<a name='L33'><font color='red'>}</font>
+<a name='L34'>
+<a name='L35'><font color='darkred'>#define</font> <a href='../R/10080.html' title='Multiple refered from 5 places.'>s_empty</a>(s) ((s)-&gt;s_top == &amp;(s)-&gt;s_base[<a href='../S/2844.html#L10' title='Defined at 10 in Parser/parser.h.'>MAXSTACK</a>])
+<a name='L36'>
+<a name='L37'><b>static</b> <b>int</b>
+<a name='L38'><a href='../R/10093.html' title='Multiple refered from 2 places.'>s_push</a>(<b>register</b> stack *s, dfa *d, node *parent)
+<a name='L39'><font color='red'>{</font>
+<a name='L40'>    <b>register</b> <a href='../S/2844.html#L16' title='Defined at 16 in Parser/parser.h.'>stackentry</a> *top;
+<a name='L41'>    <b>if</b> (s-&gt;s_top == s-&gt;s_base) <font color='red'>{</font>
+<a name='L42'>        fprintf(stderr, "s_push: parser stack overflow\n");
+<a name='L43'>        <b>return</b> <a href='../S/521.html#L21' title='Defined at 21 in Include/errcode.h.'>E_NOMEM</a>;
+<a name='L44'>    <font color='red'>}</font>
+<a name='L45'>    top = --s-&gt;s_top;
+<a name='L46'>    top-&gt;s_dfa = d;
+<a name='L47'>    top-&gt;s_parent = parent;
+<a name='L48'>    top-&gt;s_state = 0;
+<a name='L49'>    <b>return</b> 0;
+<a name='L50'><font color='red'>}</font>
+<a name='L51'>
+<a name='L52'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L53'>
+<a name='L54'><b>static</b> <b>void</b>
+<a name='L55'><a href='../R/10092.html' title='Multiple refered from 2 places.'>s_pop</a>(<b>register</b> stack *s)
+<a name='L56'><font color='red'>{</font>
+<a name='L57'>    <b>if</b> (<a href='../S/2843.html#L35' title='Defined at 35 in Parser/parser.c.'>s_empty</a>(s))
+<a name='L58'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("s_pop: parser stack underflow -- FATAL");
+<a name='L59'>    s-&gt;s_top++;
+<a name='L60'><font color='red'>}</font>
+<a name='L61'>
+<a name='L62'><font color='darkred'>#else</font> <i><font color='green'>/* !Py_DEBUG */</font></i>
+<a name='L63'>
+<a name='L64'><font color='darkred'>#define</font> <a href='../R/10092.html' title='Multiple refered from 2 places.'>s_pop</a>(s) (s)-&gt;s_top++
+<a name='L65'>
+<a name='L66'><font color='darkred'>#endif</font>
+<a name='L67'>
+<a name='L68'>
+<a name='L69'><i><font color='green'>/* PARSER CREATION */</font></i>
+<a name='L70'>
+<a name='L71'><a href='../S/2844.html#L31' title='Defined at 31 in Parser/parser.h.'>parser_state</a> *
+<a name='L72'><a href='../R/3313.html' title='Multiple refered from 2 places.'>PyParser_New</a>(grammar *g, <b>int</b> start)
+<a name='L73'><font color='red'>{</font>
+<a name='L74'>    <a href='../S/2844.html#L31' title='Defined at 31 in Parser/parser.h.'>parser_state</a> *ps;
+<a name='L75'>
+<a name='L76'>    <b>if</b> (!g-&gt;g_accel)
+<a name='L77'>        <a href='../S/2831.html#L24' title='Defined at 24 in Parser/acceler.c.'>PyGrammar_AddAccelerators</a>(g);
+<a name='L78'>    ps = (<a href='../S/2844.html#L31' title='Defined at 31 in Parser/parser.h.'>parser_state</a> *)PyMem_MALLOC(<b>sizeof</b>(<a href='../S/2844.html#L31' title='Defined at 31 in Parser/parser.h.'>parser_state</a>));
+<a name='L79'>    <b>if</b> (ps == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L80'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L81'>    ps-&gt;p_grammar = g;
+<a name='L82'><font color='darkred'>#ifdef</font> <a href='../S/511.html#L63' title='Defined at 63 in Include/code.h.'>PY_PARSER_REQUIRES_FUTURE_KEYWORD</a>
+<a name='L83'>    ps-&gt;p_flags = 0;
+<a name='L84'><font color='darkred'>#endif</font>
+<a name='L85'>    ps-&gt;p_tree = <a href='../S/2842.html#L8' title='Defined at 8 in Parser/node.c.'>PyNode_New</a>(start);
+<a name='L86'>    <b>if</b> (ps-&gt;p_tree == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L87'>        PyMem_FREE(ps);
+<a name='L88'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L89'>    <font color='red'>}</font>
+<a name='L90'>    <a href='../S/2843.html#L30' title='Defined at 30 in Parser/parser.c.'>s_reset</a>(&amp;ps-&gt;p_stack);
+<a name='L91'>    (<b>void</b>) <a href='../S/2843.html#L38' title='Defined at 38 in Parser/parser.c.'>s_push</a>(&amp;ps-&gt;p_stack, <a href='../S/2837.html#L12' title='Defined at 12 in Parser/grammar1.c.'>PyGrammar_FindDFA</a>(g, start), ps-&gt;p_tree);
+<a name='L92'>    <b>return</b> ps;
+<a name='L93'><font color='red'>}</font>
+<a name='L94'>
+<a name='L95'><b>void</b>
+<a name='L96'><a href='../R/3312.html' title='Multiple refered from 2 places.'>PyParser_Delete</a>(parser_state *ps)
+<a name='L97'><font color='red'>{</font>
+<a name='L98'>    <i><font color='green'>/* NB If you want to save the parse tree,</font></i>
+<a name='L99'><i><font color='green'>       you must set p_tree to NULL before calling delparser! */</font></i>
+<a name='L100'>    <a href='../S/2842.html#L120' title='Defined at 120 in Parser/node.c.'>PyNode_Free</a>(ps-&gt;p_tree);
+<a name='L101'>    PyMem_FREE(ps);
+<a name='L102'><font color='red'>}</font>
+<a name='L103'>
+<a name='L104'>
+<a name='L105'><i><font color='green'>/* PARSER STACK OPERATIONS */</font></i>
+<a name='L106'>
+<a name='L107'><b>static</b> <b>int</b>
+<a name='L108'><a href='../R/10298.html' title='Multiple refered from 30 places.'>shift</a>(<b>register</b> stack *s, <b>int</b> type, <b>char</b> *str, <b>int</b> newstate, <b>int</b> lineno, <b>int</b> col_offset)
+<a name='L109'><font color='red'>{</font>
+<a name='L110'>    <b>int</b> err;
+<a name='L111'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(!<a href='../S/2843.html#L35' title='Defined at 35 in Parser/parser.c.'>s_empty</a>(s));
+<a name='L112'>    err = <a href='../S/2842.html#L79' title='Defined at 79 in Parser/node.c.'>PyNode_AddChild</a>(s-&gt;s_top-&gt;s_parent, type, str, lineno, col_offset);
+<a name='L113'>    <b>if</b> (err)
+<a name='L114'>        <b>return</b> err;
+<a name='L115'>    s-&gt;s_top-&gt;s_state = newstate;
+<a name='L116'>    <b>return</b> 0;
+<a name='L117'><font color='red'>}</font>
+<a name='L118'>
+<a name='L119'><b>static</b> <b>int</b>
+<a name='L120'><a href='../R/9786.html' title='Multiple refered from 5 places.'>push</a>(<b>register</b> stack *s, <b>int</b> type, dfa *d, <b>int</b> newstate, <b>int</b> lineno, <b>int</b> col_offset)
+<a name='L121'><font color='red'>{</font>
+<a name='L122'>    <b>int</b> err;
+<a name='L123'>    <b>register</b> <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *n;
+<a name='L124'>    n = s-&gt;s_top-&gt;s_parent;
+<a name='L125'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(!<a href='../S/2843.html#L35' title='Defined at 35 in Parser/parser.c.'>s_empty</a>(s));
+<a name='L126'>    err = <a href='../S/2842.html#L79' title='Defined at 79 in Parser/node.c.'>PyNode_AddChild</a>(n, type, (<b>char</b> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, lineno, col_offset);
+<a name='L127'>    <b>if</b> (err)
+<a name='L128'>        <b>return</b> err;
+<a name='L129'>    s-&gt;s_top-&gt;s_state = newstate;
+<a name='L130'>    <b>return</b> <a href='../S/2843.html#L38' title='Defined at 38 in Parser/parser.c.'>s_push</a>(s, d, CHILD(n, NCH(n)-1));
+<a name='L131'><font color='red'>}</font>
+<a name='L132'>
+<a name='L133'>
+<a name='L134'><i><font color='green'>/* PARSER PROPER */</font></i>
+<a name='L135'>
+<a name='L136'><b>static</b> <b>int</b>
+<a name='L137'><a href='../S/2843.html#L237' title='Refered from 237 in Parser/parser.c.'>classify</a>(parser_state *ps, <b>int</b> type, <b>char</b> *str)
+<a name='L138'><font color='red'>{</font>
+<a name='L139'>    <a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *g = ps-&gt;p_grammar;
+<a name='L140'>    <b>register</b> <b>int</b> n = g-&gt;g_ll.ll_nlabels;
+<a name='L141'>
+<a name='L142'>    <b>if</b> (type == <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>) <font color='red'>{</font>
+<a name='L143'>        <b>register</b> <b>char</b> *s = str;
+<a name='L144'>        <b>register</b> <a href='../S/530.html#L17' title='Defined at 17 in Include/grammar.h.'>label</a> *l = g-&gt;g_ll.ll_label;
+<a name='L145'>        <b>register</b> <b>int</b> i;
+<a name='L146'>        <b>for</b> (i = n; i &gt; 0; i--, l++) <font color='red'>{</font>
+<a name='L147'>            <b>if</b> (l-&gt;lb_type != <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a> || l-&gt;lb_str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L148'>                l-&gt;lb_str[0] != s[0] ||
+<a name='L149'>                strcmp(l-&gt;lb_str, s) != 0)
+<a name='L150'>                <b>continue</b>;
+<a name='L151'><font color='darkred'>#ifdef</font> <a href='../S/511.html#L63' title='Defined at 63 in Include/code.h.'>PY_PARSER_REQUIRES_FUTURE_KEYWORD</a>
+<a name='L152'><font color='darkred'>#if</font> 0
+<a name='L153'>            <i><font color='green'>/* Leaving this in as an example */</font></i>
+<a name='L154'>            <b>if</b> (!(ps-&gt;p_flags &amp; <a href='../S/511.html#L54' title='Defined at 54 in Include/code.h.'>CO_FUTURE_WITH_STATEMENT</a>)) <font color='red'>{</font>
+<a name='L155'>                <b>if</b> (s[0] == 'w' &amp;&amp; strcmp(s, "with") == 0)
+<a name='L156'>                    <b>break</b>; <i><font color='green'>/* not a keyword yet */</font></i>
+<a name='L157'>                <b>else</b> <b>if</b> (s[0] == 'a' &amp;&amp; strcmp(s, "as") == 0)
+<a name='L158'>                    <b>break</b>; <i><font color='green'>/* not a keyword yet */</font></i>
+<a name='L159'>            <font color='red'>}</font>
+<a name='L160'><font color='darkred'>#endif</font>
+<a name='L161'><font color='darkred'>#endif</font>
+<a name='L162'>            <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf("It's a keyword\n"));
+<a name='L163'>            <b>return</b> n - i;
+<a name='L164'>        <font color='red'>}</font>
+<a name='L165'>    <font color='red'>}</font>
+<a name='L166'>
+<a name='L167'>    <font color='red'>{</font>
+<a name='L168'>        <b>register</b> <a href='../S/530.html#L17' title='Defined at 17 in Include/grammar.h.'>label</a> *l = g-&gt;g_ll.ll_label;
+<a name='L169'>        <b>register</b> <b>int</b> i;
+<a name='L170'>        <b>for</b> (i = n; i &gt; 0; i--, l++) <font color='red'>{</font>
+<a name='L171'>            <b>if</b> (l-&gt;lb_type == type &amp;&amp; l-&gt;lb_str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L172'>                <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf("It's a token we know\n"));
+<a name='L173'>                <b>return</b> n - i;
+<a name='L174'>            <font color='red'>}</font>
+<a name='L175'>        <font color='red'>}</font>
+<a name='L176'>    <font color='red'>}</font>
+<a name='L177'>
+<a name='L178'>    <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf("Illegal token\n"));
+<a name='L179'>    <b>return</b> -1;
+<a name='L180'><font color='red'>}</font>
+<a name='L181'>
+<a name='L182'><font color='darkred'>#ifdef</font> <a href='../S/511.html#L63' title='Defined at 63 in Include/code.h.'>PY_PARSER_REQUIRES_FUTURE_KEYWORD</a>
+<a name='L183'><font color='darkred'>#if</font> 0
+<a name='L184'><i><font color='green'>/* Leaving this in as an example */</font></i>
+<a name='L185'><b>static</b> <b>void</b>
+<a name='L186'><a href='../R/7966.html' title='Multiple refered from 2 places.'>future_hack</a>(parser_state *ps)
+<a name='L187'><font color='red'>{</font>
+<a name='L188'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *n = ps-&gt;p_stack.s_top-&gt;s_parent;
+<a name='L189'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *ch, *cch;
+<a name='L190'>    <b>int</b> i;
+<a name='L191'>
+<a name='L192'>    <i><font color='green'>/* from __future__ import ..., must have at least 4 children */</font></i>
+<a name='L193'>    n = CHILD(n, 0);
+<a name='L194'>    <b>if</b> (NCH(n) &lt; 4)
+<a name='L195'>        <b>return</b>;
+<a name='L196'>    ch = CHILD(n, 0);
+<a name='L197'>    <b>if</b> (STR(ch) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || strcmp(STR(ch), "from") != 0)
+<a name='L198'>        <b>return</b>;
+<a name='L199'>    ch = CHILD(n, 1);
+<a name='L200'>    <b>if</b> (NCH(ch) == 1 &amp;&amp; STR(CHILD(ch, 0)) &amp;&amp;
+<a name='L201'>        strcmp(STR(CHILD(ch, 0)), "__future__") != 0)
+<a name='L202'>        <b>return</b>;
+<a name='L203'>    ch = CHILD(n, 3);
+<a name='L204'>    <i><font color='green'>/* ch can be a star, a parenthesis or import_as_names */</font></i>
+<a name='L205'>    <b>if</b> (<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(ch) == <a href='../S/582.html#L28' title='Defined at 28 in Include/token.h.'>STAR</a>)
+<a name='L206'>        <b>return</b>;
+<a name='L207'>    <b>if</b> (<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(ch) == <a href='../S/582.html#L19' title='Defined at 19 in Include/token.h.'>LPAR</a>)
+<a name='L208'>        ch = CHILD(n, 4);
+<a name='L209'>
+<a name='L210'>    <b>for</b> (i = 0; i &lt; NCH(ch); i += 2) <font color='red'>{</font>
+<a name='L211'>        cch = CHILD(ch, i);
+<a name='L212'>        <b>if</b> (NCH(cch) &gt;= 1 &amp;&amp; <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(CHILD(cch, 0)) == <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>) <font color='red'>{</font>
+<a name='L213'>            <b>char</b> *str_ch = STR(CHILD(cch, 0));
+<a name='L214'>            <b>if</b> (strcmp(str_ch, <a href='../S/513.html#L26' title='Defined at 26 in Include/compile.h.'>FUTURE_WITH_STATEMENT</a>) == 0) <font color='red'>{</font>
+<a name='L215'>                ps-&gt;p_flags |= <a href='../S/511.html#L54' title='Defined at 54 in Include/code.h.'>CO_FUTURE_WITH_STATEMENT</a>;
+<a name='L216'>            <font color='red'>}</font> <b>else</b> <b>if</b> (strcmp(str_ch, <a href='../S/513.html#L27' title='Defined at 27 in Include/compile.h.'>FUTURE_PRINT_FUNCTION</a>) == 0) <font color='red'>{</font>
+<a name='L217'>                ps-&gt;p_flags |= <a href='../S/511.html#L55' title='Defined at 55 in Include/code.h.'>CO_FUTURE_PRINT_FUNCTION</a>;
+<a name='L218'>            <font color='red'>}</font> <b>else</b> <b>if</b> (strcmp(str_ch, <a href='../S/513.html#L28' title='Defined at 28 in Include/compile.h.'>FUTURE_UNICODE_LITERALS</a>) == 0) <font color='red'>{</font>
+<a name='L219'>                ps-&gt;p_flags |= <a href='../S/511.html#L56' title='Defined at 56 in Include/code.h.'>CO_FUTURE_UNICODE_LITERALS</a>;
+<a name='L220'>            <font color='red'>}</font>
+<a name='L221'>        <font color='red'>}</font>
+<a name='L222'>    <font color='red'>}</font>
+<a name='L223'><font color='red'>}</font>
+<a name='L224'><font color='darkred'>#endif</font>
+<a name='L225'><font color='darkred'>#endif</font> <i><font color='green'>/* future keyword */</font></i>
+<a name='L226'>
+<a name='L227'><b>int</b>
+<a name='L228'><a href='../R/3311.html' title='Multiple refered from 2 places.'>PyParser_AddToken</a>(<b>register</b> parser_state *ps, <b>register</b> <b>int</b> type, <b>char</b> *str,
+<a name='L229'>                  <b>int</b> lineno, <b>int</b> col_offset, <b>int</b> *expected_ret)
+<a name='L230'><font color='red'>{</font>
+<a name='L231'>    <b>register</b> <b>int</b> ilabel;
+<a name='L232'>    <b>int</b> err;
+<a name='L233'>
+<a name='L234'>    <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf("Token %s/'%s' ... ", _PyParser_TokenNames[type], str));
+<a name='L235'>
+<a name='L236'>    <i><font color='green'>/* Find out which label this token is */</font></i>
+<a name='L237'>    ilabel = <a href='../S/2843.html#L137' title='Defined at 137 in Parser/parser.c.'>classify</a>(ps, type, str);
+<a name='L238'>    <b>if</b> (ilabel &lt; 0)
+<a name='L239'>        <b>return</b> <a href='../S/521.html#L20' title='Defined at 20 in Include/errcode.h.'>E_SYNTAX</a>;
+<a name='L240'>
+<a name='L241'>    <i><font color='green'>/* Loop until the token is shifted or an error occurred */</font></i>
+<a name='L242'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L243'>        <i><font color='green'>/* Fetch the current dfa and state */</font></i>
+<a name='L244'>        <b>register</b> <a href='../S/530.html#L57' title='Defined at 57 in Include/grammar.h.'>dfa</a> *d = ps-&gt;p_stack.s_top-&gt;s_dfa;
+<a name='L245'>        <b>register</b> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> *s = &amp;d-&gt;d_state[ps-&gt;p_stack.s_top-&gt;s_state];
+<a name='L246'>
+<a name='L247'>        <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" DFA '%s', state %d:",
+<a name='L248'>            d-&gt;d_name, ps-&gt;p_stack.s_top-&gt;s_state));
+<a name='L249'>
+<a name='L250'>        <i><font color='green'>/* Check accelerator */</font></i>
+<a name='L251'>        <b>if</b> (s-&gt;s_lower &lt;= ilabel &amp;&amp; ilabel &lt; s-&gt;s_upper) <font color='red'>{</font>
+<a name='L252'>            <b>register</b> <b>int</b> x = s-&gt;s_accel[ilabel - s-&gt;s_lower];
+<a name='L253'>            <b>if</b> (x != -1) <font color='red'>{</font>
+<a name='L254'>                <b>if</b> (x &amp; (1&lt;&lt;7)) <font color='red'>{</font>
+<a name='L255'>                    <i><font color='green'>/* Push non-terminal */</font></i>
+<a name='L256'>                    <b>int</b> nt = (x &gt;&gt; 8) + <a href='../S/582.html#L72' title='Defined at 72 in Include/token.h.'>NT_OFFSET</a>;
+<a name='L257'>                    <b>int</b> arrow = x &amp; ((1&lt;&lt;7)-1);
+<a name='L258'>                    <a href='../S/530.html#L57' title='Defined at 57 in Include/grammar.h.'>dfa</a> *d1 = <a href='../S/2837.html#L12' title='Defined at 12 in Parser/grammar1.c.'>PyGrammar_FindDFA</a>(
+<a name='L259'>                        ps-&gt;p_grammar, nt);
+<a name='L260'>                    <b>if</b> ((err = <a href='../S/2843.html#L120' title='Defined at 120 in Parser/parser.c.'>push</a>(&amp;ps-&gt;p_stack, nt, d1,
+<a name='L261'>                        arrow, lineno, col_offset)) &gt; 0) <font color='red'>{</font>
+<a name='L262'>                        <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" MemError: push\n"));
+<a name='L263'>                        <b>return</b> err;
+<a name='L264'>                    <font color='red'>}</font>
+<a name='L265'>                    <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" Push ...\n"));
+<a name='L266'>                    <b>continue</b>;
+<a name='L267'>                <font color='red'>}</font>
+<a name='L268'>
+<a name='L269'>                <i><font color='green'>/* Shift the token */</font></i>
+<a name='L270'>                <b>if</b> ((err = <a href='../S/2843.html#L108' title='Defined at 108 in Parser/parser.c.'>shift</a>(&amp;ps-&gt;p_stack, type, str,
+<a name='L271'>                                x, lineno, col_offset)) &gt; 0) <font color='red'>{</font>
+<a name='L272'>                    <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" MemError: shift.\n"));
+<a name='L273'>                    <b>return</b> err;
+<a name='L274'>                <font color='red'>}</font>
+<a name='L275'>                <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" Shift.\n"));
+<a name='L276'>                <i><font color='green'>/* Pop while we are in an accept-only state */</font></i>
+<a name='L277'>                <b>while</b> (s = &amp;d-&gt;d_state
+<a name='L278'>                                [ps-&gt;p_stack.s_top-&gt;s_state],
+<a name='L279'>                    s-&gt;s_accept &amp;&amp; s-&gt;s_narcs == 1) <font color='red'>{</font>
+<a name='L280'>                    <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf("  DFA '%s', state %d: "
+<a name='L281'>                             "Direct pop.\n",
+<a name='L282'>                             d-&gt;d_name,
+<a name='L283'>                             ps-&gt;p_stack.s_top-&gt;s_state));
+<a name='L284'><font color='darkred'>#ifdef</font> <a href='../S/511.html#L63' title='Defined at 63 in Include/code.h.'>PY_PARSER_REQUIRES_FUTURE_KEYWORD</a>
+<a name='L285'><font color='darkred'>#if</font> 0
+<a name='L286'>                    <b>if</b> (d-&gt;d_name[0] == 'i' &amp;&amp;
+<a name='L287'>                        strcmp(d-&gt;d_name,
+<a name='L288'>                           "import_stmt") == 0)
+<a name='L289'>                        <a href='../S/2843.html#L186' title='Defined at 186 in Parser/parser.c.'>future_hack</a>(ps);
+<a name='L290'><font color='darkred'>#endif</font>
+<a name='L291'><font color='darkred'>#endif</font>
+<a name='L292'>                    <a href='../D/10945.html' title='Multiple defined in 2 places.'>s_pop</a>(&amp;ps-&gt;p_stack);
+<a name='L293'>                    <b>if</b> (<a href='../S/2843.html#L35' title='Defined at 35 in Parser/parser.c.'>s_empty</a>(&amp;ps-&gt;p_stack)) <font color='red'>{</font>
+<a name='L294'>                        <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf("  ACCEPT.\n"));
+<a name='L295'>                        <b>return</b> <a href='../S/521.html#L22' title='Defined at 22 in Include/errcode.h.'>E_DONE</a>;
+<a name='L296'>                    <font color='red'>}</font>
+<a name='L297'>                    d = ps-&gt;p_stack.s_top-&gt;s_dfa;
+<a name='L298'>                <font color='red'>}</font>
+<a name='L299'>                <b>return</b> <a href='../S/521.html#L16' title='Defined at 16 in Include/errcode.h.'>E_OK</a>;
+<a name='L300'>            <font color='red'>}</font>
+<a name='L301'>        <font color='red'>}</font>
+<a name='L302'>
+<a name='L303'>        <b>if</b> (s-&gt;s_accept) <font color='red'>{</font>
+<a name='L304'><font color='darkred'>#ifdef</font> <a href='../S/511.html#L63' title='Defined at 63 in Include/code.h.'>PY_PARSER_REQUIRES_FUTURE_KEYWORD</a>
+<a name='L305'><font color='darkred'>#if</font> 0
+<a name='L306'>            <b>if</b> (d-&gt;d_name[0] == 'i' &amp;&amp;
+<a name='L307'>                strcmp(d-&gt;d_name, "import_stmt") == 0)
+<a name='L308'>                <a href='../S/2843.html#L186' title='Defined at 186 in Parser/parser.c.'>future_hack</a>(ps);
+<a name='L309'><font color='darkred'>#endif</font>
+<a name='L310'><font color='darkred'>#endif</font>
+<a name='L311'>            <i><font color='green'>/* Pop this dfa and try again */</font></i>
+<a name='L312'>            <a href='../D/10945.html' title='Multiple defined in 2 places.'>s_pop</a>(&amp;ps-&gt;p_stack);
+<a name='L313'>            <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" Pop ...\n"));
+<a name='L314'>            <b>if</b> (<a href='../S/2843.html#L35' title='Defined at 35 in Parser/parser.c.'>s_empty</a>(&amp;ps-&gt;p_stack)) <font color='red'>{</font>
+<a name='L315'>                <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" Error: bottom of stack.\n"));
+<a name='L316'>                <b>return</b> <a href='../S/521.html#L20' title='Defined at 20 in Include/errcode.h.'>E_SYNTAX</a>;
+<a name='L317'>            <font color='red'>}</font>
+<a name='L318'>            <b>continue</b>;
+<a name='L319'>        <font color='red'>}</font>
+<a name='L320'>
+<a name='L321'>        <i><font color='green'>/* Stuck, report syntax error */</font></i>
+<a name='L322'>        <a href='../D/703.html' title='Multiple defined in 3 places.'>D</a>(printf(" Error.\n"));
+<a name='L323'>        <b>if</b> (expected_ret) <font color='red'>{</font>
+<a name='L324'>            <b>if</b> (s-&gt;s_lower == s-&gt;s_upper - 1) <font color='red'>{</font>
+<a name='L325'>                <i><font color='green'>/* Only one possible expected token */</font></i>
+<a name='L326'>                *expected_ret = ps-&gt;p_grammar-&gt;
+<a name='L327'>                    g_ll.ll_label[s-&gt;s_lower].lb_type;
+<a name='L328'>            <font color='red'>}</font>
+<a name='L329'>            <b>else</b>
+<a name='L330'>                *expected_ret = -1;
+<a name='L331'>        <font color='red'>}</font>
+<a name='L332'>        <b>return</b> <a href='../S/521.html#L20' title='Defined at 20 in Include/errcode.h.'>E_SYNTAX</a>;
+<a name='L333'>    <font color='red'>}</font>
+<a name='L334'><font color='red'>}</font>
+<a name='L335'>
+<a name='L336'>
+<a name='L337'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L338'>
+<a name='L339'><i><font color='green'>/* DEBUG OUTPUT */</font></i>
+<a name='L340'>
+<a name='L341'><b>void</b>
+<a name='L342'><a href='../R/7492.html' title='Multiple refered from 2 places.'>dumptree</a>(grammar *g, node *n)
+<a name='L343'><font color='red'>{</font>
+<a name='L344'>    <b>int</b> i;
+<a name='L345'>
+<a name='L346'>    <b>if</b> (n == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L347'>        printf("NIL");
+<a name='L348'>    <b>else</b> <font color='red'>{</font>
+<a name='L349'>        <a href='../S/530.html#L17' title='Defined at 17 in Include/grammar.h.'>label</a> l;
+<a name='L350'>        l.lb_type = <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(n);
+<a name='L351'>        l.lb_str = STR(n);
+<a name='L352'>        printf("%s", <a href='../S/2837.html#L34' title='Defined at 34 in Parser/grammar1.c.'>PyGrammar_LabelRepr</a>(&amp;l));
+<a name='L353'>        <b>if</b> (<a href='../S/582.html#L75' title='Defined at 75 in Include/token.h.'>ISNONTERMINAL</a>(<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(n))) <font color='red'>{</font>
+<a name='L354'>            printf("(");
+<a name='L355'>            <b>for</b> (i = 0; i &lt; NCH(n); i++) <font color='red'>{</font>
+<a name='L356'>                <b>if</b> (i &gt; 0)
+<a name='L357'>                    printf(",");
+<a name='L358'>                <a href='../S/2843.html#L342' title='Defined at 342 in Parser/parser.c.'>dumptree</a>(g, CHILD(n, i));
+<a name='L359'>            <font color='red'>}</font>
+<a name='L360'>            printf(")");
+<a name='L361'>        <font color='red'>}</font>
+<a name='L362'>    <font color='red'>}</font>
+<a name='L363'><font color='red'>}</font>
+<a name='L364'>
+<a name='L365'><b>void</b>
+<a name='L366'><a href='../R/10305.html' title='Multiple refered from 2 places.'>showtree</a>(grammar *g, node *n)
+<a name='L367'><font color='red'>{</font>
+<a name='L368'>    <b>int</b> i;
+<a name='L369'>
+<a name='L370'>    <b>if</b> (n == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L371'>        <b>return</b>;
+<a name='L372'>    <b>if</b> (<a href='../S/582.html#L75' title='Defined at 75 in Include/token.h.'>ISNONTERMINAL</a>(<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(n))) <font color='red'>{</font>
+<a name='L373'>        <b>for</b> (i = 0; i &lt; NCH(n); i++)
+<a name='L374'>            <a href='../S/2843.html#L366' title='Defined at 366 in Parser/parser.c.'>showtree</a>(g, CHILD(n, i));
+<a name='L375'>    <font color='red'>}</font>
+<a name='L376'>    <b>else</b> <b>if</b> (<a href='../S/582.html#L74' title='Defined at 74 in Include/token.h.'>ISTERMINAL</a>(<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(n))) <font color='red'>{</font>
+<a name='L377'>        printf("%s", _PyParser_TokenNames[<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(n)]);
+<a name='L378'>        <b>if</b> (<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(n) == <a href='../S/582.html#L14' title='Defined at 14 in Include/token.h.'>NUMBER</a> || <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>(n) == <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>)
+<a name='L379'>            printf("(%s)", STR(n));
+<a name='L380'>        printf(" ");
+<a name='L381'>    <font color='red'>}</font>
+<a name='L382'>    <b>else</b>
+<a name='L383'>        printf("? ");
+<a name='L384'><font color='red'>}</font>
+<a name='L385'>
+<a name='L386'><b>void</b>
+<a name='L387'>printtree(parser_state *ps)
+<a name='L388'><font color='red'>{</font>
+<a name='L389'>    <b>if</b> (Py_DebugFlag) <font color='red'>{</font>
+<a name='L390'>        printf("Parse tree:\n");
+<a name='L391'>        <a href='../S/2843.html#L342' title='Defined at 342 in Parser/parser.c.'>dumptree</a>(ps-&gt;p_grammar, ps-&gt;p_tree);
+<a name='L392'>        printf("\n");
+<a name='L393'>        printf("Tokens:\n");
+<a name='L394'>        <a href='../S/2843.html#L366' title='Defined at 366 in Parser/parser.c.'>showtree</a>(ps-&gt;p_grammar, ps-&gt;p_tree);
+<a name='L395'>        printf("\n");
+<a name='L396'>    <font color='red'>}</font>
+<a name='L397'>    printf("Listing:\n");
+<a name='L398'>    <a href='../S/2839.html#L13' title='Defined at 13 in Parser/listnode.c.'>PyNode_ListTree</a>(ps-&gt;p_tree);
+<a name='L399'>    printf("\n");
+<a name='L400'><font color='red'>}</font>
+<a name='L401'>
+<a name='L402'><font color='darkred'>#endif</font> <i><font color='green'>/* Py_DEBUG */</font></i>
+<a name='L403'>
+<a name='L404'><i><font color='green'>/*</font></i>
+<a name='L405'><i><font color='green'></font></i>
+<a name='L406'><i><font color='green'>Description</font></i>
+<a name='L407'><i><font color='green'>-----------</font></i>
+<a name='L408'><i><font color='green'></font></i>
+<a name='L409'><i><font color='green'>The parser's interface is different than usual: the function addtoken()</font></i>
+<a name='L410'><i><font color='green'>must be called for each token in the input.  This makes it possible to</font></i>
+<a name='L411'><i><font color='green'>turn it into an incremental parsing system later.  The parsing system</font></i>
+<a name='L412'><i><font color='green'>constructs a parse tree as it goes.</font></i>
+<a name='L413'><i><font color='green'></font></i>
+<a name='L414'><i><font color='green'>A parsing rule is represented as a Deterministic Finite-state Automaton</font></i>
+<a name='L415'><i><font color='green'>(DFA).  A node in a DFA represents a state of the parser; an arc represents</font></i>
+<a name='L416'><i><font color='green'>a transition.  Transitions are either labeled with terminal symbols or</font></i>
+<a name='L417'><i><font color='green'>with non-terminals.  When the parser decides to follow an arc labeled</font></i>
+<a name='L418'><i><font color='green'>with a non-terminal, it is invoked recursively with the DFA representing</font></i>
+<a name='L419'><i><font color='green'>the parsing rule for that as its initial state; when that DFA accepts,</font></i>
+<a name='L420'><i><font color='green'>the parser that invoked it continues.  The parse tree constructed by the</font></i>
+<a name='L421'><i><font color='green'>recursively called parser is inserted as a child in the current parse tree.</font></i>
+<a name='L422'><i><font color='green'></font></i>
+<a name='L423'><i><font color='green'>The DFA's can be constructed automatically from a more conventional</font></i>
+<a name='L424'><i><font color='green'>language description.  An extended LL(1) grammar (ELL(1)) is suitable.</font></i>
+<a name='L425'><i><font color='green'>Certain restrictions make the parser's life easier: rules that can produce</font></i>
+<a name='L426'><i><font color='green'>the empty string should be outlawed (there are other ways to put loops</font></i>
+<a name='L427'><i><font color='green'>or optional parts in the language).  To avoid the need to construct</font></i>
+<a name='L428'><i><font color='green'>FIRST sets, we can require that all but the last alternative of a rule</font></i>
+<a name='L429'><i><font color='green'>(really: arc going out of a DFA's state) must begin with a terminal</font></i>
+<a name='L430'><i><font color='green'>symbol.</font></i>
+<a name='L431'><i><font color='green'></font></i>
+<a name='L432'><i><font color='green'>As an example, consider this grammar:</font></i>
+<a name='L433'><i><font color='green'></font></i>
+<a name='L434'><i><font color='green'>expr:   term (OP term)*</font></i>
+<a name='L435'><i><font color='green'>term:   CONSTANT | '(' expr ')'</font></i>
+<a name='L436'><i><font color='green'></font></i>
+<a name='L437'><i><font color='green'>The DFA corresponding to the rule for expr is:</font></i>
+<a name='L438'><i><font color='green'></font></i>
+<a name='L439'><i><font color='green'>-------&gt;.---term--&gt;.-------&gt;</font></i>
+<a name='L440'><i><font color='green'>    ^          |</font></i>
+<a name='L441'><i><font color='green'>    |          |</font></i>
+<a name='L442'><i><font color='green'>    \----OP----/</font></i>
+<a name='L443'><i><font color='green'></font></i>
+<a name='L444'><i><font color='green'>The parse tree generated for the input a+b is:</font></i>
+<a name='L445'><i><font color='green'></font></i>
+<a name='L446'><i><font color='green'>(expr: (term: (NAME: a)), (OP: +), (term: (NAME: b)))</font></i>
+<a name='L447'><i><font color='green'></font></i>
+<a name='L448'><i><font color='green'>*/</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L30'>[^]</a><a href='#L387'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

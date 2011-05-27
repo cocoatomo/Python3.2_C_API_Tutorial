@@ -1,0 +1,1006 @@
+<html>
+<head>
+<title>Modules/termios.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/termios.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L43'>[^]</a><a href='#L956'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L43' title='Defined at 43.'>fdconv</a>
+<li><a href='#L67' title='Defined at 67.'>termios_tcgetattr</a>
+<li><a href='#L144' title='Defined at 144.'>termios_tcsetattr</a>
+<li><a href='#L214' title='Defined at 214.'>termios_tcsendbreak</a>
+<li><a href='#L234' title='Defined at 234.'>termios_tcdrain</a>
+<li><a href='#L257' title='Defined at 257.'>termios_tcflush</a>
+<li><a href='#L280' title='Defined at 280.'>termios_tcflow</a>
+<li><a href='#L956' title='Defined at 956.'>PyInit_termios</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* termiosmodule.c -- POSIX terminal I/O module implementation.  */</font></i>
+<a name='L2'>
+<a name='L3'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L4'>
+<a name='L5'><i><font color='green'>/* Apparently, on SGI, termios.h won't define CTRL if _XOPEN_SOURCE</font></i>
+<a name='L6'><i><font color='green'>   is defined, so we define it here. */</font></i>
+<a name='L7'><font color='darkred'>#if</font> <b>defined</b>(__sgi)
+<a name='L8'><font color='darkred'>#define</font> CTRL(c) ((c)&amp;037)
+<a name='L9'><font color='darkred'>#endif</font>
+<a name='L10'>
+<a name='L11'><font color='darkred'>#include</font> &lt;termios.h&gt;
+<a name='L12'><font color='darkred'>#ifdef</font> __osf__
+<a name='L13'><i><font color='green'>/* On OSF, sys/ioctl.h requires that struct termio already be defined,</font></i>
+<a name='L14'><i><font color='green'> * so this needs to be included first on that platform. */</font></i>
+<a name='L15'><font color='darkred'>#include</font> &lt;termio.h&gt;
+<a name='L16'><font color='darkred'>#endif</font>
+<a name='L17'><font color='darkred'>#include</font> &lt;sys/ioctl.h&gt;
+<a name='L18'>
+<a name='L19'><i><font color='green'>/* HP-UX requires that this be included to pick up MDCD, MCTS, MDSR,</font></i>
+<a name='L20'><i><font color='green'> * MDTR, MRI, and MRTS (appearantly used internally by some things</font></i>
+<a name='L21'><i><font color='green'> * defined as macros; these are not used here directly).</font></i>
+<a name='L22'><i><font color='green'> */</font></i>
+<a name='L23'><font color='darkred'>#ifdef</font> HAVE_SYS_MODEM_H
+<a name='L24'><font color='darkred'>#include</font> &lt;sys/modem.h&gt;
+<a name='L25'><font color='darkred'>#endif</font>
+<a name='L26'><i><font color='green'>/* HP-UX requires that this be included to pick up TIOCGPGRP and friends */</font></i>
+<a name='L27'><font color='darkred'>#ifdef</font> HAVE_SYS_BSDTTY_H
+<a name='L28'><font color='darkred'>#include</font> &lt;sys/bsdtty.h&gt;
+<a name='L29'><font color='darkred'>#endif</font>
+<a name='L30'>
+<a name='L31'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(termios__doc__,
+<a name='L32'>"This module provides an interface to the Posix calls for tty I/O control.\n\
+<a name='L33'>For a complete description of these calls, see the Posix or Unix manual\n\
+<a name='L34'>pages. It is only available for those Unix versions that support Posix\n\
+<a name='L35'>termios style tty I/O control.\n\
+<a name='L36'>\n\
+<a name='L37'>All functions in this module take a file descriptor fd as their first\n\
+<a name='L38'>argument. This can be an integer file descriptor, such as returned by\n\
+<a name='L39'>sys.stdin.fileno(), or a file object, such as sys.stdin itself.");
+<a name='L40'>
+<a name='L41'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *TermiosError;
+<a name='L42'>
+<a name='L43'><b>static</b> <b>int</b> <a href='../R/7674.html' title='Multiple refered from 6 places.'>fdconv</a>(PyObject* obj, <b>void</b>* p)
+<a name='L44'><font color='red'>{</font>
+<a name='L45'>    <b>int</b> fd;
+<a name='L46'>
+<a name='L47'>    fd = <a href='../S/2790.html#L197' title='Defined at 197 in Objects/fileobject.c.'>PyObject_AsFileDescriptor</a>(obj);
+<a name='L48'>    <b>if</b> (fd &gt;= 0) <font color='red'>{</font>
+<a name='L49'>        *(<b>int</b>*)p = fd;
+<a name='L50'>        <b>return</b> 1;
+<a name='L51'>    <font color='red'>}</font>
+<a name='L52'>    <b>return</b> 0;
+<a name='L53'><font color='red'>}</font>
+<a name='L54'>
+<a name='L55'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(termios_tcgetattr__doc__,
+<a name='L56'>"tcgetattr(fd) -&gt; list_of_attrs\n\
+<a name='L57'>\n\
+<a name='L58'>Get the tty attributes for file descriptor fd, as follows:\n\
+<a name='L59'>[iflag, oflag, cflag, lflag, ispeed, ospeed, cc] where cc is a list\n\
+<a name='L60'>of the tty special characters (each a string of length 1, except the items\n\
+<a name='L61'>with indices VMIN and VTIME, which are integers when these fields are\n\
+<a name='L62'>defined).  The interpretation of the flags and the speeds as well as the\n\
+<a name='L63'>indexing in the cc array must be done using the symbolic constants defined\n\
+<a name='L64'>in this module.");
+<a name='L65'>
+<a name='L66'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L67'><a href='../S/2718.html#L296' title='Refered from 296 in Modules/termios.c.'>termios_tcgetattr</a>(PyObject *self, PyObject *args)
+<a name='L68'><font color='red'>{</font>
+<a name='L69'>    <b>int</b> fd;
+<a name='L70'>    <b>struct</b> termios mode;
+<a name='L71'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *cc;
+<a name='L72'>    speed_t ispeed, ospeed;
+<a name='L73'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L74'>    <b>int</b> i;
+<a name='L75'>    <b>char</b> ch;
+<a name='L76'>
+<a name='L77'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;:tcgetattr",
+<a name='L78'>                          <a href='../S/2718.html#L43' title='Defined at 43 in Modules/termios.c.'>fdconv</a>, (<b>void</b>*)&amp;fd))
+<a name='L79'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L80'>
+<a name='L81'>    <b>if</b> (tcgetattr(fd, &amp;mode) == -1)
+<a name='L82'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L83'>
+<a name='L84'>    ispeed = cfgetispeed(&amp;mode);
+<a name='L85'>    ospeed = cfgetospeed(&amp;mode);
+<a name='L86'>
+<a name='L87'>    cc = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(NCCS);
+<a name='L88'>    <b>if</b> (cc == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L89'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L90'>    <b>for</b> (i = 0; i &lt; NCCS; i++) <font color='red'>{</font>
+<a name='L91'>        ch = (<b>char</b>)mode.c_cc[i];
+<a name='L92'>        v = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(&amp;ch, 1);
+<a name='L93'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L94'>            <b>goto</b> err;
+<a name='L95'>        <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(cc, i, v);
+<a name='L96'>    <font color='red'>}</font>
+<a name='L97'>
+<a name='L98'>    <i><font color='green'>/* Convert the MIN and TIME slots to integer.  On some systems, the</font></i>
+<a name='L99'><i><font color='green'>       MIN and TIME slots are the same as the EOF and EOL slots.  So we</font></i>
+<a name='L100'><i><font color='green'>       only do this in noncanonical input mode.  */</font></i>
+<a name='L101'>    <b>if</b> ((mode.c_lflag &amp; ICANON) == 0) <font color='red'>{</font>
+<a name='L102'>        v = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)mode.c_cc[VMIN]);
+<a name='L103'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L104'>            <b>goto</b> err;
+<a name='L105'>        <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(cc, VMIN, v);
+<a name='L106'>        v = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)mode.c_cc[VTIME]);
+<a name='L107'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L108'>            <b>goto</b> err;
+<a name='L109'>        <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(cc, VTIME, v);
+<a name='L110'>    <font color='red'>}</font>
+<a name='L111'>
+<a name='L112'>    <b>if</b> (!(v = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(7)))
+<a name='L113'>        <b>goto</b> err;
+<a name='L114'>
+<a name='L115'>    <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(v, 0, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)mode.c_iflag));
+<a name='L116'>    <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(v, 1, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)mode.c_oflag));
+<a name='L117'>    <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(v, 2, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)mode.c_cflag));
+<a name='L118'>    <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(v, 3, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)mode.c_lflag));
+<a name='L119'>    <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(v, 4, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)ispeed));
+<a name='L120'>    <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(v, 5, <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)ospeed));
+<a name='L121'>    <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(v, 6, cc);
+<a name='L122'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())<font color='red'>{</font>
+<a name='L123'>        Py_DECREF(v);
+<a name='L124'>        <b>goto</b> err;
+<a name='L125'>    <font color='red'>}</font>
+<a name='L126'>    <b>return</b> v;
+<a name='L127'>  err:
+<a name='L128'>    Py_DECREF(cc);
+<a name='L129'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L130'><font color='red'>}</font>
+<a name='L131'>
+<a name='L132'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(termios_tcsetattr__doc__,
+<a name='L133'>"tcsetattr(fd, when, attributes) -&gt; None\n\
+<a name='L134'>\n\
+<a name='L135'>Set the tty attributes for file descriptor fd.\n\
+<a name='L136'>The attributes to be set are taken from the attributes argument, which\n\
+<a name='L137'>is a list like the one returned by tcgetattr(). The when argument\n\
+<a name='L138'>determines when the attributes are changed: termios.TCSANOW to\n\
+<a name='L139'>change immediately, termios.TCSADRAIN to change after transmitting all\n\
+<a name='L140'>queued output, or termios.TCSAFLUSH to change after transmitting all\n\
+<a name='L141'>queued output and discarding all queued input. ");
+<a name='L142'>
+<a name='L143'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L144'><a href='../S/2718.html#L298' title='Refered from 298 in Modules/termios.c.'>termios_tcsetattr</a>(PyObject *self, PyObject *args)
+<a name='L145'><font color='red'>{</font>
+<a name='L146'>    <b>int</b> fd, when;
+<a name='L147'>    <b>struct</b> termios mode;
+<a name='L148'>    speed_t ispeed, ospeed;
+<a name='L149'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, *cc, *v;
+<a name='L150'>    <b>int</b> i;
+<a name='L151'>
+<a name='L152'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;iO:tcsetattr",
+<a name='L153'>                          <a href='../S/2718.html#L43' title='Defined at 43 in Modules/termios.c.'>fdconv</a>, &amp;fd, &amp;when, &amp;<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>))
+<a name='L154'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L155'>    <b>if</b> (!PyList_Check(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>) || <a href='../S/2796.html#L166' title='Defined at 166 in Objects/listobject.c.'>PyList_Size</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>) != 7) <font color='red'>{</font>
+<a name='L156'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L157'>                     "tcsetattr, arg 3: must be 7 element list");
+<a name='L158'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L159'>    <font color='red'>}</font>
+<a name='L160'>
+<a name='L161'>    <i><font color='green'>/* Get the old mode, in case there are any hidden fields... */</font></i>
+<a name='L162'>    <b>if</b> (tcgetattr(fd, &amp;mode) == -1)
+<a name='L163'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L164'>    mode.c_iflag = (tcflag_t) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, 0));
+<a name='L165'>    mode.c_oflag = (tcflag_t) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, 1));
+<a name='L166'>    mode.c_cflag = (tcflag_t) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, 2));
+<a name='L167'>    mode.c_lflag = (tcflag_t) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, 3));
+<a name='L168'>    ispeed = (speed_t) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, 4));
+<a name='L169'>    ospeed = (speed_t) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(<a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, 5));
+<a name='L170'>    cc = <a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(<a href='../S/529.html#L64' title='Defined at 64 in Include/graminit.h.'>term</a>, 6);
+<a name='L171'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L172'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L173'>
+<a name='L174'>    <b>if</b> (!PyList_Check(cc) || <a href='../S/2796.html#L166' title='Defined at 166 in Objects/listobject.c.'>PyList_Size</a>(cc) != NCCS) <font color='red'>{</font>
+<a name='L175'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L176'>            "tcsetattr: attributes[6] must be %d element list",
+<a name='L177'>                 NCCS);
+<a name='L178'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L179'>    <font color='red'>}</font>
+<a name='L180'>
+<a name='L181'>    <b>for</b> (i = 0; i &lt; NCCS; i++) <font color='red'>{</font>
+<a name='L182'>        v = <a href='../S/2796.html#L179' title='Defined at 179 in Objects/listobject.c.'>PyList_GetItem</a>(cc, i);
+<a name='L183'>
+<a name='L184'>        <b>if</b> (PyBytes_Check(v) &amp;&amp; <a href='../S/2779.html#L506' title='Defined at 506 in Objects/bytesobject.c.'>PyBytes_Size</a>(v) == 1)
+<a name='L185'>            mode.c_cc[i] = (cc_t) * <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(v);
+<a name='L186'>        <b>else</b> <b>if</b> (PyLong_Check(v))
+<a name='L187'>            mode.c_cc[i] = (cc_t) <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(v);
+<a name='L188'>        <b>else</b> <font color='red'>{</font>
+<a name='L189'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L190'>     "tcsetattr: elements of attributes must be characters or integers");
+<a name='L191'>                        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L192'>                <font color='red'>}</font>
+<a name='L193'>    <font color='red'>}</font>
+<a name='L194'>
+<a name='L195'>    <b>if</b> (cfsetispeed(&amp;mode, (speed_t) ispeed) == -1)
+<a name='L196'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L197'>    <b>if</b> (cfsetospeed(&amp;mode, (speed_t) ospeed) == -1)
+<a name='L198'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L199'>    <b>if</b> (tcsetattr(fd, when, &amp;mode) == -1)
+<a name='L200'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L201'>
+<a name='L202'>    Py_INCREF(Py_None);
+<a name='L203'>    <b>return</b> Py_None;
+<a name='L204'><font color='red'>}</font>
+<a name='L205'>
+<a name='L206'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(termios_tcsendbreak__doc__,
+<a name='L207'>"tcsendbreak(fd, duration) -&gt; None\n\
+<a name='L208'>\n\
+<a name='L209'>Send a break on file descriptor fd.\n\
+<a name='L210'>A zero duration sends a break for 0.25-0.5 seconds; a nonzero duration\n\
+<a name='L211'>has a system dependent meaning.");
+<a name='L212'>
+<a name='L213'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L214'><a href='../S/2718.html#L300' title='Refered from 300 in Modules/termios.c.'>termios_tcsendbreak</a>(PyObject *self, PyObject *args)
+<a name='L215'><font color='red'>{</font>
+<a name='L216'>    <b>int</b> fd, duration;
+<a name='L217'>
+<a name='L218'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;i:tcsendbreak",
+<a name='L219'>                          <a href='../S/2718.html#L43' title='Defined at 43 in Modules/termios.c.'>fdconv</a>, &amp;fd, &amp;duration))
+<a name='L220'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L221'>    <b>if</b> (tcsendbreak(fd, duration) == -1)
+<a name='L222'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L223'>
+<a name='L224'>    Py_INCREF(Py_None);
+<a name='L225'>    <b>return</b> Py_None;
+<a name='L226'><font color='red'>}</font>
+<a name='L227'>
+<a name='L228'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(termios_tcdrain__doc__,
+<a name='L229'>"tcdrain(fd) -&gt; None\n\
+<a name='L230'>\n\
+<a name='L231'>Wait until all output written to file descriptor fd has been transmitted.");
+<a name='L232'>
+<a name='L233'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L234'><a href='../S/2718.html#L302' title='Refered from 302 in Modules/termios.c.'>termios_tcdrain</a>(PyObject *self, PyObject *args)
+<a name='L235'><font color='red'>{</font>
+<a name='L236'>    <b>int</b> fd;
+<a name='L237'>
+<a name='L238'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;:tcdrain",
+<a name='L239'>                          <a href='../S/2718.html#L43' title='Defined at 43 in Modules/termios.c.'>fdconv</a>, &amp;fd))
+<a name='L240'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L241'>    <b>if</b> (tcdrain(fd) == -1)
+<a name='L242'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L243'>
+<a name='L244'>    Py_INCREF(Py_None);
+<a name='L245'>    <b>return</b> Py_None;
+<a name='L246'><font color='red'>}</font>
+<a name='L247'>
+<a name='L248'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(termios_tcflush__doc__,
+<a name='L249'>"tcflush(fd, queue) -&gt; None\n\
+<a name='L250'>\n\
+<a name='L251'>Discard queued data on file descriptor fd.\n\
+<a name='L252'>The queue selector specifies which queue: termios.TCIFLUSH for the input\n\
+<a name='L253'>queue, termios.TCOFLUSH for the output queue, or termios.TCIOFLUSH for\n\
+<a name='L254'>both queues. ");
+<a name='L255'>
+<a name='L256'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L257'><a href='../S/2718.html#L304' title='Refered from 304 in Modules/termios.c.'>termios_tcflush</a>(PyObject *self, PyObject *args)
+<a name='L258'><font color='red'>{</font>
+<a name='L259'>    <b>int</b> fd, queue;
+<a name='L260'>
+<a name='L261'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;i:tcflush",
+<a name='L262'>                          <a href='../S/2718.html#L43' title='Defined at 43 in Modules/termios.c.'>fdconv</a>, &amp;fd, &amp;queue))
+<a name='L263'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L264'>    <b>if</b> (tcflush(fd, queue) == -1)
+<a name='L265'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L266'>
+<a name='L267'>    Py_INCREF(Py_None);
+<a name='L268'>    <b>return</b> Py_None;
+<a name='L269'><font color='red'>}</font>
+<a name='L270'>
+<a name='L271'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(termios_tcflow__doc__,
+<a name='L272'>"tcflow(fd, action) -&gt; None\n\
+<a name='L273'>\n\
+<a name='L274'>Suspend or resume input or output on file descriptor fd.\n\
+<a name='L275'>The action argument can be termios.TCOOFF to suspend output,\n\
+<a name='L276'>termios.TCOON to restart output, termios.TCIOFF to suspend input,\n\
+<a name='L277'>or termios.TCION to restart input.");
+<a name='L278'>
+<a name='L279'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L280'><a href='../S/2718.html#L306' title='Refered from 306 in Modules/termios.c.'>termios_tcflow</a>(PyObject *self, PyObject *args)
+<a name='L281'><font color='red'>{</font>
+<a name='L282'>    <b>int</b> fd, action;
+<a name='L283'>
+<a name='L284'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O&amp;i:tcflow",
+<a name='L285'>                          <a href='../S/2718.html#L43' title='Defined at 43 in Modules/termios.c.'>fdconv</a>, &amp;fd, &amp;action))
+<a name='L286'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L287'>    <b>if</b> (tcflow(fd, action) == -1)
+<a name='L288'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(TermiosError);
+<a name='L289'>
+<a name='L290'>    Py_INCREF(Py_None);
+<a name='L291'>    <b>return</b> Py_None;
+<a name='L292'><font color='red'>}</font>
+<a name='L293'>
+<a name='L294'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> termios_methods[] =
+<a name='L295'><font color='red'>{</font>
+<a name='L296'>    <font color='red'>{</font>"tcgetattr", <a href='../S/2718.html#L67' title='Defined at 67 in Modules/termios.c.'>termios_tcgetattr</a>,
+<a name='L297'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, termios_tcgetattr__doc__<font color='red'>}</font>,
+<a name='L298'>    <font color='red'>{</font>"tcsetattr", <a href='../S/2718.html#L144' title='Defined at 144 in Modules/termios.c.'>termios_tcsetattr</a>,
+<a name='L299'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, termios_tcsetattr__doc__<font color='red'>}</font>,
+<a name='L300'>    <font color='red'>{</font>"tcsendbreak", <a href='../S/2718.html#L214' title='Defined at 214 in Modules/termios.c.'>termios_tcsendbreak</a>,
+<a name='L301'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, termios_tcsendbreak__doc__<font color='red'>}</font>,
+<a name='L302'>    <font color='red'>{</font>"tcdrain", <a href='../S/2718.html#L234' title='Defined at 234 in Modules/termios.c.'>termios_tcdrain</a>,
+<a name='L303'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, termios_tcdrain__doc__<font color='red'>}</font>,
+<a name='L304'>    <font color='red'>{</font>"tcflush", <a href='../S/2718.html#L257' title='Defined at 257 in Modules/termios.c.'>termios_tcflush</a>,
+<a name='L305'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, termios_tcflush__doc__<font color='red'>}</font>,
+<a name='L306'>    <font color='red'>{</font>"tcflow", <a href='../S/2718.html#L280' title='Defined at 280 in Modules/termios.c.'>termios_tcflow</a>,
+<a name='L307'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, termios_tcflow__doc__<font color='red'>}</font>,
+<a name='L308'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L309'><font color='red'>}</font>;
+<a name='L310'>
+<a name='L311'>
+<a name='L312'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2718.html#L317' title='Defined at 317 in Modules/termios.c.'>VSWTCH</a>) &amp;&amp; !<b>defined</b>(<a href='../S/2718.html#L313' title='Defined at 313 in Modules/termios.c.'>VSWTC</a>)
+<a name='L313'><font color='darkred'>#define</font> <a href='../R/4868.html' title='Multiple refered from 5 places.'>VSWTC</a> <a href='../S/2718.html#L317' title='Defined at 317 in Modules/termios.c.'>VSWTCH</a>
+<a name='L314'><font color='darkred'>#endif</font>
+<a name='L315'>
+<a name='L316'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2718.html#L313' title='Defined at 313 in Modules/termios.c.'>VSWTC</a>) &amp;&amp; !<b>defined</b>(<a href='../S/2718.html#L317' title='Defined at 317 in Modules/termios.c.'>VSWTCH</a>)
+<a name='L317'><font color='darkred'>#define</font> <a href='../R/4869.html' title='Multiple refered from 4 places.'>VSWTCH</a> <a href='../S/2718.html#L313' title='Defined at 313 in Modules/termios.c.'>VSWTC</a>
+<a name='L318'><font color='darkred'>#endif</font>
+<a name='L319'>
+<a name='L320'><b>static</b> <b>struct</b> <a href='../R/6982.html' title='Multiple refered from 18 places.'>constant</a> <font color='red'>{</font>
+<a name='L321'>    <b>char</b> *name;
+<a name='L322'>    <b>long</b> <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L323'><font color='red'>}</font> termios_constants[] = <font color='red'>{</font>
+<a name='L324'>    <i><font color='green'>/* cfgetospeed(), cfsetospeed() constants */</font></i>
+<a name='L325'>    <font color='red'>{</font>"B0", B0<font color='red'>}</font>,
+<a name='L326'>    <font color='red'>{</font>"B50", B50<font color='red'>}</font>,
+<a name='L327'>    <font color='red'>{</font>"B75", B75<font color='red'>}</font>,
+<a name='L328'>    <font color='red'>{</font>"B110", B110<font color='red'>}</font>,
+<a name='L329'>    <font color='red'>{</font>"B134", B134<font color='red'>}</font>,
+<a name='L330'>    <font color='red'>{</font>"B150", B150<font color='red'>}</font>,
+<a name='L331'>    <font color='red'>{</font>"B200", B200<font color='red'>}</font>,
+<a name='L332'>    <font color='red'>{</font>"B300", B300<font color='red'>}</font>,
+<a name='L333'>    <font color='red'>{</font>"B600", B600<font color='red'>}</font>,
+<a name='L334'>    <font color='red'>{</font>"B1200", B1200<font color='red'>}</font>,
+<a name='L335'>    <font color='red'>{</font>"B1800", B1800<font color='red'>}</font>,
+<a name='L336'>    <font color='red'>{</font>"B2400", B2400<font color='red'>}</font>,
+<a name='L337'>    <font color='red'>{</font>"B4800", B4800<font color='red'>}</font>,
+<a name='L338'>    <font color='red'>{</font>"B9600", B9600<font color='red'>}</font>,
+<a name='L339'>    <font color='red'>{</font>"B19200", B19200<font color='red'>}</font>,
+<a name='L340'>    <font color='red'>{</font>"B38400", B38400<font color='red'>}</font>,
+<a name='L341'><font color='darkred'>#ifdef</font> B57600
+<a name='L342'>    <font color='red'>{</font>"B57600", B57600<font color='red'>}</font>,
+<a name='L343'><font color='darkred'>#endif</font>
+<a name='L344'><font color='darkred'>#ifdef</font> B115200
+<a name='L345'>    <font color='red'>{</font>"B115200", B115200<font color='red'>}</font>,
+<a name='L346'><font color='darkred'>#endif</font>
+<a name='L347'><font color='darkred'>#ifdef</font> B230400
+<a name='L348'>    <font color='red'>{</font>"B230400", B230400<font color='red'>}</font>,
+<a name='L349'><font color='darkred'>#endif</font>
+<a name='L350'><font color='darkred'>#ifdef</font> B460800
+<a name='L351'>    <font color='red'>{</font>"B460800", B460800<font color='red'>}</font>,
+<a name='L352'><font color='darkred'>#endif</font>
+<a name='L353'><font color='darkred'>#ifdef</font> B500000
+<a name='L354'>    <font color='red'>{</font>"B500000", B500000<font color='red'>}</font>,
+<a name='L355'><font color='darkred'>#endif</font>
+<a name='L356'><font color='darkred'>#ifdef</font> B576000
+<a name='L357'>    <font color='red'>{</font>"B576000", B576000<font color='red'>}</font>,
+<a name='L358'><font color='darkred'>#endif</font>
+<a name='L359'><font color='darkred'>#ifdef</font> B921600
+<a name='L360'>    <font color='red'>{</font>"B921600", B921600<font color='red'>}</font>,
+<a name='L361'><font color='darkred'>#endif</font>
+<a name='L362'><font color='darkred'>#ifdef</font> B1000000
+<a name='L363'>    <font color='red'>{</font>"B1000000", B1000000<font color='red'>}</font>,
+<a name='L364'><font color='darkred'>#endif</font>
+<a name='L365'><font color='darkred'>#ifdef</font> B1152000
+<a name='L366'>    <font color='red'>{</font>"B1152000", B1152000<font color='red'>}</font>,
+<a name='L367'><font color='darkred'>#endif</font>
+<a name='L368'><font color='darkred'>#ifdef</font> B1500000
+<a name='L369'>    <font color='red'>{</font>"B1500000", B1500000<font color='red'>}</font>,
+<a name='L370'><font color='darkred'>#endif</font>
+<a name='L371'><font color='darkred'>#ifdef</font> B2000000
+<a name='L372'>    <font color='red'>{</font>"B2000000", B2000000<font color='red'>}</font>,
+<a name='L373'><font color='darkred'>#endif</font>
+<a name='L374'><font color='darkred'>#ifdef</font> B2500000
+<a name='L375'>    <font color='red'>{</font>"B2500000", B2500000<font color='red'>}</font>,
+<a name='L376'><font color='darkred'>#endif</font>
+<a name='L377'><font color='darkred'>#ifdef</font> B3000000
+<a name='L378'>    <font color='red'>{</font>"B3000000", B3000000<font color='red'>}</font>,
+<a name='L379'><font color='darkred'>#endif</font>
+<a name='L380'><font color='darkred'>#ifdef</font> B3500000
+<a name='L381'>    <font color='red'>{</font>"B3500000", B3500000<font color='red'>}</font>,
+<a name='L382'><font color='darkred'>#endif</font>
+<a name='L383'><font color='darkred'>#ifdef</font> B4000000
+<a name='L384'>    <font color='red'>{</font>"B4000000", B4000000<font color='red'>}</font>,
+<a name='L385'><font color='darkred'>#endif</font>
+<a name='L386'>
+<a name='L387'><font color='darkred'>#ifdef</font> CBAUDEX
+<a name='L388'>    <font color='red'>{</font>"CBAUDEX", CBAUDEX<font color='red'>}</font>,
+<a name='L389'><font color='darkred'>#endif</font>
+<a name='L390'>
+<a name='L391'>    <i><font color='green'>/* tcsetattr() constants */</font></i>
+<a name='L392'>    <font color='red'>{</font>"TCSANOW", TCSANOW<font color='red'>}</font>,
+<a name='L393'>    <font color='red'>{</font>"TCSADRAIN", TCSADRAIN<font color='red'>}</font>,
+<a name='L394'>    <font color='red'>{</font>"TCSAFLUSH", TCSAFLUSH<font color='red'>}</font>,
+<a name='L395'><font color='darkred'>#ifdef</font> TCSASOFT
+<a name='L396'>    <font color='red'>{</font>"TCSASOFT", TCSASOFT<font color='red'>}</font>,
+<a name='L397'><font color='darkred'>#endif</font>
+<a name='L398'>
+<a name='L399'>    <i><font color='green'>/* tcflush() constants */</font></i>
+<a name='L400'>    <font color='red'>{</font>"TCIFLUSH", TCIFLUSH<font color='red'>}</font>,
+<a name='L401'>    <font color='red'>{</font>"TCOFLUSH", TCOFLUSH<font color='red'>}</font>,
+<a name='L402'>    <font color='red'>{</font>"TCIOFLUSH", TCIOFLUSH<font color='red'>}</font>,
+<a name='L403'>
+<a name='L404'>    <i><font color='green'>/* tcflow() constants */</font></i>
+<a name='L405'>    <font color='red'>{</font>"TCOOFF", TCOOFF<font color='red'>}</font>,
+<a name='L406'>    <font color='red'>{</font>"TCOON", TCOON<font color='red'>}</font>,
+<a name='L407'>    <font color='red'>{</font>"TCIOFF", TCIOFF<font color='red'>}</font>,
+<a name='L408'>    <font color='red'>{</font>"TCION", TCION<font color='red'>}</font>,
+<a name='L409'>
+<a name='L410'>    <i><font color='green'>/* struct termios.c_iflag constants */</font></i>
+<a name='L411'>    <font color='red'>{</font>"IGNBRK", IGNBRK<font color='red'>}</font>,
+<a name='L412'>    <font color='red'>{</font>"BRKINT", BRKINT<font color='red'>}</font>,
+<a name='L413'>    <font color='red'>{</font>"IGNPAR", IGNPAR<font color='red'>}</font>,
+<a name='L414'>    <font color='red'>{</font>"PARMRK", PARMRK<font color='red'>}</font>,
+<a name='L415'>    <font color='red'>{</font>"INPCK", INPCK<font color='red'>}</font>,
+<a name='L416'>    <font color='red'>{</font>"ISTRIP", ISTRIP<font color='red'>}</font>,
+<a name='L417'>    <font color='red'>{</font>"INLCR", INLCR<font color='red'>}</font>,
+<a name='L418'>    <font color='red'>{</font>"IGNCR", IGNCR<font color='red'>}</font>,
+<a name='L419'>    <font color='red'>{</font>"ICRNL", ICRNL<font color='red'>}</font>,
+<a name='L420'><font color='darkred'>#ifdef</font> IUCLC
+<a name='L421'>    <font color='red'>{</font>"IUCLC", IUCLC<font color='red'>}</font>,
+<a name='L422'><font color='darkred'>#endif</font>
+<a name='L423'>    <font color='red'>{</font>"IXON", IXON<font color='red'>}</font>,
+<a name='L424'>    <font color='red'>{</font>"IXANY", IXANY<font color='red'>}</font>,
+<a name='L425'>    <font color='red'>{</font>"IXOFF", IXOFF<font color='red'>}</font>,
+<a name='L426'><font color='darkred'>#ifdef</font> IMAXBEL
+<a name='L427'>    <font color='red'>{</font>"IMAXBEL", IMAXBEL<font color='red'>}</font>,
+<a name='L428'><font color='darkred'>#endif</font>
+<a name='L429'>
+<a name='L430'>    <i><font color='green'>/* struct termios.c_oflag constants */</font></i>
+<a name='L431'>    <font color='red'>{</font>"OPOST", OPOST<font color='red'>}</font>,
+<a name='L432'><font color='darkred'>#ifdef</font> OLCUC
+<a name='L433'>    <font color='red'>{</font>"OLCUC", OLCUC<font color='red'>}</font>,
+<a name='L434'><font color='darkred'>#endif</font>
+<a name='L435'><font color='darkred'>#ifdef</font> ONLCR
+<a name='L436'>    <font color='red'>{</font>"ONLCR", ONLCR<font color='red'>}</font>,
+<a name='L437'><font color='darkred'>#endif</font>
+<a name='L438'><font color='darkred'>#ifdef</font> OCRNL
+<a name='L439'>    <font color='red'>{</font>"OCRNL", OCRNL<font color='red'>}</font>,
+<a name='L440'><font color='darkred'>#endif</font>
+<a name='L441'><font color='darkred'>#ifdef</font> ONOCR
+<a name='L442'>    <font color='red'>{</font>"ONOCR", ONOCR<font color='red'>}</font>,
+<a name='L443'><font color='darkred'>#endif</font>
+<a name='L444'><font color='darkred'>#ifdef</font> ONLRET
+<a name='L445'>    <font color='red'>{</font>"ONLRET", ONLRET<font color='red'>}</font>,
+<a name='L446'><font color='darkred'>#endif</font>
+<a name='L447'><font color='darkred'>#ifdef</font> OFILL
+<a name='L448'>    <font color='red'>{</font>"OFILL", OFILL<font color='red'>}</font>,
+<a name='L449'><font color='darkred'>#endif</font>
+<a name='L450'><font color='darkred'>#ifdef</font> OFDEL
+<a name='L451'>    <font color='red'>{</font>"OFDEL", OFDEL<font color='red'>}</font>,
+<a name='L452'><font color='darkred'>#endif</font>
+<a name='L453'><font color='darkred'>#ifdef</font> NLDLY
+<a name='L454'>    <font color='red'>{</font>"NLDLY", NLDLY<font color='red'>}</font>,
+<a name='L455'><font color='darkred'>#endif</font>
+<a name='L456'><font color='darkred'>#ifdef</font> CRDLY
+<a name='L457'>    <font color='red'>{</font>"CRDLY", CRDLY<font color='red'>}</font>,
+<a name='L458'><font color='darkred'>#endif</font>
+<a name='L459'><font color='darkred'>#ifdef</font> TABDLY
+<a name='L460'>    <font color='red'>{</font>"TABDLY", TABDLY<font color='red'>}</font>,
+<a name='L461'><font color='darkred'>#endif</font>
+<a name='L462'><font color='darkred'>#ifdef</font> BSDLY
+<a name='L463'>    <font color='red'>{</font>"BSDLY", BSDLY<font color='red'>}</font>,
+<a name='L464'><font color='darkred'>#endif</font>
+<a name='L465'><font color='darkred'>#ifdef</font> VTDLY
+<a name='L466'>    <font color='red'>{</font>"VTDLY", VTDLY<font color='red'>}</font>,
+<a name='L467'><font color='darkred'>#endif</font>
+<a name='L468'><font color='darkred'>#ifdef</font> FFDLY
+<a name='L469'>    <font color='red'>{</font>"FFDLY", FFDLY<font color='red'>}</font>,
+<a name='L470'><font color='darkred'>#endif</font>
+<a name='L471'>
+<a name='L472'>    <i><font color='green'>/* struct termios.c_oflag-related values (delay mask) */</font></i>
+<a name='L473'><font color='darkred'>#ifdef</font> NL0
+<a name='L474'>    <font color='red'>{</font>"NL0", NL0<font color='red'>}</font>,
+<a name='L475'><font color='darkred'>#endif</font>
+<a name='L476'><font color='darkred'>#ifdef</font> NL1
+<a name='L477'>    <font color='red'>{</font>"NL1", NL1<font color='red'>}</font>,
+<a name='L478'><font color='darkred'>#endif</font>
+<a name='L479'><font color='darkred'>#ifdef</font> CR0
+<a name='L480'>    <font color='red'>{</font>"CR0", CR0<font color='red'>}</font>,
+<a name='L481'><font color='darkred'>#endif</font>
+<a name='L482'><font color='darkred'>#ifdef</font> CR1
+<a name='L483'>    <font color='red'>{</font>"CR1", CR1<font color='red'>}</font>,
+<a name='L484'><font color='darkred'>#endif</font>
+<a name='L485'><font color='darkred'>#ifdef</font> CR2
+<a name='L486'>    <font color='red'>{</font>"CR2", CR2<font color='red'>}</font>,
+<a name='L487'><font color='darkred'>#endif</font>
+<a name='L488'><font color='darkred'>#ifdef</font> CR3
+<a name='L489'>    <font color='red'>{</font>"CR3", CR3<font color='red'>}</font>,
+<a name='L490'><font color='darkred'>#endif</font>
+<a name='L491'><font color='darkred'>#ifdef</font> TAB0
+<a name='L492'>    <font color='red'>{</font>"TAB0", TAB0<font color='red'>}</font>,
+<a name='L493'><font color='darkred'>#endif</font>
+<a name='L494'><font color='darkred'>#ifdef</font> TAB1
+<a name='L495'>    <font color='red'>{</font>"TAB1", TAB1<font color='red'>}</font>,
+<a name='L496'><font color='darkred'>#endif</font>
+<a name='L497'><font color='darkred'>#ifdef</font> TAB2
+<a name='L498'>    <font color='red'>{</font>"TAB2", TAB2<font color='red'>}</font>,
+<a name='L499'><font color='darkred'>#endif</font>
+<a name='L500'><font color='darkred'>#ifdef</font> TAB3
+<a name='L501'>    <font color='red'>{</font>"TAB3", TAB3<font color='red'>}</font>,
+<a name='L502'><font color='darkred'>#endif</font>
+<a name='L503'><font color='darkred'>#ifdef</font> XTABS
+<a name='L504'>    <font color='red'>{</font>"XTABS", XTABS<font color='red'>}</font>,
+<a name='L505'><font color='darkred'>#endif</font>
+<a name='L506'><font color='darkred'>#ifdef</font> BS0
+<a name='L507'>    <font color='red'>{</font>"BS0", BS0<font color='red'>}</font>,
+<a name='L508'><font color='darkred'>#endif</font>
+<a name='L509'><font color='darkred'>#ifdef</font> BS1
+<a name='L510'>    <font color='red'>{</font>"BS1", BS1<font color='red'>}</font>,
+<a name='L511'><font color='darkred'>#endif</font>
+<a name='L512'><font color='darkred'>#ifdef</font> VT0
+<a name='L513'>    <font color='red'>{</font>"VT0", VT0<font color='red'>}</font>,
+<a name='L514'><font color='darkred'>#endif</font>
+<a name='L515'><font color='darkred'>#ifdef</font> VT1
+<a name='L516'>    <font color='red'>{</font>"VT1", VT1<font color='red'>}</font>,
+<a name='L517'><font color='darkred'>#endif</font>
+<a name='L518'><font color='darkred'>#ifdef</font> FF0
+<a name='L519'>    <font color='red'>{</font>"FF0", FF0<font color='red'>}</font>,
+<a name='L520'><font color='darkred'>#endif</font>
+<a name='L521'><font color='darkred'>#ifdef</font> FF1
+<a name='L522'>    <font color='red'>{</font>"FF1", FF1<font color='red'>}</font>,
+<a name='L523'><font color='darkred'>#endif</font>
+<a name='L524'>
+<a name='L525'>    <i><font color='green'>/* struct termios.c_cflag constants */</font></i>
+<a name='L526'>    <font color='red'>{</font>"CSIZE", CSIZE<font color='red'>}</font>,
+<a name='L527'>    <font color='red'>{</font>"CSTOPB", CSTOPB<font color='red'>}</font>,
+<a name='L528'>    <font color='red'>{</font>"CREAD", CREAD<font color='red'>}</font>,
+<a name='L529'>    <font color='red'>{</font>"PARENB", PARENB<font color='red'>}</font>,
+<a name='L530'>    <font color='red'>{</font>"PARODD", PARODD<font color='red'>}</font>,
+<a name='L531'>    <font color='red'>{</font>"HUPCL", HUPCL<font color='red'>}</font>,
+<a name='L532'>    <font color='red'>{</font>"CLOCAL", CLOCAL<font color='red'>}</font>,
+<a name='L533'><font color='darkred'>#ifdef</font> CIBAUD
+<a name='L534'>    <font color='red'>{</font>"CIBAUD", CIBAUD<font color='red'>}</font>,
+<a name='L535'><font color='darkred'>#endif</font>
+<a name='L536'><font color='darkred'>#ifdef</font> CRTSCTS
+<a name='L537'>    <font color='red'>{</font>"CRTSCTS", (<b>long</b>)CRTSCTS<font color='red'>}</font>,
+<a name='L538'><font color='darkred'>#endif</font>
+<a name='L539'>
+<a name='L540'>    <i><font color='green'>/* struct termios.c_cflag-related values (character size) */</font></i>
+<a name='L541'>    <font color='red'>{</font>"CS5", CS5<font color='red'>}</font>,
+<a name='L542'>    <font color='red'>{</font>"CS6", CS6<font color='red'>}</font>,
+<a name='L543'>    <font color='red'>{</font>"CS7", CS7<font color='red'>}</font>,
+<a name='L544'>    <font color='red'>{</font>"CS8", CS8<font color='red'>}</font>,
+<a name='L545'>
+<a name='L546'>    <i><font color='green'>/* struct termios.c_lflag constants */</font></i>
+<a name='L547'>    <font color='red'>{</font>"ISIG", ISIG<font color='red'>}</font>,
+<a name='L548'>    <font color='red'>{</font>"ICANON", ICANON<font color='red'>}</font>,
+<a name='L549'><font color='darkred'>#ifdef</font> XCASE
+<a name='L550'>    <font color='red'>{</font>"XCASE", XCASE<font color='red'>}</font>,
+<a name='L551'><font color='darkred'>#endif</font>
+<a name='L552'>    <font color='red'>{</font>"ECHO", ECHO<font color='red'>}</font>,
+<a name='L553'>    <font color='red'>{</font>"ECHOE", ECHOE<font color='red'>}</font>,
+<a name='L554'>    <font color='red'>{</font>"ECHOK", ECHOK<font color='red'>}</font>,
+<a name='L555'>    <font color='red'>{</font>"ECHONL", ECHONL<font color='red'>}</font>,
+<a name='L556'><font color='darkred'>#ifdef</font> ECHOCTL
+<a name='L557'>    <font color='red'>{</font>"ECHOCTL", ECHOCTL<font color='red'>}</font>,
+<a name='L558'><font color='darkred'>#endif</font>
+<a name='L559'><font color='darkred'>#ifdef</font> ECHOPRT
+<a name='L560'>    <font color='red'>{</font>"ECHOPRT", ECHOPRT<font color='red'>}</font>,
+<a name='L561'><font color='darkred'>#endif</font>
+<a name='L562'><font color='darkred'>#ifdef</font> ECHOKE
+<a name='L563'>    <font color='red'>{</font>"ECHOKE", ECHOKE<font color='red'>}</font>,
+<a name='L564'><font color='darkred'>#endif</font>
+<a name='L565'><font color='darkred'>#ifdef</font> FLUSHO
+<a name='L566'>    <font color='red'>{</font>"FLUSHO", FLUSHO<font color='red'>}</font>,
+<a name='L567'><font color='darkred'>#endif</font>
+<a name='L568'>    <font color='red'>{</font>"NOFLSH", NOFLSH<font color='red'>}</font>,
+<a name='L569'>    <font color='red'>{</font>"TOSTOP", TOSTOP<font color='red'>}</font>,
+<a name='L570'><font color='darkred'>#ifdef</font> PENDIN
+<a name='L571'>    <font color='red'>{</font>"PENDIN", PENDIN<font color='red'>}</font>,
+<a name='L572'><font color='darkred'>#endif</font>
+<a name='L573'>    <font color='red'>{</font>"IEXTEN", IEXTEN<font color='red'>}</font>,
+<a name='L574'>
+<a name='L575'>    <i><font color='green'>/* indexes into the control chars array returned by tcgetattr() */</font></i>
+<a name='L576'>    <font color='red'>{</font>"VINTR", VINTR<font color='red'>}</font>,
+<a name='L577'>    <font color='red'>{</font>"VQUIT", VQUIT<font color='red'>}</font>,
+<a name='L578'>    <font color='red'>{</font>"VERASE", VERASE<font color='red'>}</font>,
+<a name='L579'>    <font color='red'>{</font>"VKILL", VKILL<font color='red'>}</font>,
+<a name='L580'>    <font color='red'>{</font>"VEOF", VEOF<font color='red'>}</font>,
+<a name='L581'>    <font color='red'>{</font>"VTIME", VTIME<font color='red'>}</font>,
+<a name='L582'>    <font color='red'>{</font>"VMIN", VMIN<font color='red'>}</font>,
+<a name='L583'><font color='darkred'>#ifdef</font> <a href='../S/2718.html#L313' title='Defined at 313 in Modules/termios.c.'>VSWTC</a>
+<a name='L584'>    <i><font color='green'>/* The #defines above ensure that if either is defined, both are,</font></i>
+<a name='L585'><i><font color='green'>     * but both may be omitted by the system headers.  ;-(  */</font></i>
+<a name='L586'>    <font color='red'>{</font>"VSWTC", <a href='../S/2718.html#L313' title='Defined at 313 in Modules/termios.c.'>VSWTC</a><font color='red'>}</font>,
+<a name='L587'>    <font color='red'>{</font>"VSWTCH", <a href='../S/2718.html#L317' title='Defined at 317 in Modules/termios.c.'>VSWTCH</a><font color='red'>}</font>,
+<a name='L588'><font color='darkred'>#endif</font>
+<a name='L589'>    <font color='red'>{</font>"VSTART", VSTART<font color='red'>}</font>,
+<a name='L590'>    <font color='red'>{</font>"VSTOP", VSTOP<font color='red'>}</font>,
+<a name='L591'>    <font color='red'>{</font>"VSUSP", VSUSP<font color='red'>}</font>,
+<a name='L592'>    <font color='red'>{</font>"VEOL", VEOL<font color='red'>}</font>,
+<a name='L593'><font color='darkred'>#ifdef</font> VREPRINT
+<a name='L594'>    <font color='red'>{</font>"VREPRINT", VREPRINT<font color='red'>}</font>,
+<a name='L595'><font color='darkred'>#endif</font>
+<a name='L596'><font color='darkred'>#ifdef</font> VDISCARD
+<a name='L597'>    <font color='red'>{</font>"VDISCARD", VDISCARD<font color='red'>}</font>,
+<a name='L598'><font color='darkred'>#endif</font>
+<a name='L599'><font color='darkred'>#ifdef</font> VWERASE
+<a name='L600'>    <font color='red'>{</font>"VWERASE", VWERASE<font color='red'>}</font>,
+<a name='L601'><font color='darkred'>#endif</font>
+<a name='L602'><font color='darkred'>#ifdef</font> VLNEXT
+<a name='L603'>    <font color='red'>{</font>"VLNEXT", VLNEXT<font color='red'>}</font>,
+<a name='L604'><font color='darkred'>#endif</font>
+<a name='L605'><font color='darkred'>#ifdef</font> VEOL2
+<a name='L606'>    <font color='red'>{</font>"VEOL2", VEOL2<font color='red'>}</font>,
+<a name='L607'><font color='darkred'>#endif</font>
+<a name='L608'>
+<a name='L609'>
+<a name='L610'><font color='darkred'>#ifdef</font> B460800
+<a name='L611'>    <font color='red'>{</font>"B460800", B460800<font color='red'>}</font>,
+<a name='L612'><font color='darkred'>#endif</font>
+<a name='L613'><font color='darkred'>#ifdef</font> CBAUD
+<a name='L614'>    <font color='red'>{</font>"CBAUD", CBAUD<font color='red'>}</font>,
+<a name='L615'><font color='darkred'>#endif</font>
+<a name='L616'><font color='darkred'>#ifdef</font> CDEL
+<a name='L617'>    <font color='red'>{</font>"CDEL", CDEL<font color='red'>}</font>,
+<a name='L618'><font color='darkred'>#endif</font>
+<a name='L619'><font color='darkred'>#ifdef</font> CDSUSP
+<a name='L620'>    <font color='red'>{</font>"CDSUSP", CDSUSP<font color='red'>}</font>,
+<a name='L621'><font color='darkred'>#endif</font>
+<a name='L622'><font color='darkred'>#ifdef</font> CEOF
+<a name='L623'>    <font color='red'>{</font>"CEOF", CEOF<font color='red'>}</font>,
+<a name='L624'><font color='darkred'>#endif</font>
+<a name='L625'><font color='darkred'>#ifdef</font> CEOL
+<a name='L626'>    <font color='red'>{</font>"CEOL", CEOL<font color='red'>}</font>,
+<a name='L627'><font color='darkred'>#endif</font>
+<a name='L628'><font color='darkred'>#ifdef</font> CEOL2
+<a name='L629'>    <font color='red'>{</font>"CEOL2", CEOL2<font color='red'>}</font>,
+<a name='L630'><font color='darkred'>#endif</font>
+<a name='L631'><font color='darkred'>#ifdef</font> CEOT
+<a name='L632'>    <font color='red'>{</font>"CEOT", CEOT<font color='red'>}</font>,
+<a name='L633'><font color='darkred'>#endif</font>
+<a name='L634'><font color='darkred'>#ifdef</font> CERASE
+<a name='L635'>    <font color='red'>{</font>"CERASE", CERASE<font color='red'>}</font>,
+<a name='L636'><font color='darkred'>#endif</font>
+<a name='L637'><font color='darkred'>#ifdef</font> CESC
+<a name='L638'>    <font color='red'>{</font>"CESC", CESC<font color='red'>}</font>,
+<a name='L639'><font color='darkred'>#endif</font>
+<a name='L640'><font color='darkred'>#ifdef</font> CFLUSH
+<a name='L641'>    <font color='red'>{</font>"CFLUSH", CFLUSH<font color='red'>}</font>,
+<a name='L642'><font color='darkred'>#endif</font>
+<a name='L643'><font color='darkred'>#ifdef</font> CINTR
+<a name='L644'>    <font color='red'>{</font>"CINTR", CINTR<font color='red'>}</font>,
+<a name='L645'><font color='darkred'>#endif</font>
+<a name='L646'><font color='darkred'>#ifdef</font> CKILL
+<a name='L647'>    <font color='red'>{</font>"CKILL", CKILL<font color='red'>}</font>,
+<a name='L648'><font color='darkred'>#endif</font>
+<a name='L649'><font color='darkred'>#ifdef</font> CLNEXT
+<a name='L650'>    <font color='red'>{</font>"CLNEXT", CLNEXT<font color='red'>}</font>,
+<a name='L651'><font color='darkred'>#endif</font>
+<a name='L652'><font color='darkred'>#ifdef</font> CNUL
+<a name='L653'>    <font color='red'>{</font>"CNUL", CNUL<font color='red'>}</font>,
+<a name='L654'><font color='darkred'>#endif</font>
+<a name='L655'><font color='darkred'>#ifdef</font> COMMON
+<a name='L656'>    <font color='red'>{</font>"COMMON", COMMON<font color='red'>}</font>,
+<a name='L657'><font color='darkred'>#endif</font>
+<a name='L658'><font color='darkred'>#ifdef</font> CQUIT
+<a name='L659'>    <font color='red'>{</font>"CQUIT", CQUIT<font color='red'>}</font>,
+<a name='L660'><font color='darkred'>#endif</font>
+<a name='L661'><font color='darkred'>#ifdef</font> CRPRNT
+<a name='L662'>    <font color='red'>{</font>"CRPRNT", CRPRNT<font color='red'>}</font>,
+<a name='L663'><font color='darkred'>#endif</font>
+<a name='L664'><font color='darkred'>#ifdef</font> CSTART
+<a name='L665'>    <font color='red'>{</font>"CSTART", CSTART<font color='red'>}</font>,
+<a name='L666'><font color='darkred'>#endif</font>
+<a name='L667'><font color='darkred'>#ifdef</font> CSTOP
+<a name='L668'>    <font color='red'>{</font>"CSTOP", CSTOP<font color='red'>}</font>,
+<a name='L669'><font color='darkred'>#endif</font>
+<a name='L670'><font color='darkred'>#ifdef</font> CSUSP
+<a name='L671'>    <font color='red'>{</font>"CSUSP", CSUSP<font color='red'>}</font>,
+<a name='L672'><font color='darkred'>#endif</font>
+<a name='L673'><font color='darkred'>#ifdef</font> CSWTCH
+<a name='L674'>    <font color='red'>{</font>"CSWTCH", CSWTCH<font color='red'>}</font>,
+<a name='L675'><font color='darkred'>#endif</font>
+<a name='L676'><font color='darkred'>#ifdef</font> CWERASE
+<a name='L677'>    <font color='red'>{</font>"CWERASE", CWERASE<font color='red'>}</font>,
+<a name='L678'><font color='darkred'>#endif</font>
+<a name='L679'><font color='darkred'>#ifdef</font> EXTA
+<a name='L680'>    <font color='red'>{</font>"EXTA", EXTA<font color='red'>}</font>,
+<a name='L681'><font color='darkred'>#endif</font>
+<a name='L682'><font color='darkred'>#ifdef</font> EXTB
+<a name='L683'>    <font color='red'>{</font>"EXTB", EXTB<font color='red'>}</font>,
+<a name='L684'><font color='darkred'>#endif</font>
+<a name='L685'><font color='darkred'>#ifdef</font> FIOASYNC
+<a name='L686'>    <font color='red'>{</font>"FIOASYNC", FIOASYNC<font color='red'>}</font>,
+<a name='L687'><font color='darkred'>#endif</font>
+<a name='L688'><font color='darkred'>#ifdef</font> FIOCLEX
+<a name='L689'>    <font color='red'>{</font>"FIOCLEX", FIOCLEX<font color='red'>}</font>,
+<a name='L690'><font color='darkred'>#endif</font>
+<a name='L691'><font color='darkred'>#ifdef</font> FIONBIO
+<a name='L692'>    <font color='red'>{</font>"FIONBIO", FIONBIO<font color='red'>}</font>,
+<a name='L693'><font color='darkred'>#endif</font>
+<a name='L694'><font color='darkred'>#ifdef</font> FIONCLEX
+<a name='L695'>    <font color='red'>{</font>"FIONCLEX", FIONCLEX<font color='red'>}</font>,
+<a name='L696'><font color='darkred'>#endif</font>
+<a name='L697'><font color='darkred'>#ifdef</font> FIONREAD
+<a name='L698'>    <font color='red'>{</font>"FIONREAD", FIONREAD<font color='red'>}</font>,
+<a name='L699'><font color='darkred'>#endif</font>
+<a name='L700'><font color='darkred'>#ifdef</font> IBSHIFT
+<a name='L701'>    <font color='red'>{</font>"IBSHIFT", IBSHIFT<font color='red'>}</font>,
+<a name='L702'><font color='darkred'>#endif</font>
+<a name='L703'><font color='darkred'>#ifdef</font> INIT_C_CC
+<a name='L704'>    <font color='red'>{</font>"INIT_C_CC", INIT_C_CC<font color='red'>}</font>,
+<a name='L705'><font color='darkred'>#endif</font>
+<a name='L706'><font color='darkred'>#ifdef</font> IOCSIZE_MASK
+<a name='L707'>    <font color='red'>{</font>"IOCSIZE_MASK", IOCSIZE_MASK<font color='red'>}</font>,
+<a name='L708'><font color='darkred'>#endif</font>
+<a name='L709'><font color='darkred'>#ifdef</font> IOCSIZE_SHIFT
+<a name='L710'>    <font color='red'>{</font>"IOCSIZE_SHIFT", IOCSIZE_SHIFT<font color='red'>}</font>,
+<a name='L711'><font color='darkred'>#endif</font>
+<a name='L712'><font color='darkred'>#ifdef</font> NCC
+<a name='L713'>    <font color='red'>{</font>"NCC", NCC<font color='red'>}</font>,
+<a name='L714'><font color='darkred'>#endif</font>
+<a name='L715'><font color='darkred'>#ifdef</font> NCCS
+<a name='L716'>    <font color='red'>{</font>"NCCS", NCCS<font color='red'>}</font>,
+<a name='L717'><font color='darkred'>#endif</font>
+<a name='L718'><font color='darkred'>#ifdef</font> NSWTCH
+<a name='L719'>    <font color='red'>{</font>"NSWTCH", NSWTCH<font color='red'>}</font>,
+<a name='L720'><font color='darkred'>#endif</font>
+<a name='L721'><font color='darkred'>#ifdef</font> N_MOUSE
+<a name='L722'>    <font color='red'>{</font>"N_MOUSE", N_MOUSE<font color='red'>}</font>,
+<a name='L723'><font color='darkred'>#endif</font>
+<a name='L724'><font color='darkred'>#ifdef</font> N_PPP
+<a name='L725'>    <font color='red'>{</font>"N_PPP", N_PPP<font color='red'>}</font>,
+<a name='L726'><font color='darkred'>#endif</font>
+<a name='L727'><font color='darkred'>#ifdef</font> N_SLIP
+<a name='L728'>    <font color='red'>{</font>"N_SLIP", N_SLIP<font color='red'>}</font>,
+<a name='L729'><font color='darkred'>#endif</font>
+<a name='L730'><font color='darkred'>#ifdef</font> N_STRIP
+<a name='L731'>    <font color='red'>{</font>"N_STRIP", N_STRIP<font color='red'>}</font>,
+<a name='L732'><font color='darkred'>#endif</font>
+<a name='L733'><font color='darkred'>#ifdef</font> N_TTY
+<a name='L734'>    <font color='red'>{</font>"N_TTY", N_TTY<font color='red'>}</font>,
+<a name='L735'><font color='darkred'>#endif</font>
+<a name='L736'><font color='darkred'>#ifdef</font> TCFLSH
+<a name='L737'>    <font color='red'>{</font>"TCFLSH", TCFLSH<font color='red'>}</font>,
+<a name='L738'><font color='darkred'>#endif</font>
+<a name='L739'><font color='darkred'>#ifdef</font> TCGETA
+<a name='L740'>    <font color='red'>{</font>"TCGETA", TCGETA<font color='red'>}</font>,
+<a name='L741'><font color='darkred'>#endif</font>
+<a name='L742'><font color='darkred'>#ifdef</font> TCGETS
+<a name='L743'>    <font color='red'>{</font>"TCGETS", TCGETS<font color='red'>}</font>,
+<a name='L744'><font color='darkred'>#endif</font>
+<a name='L745'><font color='darkred'>#ifdef</font> TCSBRK
+<a name='L746'>    <font color='red'>{</font>"TCSBRK", TCSBRK<font color='red'>}</font>,
+<a name='L747'><font color='darkred'>#endif</font>
+<a name='L748'><font color='darkred'>#ifdef</font> TCSBRKP
+<a name='L749'>    <font color='red'>{</font>"TCSBRKP", TCSBRKP<font color='red'>}</font>,
+<a name='L750'><font color='darkred'>#endif</font>
+<a name='L751'><font color='darkred'>#ifdef</font> TCSETA
+<a name='L752'>    <font color='red'>{</font>"TCSETA", TCSETA<font color='red'>}</font>,
+<a name='L753'><font color='darkred'>#endif</font>
+<a name='L754'><font color='darkred'>#ifdef</font> TCSETAF
+<a name='L755'>    <font color='red'>{</font>"TCSETAF", TCSETAF<font color='red'>}</font>,
+<a name='L756'><font color='darkred'>#endif</font>
+<a name='L757'><font color='darkred'>#ifdef</font> TCSETAW
+<a name='L758'>    <font color='red'>{</font>"TCSETAW", TCSETAW<font color='red'>}</font>,
+<a name='L759'><font color='darkred'>#endif</font>
+<a name='L760'><font color='darkred'>#ifdef</font> TCSETS
+<a name='L761'>    <font color='red'>{</font>"TCSETS", TCSETS<font color='red'>}</font>,
+<a name='L762'><font color='darkred'>#endif</font>
+<a name='L763'><font color='darkred'>#ifdef</font> TCSETSF
+<a name='L764'>    <font color='red'>{</font>"TCSETSF", TCSETSF<font color='red'>}</font>,
+<a name='L765'><font color='darkred'>#endif</font>
+<a name='L766'><font color='darkred'>#ifdef</font> TCSETSW
+<a name='L767'>    <font color='red'>{</font>"TCSETSW", TCSETSW<font color='red'>}</font>,
+<a name='L768'><font color='darkred'>#endif</font>
+<a name='L769'><font color='darkred'>#ifdef</font> TCXONC
+<a name='L770'>    <font color='red'>{</font>"TCXONC", TCXONC<font color='red'>}</font>,
+<a name='L771'><font color='darkred'>#endif</font>
+<a name='L772'><font color='darkred'>#ifdef</font> TIOCCONS
+<a name='L773'>    <font color='red'>{</font>"TIOCCONS", TIOCCONS<font color='red'>}</font>,
+<a name='L774'><font color='darkred'>#endif</font>
+<a name='L775'><font color='darkred'>#ifdef</font> TIOCEXCL
+<a name='L776'>    <font color='red'>{</font>"TIOCEXCL", TIOCEXCL<font color='red'>}</font>,
+<a name='L777'><font color='darkred'>#endif</font>
+<a name='L778'><font color='darkred'>#ifdef</font> TIOCGETD
+<a name='L779'>    <font color='red'>{</font>"TIOCGETD", TIOCGETD<font color='red'>}</font>,
+<a name='L780'><font color='darkred'>#endif</font>
+<a name='L781'><font color='darkred'>#ifdef</font> TIOCGICOUNT
+<a name='L782'>    <font color='red'>{</font>"TIOCGICOUNT", TIOCGICOUNT<font color='red'>}</font>,
+<a name='L783'><font color='darkred'>#endif</font>
+<a name='L784'><font color='darkred'>#ifdef</font> TIOCGLCKTRMIOS
+<a name='L785'>    <font color='red'>{</font>"TIOCGLCKTRMIOS", TIOCGLCKTRMIOS<font color='red'>}</font>,
+<a name='L786'><font color='darkred'>#endif</font>
+<a name='L787'><font color='darkred'>#ifdef</font> TIOCGPGRP
+<a name='L788'>    <font color='red'>{</font>"TIOCGPGRP", TIOCGPGRP<font color='red'>}</font>,
+<a name='L789'><font color='darkred'>#endif</font>
+<a name='L790'><font color='darkred'>#ifdef</font> TIOCGSERIAL
+<a name='L791'>    <font color='red'>{</font>"TIOCGSERIAL", TIOCGSERIAL<font color='red'>}</font>,
+<a name='L792'><font color='darkred'>#endif</font>
+<a name='L793'><font color='darkred'>#ifdef</font> TIOCGSOFTCAR
+<a name='L794'>    <font color='red'>{</font>"TIOCGSOFTCAR", TIOCGSOFTCAR<font color='red'>}</font>,
+<a name='L795'><font color='darkred'>#endif</font>
+<a name='L796'><font color='darkred'>#ifdef</font> TIOCGWINSZ
+<a name='L797'>    <font color='red'>{</font>"TIOCGWINSZ", TIOCGWINSZ<font color='red'>}</font>,
+<a name='L798'><font color='darkred'>#endif</font>
+<a name='L799'><font color='darkred'>#ifdef</font> TIOCINQ
+<a name='L800'>    <font color='red'>{</font>"TIOCINQ", TIOCINQ<font color='red'>}</font>,
+<a name='L801'><font color='darkred'>#endif</font>
+<a name='L802'><font color='darkred'>#ifdef</font> TIOCLINUX
+<a name='L803'>    <font color='red'>{</font>"TIOCLINUX", TIOCLINUX<font color='red'>}</font>,
+<a name='L804'><font color='darkred'>#endif</font>
+<a name='L805'><font color='darkred'>#ifdef</font> TIOCMBIC
+<a name='L806'>    <font color='red'>{</font>"TIOCMBIC", TIOCMBIC<font color='red'>}</font>,
+<a name='L807'><font color='darkred'>#endif</font>
+<a name='L808'><font color='darkred'>#ifdef</font> TIOCMBIS
+<a name='L809'>    <font color='red'>{</font>"TIOCMBIS", TIOCMBIS<font color='red'>}</font>,
+<a name='L810'><font color='darkred'>#endif</font>
+<a name='L811'><font color='darkred'>#ifdef</font> TIOCMGET
+<a name='L812'>    <font color='red'>{</font>"TIOCMGET", TIOCMGET<font color='red'>}</font>,
+<a name='L813'><font color='darkred'>#endif</font>
+<a name='L814'><font color='darkred'>#ifdef</font> TIOCMIWAIT
+<a name='L815'>    <font color='red'>{</font>"TIOCMIWAIT", TIOCMIWAIT<font color='red'>}</font>,
+<a name='L816'><font color='darkred'>#endif</font>
+<a name='L817'><font color='darkred'>#ifdef</font> TIOCMSET
+<a name='L818'>    <font color='red'>{</font>"TIOCMSET", TIOCMSET<font color='red'>}</font>,
+<a name='L819'><font color='darkred'>#endif</font>
+<a name='L820'><font color='darkred'>#ifdef</font> TIOCM_CAR
+<a name='L821'>    <font color='red'>{</font>"TIOCM_CAR", TIOCM_CAR<font color='red'>}</font>,
+<a name='L822'><font color='darkred'>#endif</font>
+<a name='L823'><font color='darkred'>#ifdef</font> TIOCM_CD
+<a name='L824'>    <font color='red'>{</font>"TIOCM_CD", TIOCM_CD<font color='red'>}</font>,
+<a name='L825'><font color='darkred'>#endif</font>
+<a name='L826'><font color='darkred'>#ifdef</font> TIOCM_CTS
+<a name='L827'>    <font color='red'>{</font>"TIOCM_CTS", TIOCM_CTS<font color='red'>}</font>,
+<a name='L828'><font color='darkred'>#endif</font>
+<a name='L829'><font color='darkred'>#ifdef</font> TIOCM_DSR
+<a name='L830'>    <font color='red'>{</font>"TIOCM_DSR", TIOCM_DSR<font color='red'>}</font>,
+<a name='L831'><font color='darkred'>#endif</font>
+<a name='L832'><font color='darkred'>#ifdef</font> TIOCM_DTR
+<a name='L833'>    <font color='red'>{</font>"TIOCM_DTR", TIOCM_DTR<font color='red'>}</font>,
+<a name='L834'><font color='darkred'>#endif</font>
+<a name='L835'><font color='darkred'>#ifdef</font> TIOCM_LE
+<a name='L836'>    <font color='red'>{</font>"TIOCM_LE", TIOCM_LE<font color='red'>}</font>,
+<a name='L837'><font color='darkred'>#endif</font>
+<a name='L838'><font color='darkred'>#ifdef</font> TIOCM_RI
+<a name='L839'>    <font color='red'>{</font>"TIOCM_RI", TIOCM_RI<font color='red'>}</font>,
+<a name='L840'><font color='darkred'>#endif</font>
+<a name='L841'><font color='darkred'>#ifdef</font> TIOCM_RNG
+<a name='L842'>    <font color='red'>{</font>"TIOCM_RNG", TIOCM_RNG<font color='red'>}</font>,
+<a name='L843'><font color='darkred'>#endif</font>
+<a name='L844'><font color='darkred'>#ifdef</font> TIOCM_RTS
+<a name='L845'>    <font color='red'>{</font>"TIOCM_RTS", TIOCM_RTS<font color='red'>}</font>,
+<a name='L846'><font color='darkred'>#endif</font>
+<a name='L847'><font color='darkred'>#ifdef</font> TIOCM_SR
+<a name='L848'>    <font color='red'>{</font>"TIOCM_SR", TIOCM_SR<font color='red'>}</font>,
+<a name='L849'><font color='darkred'>#endif</font>
+<a name='L850'><font color='darkred'>#ifdef</font> TIOCM_ST
+<a name='L851'>    <font color='red'>{</font>"TIOCM_ST", TIOCM_ST<font color='red'>}</font>,
+<a name='L852'><font color='darkred'>#endif</font>
+<a name='L853'><font color='darkred'>#ifdef</font> TIOCNOTTY
+<a name='L854'>    <font color='red'>{</font>"TIOCNOTTY", TIOCNOTTY<font color='red'>}</font>,
+<a name='L855'><font color='darkred'>#endif</font>
+<a name='L856'><font color='darkred'>#ifdef</font> TIOCNXCL
+<a name='L857'>    <font color='red'>{</font>"TIOCNXCL", TIOCNXCL<font color='red'>}</font>,
+<a name='L858'><font color='darkred'>#endif</font>
+<a name='L859'><font color='darkred'>#ifdef</font> TIOCOUTQ
+<a name='L860'>    <font color='red'>{</font>"TIOCOUTQ", TIOCOUTQ<font color='red'>}</font>,
+<a name='L861'><font color='darkred'>#endif</font>
+<a name='L862'><font color='darkred'>#ifdef</font> TIOCPKT
+<a name='L863'>    <font color='red'>{</font>"TIOCPKT", TIOCPKT<font color='red'>}</font>,
+<a name='L864'><font color='darkred'>#endif</font>
+<a name='L865'><font color='darkred'>#ifdef</font> TIOCPKT_DATA
+<a name='L866'>    <font color='red'>{</font>"TIOCPKT_DATA", TIOCPKT_DATA<font color='red'>}</font>,
+<a name='L867'><font color='darkred'>#endif</font>
+<a name='L868'><font color='darkred'>#ifdef</font> TIOCPKT_DOSTOP
+<a name='L869'>    <font color='red'>{</font>"TIOCPKT_DOSTOP", TIOCPKT_DOSTOP<font color='red'>}</font>,
+<a name='L870'><font color='darkred'>#endif</font>
+<a name='L871'><font color='darkred'>#ifdef</font> TIOCPKT_FLUSHREAD
+<a name='L872'>    <font color='red'>{</font>"TIOCPKT_FLUSHREAD", TIOCPKT_FLUSHREAD<font color='red'>}</font>,
+<a name='L873'><font color='darkred'>#endif</font>
+<a name='L874'><font color='darkred'>#ifdef</font> TIOCPKT_FLUSHWRITE
+<a name='L875'>    <font color='red'>{</font>"TIOCPKT_FLUSHWRITE", TIOCPKT_FLUSHWRITE<font color='red'>}</font>,
+<a name='L876'><font color='darkred'>#endif</font>
+<a name='L877'><font color='darkred'>#ifdef</font> TIOCPKT_NOSTOP
+<a name='L878'>    <font color='red'>{</font>"TIOCPKT_NOSTOP", TIOCPKT_NOSTOP<font color='red'>}</font>,
+<a name='L879'><font color='darkred'>#endif</font>
+<a name='L880'><font color='darkred'>#ifdef</font> TIOCPKT_START
+<a name='L881'>    <font color='red'>{</font>"TIOCPKT_START", TIOCPKT_START<font color='red'>}</font>,
+<a name='L882'><font color='darkred'>#endif</font>
+<a name='L883'><font color='darkred'>#ifdef</font> TIOCPKT_STOP
+<a name='L884'>    <font color='red'>{</font>"TIOCPKT_STOP", TIOCPKT_STOP<font color='red'>}</font>,
+<a name='L885'><font color='darkred'>#endif</font>
+<a name='L886'><font color='darkred'>#ifdef</font> TIOCSCTTY
+<a name='L887'>    <font color='red'>{</font>"TIOCSCTTY", TIOCSCTTY<font color='red'>}</font>,
+<a name='L888'><font color='darkred'>#endif</font>
+<a name='L889'><font color='darkred'>#ifdef</font> TIOCSERCONFIG
+<a name='L890'>    <font color='red'>{</font>"TIOCSERCONFIG", TIOCSERCONFIG<font color='red'>}</font>,
+<a name='L891'><font color='darkred'>#endif</font>
+<a name='L892'><font color='darkred'>#ifdef</font> TIOCSERGETLSR
+<a name='L893'>    <font color='red'>{</font>"TIOCSERGETLSR", TIOCSERGETLSR<font color='red'>}</font>,
+<a name='L894'><font color='darkred'>#endif</font>
+<a name='L895'><font color='darkred'>#ifdef</font> TIOCSERGETMULTI
+<a name='L896'>    <font color='red'>{</font>"TIOCSERGETMULTI", TIOCSERGETMULTI<font color='red'>}</font>,
+<a name='L897'><font color='darkred'>#endif</font>
+<a name='L898'><font color='darkred'>#ifdef</font> TIOCSERGSTRUCT
+<a name='L899'>    <font color='red'>{</font>"TIOCSERGSTRUCT", TIOCSERGSTRUCT<font color='red'>}</font>,
+<a name='L900'><font color='darkred'>#endif</font>
+<a name='L901'><font color='darkred'>#ifdef</font> TIOCSERGWILD
+<a name='L902'>    <font color='red'>{</font>"TIOCSERGWILD", TIOCSERGWILD<font color='red'>}</font>,
+<a name='L903'><font color='darkred'>#endif</font>
+<a name='L904'><font color='darkred'>#ifdef</font> TIOCSERSETMULTI
+<a name='L905'>    <font color='red'>{</font>"TIOCSERSETMULTI", TIOCSERSETMULTI<font color='red'>}</font>,
+<a name='L906'><font color='darkred'>#endif</font>
+<a name='L907'><font color='darkred'>#ifdef</font> TIOCSERSWILD
+<a name='L908'>    <font color='red'>{</font>"TIOCSERSWILD", TIOCSERSWILD<font color='red'>}</font>,
+<a name='L909'><font color='darkred'>#endif</font>
+<a name='L910'><font color='darkred'>#ifdef</font> TIOCSER_TEMT
+<a name='L911'>    <font color='red'>{</font>"TIOCSER_TEMT", TIOCSER_TEMT<font color='red'>}</font>,
+<a name='L912'><font color='darkred'>#endif</font>
+<a name='L913'><font color='darkred'>#ifdef</font> TIOCSETD
+<a name='L914'>    <font color='red'>{</font>"TIOCSETD", TIOCSETD<font color='red'>}</font>,
+<a name='L915'><font color='darkred'>#endif</font>
+<a name='L916'><font color='darkred'>#ifdef</font> TIOCSLCKTRMIOS
+<a name='L917'>    <font color='red'>{</font>"TIOCSLCKTRMIOS", TIOCSLCKTRMIOS<font color='red'>}</font>,
+<a name='L918'><font color='darkred'>#endif</font>
+<a name='L919'><font color='darkred'>#ifdef</font> TIOCSPGRP
+<a name='L920'>    <font color='red'>{</font>"TIOCSPGRP", TIOCSPGRP<font color='red'>}</font>,
+<a name='L921'><font color='darkred'>#endif</font>
+<a name='L922'><font color='darkred'>#ifdef</font> TIOCSSERIAL
+<a name='L923'>    <font color='red'>{</font>"TIOCSSERIAL", TIOCSSERIAL<font color='red'>}</font>,
+<a name='L924'><font color='darkred'>#endif</font>
+<a name='L925'><font color='darkred'>#ifdef</font> TIOCSSOFTCAR
+<a name='L926'>    <font color='red'>{</font>"TIOCSSOFTCAR", TIOCSSOFTCAR<font color='red'>}</font>,
+<a name='L927'><font color='darkred'>#endif</font>
+<a name='L928'><font color='darkred'>#ifdef</font> TIOCSTI
+<a name='L929'>    <font color='red'>{</font>"TIOCSTI", TIOCSTI<font color='red'>}</font>,
+<a name='L930'><font color='darkred'>#endif</font>
+<a name='L931'><font color='darkred'>#ifdef</font> TIOCSWINSZ
+<a name='L932'>    <font color='red'>{</font>"TIOCSWINSZ", TIOCSWINSZ<font color='red'>}</font>,
+<a name='L933'><font color='darkred'>#endif</font>
+<a name='L934'><font color='darkred'>#ifdef</font> TIOCTTYGSTRUCT
+<a name='L935'>    <font color='red'>{</font>"TIOCTTYGSTRUCT", TIOCTTYGSTRUCT<font color='red'>}</font>,
+<a name='L936'><font color='darkred'>#endif</font>
+<a name='L937'>
+<a name='L938'>    <i><font color='green'>/* sentinel */</font></i>
+<a name='L939'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0<font color='red'>}</font>
+<a name='L940'><font color='red'>}</font>;
+<a name='L941'>
+<a name='L942'>
+<a name='L943'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> termiosmodule = <font color='red'>{</font>
+<a name='L944'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L945'>    "termios",
+<a name='L946'>    termios__doc__,
+<a name='L947'>    -1,
+<a name='L948'>    termios_methods,
+<a name='L949'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L950'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L951'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L952'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L953'><font color='red'>}</font>;
+<a name='L954'>
+<a name='L955'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L956'>PyInit_termios(<b>void</b>)
+<a name='L957'><font color='red'>{</font>
+<a name='L958'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m;
+<a name='L959'>    <b>struct</b> <a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a> *<a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a> = termios_constants;
+<a name='L960'>
+<a name='L961'>    m = PyModule_Create(&amp;termiosmodule);
+<a name='L962'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L963'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L964'>
+<a name='L965'>    <b>if</b> (TermiosError == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L966'>        TermiosError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("termios.error", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L967'>    <font color='red'>}</font>
+<a name='L968'>    Py_INCREF(TermiosError);
+<a name='L969'>    <a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "error", TermiosError);
+<a name='L970'>
+<a name='L971'>    <b>while</b> (<a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a>-&gt;name != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L972'>        <a href='../S/3125.html#L554' title='Defined at 554 in Python/modsupport.c.'>PyModule_AddIntConstant</a>(m, <a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a>-&gt;name, <a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a>-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L973'>        ++<a href='../S/2718.html#L320' title='Defined at 320 in Modules/termios.c.'>constant</a>;
+<a name='L974'>    <font color='red'>}</font>
+<a name='L975'>    <b>return</b> m;
+<a name='L976'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L43'>[^]</a><a href='#L956'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

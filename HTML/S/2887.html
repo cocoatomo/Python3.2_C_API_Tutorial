@@ -1,0 +1,560 @@
+<html>
+<head>
+<title>PC/msvcrtmodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3393.html'>PC</a>/msvcrtmodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L468'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L36' title='Defined at 36.'>msvcrt_heapmin</a>
+<li><a href='#L56' title='Defined at 56.'>msvcrt_locking</a>
+<li><a href='#L89' title='Defined at 89.'>msvcrt_setmode</a>
+<li><a href='#L112' title='Defined at 112.'>msvcrt_open_osfhandle</a>
+<li><a href='#L138' title='Defined at 138.'>msvcrt_get_osfhandle</a>
+<li><a href='#L168' title='Defined at 168.'>msvcrt_kbhit</a>
+<li><a href='#L185' title='Defined at 185.'>msvcrt_getch</a>
+<li><a href='#L212' title='Defined at 212.'>msvcrt_getwch</a>
+<li><a href='#L234' title='Defined at 234.'>msvcrt_getche</a>
+<li><a href='#L257' title='Defined at 257.'>msvcrt_getwche</a>
+<li><a href='#L279' title='Defined at 279.'>msvcrt_putch</a>
+<li><a href='#L298' title='Defined at 298.'>msvcrt_putwch</a>
+<li><a href='#L317' title='Defined at 317.'>msvcrt_ungetch</a>
+<li><a href='#L339' title='Defined at 339.'>msvcrt_ungetwch</a>
+<li><a href='#L359' title='Defined at 359.'>insertint</a>
+<li><a href='#L375' title='Defined at 375.'>msvcrt_setreportfile</a>
+<li><a href='#L389' title='Defined at 389.'>msvcrt_setreportmode</a>
+<li><a href='#L403' title='Defined at 403.'>msvcrt_seterrormode</a>
+<li><a href='#L416' title='Defined at 416.'>seterrormode</a>
+<li><a href='#L468' title='Defined at 468.'>PyInit_msvcrt</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*********************************************************</font></i>
+<a name='L2'><i><font color='green'></font></i>
+<a name='L3'><i><font color='green'>    msvcrtmodule.c</font></i>
+<a name='L4'><i><font color='green'></font></i>
+<a name='L5'><i><font color='green'>    A Python interface to the Microsoft Visual C Runtime</font></i>
+<a name='L6'><i><font color='green'>    Library, providing access to those non-portable, but</font></i>
+<a name='L7'><i><font color='green'>    still useful routines.</font></i>
+<a name='L8'><i><font color='green'></font></i>
+<a name='L9'><i><font color='green'>    Only ever compiled with an MS compiler, so no attempt</font></i>
+<a name='L10'><i><font color='green'>    has been made to avoid MS language extensions, etc...</font></i>
+<a name='L11'><i><font color='green'></font></i>
+<a name='L12'><i><font color='green'>    This may only work on NT or 95...</font></i>
+<a name='L13'><i><font color='green'></font></i>
+<a name='L14'><i><font color='green'>    Author: Mark Hammond and Guido van Rossum.</font></i>
+<a name='L15'><i><font color='green'>    Maintenance: Guido van Rossum.</font></i>
+<a name='L16'><i><font color='green'></font></i>
+<a name='L17'><i><font color='green'>***********************************************************/</font></i>
+<a name='L18'>
+<a name='L19'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L20'><font color='darkred'>#include</font> "malloc.h"
+<a name='L21'><font color='darkred'>#include</font> &lt;io.h&gt;
+<a name='L22'><font color='darkred'>#include</font> &lt;conio.h&gt;
+<a name='L23'><font color='darkred'>#include</font> &lt;sys/locking.h&gt;
+<a name='L24'><font color='darkred'>#include</font> &lt;crtdbg.h&gt;
+<a name='L25'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L26'>
+<a name='L27'><font color='darkred'>#ifdef</font> _MSC_VER
+<a name='L28'><font color='darkred'>#if</font> _MSC_VER &gt;= 1500 &amp;&amp; _MSC_VER &lt; 1600
+<a name='L29'><font color='darkred'>#include</font> &lt;crtassem.h&gt;
+<a name='L30'><font color='darkred'>#endif</font>
+<a name='L31'><font color='darkred'>#endif</font>
+<a name='L32'>
+<a name='L33'><i><font color='green'>// Force the malloc heap to clean itself up, and free unused blocks</font></i>
+<a name='L34'><i><font color='green'>// back to the OS.  (According to the docs, only works on NT.)</font></i>
+<a name='L35'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L36'><a href='../S/2887.html#L429' title='Refered from 429 in PC/msvcrtmodule.c.'>msvcrt_heapmin</a>(PyObject *self, PyObject *args)
+<a name='L37'><font color='red'>{</font>
+<a name='L38'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, ":heapmin"))
+<a name='L39'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L40'>
+<a name='L41'>    <b>if</b> (_heapmin() != 0)
+<a name='L42'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L43'>
+<a name='L44'>    Py_INCREF(Py_None);
+<a name='L45'>    <b>return</b> Py_None;
+<a name='L46'><font color='red'>}</font>
+<a name='L47'>
+<a name='L48'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(heapmin_doc,
+<a name='L49'>"heapmin() -&gt; None\n\
+<a name='L50'>\n\
+<a name='L51'>Force the malloc() heap to clean itself up and return unused blocks\n\
+<a name='L52'>to the operating system. On failure, this raises IOError.");
+<a name='L53'>
+<a name='L54'><i><font color='green'>// Perform locking operations on a C runtime file descriptor.</font></i>
+<a name='L55'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L56'><a href='../S/2887.html#L430' title='Refered from 430 in PC/msvcrtmodule.c.'>msvcrt_locking</a>(PyObject *self, PyObject *args)
+<a name='L57'><font color='red'>{</font>
+<a name='L58'>    <b>int</b> fd;
+<a name='L59'>    <b>int</b> mode;
+<a name='L60'>    <b>long</b> nbytes;
+<a name='L61'>    <b>int</b> err;
+<a name='L62'>
+<a name='L63'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "iil:locking", &amp;fd, &amp;mode, &amp;nbytes))
+<a name='L64'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L65'>
+<a name='L66'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L67'>    err = _locking(fd, mode, nbytes);
+<a name='L68'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L69'>    <b>if</b> (err != 0)
+<a name='L70'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L71'>
+<a name='L72'>    Py_INCREF(Py_None);
+<a name='L73'>    <b>return</b> Py_None;
+<a name='L74'><font color='red'>}</font>
+<a name='L75'>
+<a name='L76'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(locking_doc,
+<a name='L77'>"locking(fd, mode, nbytes) -&gt; None\n\
+<a name='L78'>\n\
+<a name='L79'>Lock part of a file based on file descriptor fd from the C runtime.\n\
+<a name='L80'>Raises IOError on failure. The locked region of the file extends from\n\
+<a name='L81'>the current file position for nbytes bytes, and may continue beyond\n\
+<a name='L82'>the end of the file. mode must be one of the LK_* constants listed\n\
+<a name='L83'>below. Multiple regions in a file may be locked at the same time, but\n\
+<a name='L84'>may not overlap. Adjacent regions are not merged; they must be unlocked\n\
+<a name='L85'>individually.");
+<a name='L86'>
+<a name='L87'><i><font color='green'>// Set the file translation mode for a C runtime file descriptor.</font></i>
+<a name='L88'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L89'><a href='../S/2887.html#L431' title='Refered from 431 in PC/msvcrtmodule.c.'>msvcrt_setmode</a>(PyObject *self, PyObject *args)
+<a name='L90'><font color='red'>{</font>
+<a name='L91'>    <b>int</b> fd;
+<a name='L92'>    <b>int</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L93'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>,"ii:setmode", &amp;fd, &amp;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>))
+<a name='L94'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L95'>
+<a name='L96'>    <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2906.html#L247' title='Defined at 247 in PC/pyconfig.h.'>_setmode</a>(fd, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L97'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> == -1)
+<a name='L98'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L99'>
+<a name='L100'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L101'><font color='red'>}</font>
+<a name='L102'>
+<a name='L103'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(setmode_doc,
+<a name='L104'>"setmode(fd, mode) -&gt; Previous mode\n\
+<a name='L105'>\n\
+<a name='L106'>Set the line-end translation mode for the file descriptor fd. To set\n\
+<a name='L107'>it to text mode, flags should be os.O_TEXT; for binary, it should be\n\
+<a name='L108'>os.O_BINARY.");
+<a name='L109'>
+<a name='L110'><i><font color='green'>// Convert an OS file handle to a C runtime file descriptor.</font></i>
+<a name='L111'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L112'><a href='../S/2887.html#L432' title='Refered from 432 in PC/msvcrtmodule.c.'>msvcrt_open_osfhandle</a>(PyObject *self, PyObject *args)
+<a name='L113'><font color='red'>{</font>
+<a name='L114'>    <b>long</b> handle;
+<a name='L115'>    <b>int</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L116'>    <b>int</b> fd;
+<a name='L117'>
+<a name='L118'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "li:open_osfhandle", &amp;handle, &amp;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>))
+<a name='L119'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L120'>
+<a name='L121'>    fd = _open_osfhandle(handle, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L122'>    <b>if</b> (fd == -1)
+<a name='L123'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L124'>
+<a name='L125'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(fd);
+<a name='L126'><font color='red'>}</font>
+<a name='L127'>
+<a name='L128'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(open_osfhandle_doc,
+<a name='L129'>"open_osfhandle(handle, flags) -&gt; file descriptor\n\
+<a name='L130'>\n\
+<a name='L131'>Create a C runtime file descriptor from the file handle handle. The\n\
+<a name='L132'>flags parameter should be a bitwise OR of os.O_APPEND, os.O_RDONLY,\n\
+<a name='L133'>and os.O_TEXT. The returned file descriptor may be used as a parameter\n\
+<a name='L134'>to os.fdopen() to create a file object.");
+<a name='L135'>
+<a name='L136'><i><font color='green'>// Convert a C runtime file descriptor to an OS file handle.</font></i>
+<a name='L137'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L138'><a href='../S/2887.html#L433' title='Refered from 433 in PC/msvcrtmodule.c.'>msvcrt_get_osfhandle</a>(PyObject *self, PyObject *args)
+<a name='L139'><font color='red'>{</font>
+<a name='L140'>    <b>int</b> fd;
+<a name='L141'>    <a href='../D/4315.html' title='Multiple defined in 4 places.'>Py_intptr_t</a> handle;
+<a name='L142'>
+<a name='L143'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>,"i:get_osfhandle", &amp;fd))
+<a name='L144'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L145'>
+<a name='L146'>    <b>if</b> (!_PyVerify_fd(fd))
+<a name='L147'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L148'>
+<a name='L149'>    handle = _get_osfhandle(fd);
+<a name='L150'>    <b>if</b> (handle == -1)
+<a name='L151'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L152'>
+<a name='L153'>    <i><font color='green'>/* technically 'handle' is not a pointer, but a integer as</font></i>
+<a name='L154'><i><font color='green'>       large as a pointer, Python's *VoidPtr interface is the</font></i>
+<a name='L155'><i><font color='green'>       most appropriate here */</font></i>
+<a name='L156'>    <b>return</b> <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>((<b>void</b>*)handle);
+<a name='L157'><font color='red'>}</font>
+<a name='L158'>
+<a name='L159'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(get_osfhandle_doc,
+<a name='L160'>"get_osfhandle(fd) -&gt; file handle\n\
+<a name='L161'>\n\
+<a name='L162'>Return the file handle for the file descriptor fd. Raises IOError\n\
+<a name='L163'>if fd is not recognized.");
+<a name='L164'>
+<a name='L165'><i><font color='green'>/* Console I/O */</font></i>
+<a name='L166'>
+<a name='L167'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L168'><a href='../S/2887.html#L434' title='Refered from 434 in PC/msvcrtmodule.c.'>msvcrt_kbhit</a>(PyObject *self, PyObject *args)
+<a name='L169'><font color='red'>{</font>
+<a name='L170'>    <b>int</b> ok;
+<a name='L171'>
+<a name='L172'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, ":kbhit"))
+<a name='L173'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L174'>
+<a name='L175'>    ok = _kbhit();
+<a name='L176'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ok);
+<a name='L177'><font color='red'>}</font>
+<a name='L178'>
+<a name='L179'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(kbhit_doc,
+<a name='L180'>"kbhit() -&gt; bool\n\
+<a name='L181'>\n\
+<a name='L182'>Return true if a keypress is waiting to be read.");
+<a name='L183'>
+<a name='L184'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L185'><a href='../S/2887.html#L435' title='Refered from 435 in PC/msvcrtmodule.c.'>msvcrt_getch</a>(PyObject *self, PyObject *args)
+<a name='L186'><font color='red'>{</font>
+<a name='L187'>    <b>int</b> ch;
+<a name='L188'>    <b>char</b> s[1];
+<a name='L189'>
+<a name='L190'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, ":getch"))
+<a name='L191'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L192'>
+<a name='L193'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L194'>    ch = _getch();
+<a name='L195'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L196'>    s[0] = ch;
+<a name='L197'>    <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(s, 1);
+<a name='L198'><font color='red'>}</font>
+<a name='L199'>
+<a name='L200'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(getch_doc,
+<a name='L201'>"getch() -&gt; key character\n\
+<a name='L202'>\n\
+<a name='L203'>Read a keypress and return the resulting character as a byte string.\n\
+<a name='L204'>Nothing is echoed to the console. This call will block if a keypress is\n\
+<a name='L205'>not already available, but will not wait for Enter to be pressed. If the\n\
+<a name='L206'>pressed key was a special function key, this will return '\\000' or\n\
+<a name='L207'>'\\xe0'; the next call will return the keycode. The Control-C keypress\n\
+<a name='L208'>cannot be read with this function.");
+<a name='L209'>
+<a name='L210'><font color='darkred'>#ifdef</font> _WCONIO_DEFINED
+<a name='L211'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L212'><a href='../S/2887.html#L446' title='Refered from 446 in PC/msvcrtmodule.c.'>msvcrt_getwch</a>(PyObject *self, PyObject *args)
+<a name='L213'><font color='red'>{</font>
+<a name='L214'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> ch;
+<a name='L215'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> u[1];
+<a name='L216'>
+<a name='L217'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, ":getwch"))
+<a name='L218'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L219'>
+<a name='L220'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L221'>    ch = _getwch();
+<a name='L222'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L223'>    u[0] = ch;
+<a name='L224'>    <b>return</b> <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(u, 1);
+<a name='L225'><font color='red'>}</font>
+<a name='L226'>
+<a name='L227'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(getwch_doc,
+<a name='L228'>"getwch() -&gt; Unicode key character\n\
+<a name='L229'>\n\
+<a name='L230'>Wide char variant of getch(), returning a Unicode value.");
+<a name='L231'><font color='darkred'>#endif</font>
+<a name='L232'>
+<a name='L233'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L234'><a href='../S/2887.html#L436' title='Refered from 436 in PC/msvcrtmodule.c.'>msvcrt_getche</a>(PyObject *self, PyObject *args)
+<a name='L235'><font color='red'>{</font>
+<a name='L236'>    <b>int</b> ch;
+<a name='L237'>    <b>char</b> s[1];
+<a name='L238'>
+<a name='L239'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, ":getche"))
+<a name='L240'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L241'>
+<a name='L242'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L243'>    ch = _getche();
+<a name='L244'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L245'>    s[0] = ch;
+<a name='L246'>    <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(s, 1);
+<a name='L247'><font color='red'>}</font>
+<a name='L248'>
+<a name='L249'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(getche_doc,
+<a name='L250'>"getche() -&gt; key character\n\
+<a name='L251'>\n\
+<a name='L252'>Similar to getch(), but the keypress will be echoed if it represents\n\
+<a name='L253'>a printable character.");
+<a name='L254'>
+<a name='L255'><font color='darkred'>#ifdef</font> _WCONIO_DEFINED
+<a name='L256'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L257'><a href='../S/2887.html#L447' title='Refered from 447 in PC/msvcrtmodule.c.'>msvcrt_getwche</a>(PyObject *self, PyObject *args)
+<a name='L258'><font color='red'>{</font>
+<a name='L259'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> ch;
+<a name='L260'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> s[1];
+<a name='L261'>
+<a name='L262'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, ":getwche"))
+<a name='L263'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L264'>
+<a name='L265'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L266'>    ch = _getwche();
+<a name='L267'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L268'>    s[0] = ch;
+<a name='L269'>    <b>return</b> <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(s, 1);
+<a name='L270'><font color='red'>}</font>
+<a name='L271'>
+<a name='L272'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(getwche_doc,
+<a name='L273'>"getwche() -&gt; Unicode key character\n\
+<a name='L274'>\n\
+<a name='L275'>Wide char variant of getche(), returning a Unicode value.");
+<a name='L276'><font color='darkred'>#endif</font>
+<a name='L277'>
+<a name='L278'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L279'><a href='../S/2887.html#L437' title='Refered from 437 in PC/msvcrtmodule.c.'>msvcrt_putch</a>(PyObject *self, PyObject *args)
+<a name='L280'><font color='red'>{</font>
+<a name='L281'>    <b>char</b> ch;
+<a name='L282'>
+<a name='L283'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "c:putch", &amp;ch))
+<a name='L284'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L285'>
+<a name='L286'>    _putch(ch);
+<a name='L287'>    Py_INCREF(Py_None);
+<a name='L288'>    <b>return</b> Py_None;
+<a name='L289'><font color='red'>}</font>
+<a name='L290'>
+<a name='L291'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(putch_doc,
+<a name='L292'>"putch(char) -&gt; None\n\
+<a name='L293'>\n\
+<a name='L294'>Print the byte string char to the console without buffering.");
+<a name='L295'>
+<a name='L296'><font color='darkred'>#ifdef</font> _WCONIO_DEFINED
+<a name='L297'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L298'><a href='../S/2887.html#L448' title='Refered from 448 in PC/msvcrtmodule.c.'>msvcrt_putwch</a>(PyObject *self, PyObject *args)
+<a name='L299'><font color='red'>{</font>
+<a name='L300'>    <b>int</b> ch;
+<a name='L301'>
+<a name='L302'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "C:putwch", &amp;ch))
+<a name='L303'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L304'>
+<a name='L305'>    _putwch(ch);
+<a name='L306'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L307'>
+<a name='L308'><font color='red'>}</font>
+<a name='L309'>
+<a name='L310'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(putwch_doc,
+<a name='L311'>"putwch(unicode_char) -&gt; None\n\
+<a name='L312'>\n\
+<a name='L313'>Wide char variant of putch(), accepting a Unicode value.");
+<a name='L314'><font color='darkred'>#endif</font>
+<a name='L315'>
+<a name='L316'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L317'><a href='../S/2887.html#L438' title='Refered from 438 in PC/msvcrtmodule.c.'>msvcrt_ungetch</a>(PyObject *self, PyObject *args)
+<a name='L318'><font color='red'>{</font>
+<a name='L319'>    <b>char</b> ch;
+<a name='L320'>
+<a name='L321'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "c:ungetch", &amp;ch))
+<a name='L322'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L323'>
+<a name='L324'>    <b>if</b> (_ungetch(ch) == EOF)
+<a name='L325'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L326'>    Py_INCREF(Py_None);
+<a name='L327'>    <b>return</b> Py_None;
+<a name='L328'><font color='red'>}</font>
+<a name='L329'>
+<a name='L330'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(ungetch_doc,
+<a name='L331'>"ungetch(char) -&gt; None\n\
+<a name='L332'>\n\
+<a name='L333'>Cause the byte string char to be \"pushed back\" into the\n\
+<a name='L334'>console buffer; it will be the next character read by\n\
+<a name='L335'>getch() or getche().");
+<a name='L336'>
+<a name='L337'><font color='darkred'>#ifdef</font> _WCONIO_DEFINED
+<a name='L338'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L339'><a href='../S/2887.html#L449' title='Refered from 449 in PC/msvcrtmodule.c.'>msvcrt_ungetwch</a>(PyObject *self, PyObject *args)
+<a name='L340'><font color='red'>{</font>
+<a name='L341'>    <b>int</b> ch;
+<a name='L342'>
+<a name='L343'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "C:ungetwch", &amp;ch))
+<a name='L344'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L345'>
+<a name='L346'>    <b>if</b> (_ungetwch(ch) == WEOF)
+<a name='L347'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L348'>    Py_INCREF(Py_None);
+<a name='L349'>    <b>return</b> Py_None;
+<a name='L350'><font color='red'>}</font>
+<a name='L351'>
+<a name='L352'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(ungetwch_doc,
+<a name='L353'>"ungetwch(unicode_char) -&gt; None\n\
+<a name='L354'>\n\
+<a name='L355'>Wide char variant of ungetch(), accepting a Unicode value.");
+<a name='L356'><font color='darkred'>#endif</font>
+<a name='L357'>
+<a name='L358'><b>static</b> <b>void</b>
+<a name='L359'><a href='../R/8419.html' title='Multiple refered from 19 places.'>insertint</a>(PyObject *d, <b>char</b> *name, <b>int</b> value)
+<a name='L360'><font color='red'>{</font>
+<a name='L361'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>) <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L362'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L363'>        <i><font color='green'>/* Don't bother reporting this error */</font></i>
+<a name='L364'>        <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L365'>    <font color='red'>}</font>
+<a name='L366'>    <b>else</b> <font color='red'>{</font>
+<a name='L367'>        <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, name, v);
+<a name='L368'>        Py_DECREF(v);
+<a name='L369'>    <font color='red'>}</font>
+<a name='L370'><font color='red'>}</font>
+<a name='L371'>
+<a name='L372'><font color='darkred'>#ifdef</font> _DEBUG
+<a name='L373'>
+<a name='L374'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L375'><a href='../S/2887.html#L441' title='Refered from 441 in PC/msvcrtmodule.c.'>msvcrt_setreportfile</a>(PyObject *self, PyObject *args)
+<a name='L376'><font color='red'>{</font>
+<a name='L377'>    <b>int</b> type, file;
+<a name='L378'>    _HFILE res;
+<a name='L379'>
+<a name='L380'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "ii", &amp;type, &amp;file))
+<a name='L381'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L382'>    res = _CrtSetReportFile(type, (_HFILE)file);
+<a name='L383'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)res);
+<a name='L384'>    Py_INCREF(Py_None);
+<a name='L385'>    <b>return</b> Py_None;
+<a name='L386'><font color='red'>}</font>
+<a name='L387'>
+<a name='L388'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L389'><a href='../S/2887.html#L442' title='Refered from 442 in PC/msvcrtmodule.c.'>msvcrt_setreportmode</a>(PyObject *self, PyObject *args)
+<a name='L390'><font color='red'>{</font>
+<a name='L391'>    <b>int</b> type, mode;
+<a name='L392'>    <b>int</b> res;
+<a name='L393'>
+<a name='L394'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "ii", &amp;type, &amp;mode))
+<a name='L395'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L396'>    res = _CrtSetReportMode(type, mode);
+<a name='L397'>    <b>if</b> (res == -1)
+<a name='L398'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_IOError);
+<a name='L399'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(res);
+<a name='L400'><font color='red'>}</font>
+<a name='L401'>
+<a name='L402'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L403'><a href='../S/2887.html#L443' title='Refered from 443 in PC/msvcrtmodule.c.'>msvcrt_seterrormode</a>(PyObject *self, PyObject *args)
+<a name='L404'><font color='red'>{</font>
+<a name='L405'>    <b>int</b> mode, res;
+<a name='L406'>
+<a name='L407'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i", &amp;mode))
+<a name='L408'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L409'>    res = _set_error_mode(mode);
+<a name='L410'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(res);
+<a name='L411'><font color='red'>}</font>
+<a name='L412'>
+<a name='L413'><font color='darkred'>#endif</font>
+<a name='L414'>
+<a name='L415'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L416'><a href='../S/2887.html#L439' title='Refered from 439 in PC/msvcrtmodule.c.'>seterrormode</a>(PyObject *self, PyObject *args)
+<a name='L417'><font color='red'>{</font>
+<a name='L418'>    <b>unsigned</b> <b>int</b> mode, res;
+<a name='L419'>
+<a name='L420'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "I", &amp;mode))
+<a name='L421'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L422'>    res = SetErrorMode(mode);
+<a name='L423'>    <b>return</b> <a href='../S/2799.html#L245' title='Defined at 245 in Objects/longobject.c.'>PyLong_FromUnsignedLong</a>(res);
+<a name='L424'><font color='red'>}</font>
+<a name='L425'>
+<a name='L426'>
+<a name='L427'><i><font color='green'>/* List of functions exported by this module */</font></i>
+<a name='L428'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> msvcrt_functions[] = <font color='red'>{</font>
+<a name='L429'>    <font color='red'>{</font>"heapmin",                 <a href='../S/2887.html#L36' title='Defined at 36 in PC/msvcrtmodule.c.'>msvcrt_heapmin</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, heapmin_doc<font color='red'>}</font>,
+<a name='L430'>    <font color='red'>{</font>"locking",             <a href='../S/2887.html#L56' title='Defined at 56 in PC/msvcrtmodule.c.'>msvcrt_locking</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, locking_doc<font color='red'>}</font>,
+<a name='L431'>    <font color='red'>{</font>"setmode",                 <a href='../S/2887.html#L89' title='Defined at 89 in PC/msvcrtmodule.c.'>msvcrt_setmode</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, setmode_doc<font color='red'>}</font>,
+<a name='L432'>    <font color='red'>{</font>"open_osfhandle",          <a href='../S/2887.html#L112' title='Defined at 112 in PC/msvcrtmodule.c.'>msvcrt_open_osfhandle</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, open_osfhandle_doc<font color='red'>}</font>,
+<a name='L433'>    <font color='red'>{</font>"get_osfhandle",           <a href='../S/2887.html#L138' title='Defined at 138 in PC/msvcrtmodule.c.'>msvcrt_get_osfhandle</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, get_osfhandle_doc<font color='red'>}</font>,
+<a name='L434'>    <font color='red'>{</font>"kbhit",                   <a href='../S/2887.html#L168' title='Defined at 168 in PC/msvcrtmodule.c.'>msvcrt_kbhit</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, kbhit_doc<font color='red'>}</font>,
+<a name='L435'>    <font color='red'>{</font>"getch",                   <a href='../S/2887.html#L185' title='Defined at 185 in PC/msvcrtmodule.c.'>msvcrt_getch</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, getch_doc<font color='red'>}</font>,
+<a name='L436'>    <font color='red'>{</font>"getche",                  <a href='../S/2887.html#L234' title='Defined at 234 in PC/msvcrtmodule.c.'>msvcrt_getche</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, getche_doc<font color='red'>}</font>,
+<a name='L437'>    <font color='red'>{</font>"putch",                   <a href='../S/2887.html#L279' title='Defined at 279 in PC/msvcrtmodule.c.'>msvcrt_putch</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, putch_doc<font color='red'>}</font>,
+<a name='L438'>    <font color='red'>{</font>"ungetch",                 <a href='../S/2887.html#L317' title='Defined at 317 in PC/msvcrtmodule.c.'>msvcrt_ungetch</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, ungetch_doc<font color='red'>}</font>,
+<a name='L439'>    <font color='red'>{</font>"SetErrorMode",            <a href='../S/2887.html#L416' title='Defined at 416 in PC/msvcrtmodule.c.'>seterrormode</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L440'><font color='darkred'>#ifdef</font> _DEBUG
+<a name='L441'>    <font color='red'>{</font>"CrtSetReportFile",        <a href='../S/2887.html#L375' title='Defined at 375 in PC/msvcrtmodule.c.'>msvcrt_setreportfile</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L442'>    <font color='red'>{</font>"CrtSetReportMode",        <a href='../S/2887.html#L389' title='Defined at 389 in PC/msvcrtmodule.c.'>msvcrt_setreportmode</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L443'>    <font color='red'>{</font>"set_error_mode",          <a href='../S/2887.html#L403' title='Defined at 403 in PC/msvcrtmodule.c.'>msvcrt_seterrormode</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a><font color='red'>}</font>,
+<a name='L444'><font color='darkred'>#endif</font>
+<a name='L445'><font color='darkred'>#ifdef</font> _WCONIO_DEFINED
+<a name='L446'>    <font color='red'>{</font>"getwch",                  <a href='../S/2887.html#L212' title='Defined at 212 in PC/msvcrtmodule.c.'>msvcrt_getwch</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, getwch_doc<font color='red'>}</font>,
+<a name='L447'>    <font color='red'>{</font>"getwche",                 <a href='../S/2887.html#L257' title='Defined at 257 in PC/msvcrtmodule.c.'>msvcrt_getwche</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, getwche_doc<font color='red'>}</font>,
+<a name='L448'>    <font color='red'>{</font>"putwch",                  <a href='../S/2887.html#L298' title='Defined at 298 in PC/msvcrtmodule.c.'>msvcrt_putwch</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, putwch_doc<font color='red'>}</font>,
+<a name='L449'>    <font color='red'>{</font>"ungetwch",                <a href='../S/2887.html#L339' title='Defined at 339 in PC/msvcrtmodule.c.'>msvcrt_ungetwch</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, ungetwch_doc<font color='red'>}</font>,
+<a name='L450'><font color='darkred'>#endif</font>
+<a name='L451'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,                      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L452'><font color='red'>}</font>;
+<a name='L453'>
+<a name='L454'>
+<a name='L455'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> msvcrtmodule = <font color='red'>{</font>
+<a name='L456'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L457'>    "msvcrt",
+<a name='L458'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L459'>    -1,
+<a name='L460'>    msvcrt_functions,
+<a name='L461'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L462'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L463'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L464'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L465'><font color='red'>}</font>;
+<a name='L466'>
+<a name='L467'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L468'><a href='../R/3058.html' title='Multiple refered from 2 places.'>PyInit_msvcrt</a>(<b>void</b>)
+<a name='L469'><font color='red'>{</font>
+<a name='L470'>    <b>int</b> st;
+<a name='L471'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d;
+<a name='L472'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m = PyModule_Create(&amp;msvcrtmodule);
+<a name='L473'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L474'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L475'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(m);
+<a name='L476'>
+<a name='L477'>    <i><font color='green'>/* constants for the locking() function's mode argument */</font></i>
+<a name='L478'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "LK_LOCK", _LK_LOCK);
+<a name='L479'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "LK_NBLCK", _LK_NBLCK);
+<a name='L480'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "LK_NBRLCK", _LK_NBRLCK);
+<a name='L481'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "LK_RLCK", _LK_RLCK);
+<a name='L482'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "LK_UNLCK", _LK_UNLCK);
+<a name='L483'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "SEM_FAILCRITICALERRORS", SEM_FAILCRITICALERRORS);
+<a name='L484'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "SEM_NOALIGNMENTFAULTEXCEPT", SEM_NOALIGNMENTFAULTEXCEPT);
+<a name='L485'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "SEM_NOGPFAULTERRORBOX", SEM_NOGPFAULTERRORBOX);
+<a name='L486'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "SEM_NOOPENFILEERRORBOX", SEM_NOOPENFILEERRORBOX);
+<a name='L487'><font color='darkred'>#ifdef</font> _DEBUG
+<a name='L488'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRT_WARN", _CRT_WARN);
+<a name='L489'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRT_ERROR", _CRT_ERROR);
+<a name='L490'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRT_ASSERT", _CRT_ASSERT);
+<a name='L491'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRTDBG_MODE_DEBUG", _CRTDBG_MODE_DEBUG);
+<a name='L492'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRTDBG_MODE_FILE", _CRTDBG_MODE_FILE);
+<a name='L493'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRTDBG_MODE_WNDW", _CRTDBG_MODE_WNDW);
+<a name='L494'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRTDBG_REPORT_MODE", _CRTDBG_REPORT_MODE);
+<a name='L495'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRTDBG_FILE_STDERR", (<b>int</b>)_CRTDBG_FILE_STDERR);
+<a name='L496'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRTDBG_FILE_STDOUT", (<b>int</b>)_CRTDBG_FILE_STDOUT);
+<a name='L497'>    <a href='../S/2887.html#L359' title='Defined at 359 in PC/msvcrtmodule.c.'>insertint</a>(d, "CRTDBG_REPORT_FILE", (<b>int</b>)_CRTDBG_REPORT_FILE);
+<a name='L498'><font color='darkred'>#endif</font>
+<a name='L499'>
+<a name='L500'>    <i><font color='green'>/* constants for the crt versions */</font></i>
+<a name='L501'><font color='darkred'>#ifdef</font> _VC_ASSEMBLY_PUBLICKEYTOKEN
+<a name='L502'>    st = <a href='../S/3125.html#L566' title='Defined at 566 in Python/modsupport.c.'>PyModule_AddStringConstant</a>(m, "VC_ASSEMBLY_PUBLICKEYTOKEN",
+<a name='L503'>                                    _VC_ASSEMBLY_PUBLICKEYTOKEN);
+<a name='L504'>    <b>if</b> (st &lt; 0) <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L505'><font color='darkred'>#endif</font>
+<a name='L506'><font color='darkred'>#ifdef</font> _CRT_ASSEMBLY_VERSION
+<a name='L507'>    st = <a href='../S/3125.html#L566' title='Defined at 566 in Python/modsupport.c.'>PyModule_AddStringConstant</a>(m, "CRT_ASSEMBLY_VERSION",
+<a name='L508'>                                    _CRT_ASSEMBLY_VERSION);
+<a name='L509'>    <b>if</b> (st &lt; 0) <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L510'><font color='darkred'>#endif</font>
+<a name='L511'><font color='darkred'>#ifdef</font> __LIBRARIES_ASSEMBLY_NAME_PREFIX
+<a name='L512'>    st = <a href='../S/3125.html#L566' title='Defined at 566 in Python/modsupport.c.'>PyModule_AddStringConstant</a>(m, "LIBRARIES_ASSEMBLY_NAME_PREFIX",
+<a name='L513'>                                    __LIBRARIES_ASSEMBLY_NAME_PREFIX);
+<a name='L514'>    <b>if</b> (st &lt; 0) <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L515'><font color='darkred'>#endif</font>
+<a name='L516'>
+<a name='L517'>    <b>return</b> m;
+<a name='L518'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L468'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

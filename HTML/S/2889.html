@@ -1,0 +1,250 @@
+<html>
+<head>
+<title>PC/os2emx/dlfcn.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3393.html'>PC</a>/<a href='../files/3398.html'>os2emx</a>/dlfcn.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L59'>[^]</a><a href='#L220'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L59' title='Defined at 59.'>find_id</a>
+<li><a href='#L71' title='Defined at 71.'>dlopen</a>
+<li><a href='#L157' title='Defined at 157.'>dlsym</a>
+<li><a href='#L192' title='Defined at 192.'>dlclose</a>
+<li><a href='#L220' title='Defined at 220.'>dlerror</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* -*- C -*- ***********************************************</font></i>
+<a name='L2'><i><font color='green'>Copyright 1991-1995 by Stichting Mathematisch Centrum, Amsterdam,</font></i>
+<a name='L3'><i><font color='green'>The Netherlands.</font></i>
+<a name='L4'><i><font color='green'></font></i>
+<a name='L5'><i><font color='green'>                        All Rights Reserved</font></i>
+<a name='L6'><i><font color='green'></font></i>
+<a name='L7'><i><font color='green'>Permission to use, copy, modify, and distribute this software and its</font></i>
+<a name='L8'><i><font color='green'>documentation for any purpose and without fee is hereby granted,</font></i>
+<a name='L9'><i><font color='green'>provided that the above copyright notice appear in all copies and that</font></i>
+<a name='L10'><i><font color='green'>both that copyright notice and this permission notice appear in</font></i>
+<a name='L11'><i><font color='green'>supporting documentation, and that the names of Stichting Mathematisch</font></i>
+<a name='L12'><i><font color='green'>Centrum or CWI or Corporation for National Research Initiatives or</font></i>
+<a name='L13'><i><font color='green'>CNRI not be used in advertising or publicity pertaining to</font></i>
+<a name='L14'><i><font color='green'>distribution of the software without specific, written prior</font></i>
+<a name='L15'><i><font color='green'>permission.</font></i>
+<a name='L16'><i><font color='green'></font></i>
+<a name='L17'><i><font color='green'>While CWI is the initial source for this software, a modified version</font></i>
+<a name='L18'><i><font color='green'>is made available by the Corporation for National Research Initiatives</font></i>
+<a name='L19'><i><font color='green'>(CNRI) at the Internet address ftp://ftp.python.org.</font></i>
+<a name='L20'><i><font color='green'></font></i>
+<a name='L21'><i><font color='green'>STICHTING MATHEMATISCH CENTRUM AND CNRI DISCLAIM ALL WARRANTIES WITH</font></i>
+<a name='L22'><i><font color='green'>REGARD TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF</font></i>
+<a name='L23'><i><font color='green'>MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL STICHTING MATHEMATISCH</font></i>
+<a name='L24'><i><font color='green'>CENTRUM OR CNRI BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL</font></i>
+<a name='L25'><i><font color='green'>DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR</font></i>
+<a name='L26'><i><font color='green'>PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER</font></i>
+<a name='L27'><i><font color='green'>TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR</font></i>
+<a name='L28'><i><font color='green'>PERFORMANCE OF THIS SOFTWARE.</font></i>
+<a name='L29'><i><font color='green'></font></i>
+<a name='L30'><i><font color='green'>******************************************************************/</font></i>
+<a name='L31'>
+<a name='L32'><i><font color='green'>/* This library implements dlopen() - Unix-like dynamic linking</font></i>
+<a name='L33'><i><font color='green'> * emulation functions for OS/2 using DosLoadModule() and company.</font></i>
+<a name='L34'><i><font color='green'> */</font></i>
+<a name='L35'>
+<a name='L36'><font color='darkred'>#define</font> INCL_DOS
+<a name='L37'><font color='darkred'>#define</font> INCL_DOSERRORS
+<a name='L38'><font color='darkred'>#define</font> INCL_DOSSESMGR
+<a name='L39'><font color='darkred'>#define</font> INCL_WINPROGRAMLIST
+<a name='L40'><font color='darkred'>#define</font> INCL_WINFRAMEMGR
+<a name='L41'><font color='darkred'>#include</font> &lt;os2.h&gt;
+<a name='L42'>
+<a name='L43'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L44'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L45'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L46'><font color='darkred'>#include</font> &lt;malloc.h&gt;
+<a name='L47'>
+<a name='L48'><b>typedef</b> <b>struct</b> <a href='../S/2889.html#L52' title='Refered from 52 in PC/os2emx/dlfcn.c.'>_track_rec</a> <font color='red'>{</font>
+<a name='L49'>    <b>char</b> *name;
+<a name='L50'>    HMODULE handle;
+<a name='L51'>    <b>void</b> *id;
+<a name='L52'>    <b>struct</b> <a href='../S/2889.html#L48' title='Defined at 48 in PC/os2emx/dlfcn.c.'>_track_rec</a> *next;
+<a name='L53'><font color='red'>}</font> <a href='../S/2889.html#L85' title='Refered from 85 in PC/os2emx/dlfcn.c.'>tDLLchain</a>, *<a href='../R/745.html' title='Multiple refered from 7 places.'>DLLchain</a>;
+<a name='L54'>
+<a name='L55'><b>static</b> <a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>DLLchain</a> dlload = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;  <i><font color='green'>/* A simple chained list of DLL names */</font></i>
+<a name='L56'><b>static</b> <b>char</b> dlerr [256];        <i><font color='green'>/* last error text string */</font></i>
+<a name='L57'><b>static</b> <b>void</b> *last_id;
+<a name='L58'>
+<a name='L59'><b>static</b> <a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>DLLchain</a> <a href='../R/7800.html' title='Multiple refered from 3 places.'>find_id</a>(<b>void</b> *id)
+<a name='L60'><font color='red'>{</font>
+<a name='L61'>    <a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>DLLchain</a> tmp;
+<a name='L62'>
+<a name='L63'>    <b>for</b> (tmp = dlload; tmp; tmp = tmp-&gt;next)
+<a name='L64'>        <b>if</b> (id == tmp-&gt;id)
+<a name='L65'>            <b>return</b> tmp;
+<a name='L66'>
+<a name='L67'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L68'><font color='red'>}</font>
+<a name='L69'>
+<a name='L70'><i><font color='green'>/* load a dynamic-link library and return handle */</font></i>
+<a name='L71'><b>void</b> *<a href='../R/7412.html' title='Multiple refered from 7 places.'>dlopen</a>(<b>char</b> *filename, <b>int</b> flags)
+<a name='L72'><font color='red'>{</font>
+<a name='L73'>    HMODULE hm;
+<a name='L74'>    <a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>DLLchain</a> tmp;
+<a name='L75'>    <b>char</b> err[256];
+<a name='L76'>    <b>char</b> *errtxt;
+<a name='L77'>    <b>int</b> rc = 0, set_chain = 0;
+<a name='L78'>
+<a name='L79'>    <b>for</b> (tmp = dlload; tmp; tmp = tmp-&gt;next)
+<a name='L80'>        <b>if</b> (strnicmp(tmp-&gt;name, filename, 999) == 0)
+<a name='L81'>            <b>break</b>;
+<a name='L82'>
+<a name='L83'>    <b>if</b> (!tmp)
+<a name='L84'>    <font color='red'>{</font>
+<a name='L85'>        tmp = (<a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>DLLchain</a>) malloc(<b>sizeof</b>(<a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>tDLLchain</a>));
+<a name='L86'>        <b>if</b> (!tmp)
+<a name='L87'>            <b>goto</b> nomem;
+<a name='L88'>        tmp-&gt;name = <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(filename);
+<a name='L89'>        tmp-&gt;next = dlload;
+<a name='L90'>        set_chain = 1;
+<a name='L91'>    <font color='red'>}</font>
+<a name='L92'>
+<a name='L93'>    <b>switch</b> (rc = DosLoadModule((PSZ)&amp;err, <b>sizeof</b>(err), filename, &amp;hm))
+<a name='L94'>    <font color='red'>{</font>
+<a name='L95'>        <b>case</b> NO_ERROR:
+<a name='L96'>            tmp-&gt;handle = hm;
+<a name='L97'>            <b>if</b> (set_chain)
+<a name='L98'>            <font color='red'>{</font>
+<a name='L99'>                <b>do</b>
+<a name='L100'>                    last_id++;
+<a name='L101'>                <b>while</b> ((last_id == 0) || (<a href='../S/2889.html#L59' title='Defined at 59 in PC/os2emx/dlfcn.c.'>find_id</a>(last_id)));
+<a name='L102'>                tmp-&gt;id = last_id;
+<a name='L103'>                dlload = tmp;
+<a name='L104'>            <font color='red'>}</font>
+<a name='L105'>            <b>return</b> tmp-&gt;id;
+<a name='L106'>        <b>case</b> ERROR_FILE_NOT_FOUND:
+<a name='L107'>        <b>case</b> ERROR_PATH_NOT_FOUND:
+<a name='L108'>            errtxt = "module `%s' not found";
+<a name='L109'>            <b>break</b>;
+<a name='L110'>        <b>case</b> ERROR_TOO_MANY_OPEN_FILES:
+<a name='L111'>        <b>case</b> ERROR_NOT_ENOUGH_MEMORY:
+<a name='L112'>        <b>case</b> ERROR_SHARING_BUFFER_EXCEEDED:
+<a name='L113'>nomem:
+<a name='L114'>            errtxt = "out of system resources";
+<a name='L115'>            <b>break</b>;
+<a name='L116'>        <b>case</b> ERROR_ACCESS_DENIED:
+<a name='L117'>            errtxt = "access denied";
+<a name='L118'>            <b>break</b>;
+<a name='L119'>        <b>case</b> ERROR_BAD_FORMAT:
+<a name='L120'>        <b>case</b> ERROR_INVALID_SEGMENT_NUMBER:
+<a name='L121'>        <b>case</b> ERROR_INVALID_ORDINAL:
+<a name='L122'>        <b>case</b> ERROR_INVALID_MODULETYPE:
+<a name='L123'>        <b>case</b> ERROR_INVALID_EXE_SIGNATURE:
+<a name='L124'>        <b>case</b> ERROR_EXE_MARKED_INVALID:
+<a name='L125'>        <b>case</b> ERROR_ITERATED_DATA_EXCEEDS_64K:
+<a name='L126'>        <b>case</b> ERROR_INVALID_MINALLOCSIZE:
+<a name='L127'>        <b>case</b> ERROR_INVALID_SEGDPL:
+<a name='L128'>        <b>case</b> ERROR_AUTODATASEG_EXCEEDS_64K:
+<a name='L129'>        <b>case</b> ERROR_RELOCSRC_CHAIN_EXCEEDS_SEGLIMIT:
+<a name='L130'>            errtxt = "invalid module format";
+<a name='L131'>            <b>break</b>;
+<a name='L132'>        <b>case</b> ERROR_INVALID_NAME:
+<a name='L133'>            errtxt = "filename doesn't match module name";
+<a name='L134'>            <b>break</b>;
+<a name='L135'>        <b>case</b> ERROR_SHARING_VIOLATION:
+<a name='L136'>        <b>case</b> ERROR_LOCK_VIOLATION:
+<a name='L137'>            errtxt = "sharing violation";
+<a name='L138'>            <b>break</b>;
+<a name='L139'>        <b>case</b> ERROR_INIT_ROUTINE_FAILED:
+<a name='L140'>            errtxt = "module initialization failed";
+<a name='L141'>            <b>break</b>;
+<a name='L142'>        <b>default</b>:
+<a name='L143'>            errtxt = "cause `%s', error code = %d";
+<a name='L144'>            <b>break</b>;
+<a name='L145'>    <font color='red'>}</font>
+<a name='L146'>    <a href='../S/2711.html#L370' title='Defined at 370 in Modules/socketmodule.c.'>snprintf</a>(dlerr, <b>sizeof</b>(dlerr), errtxt, &amp;err, rc);
+<a name='L147'>    <b>if</b> (tmp)
+<a name='L148'>    <font color='red'>{</font>
+<a name='L149'>        <b>if</b> (tmp-&gt;name)
+<a name='L150'>            free(tmp-&gt;name);
+<a name='L151'>        free(tmp);
+<a name='L152'>    <font color='red'>}</font>
+<a name='L153'>    <b>return</b> 0;
+<a name='L154'><font color='red'>}</font>
+<a name='L155'>
+<a name='L156'><i><font color='green'>/* return a pointer to the `symbol' in DLL */</font></i>
+<a name='L157'><b>void</b> *<a href='../R/7415.html' title='Multiple refered from 7 places.'>dlsym</a>(<b>void</b> *handle, <b>char</b> *symbol)
+<a name='L158'><font color='red'>{</font>
+<a name='L159'>    <b>int</b> rc = 0;
+<a name='L160'>    PFN addr;
+<a name='L161'>    <b>char</b> *errtxt;
+<a name='L162'>    <b>int</b> symord = 0;
+<a name='L163'>    <a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>DLLchain</a> tmp = <a href='../S/2889.html#L59' title='Defined at 59 in PC/os2emx/dlfcn.c.'>find_id</a>(handle);
+<a name='L164'>
+<a name='L165'>    <b>if</b> (!tmp)
+<a name='L166'>        <b>goto</b> inv_handle;
+<a name='L167'>
+<a name='L168'>    <b>if</b> (*symbol == '#')
+<a name='L169'>        symord = atoi(symbol + 1);
+<a name='L170'>
+<a name='L171'>    <b>switch</b> (rc = DosQueryProcAddr(tmp-&gt;handle, symord, symbol, &amp;addr))
+<a name='L172'>    <font color='red'>{</font>
+<a name='L173'>        <b>case</b> NO_ERROR:
+<a name='L174'>            <b>return</b> (<b>void</b> *)addr;
+<a name='L175'>        <b>case</b> ERROR_INVALID_HANDLE:
+<a name='L176'>inv_handle:
+<a name='L177'>            errtxt = "invalid module handle";
+<a name='L178'>            <b>break</b>;
+<a name='L179'>        <b>case</b> ERROR_PROC_NOT_FOUND:
+<a name='L180'>        <b>case</b> ERROR_INVALID_NAME:
+<a name='L181'>            errtxt = "no symbol `%s' in module";
+<a name='L182'>            <b>break</b>;
+<a name='L183'>        <b>default</b>:
+<a name='L184'>            errtxt = "symbol `%s', error code = %d";
+<a name='L185'>            <b>break</b>;
+<a name='L186'>    <font color='red'>}</font>
+<a name='L187'>    <a href='../S/2711.html#L370' title='Defined at 370 in Modules/socketmodule.c.'>snprintf</a>(dlerr, <b>sizeof</b>(dlerr), errtxt, symbol, rc);
+<a name='L188'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L189'><font color='red'>}</font>
+<a name='L190'>
+<a name='L191'><i><font color='green'>/* free dynamicaly-linked library */</font></i>
+<a name='L192'><b>int</b> <a href='../R/7397.html' title='Multiple refered from 6 places.'>dlclose</a>(<b>void</b> *handle)
+<a name='L193'><font color='red'>{</font>
+<a name='L194'>    <b>int</b> rc;
+<a name='L195'>    <a href='../S/2889.html#L53' title='Defined at 53 in PC/os2emx/dlfcn.c.'>DLLchain</a> tmp = <a href='../S/2889.html#L59' title='Defined at 59 in PC/os2emx/dlfcn.c.'>find_id</a>(handle);
+<a name='L196'>
+<a name='L197'>    <b>if</b> (!tmp)
+<a name='L198'>        <b>goto</b> inv_handle;
+<a name='L199'>
+<a name='L200'>    <b>switch</b> (rc = DosFreeModule(tmp-&gt;handle))
+<a name='L201'>    <font color='red'>{</font>
+<a name='L202'>        <b>case</b> NO_ERROR:
+<a name='L203'>            free(tmp-&gt;name);
+<a name='L204'>            dlload = tmp-&gt;next;
+<a name='L205'>            free(tmp);
+<a name='L206'>            <b>return</b> 0;
+<a name='L207'>        <b>case</b> ERROR_INVALID_HANDLE:
+<a name='L208'>inv_handle:
+<a name='L209'>            strcpy(dlerr, "invalid module handle");
+<a name='L210'>            <b>return</b> -1;
+<a name='L211'>        <b>case</b> ERROR_INVALID_ACCESS:
+<a name='L212'>            strcpy(dlerr, "access denied");
+<a name='L213'>            <b>return</b> -1;
+<a name='L214'>        <b>default</b>:
+<a name='L215'>            <b>return</b> -1;
+<a name='L216'>    <font color='red'>}</font>
+<a name='L217'><font color='red'>}</font>
+<a name='L218'>
+<a name='L219'><i><font color='green'>/* return a string describing last occurred dl error */</font></i>
+<a name='L220'><b>char</b> *<a href='../R/7398.html' title='Multiple refered from 6 places.'>dlerror</a>()
+<a name='L221'><font color='red'>{</font>
+<a name='L222'>    <b>return</b> dlerr;
+<a name='L223'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L59'>[^]</a><a href='#L220'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

@@ -1,0 +1,1039 @@
+<html>
+<head>
+<title>Modules/signalmodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/signalmodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L109'>[^]</a><a href='#L985'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L109' title='Defined at 109.'>timeval_from_double</a>
+<li><a href='#L115' title='Defined at 115.'>Py_LOCAL_INLINE</a>
+<li><a href='#L122' title='Defined at 122.'>itimer_retval</a>
+<li><a href='#L149' title='Defined at 149.'>signal_default_int_handler</a>
+<li><a href='#L163' title='Defined at 163.'>checksignals_witharg</a>
+<li><a href='#L169' title='Defined at 169.'>signal_handler</a>
+<li><a href='#L217' title='Defined at 217.'>signal_alarm</a>
+<li><a href='#L234' title='Defined at 234.'>signal_pause</a>
+<li><a href='#L257' title='Defined at 257.'>signal_signal</a>
+<li><a href='#L331' title='Defined at 331.'>signal_getsignal</a>
+<li><a href='#L364' title='Defined at 364.'>signal_siginterrupt</a>
+<li><a href='#L388' title='Defined at 388.'>signal_set_wakeup_fd</a>
+<li><a href='#L421' title='Defined at 421.'>PySignal_SetWakeupFd</a>
+<li><a href='#L433' title='Defined at 433.'>signal_setitimer</a>
+<li><a href='#L468' title='Defined at 468.'>signal_getitimer</a>
+<li><a href='#L567' title='Defined at 567.'>PyInit_signal</a>
+<li><a href='#L860' title='Defined at 860.'>finisignal</a>
+<li><a href='#L889' title='Defined at 889.'>PyErr_CheckSignals</a>
+<li><a href='#L947' title='Defined at 947.'>PyErr_SetInterrupt</a>
+<li><a href='#L955' title='Defined at 955.'>PyOS_InitInterrupts</a>
+<li><a href='#L965' title='Defined at 965.'>PyOS_FiniInterrupts</a>
+<li><a href='#L971' title='Defined at 971.'>PyOS_InterruptOccurred</a>
+<li><a href='#L985' title='Defined at 985.'>PyOS_AfterFork</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Signal module -- many thanks to Lance Ellinghaus */</font></i>
+<a name='L3'>
+<a name='L4'><i><font color='green'>/* XXX Signals should be recorded per thread, now we have thread state. */</font></i>
+<a name='L5'>
+<a name='L6'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L7'>
+<a name='L8'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L9'><font color='darkred'>#include</font> &lt;Windows.h&gt;
+<a name='L10'><font color='darkred'>#ifdef</font> <a href='../D/1546.html' title='Multiple defined in 3 places.'>HAVE_PROCESS_H</a>
+<a name='L11'><font color='darkred'>#include</font> &lt;process.h&gt;
+<a name='L12'><font color='darkred'>#endif</font>
+<a name='L13'><font color='darkred'>#endif</font>
+<a name='L14'>
+<a name='L15'><font color='darkred'>#ifdef</font> <a href='../D/1558.html' title='Multiple defined in 3 places.'>HAVE_SIGNAL_H</a>
+<a name='L16'><font color='darkred'>#include</font> &lt;signal.h&gt;
+<a name='L17'><font color='darkred'>#endif</font>
+<a name='L18'><font color='darkred'>#ifdef</font> <a href='../D/1579.html' title='Multiple defined in 4 places.'>HAVE_SYS_STAT_H</a>
+<a name='L19'><font color='darkred'>#include</font> &lt;sys/stat.h&gt;
+<a name='L20'><font color='darkred'>#endif</font>
+<a name='L21'><font color='darkred'>#ifdef</font> <a href='../D/1581.html' title='Multiple defined in 2 places.'>HAVE_SYS_TIME_H</a>
+<a name='L22'><font color='darkred'>#include</font> &lt;sys/time.h&gt;
+<a name='L23'><font color='darkred'>#endif</font>
+<a name='L24'>
+<a name='L25'><font color='darkred'>#ifndef</font> <a href='../S/2710.html#L26' title='Defined at 26 in Modules/signalmodule.c.'>SIG_ERR</a>
+<a name='L26'><font color='darkred'>#define</font> <a href='../R/4150.html' title='Multiple refered from 6 places.'>SIG_ERR</a> ((PyOS_sighandler_t)(-1))
+<a name='L27'><font color='darkred'>#endif</font>
+<a name='L28'>
+<a name='L29'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/2567.html' title='Multiple defined in 2 places.'>PYOS_OS2</a>) &amp;&amp; !<b>defined</b>(<a href='../S/2894.html#L13' title='Defined at 13 in PC/os2emx/pyconfig.h.'>PYCC_GCC</a>)
+<a name='L30'><font color='darkred'>#define</font> <a href='../R/2120.html' title='Multiple refered from 9 places.'>NSIG</a> 12
+<a name='L31'><font color='darkred'>#include</font> &lt;process.h&gt;
+<a name='L32'><font color='darkred'>#endif</font>
+<a name='L33'>
+<a name='L34'><font color='darkred'>#ifndef</font> <a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>
+<a name='L35'><font color='darkred'># if</font> <b>defined</b>(_NSIG)
+<a name='L36'><font color='darkred'>#  define</font> <a href='../R/2120.html' title='Multiple refered from 9 places.'>NSIG</a> _NSIG            <i><font color='green'>/* For BSD/SysV */</font></i>
+<a name='L37'><font color='darkred'># elif</font> <b>defined</b>(_SIGMAX)
+<a name='L38'><font color='darkred'>#  define</font> <a href='../R/2120.html' title='Multiple refered from 9 places.'>NSIG</a> (_SIGMAX + 1)    <i><font color='green'>/* For QNX */</font></i>
+<a name='L39'><font color='darkred'># elif</font> <b>defined</b>(SIGMAX)
+<a name='L40'><font color='darkred'>#  define</font> <a href='../R/2120.html' title='Multiple refered from 9 places.'>NSIG</a> (SIGMAX + 1)     <i><font color='green'>/* For djgpp */</font></i>
+<a name='L41'><font color='darkred'># else</font>
+<a name='L42'><font color='darkred'>#  define</font> <a href='../R/2120.html' title='Multiple refered from 9 places.'>NSIG</a> 64               <i><font color='green'>/* Use a reasonable default value */</font></i>
+<a name='L43'><font color='darkred'># endif</font>
+<a name='L44'><font color='darkred'>#endif</font>
+<a name='L45'>
+<a name='L46'>
+<a name='L47'><i><font color='green'>/*</font></i>
+<a name='L48'><i><font color='green'>   NOTES ON THE INTERACTION BETWEEN SIGNALS AND THREADS</font></i>
+<a name='L49'><i><font color='green'></font></i>
+<a name='L50'><i><font color='green'>   When threads are supported, we want the following semantics:</font></i>
+<a name='L51'><i><font color='green'></font></i>
+<a name='L52'><i><font color='green'>   - only the main thread can set a signal handler</font></i>
+<a name='L53'><i><font color='green'>   - any thread can get a signal handler</font></i>
+<a name='L54'><i><font color='green'>   - signals are only delivered to the main thread</font></i>
+<a name='L55'><i><font color='green'></font></i>
+<a name='L56'><i><font color='green'>   I.e. we don't support "synchronous signals" like SIGFPE (catching</font></i>
+<a name='L57'><i><font color='green'>   this doesn't make much sense in Python anyway) nor do we support</font></i>
+<a name='L58'><i><font color='green'>   signals as a means of inter-thread communication, since not all</font></i>
+<a name='L59'><i><font color='green'>   thread implementations support that (at least our thread library</font></i>
+<a name='L60'><i><font color='green'>   doesn't).</font></i>
+<a name='L61'><i><font color='green'></font></i>
+<a name='L62'><i><font color='green'>   We still have the problem that in some implementations signals</font></i>
+<a name='L63'><i><font color='green'>   generated by the keyboard (e.g. SIGINT) are delivered to all</font></i>
+<a name='L64'><i><font color='green'>   threads (e.g. SGI), while in others (e.g. Solaris) such signals are</font></i>
+<a name='L65'><i><font color='green'>   delivered to one random thread (an intermediate possibility would</font></i>
+<a name='L66'><i><font color='green'>   be to deliver it to the main thread -- POSIX?).  For now, we have</font></i>
+<a name='L67'><i><font color='green'>   a working implementation that works in all three cases -- the</font></i>
+<a name='L68'><i><font color='green'>   handler ignores signals if getpid() isn't the same as in the main</font></i>
+<a name='L69'><i><font color='green'>   thread.  XXX This is a hack.</font></i>
+<a name='L70'><i><font color='green'></font></i>
+<a name='L71'><i><font color='green'>   GNU pth is a user-space threading library, and as such, all threads</font></i>
+<a name='L72'><i><font color='green'>   run within the same process. In this case, if the currently running</font></i>
+<a name='L73'><i><font color='green'>   thread is not the main_thread, send the signal to the main_thread.</font></i>
+<a name='L74'><i><font color='green'>*/</font></i>
+<a name='L75'>
+<a name='L76'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L77'><font color='darkred'>#include</font> &lt;sys/types.h&gt; <i><font color='green'>/* For pid_t */</font></i>
+<a name='L78'><font color='darkred'>#include</font> "<a href='572.html'>pythread.h</a>"
+<a name='L79'><b>static</b> <b>long</b> main_thread;
+<a name='L80'><b>static</b> <a href='../D/10365.html' title='Multiple defined in 4 places.'>pid_t</a> main_pid;
+<a name='L81'><font color='darkred'>#endif</font>
+<a name='L82'>
+<a name='L83'><b>static</b> <b>struct</b> <font color='red'>{</font>
+<a name='L84'>    <b>int</b> tripped;
+<a name='L85'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func;
+<a name='L86'><font color='red'>}</font> Handlers[<a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>];
+<a name='L87'>
+<a name='L88'><b>static</b> sig_atomic_t wakeup_fd = -1;
+<a name='L89'>
+<a name='L90'><i><font color='green'>/* Speed up sigcheck() when none tripped */</font></i>
+<a name='L91'><b>static</b> <b>volatile</b> sig_atomic_t is_tripped = 0;
+<a name='L92'>
+<a name='L93'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *DefaultHandler;
+<a name='L94'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *IgnoreHandler;
+<a name='L95'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *IntHandler;
+<a name='L96'>
+<a name='L97'><i><font color='green'>/* On Solaris 8, gcc will produce a warning that the function</font></i>
+<a name='L98'><i><font color='green'>   declaration is not a prototype. This is caused by the definition of</font></i>
+<a name='L99'><i><font color='green'>   SIG_DFL as (void (*)())0; the correct declaration would have been</font></i>
+<a name='L100'><i><font color='green'>   (void (*)(int))0. */</font></i>
+<a name='L101'>
+<a name='L102'><b>static</b> PyOS_sighandler_t old_siginthandler = SIG_DFL;
+<a name='L103'>
+<a name='L104'><font color='darkred'>#ifdef</font> HAVE_GETITIMER
+<a name='L105'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *ItimerError;
+<a name='L106'>
+<a name='L107'><i><font color='green'>/* auxiliary functions for setitimer/getitimer */</font></i>
+<a name='L108'><b>static</b> <b>void</b>
+<a name='L109'><a href='../R/10912.html' title='Multiple refered from 2 places.'>timeval_from_double</a>(<b>double</b> d, <b>struct</b> timeval *tv)
+<a name='L110'><font color='red'>{</font>
+<a name='L111'>    tv-&gt;tv_sec = floor(d);
+<a name='L112'>    tv-&gt;tv_usec = fmod(d, 1.0) * 1000000.0;
+<a name='L113'><font color='red'>}</font>
+<a name='L114'>
+<a name='L115'>Py_LOCAL_INLINE(<b>double</b>)
+<a name='L116'>double_from_timeval(<b>struct</b> timeval *tv)
+<a name='L117'><font color='red'>{</font>
+<a name='L118'>    <b>return</b> tv-&gt;tv_sec + (<b>double</b>)(tv-&gt;tv_usec / 1000000.0);
+<a name='L119'><font color='red'>}</font>
+<a name='L120'>
+<a name='L121'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L122'><a href='../R/8546.html' title='Multiple refered from 2 places.'>itimer_retval</a>(<b>struct</b> itimerval *iv)
+<a name='L123'><font color='red'>{</font>
+<a name='L124'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *r, *v;
+<a name='L125'>
+<a name='L126'>    r = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(2);
+<a name='L127'>    <b>if</b> (r == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L128'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L129'>
+<a name='L130'>    <b>if</b>(!(v = <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(double_from_timeval(&amp;iv-&gt;it_value)))) <font color='red'>{</font>
+<a name='L131'>    Py_DECREF(r);
+<a name='L132'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L133'>    <font color='red'>}</font>
+<a name='L134'>
+<a name='L135'>    PyTuple_SET_ITEM(r, 0, v);
+<a name='L136'>
+<a name='L137'>    <b>if</b>(!(v = <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(double_from_timeval(&amp;iv-&gt;it_interval)))) <font color='red'>{</font>
+<a name='L138'>    Py_DECREF(r);
+<a name='L139'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L140'>    <font color='red'>}</font>
+<a name='L141'>
+<a name='L142'>    PyTuple_SET_ITEM(r, 1, v);
+<a name='L143'>
+<a name='L144'>    <b>return</b> r;
+<a name='L145'><font color='red'>}</font>
+<a name='L146'><font color='darkred'>#endif</font>
+<a name='L147'>
+<a name='L148'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L149'><a href='../S/2710.html#L512' title='Refered from 512 in Modules/signalmodule.c.'>signal_default_int_handler</a>(PyObject *self, PyObject *args)
+<a name='L150'><font color='red'>{</font>
+<a name='L151'>    <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_KeyboardInterrupt);
+<a name='L152'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L153'><font color='red'>}</font>
+<a name='L154'>
+<a name='L155'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(default_int_handler_doc,
+<a name='L156'>"default_int_handler(...)\n\
+<a name='L157'>\n\
+<a name='L158'>The default handler for SIGINT installed by Python.\n\
+<a name='L159'>It raises KeyboardInterrupt.");
+<a name='L160'>
+<a name='L161'>
+<a name='L162'><b>static</b> <b>int</b>
+<a name='L163'><a href='../R/6648.html' title='Multiple refered from 2 places.'>checksignals_witharg</a>(<b>void</b> * unused)
+<a name='L164'><font color='red'>{</font>
+<a name='L165'>    <b>return</b> <a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>();
+<a name='L166'><font color='red'>}</font>
+<a name='L167'>
+<a name='L168'><b>static</b> <b>void</b>
+<a name='L169'><a href='../R/10311.html' title='Multiple refered from 3 places.'>signal_handler</a>(<b>int</b> sig_num)
+<a name='L170'><font color='red'>{</font>
+<a name='L171'>    <b>int</b> save_errno = errno;
+<a name='L172'>
+<a name='L173'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>) &amp;&amp; <b>defined</b>(WITH_PTH)
+<a name='L174'>    <b>if</b> (<a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>() != main_thread) <font color='red'>{</font>
+<a name='L175'>        pth_raise(*(pth_t *) main_thread, sig_num);
+<a name='L176'>    <font color='red'>}</font>
+<a name='L177'>    <b>else</b>
+<a name='L178'><font color='darkred'>#endif</font>
+<a name='L179'>    <font color='red'>{</font>
+<a name='L180'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L181'>    <i><font color='green'>/* See NOTES section above */</font></i>
+<a name='L182'>    <b>if</b> (getpid() == main_pid)
+<a name='L183'><font color='darkred'>#endif</font>
+<a name='L184'>    <font color='red'>{</font>
+<a name='L185'>        Handlers[sig_num].tripped = 1;
+<a name='L186'>        <i><font color='green'>/* Set is_tripped after setting .tripped, as it gets</font></i>
+<a name='L187'><i><font color='green'>           cleared in PyErr_CheckSignals() before .tripped. */</font></i>
+<a name='L188'>        is_tripped = 1;
+<a name='L189'>        <a href='../D/4078.html' title='Multiple defined in 2 places.'>Py_AddPendingCall</a>(<a href='../D/7420.html' title='Multiple defined in 2 places.'>checksignals_witharg</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L190'>        <b>if</b> (wakeup_fd != -1)
+<a name='L191'>            write(wakeup_fd, "\0", 1);
+<a name='L192'>    <font color='red'>}</font>
+<a name='L193'>
+<a name='L194'><font color='darkred'>#ifndef</font> <a href='../S/2894.html#L234' title='Defined at 234 in PC/os2emx/pyconfig.h.'>HAVE_SIGACTION</a>
+<a name='L195'><font color='darkred'>#ifdef</font> SIGCHLD
+<a name='L196'>    <i><font color='green'>/* To avoid infinite recursion, this signal remains</font></i>
+<a name='L197'><i><font color='green'>       reset until explicit re-instated.</font></i>
+<a name='L198'><i><font color='green'>       Don't clear the 'func' field as it is our pointer</font></i>
+<a name='L199'><i><font color='green'>       to the Python handler... */</font></i>
+<a name='L200'>    <b>if</b> (sig_num != SIGCHLD)
+<a name='L201'><font color='darkred'>#endif</font>
+<a name='L202'>    <i><font color='green'>/* If the handler was not set up with sigaction, reinstall it.  See</font></i>
+<a name='L203'><i><font color='green'>     * Python/pythonrun.c for the implementation of PyOS_setsig which</font></i>
+<a name='L204'><i><font color='green'>     * makes this true.  See also issue8354. */</font></i>
+<a name='L205'>    <a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(sig_num, <a href='../S/2710.html#L169' title='Defined at 169 in Modules/signalmodule.c.'>signal_handler</a>);
+<a name='L206'><font color='darkred'>#endif</font>
+<a name='L207'>    <font color='red'>}</font>
+<a name='L208'>
+<a name='L209'>    <i><font color='green'>/* Issue #10311: asynchronously executing signal handlers should not</font></i>
+<a name='L210'><i><font color='green'>       mutate errno under the feet of unsuspecting C code. */</font></i>
+<a name='L211'>    errno = save_errno;
+<a name='L212'><font color='red'>}</font>
+<a name='L213'>
+<a name='L214'>
+<a name='L215'><font color='darkred'>#ifdef</font> <a href='../S/2894.html#L147' title='Defined at 147 in PC/os2emx/pyconfig.h.'>HAVE_ALARM</a>
+<a name='L216'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L217'><a href='../S/2710.html#L494' title='Refered from 494 in Modules/signalmodule.c.'>signal_alarm</a>(PyObject *self, PyObject *args)
+<a name='L218'><font color='red'>{</font>
+<a name='L219'>    <b>int</b> t;
+<a name='L220'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:alarm", &amp;t))
+<a name='L221'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L222'>    <i><font color='green'>/* alarm() returns the number of seconds remaining */</font></i>
+<a name='L223'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)alarm(t));
+<a name='L224'><font color='red'>}</font>
+<a name='L225'>
+<a name='L226'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(alarm_doc,
+<a name='L227'>"alarm(seconds)\n\
+<a name='L228'>\n\
+<a name='L229'>Arrange for SIGALRM to arrive after the given number of seconds.");
+<a name='L230'><font color='darkred'>#endif</font>
+<a name='L231'>
+<a name='L232'><font color='darkred'>#ifdef</font> <a href='../S/2894.html#L210' title='Defined at 210 in PC/os2emx/pyconfig.h.'>HAVE_PAUSE</a>
+<a name='L233'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L234'><a href='../S/2710.html#L509' title='Refered from 509 in Modules/signalmodule.c.'>signal_pause</a>(PyObject *self)
+<a name='L235'><font color='red'>{</font>
+<a name='L236'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L237'>    (<b>void</b>)pause();
+<a name='L238'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L239'>    <i><font color='green'>/* make sure that any exceptions that got raised are propagated</font></i>
+<a name='L240'><i><font color='green'>     * back into Python</font></i>
+<a name='L241'><i><font color='green'>     */</font></i>
+<a name='L242'>    <b>if</b> (<a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>())
+<a name='L243'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L244'>
+<a name='L245'>    Py_INCREF(Py_None);
+<a name='L246'>    <b>return</b> Py_None;
+<a name='L247'><font color='red'>}</font>
+<a name='L248'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(pause_doc,
+<a name='L249'>"pause()\n\
+<a name='L250'>\n\
+<a name='L251'>Wait until a signal arrives.");
+<a name='L252'>
+<a name='L253'><font color='darkred'>#endif</font>
+<a name='L254'>
+<a name='L255'>
+<a name='L256'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L257'><a href='../S/2710.html#L502' title='Refered from 502 in Modules/signalmodule.c.'>signal_signal</a>(PyObject *self, PyObject *args)
+<a name='L258'><font color='red'>{</font>
+<a name='L259'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *obj;
+<a name='L260'>    <b>int</b> sig_num;
+<a name='L261'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *old_handler;
+<a name='L262'>    <b>void</b> (*func)(<b>int</b>);
+<a name='L263'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "iO:signal", &amp;sig_num, &amp;obj))
+<a name='L264'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L265'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L266'>    <i><font color='green'>/* Validate that sig_num is one of the allowable signals */</font></i>
+<a name='L267'>    <b>switch</b> (sig_num) <font color='red'>{</font>
+<a name='L268'>        <b>case</b> SIGABRT: <b>break</b>;
+<a name='L269'><font color='darkred'>#ifdef</font> SIGBREAK
+<a name='L270'>        <i><font color='green'>/* Issue #10003: SIGBREAK is not documented as permitted, but works</font></i>
+<a name='L271'><i><font color='green'>           and corresponds to CTRL_BREAK_EVENT. */</font></i>
+<a name='L272'>        <b>case</b> SIGBREAK: <b>break</b>;
+<a name='L273'><font color='darkred'>#endif</font>
+<a name='L274'>        <b>case</b> SIGFPE: <b>break</b>;
+<a name='L275'>        <b>case</b> SIGILL: <b>break</b>;
+<a name='L276'>        <b>case</b> SIGINT: <b>break</b>;
+<a name='L277'>        <b>case</b> SIGSEGV: <b>break</b>;
+<a name='L278'>        <b>case</b> SIGTERM: <b>break</b>;
+<a name='L279'>        <b>default</b>:
+<a name='L280'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "invalid signal value");
+<a name='L281'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L282'>    <font color='red'>}</font>
+<a name='L283'><font color='darkred'>#endif</font>
+<a name='L284'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L285'>    <b>if</b> (<a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>() != main_thread) <font color='red'>{</font>
+<a name='L286'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L287'>                        "signal only works in main thread");
+<a name='L288'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L289'>    <font color='red'>}</font>
+<a name='L290'><font color='darkred'>#endif</font>
+<a name='L291'>    <b>if</b> (sig_num &lt; 1 || sig_num &gt;= <a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>) <font color='red'>{</font>
+<a name='L292'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L293'>                        "signal number out of range");
+<a name='L294'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L295'>    <font color='red'>}</font>
+<a name='L296'>    <b>if</b> (obj == IgnoreHandler)
+<a name='L297'>        func = SIG_IGN;
+<a name='L298'>    <b>else</b> <b>if</b> (obj == DefaultHandler)
+<a name='L299'>        func = SIG_DFL;
+<a name='L300'>    <b>else</b> <b>if</b> (!<a href='../S/2803.html#L1180' title='Defined at 1180 in Objects/object.c.'>PyCallable_Check</a>(obj)) <font color='red'>{</font>
+<a name='L301'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L302'>"signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object");
+<a name='L303'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L304'>    <font color='red'>}</font>
+<a name='L305'>    <b>else</b>
+<a name='L306'>        func = <a href='../S/2710.html#L169' title='Defined at 169 in Modules/signalmodule.c.'>signal_handler</a>;
+<a name='L307'>    <b>if</b> (<a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(sig_num, func) == <a href='../S/2710.html#L26' title='Defined at 26 in Modules/signalmodule.c.'>SIG_ERR</a>) <font color='red'>{</font>
+<a name='L308'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_RuntimeError);
+<a name='L309'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L310'>    <font color='red'>}</font>
+<a name='L311'>    old_handler = Handlers[sig_num].func;
+<a name='L312'>    Handlers[sig_num].tripped = 0;
+<a name='L313'>    Py_INCREF(obj);
+<a name='L314'>    Handlers[sig_num].func = obj;
+<a name='L315'>    <b>return</b> old_handler;
+<a name='L316'><font color='red'>}</font>
+<a name='L317'>
+<a name='L318'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(signal_doc,
+<a name='L319'>"signal(sig, action) -&gt; action\n\
+<a name='L320'>\n\
+<a name='L321'>Set the action for the given signal.  The action can be SIG_DFL,\n\
+<a name='L322'>SIG_IGN, or a callable Python object.  The previous action is\n\
+<a name='L323'>returned.  See getsignal() for possible return values.\n\
+<a name='L324'>\n\
+<a name='L325'>*** IMPORTANT NOTICE ***\n\
+<a name='L326'>A signal handler function is called with two arguments:\n\
+<a name='L327'>the first is the signal number, the second is the interrupted stack frame.");
+<a name='L328'>
+<a name='L329'>
+<a name='L330'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L331'><a href='../S/2710.html#L503' title='Refered from 503 in Modules/signalmodule.c.'>signal_getsignal</a>(PyObject *self, PyObject *args)
+<a name='L332'><font color='red'>{</font>
+<a name='L333'>    <b>int</b> sig_num;
+<a name='L334'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *old_handler;
+<a name='L335'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:getsignal", &amp;sig_num))
+<a name='L336'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L337'>    <b>if</b> (sig_num &lt; 1 || sig_num &gt;= <a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>) <font color='red'>{</font>
+<a name='L338'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L339'>                        "signal number out of range");
+<a name='L340'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L341'>    <font color='red'>}</font>
+<a name='L342'>    old_handler = Handlers[sig_num].func;
+<a name='L343'>    Py_INCREF(old_handler);
+<a name='L344'>    <b>return</b> old_handler;
+<a name='L345'><font color='red'>}</font>
+<a name='L346'>
+<a name='L347'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(getsignal_doc,
+<a name='L348'>"getsignal(sig) -&gt; action\n\
+<a name='L349'>\n\
+<a name='L350'>Return the current action for the given signal.  The return value can be:\n\
+<a name='L351'>SIG_IGN -- if the signal is being ignored\n\
+<a name='L352'>SIG_DFL -- if the default action for the signal is in effect\n\
+<a name='L353'>None -- if an unknown handler is in effect\n\
+<a name='L354'>anything else -- the callable Python object used as a handler");
+<a name='L355'>
+<a name='L356'><font color='darkred'>#ifdef</font> HAVE_SIGINTERRUPT
+<a name='L357'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(siginterrupt_doc,
+<a name='L358'>"siginterrupt(sig, flag) -&gt; None\n\
+<a name='L359'>change system call restart behaviour: if flag is False, system calls\n\
+<a name='L360'>will be restarted when interrupted by signal sig, else system calls\n\
+<a name='L361'>will be interrupted.");
+<a name='L362'>
+<a name='L363'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L364'><a href='../S/2710.html#L506' title='Refered from 506 in Modules/signalmodule.c.'>signal_siginterrupt</a>(PyObject *self, PyObject *args)
+<a name='L365'><font color='red'>{</font>
+<a name='L366'>    <b>int</b> sig_num;
+<a name='L367'>    <b>int</b> flag;
+<a name='L368'>
+<a name='L369'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "ii:siginterrupt", &amp;sig_num, &amp;flag))
+<a name='L370'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L371'>    <b>if</b> (sig_num &lt; 1 || sig_num &gt;= <a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>) <font color='red'>{</font>
+<a name='L372'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L373'>                        "signal number out of range");
+<a name='L374'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L375'>    <font color='red'>}</font>
+<a name='L376'>    <b>if</b> (siginterrupt(sig_num, flag)&lt;0) <font color='red'>{</font>
+<a name='L377'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_RuntimeError);
+<a name='L378'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L379'>    <font color='red'>}</font>
+<a name='L380'>
+<a name='L381'>    Py_INCREF(Py_None);
+<a name='L382'>    <b>return</b> Py_None;
+<a name='L383'><font color='red'>}</font>
+<a name='L384'>
+<a name='L385'><font color='darkred'>#endif</font>
+<a name='L386'>
+<a name='L387'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L388'><a href='../S/2710.html#L504' title='Refered from 504 in Modules/signalmodule.c.'>signal_set_wakeup_fd</a>(PyObject *self, PyObject *args)
+<a name='L389'><font color='red'>{</font>
+<a name='L390'>    <b>struct</b> stat buf;
+<a name='L391'>    <b>int</b> fd, old_fd;
+<a name='L392'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:set_wakeup_fd", &amp;fd))
+<a name='L393'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L394'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L395'>    <b>if</b> (<a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>() != main_thread) <font color='red'>{</font>
+<a name='L396'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L397'>                        "set_wakeup_fd only works in main thread");
+<a name='L398'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L399'>    <font color='red'>}</font>
+<a name='L400'><font color='darkred'>#endif</font>
+<a name='L401'>    <b>if</b> (fd != -1 &amp;&amp; fstat(fd, &amp;buf) != 0) <font color='red'>{</font>
+<a name='L402'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "invalid fd");
+<a name='L403'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L404'>    <font color='red'>}</font>
+<a name='L405'>    old_fd = wakeup_fd;
+<a name='L406'>    wakeup_fd = fd;
+<a name='L407'>    <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(old_fd);
+<a name='L408'><font color='red'>}</font>
+<a name='L409'>
+<a name='L410'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(set_wakeup_fd_doc,
+<a name='L411'>"set_wakeup_fd(fd) -&gt; fd\n\
+<a name='L412'>\n\
+<a name='L413'>Sets the fd to be written to (with '\\0') when a signal\n\
+<a name='L414'>comes in.  A library can use this to wakeup select or poll.\n\
+<a name='L415'>The previous fd is returned.\n\
+<a name='L416'>\n\
+<a name='L417'>The fd must be non-blocking.");
+<a name='L418'>
+<a name='L419'><i><font color='green'>/* C API for the same, without all the error checking */</font></i>
+<a name='L420'><b>int</b>
+<a name='L421'>PySignal_SetWakeupFd(<b>int</b> fd)
+<a name='L422'><font color='red'>{</font>
+<a name='L423'>    <b>int</b> old_fd = wakeup_fd;
+<a name='L424'>    <b>if</b> (fd &lt; 0)
+<a name='L425'>        fd = -1;
+<a name='L426'>    wakeup_fd = fd;
+<a name='L427'>    <b>return</b> old_fd;
+<a name='L428'><font color='red'>}</font>
+<a name='L429'>
+<a name='L430'>
+<a name='L431'><font color='darkred'>#ifdef</font> HAVE_SETITIMER
+<a name='L432'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L433'><a href='../S/2710.html#L497' title='Refered from 497 in Modules/signalmodule.c.'>signal_setitimer</a>(PyObject *self, PyObject *args)
+<a name='L434'><font color='red'>{</font>
+<a name='L435'>    <b>double</b> first;
+<a name='L436'>    <b>double</b> interval = 0;
+<a name='L437'>    <b>int</b> which;
+<a name='L438'>    <b>struct</b> itimerval new, old;
+<a name='L439'>
+<a name='L440'>    <b>if</b>(!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "id|d:setitimer", &amp;which, &amp;first, &amp;interval))
+<a name='L441'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L442'>
+<a name='L443'>    <a href='../S/2710.html#L109' title='Defined at 109 in Modules/signalmodule.c.'>timeval_from_double</a>(first, &amp;new.it_value);
+<a name='L444'>    <a href='../S/2710.html#L109' title='Defined at 109 in Modules/signalmodule.c.'>timeval_from_double</a>(interval, &amp;new.it_interval);
+<a name='L445'>    <i><font color='green'>/* Let OS check "which" value */</font></i>
+<a name='L446'>    <b>if</b> (setitimer(which, &amp;new, &amp;old) != 0) <font color='red'>{</font>
+<a name='L447'>    <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(ItimerError);
+<a name='L448'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L449'>    <font color='red'>}</font>
+<a name='L450'>
+<a name='L451'>    <b>return</b> <a href='../S/2710.html#L122' title='Defined at 122 in Modules/signalmodule.c.'>itimer_retval</a>(&amp;old);
+<a name='L452'><font color='red'>}</font>
+<a name='L453'>
+<a name='L454'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(setitimer_doc,
+<a name='L455'>"setitimer(which, seconds[, interval])\n\
+<a name='L456'>\n\
+<a name='L457'>Sets given itimer (one of ITIMER_REAL, ITIMER_VIRTUAL\n\
+<a name='L458'>or ITIMER_PROF) to fire after value seconds and after\n\
+<a name='L459'>that every interval seconds.\n\
+<a name='L460'>The itimer can be cleared by setting seconds to zero.\n\
+<a name='L461'>\n\
+<a name='L462'>Returns old values as a tuple: (delay, interval).");
+<a name='L463'><font color='darkred'>#endif</font>
+<a name='L464'>
+<a name='L465'>
+<a name='L466'><font color='darkred'>#ifdef</font> HAVE_GETITIMER
+<a name='L467'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L468'><a href='../S/2710.html#L500' title='Refered from 500 in Modules/signalmodule.c.'>signal_getitimer</a>(PyObject *self, PyObject *args)
+<a name='L469'><font color='red'>{</font>
+<a name='L470'>    <b>int</b> which;
+<a name='L471'>    <b>struct</b> itimerval old;
+<a name='L472'>
+<a name='L473'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "i:getitimer", &amp;which))
+<a name='L474'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L475'>
+<a name='L476'>    <b>if</b> (getitimer(which, &amp;old) != 0) <font color='red'>{</font>
+<a name='L477'>    <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(ItimerError);
+<a name='L478'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L479'>    <font color='red'>}</font>
+<a name='L480'>
+<a name='L481'>    <b>return</b> <a href='../S/2710.html#L122' title='Defined at 122 in Modules/signalmodule.c.'>itimer_retval</a>(&amp;old);
+<a name='L482'><font color='red'>}</font>
+<a name='L483'>
+<a name='L484'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(getitimer_doc,
+<a name='L485'>"getitimer(which)\n\
+<a name='L486'>\n\
+<a name='L487'>Returns current value of given itimer.");
+<a name='L488'><font color='darkred'>#endif</font>
+<a name='L489'>
+<a name='L490'>
+<a name='L491'><i><font color='green'>/* List of functions defined in the module */</font></i>
+<a name='L492'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> signal_methods[] = <font color='red'>{</font>
+<a name='L493'><font color='darkred'>#ifdef</font> <a href='../S/2894.html#L147' title='Defined at 147 in PC/os2emx/pyconfig.h.'>HAVE_ALARM</a>
+<a name='L494'>    <font color='red'>{</font>"alarm",                   <a href='../S/2710.html#L217' title='Defined at 217 in Modules/signalmodule.c.'>signal_alarm</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, alarm_doc<font color='red'>}</font>,
+<a name='L495'><font color='darkred'>#endif</font>
+<a name='L496'><font color='darkred'>#ifdef</font> HAVE_SETITIMER
+<a name='L497'>    <font color='red'>{</font>"setitimer",       <a href='../S/2710.html#L433' title='Defined at 433 in Modules/signalmodule.c.'>signal_setitimer</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, setitimer_doc<font color='red'>}</font>,
+<a name='L498'><font color='darkred'>#endif</font>
+<a name='L499'><font color='darkred'>#ifdef</font> HAVE_GETITIMER
+<a name='L500'>    <font color='red'>{</font>"getitimer",       <a href='../S/2710.html#L468' title='Defined at 468 in Modules/signalmodule.c.'>signal_getitimer</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, getitimer_doc<font color='red'>}</font>,
+<a name='L501'><font color='darkred'>#endif</font>
+<a name='L502'>    <font color='red'>{</font>"signal",                  <a href='../S/2710.html#L257' title='Defined at 257 in Modules/signalmodule.c.'>signal_signal</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, signal_doc<font color='red'>}</font>,
+<a name='L503'>    <font color='red'>{</font>"getsignal",               <a href='../S/2710.html#L331' title='Defined at 331 in Modules/signalmodule.c.'>signal_getsignal</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, getsignal_doc<font color='red'>}</font>,
+<a name='L504'>    <font color='red'>{</font>"set_wakeup_fd",           <a href='../S/2710.html#L388' title='Defined at 388 in Modules/signalmodule.c.'>signal_set_wakeup_fd</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, set_wakeup_fd_doc<font color='red'>}</font>,
+<a name='L505'><font color='darkred'>#ifdef</font> HAVE_SIGINTERRUPT
+<a name='L506'>    <font color='red'>{</font>"siginterrupt",            <a href='../S/2710.html#L364' title='Defined at 364 in Modules/signalmodule.c.'>signal_siginterrupt</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, siginterrupt_doc<font color='red'>}</font>,
+<a name='L507'><font color='darkred'>#endif</font>
+<a name='L508'><font color='darkred'>#ifdef</font> <a href='../S/2894.html#L210' title='Defined at 210 in PC/os2emx/pyconfig.h.'>HAVE_PAUSE</a>
+<a name='L509'>    <font color='red'>{</font>"pause",                   (PyCFunction)<a href='../S/2710.html#L234' title='Defined at 234 in Modules/signalmodule.c.'>signal_pause</a>,
+<a name='L510'>     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,pause_doc<font color='red'>}</font>,
+<a name='L511'><font color='darkred'>#endif</font>
+<a name='L512'>    <font color='red'>{</font>"default_int_handler", <a href='../S/2710.html#L149' title='Defined at 149 in Modules/signalmodule.c.'>signal_default_int_handler</a>,
+<a name='L513'>     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, default_int_handler_doc<font color='red'>}</font>,
+<a name='L514'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,                      <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L515'><font color='red'>}</font>;
+<a name='L516'>
+<a name='L517'>
+<a name='L518'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_doc,
+<a name='L519'>"This module provides mechanisms to use signal handlers in Python.\n\
+<a name='L520'>\n\
+<a name='L521'>Functions:\n\
+<a name='L522'>\n\
+<a name='L523'>alarm() -- cause SIGALRM after a specified time [Unix only]\n\
+<a name='L524'>setitimer() -- cause a signal (described below) after a specified\n\
+<a name='L525'>               float time and the timer may restart then [Unix only]\n\
+<a name='L526'>getitimer() -- get current value of timer [Unix only]\n\
+<a name='L527'>signal() -- set the action for a given signal\n\
+<a name='L528'>getsignal() -- get the signal action for a given signal\n\
+<a name='L529'>pause() -- wait until a signal arrives [Unix only]\n\
+<a name='L530'>default_int_handler() -- default SIGINT handler\n\
+<a name='L531'>\n\
+<a name='L532'>signal constants:\n\
+<a name='L533'>SIG_DFL -- used to refer to the system default handler\n\
+<a name='L534'>SIG_IGN -- used to ignore the signal\n\
+<a name='L535'>NSIG -- number of defined signals\n\
+<a name='L536'>SIGINT, SIGTERM, etc. -- signal numbers\n\
+<a name='L537'>\n\
+<a name='L538'>itimer constants:\n\
+<a name='L539'>ITIMER_REAL -- decrements in real time, and delivers SIGALRM upon\n\
+<a name='L540'>               expiration\n\
+<a name='L541'>ITIMER_VIRTUAL -- decrements only when the process is executing,\n\
+<a name='L542'>               and delivers SIGVTALRM upon expiration\n\
+<a name='L543'>ITIMER_PROF -- decrements both when the process is executing and\n\
+<a name='L544'>               when the system is executing on behalf of the process.\n\
+<a name='L545'>               Coupled with ITIMER_VIRTUAL, this timer is usually\n\
+<a name='L546'>               used to profile the time spent by the application\n\
+<a name='L547'>               in user and kernel space. SIGPROF is delivered upon\n\
+<a name='L548'>               expiration.\n\
+<a name='L549'>\n\n\
+<a name='L550'>*** IMPORTANT NOTICE ***\n\
+<a name='L551'>A signal handler function is called with two arguments:\n\
+<a name='L552'>the first is the signal number, the second is the interrupted stack frame.");
+<a name='L553'>
+<a name='L554'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> signalmodule = <font color='red'>{</font>
+<a name='L555'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L556'>    "signal",
+<a name='L557'>    module_doc,
+<a name='L558'>    -1,
+<a name='L559'>    signal_methods,
+<a name='L560'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L561'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L562'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L563'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L564'><font color='red'>}</font>;
+<a name='L565'>
+<a name='L566'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L567'><a href='../R/3061.html' title='Multiple refered from 3 places.'>PyInit_signal</a>(<b>void</b>)
+<a name='L568'><font color='red'>{</font>
+<a name='L569'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m, *d, *x;
+<a name='L570'>    <b>int</b> i;
+<a name='L571'>
+<a name='L572'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L573'>    main_thread = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L574'>    main_pid = getpid();
+<a name='L575'><font color='darkred'>#endif</font>
+<a name='L576'>
+<a name='L577'>    <i><font color='green'>/* Create the module and add the functions */</font></i>
+<a name='L578'>    m = PyModule_Create(&amp;signalmodule);
+<a name='L579'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L580'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L581'>
+<a name='L582'>    <i><font color='green'>/* Add some symbolic constants to the module */</font></i>
+<a name='L583'>    d = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(m);
+<a name='L584'>
+<a name='L585'>    x = DefaultHandler = <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>((<b>void</b> *)SIG_DFL);
+<a name='L586'>    <b>if</b> (!x || <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIG_DFL", x) &lt; 0)
+<a name='L587'>        <b>goto</b> finally;
+<a name='L588'>
+<a name='L589'>    x = IgnoreHandler = <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>((<b>void</b> *)SIG_IGN);
+<a name='L590'>    <b>if</b> (!x || <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIG_IGN", x) &lt; 0)
+<a name='L591'>        <b>goto</b> finally;
+<a name='L592'>
+<a name='L593'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)<a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>);
+<a name='L594'>    <b>if</b> (!x || <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "NSIG", x) &lt; 0)
+<a name='L595'>        <b>goto</b> finally;
+<a name='L596'>    Py_DECREF(x);
+<a name='L597'>
+<a name='L598'>    x = IntHandler = <a href='../S/2787.html#L2168' title='Defined at 2168 in Objects/dictobject.c.'>PyDict_GetItemString</a>(d, "default_int_handler");
+<a name='L599'>    <b>if</b> (!x)
+<a name='L600'>        <b>goto</b> finally;
+<a name='L601'>    Py_INCREF(IntHandler);
+<a name='L602'>
+<a name='L603'>    Handlers[0].tripped = 0;
+<a name='L604'>    <b>for</b> (i = 1; i &lt; <a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>; i++) <font color='red'>{</font>
+<a name='L605'>        <b>void</b> (*t)(<b>int</b>);
+<a name='L606'>        t = <a href='../S/3138.html#L2300' title='Defined at 2300 in Python/pythonrun.c.'>PyOS_getsig</a>(i);
+<a name='L607'>        Handlers[i].tripped = 0;
+<a name='L608'>        <b>if</b> (t == SIG_DFL)
+<a name='L609'>            Handlers[i].func = DefaultHandler;
+<a name='L610'>        <b>else</b> <b>if</b> (t == SIG_IGN)
+<a name='L611'>            Handlers[i].func = IgnoreHandler;
+<a name='L612'>        <b>else</b>
+<a name='L613'>            Handlers[i].func = Py_None; <i><font color='green'>/* None of our business */</font></i>
+<a name='L614'>        Py_INCREF(Handlers[i].func);
+<a name='L615'>    <font color='red'>}</font>
+<a name='L616'>    <b>if</b> (Handlers[SIGINT].func == DefaultHandler) <font color='red'>{</font>
+<a name='L617'>        <i><font color='green'>/* Install default int handler */</font></i>
+<a name='L618'>        Py_INCREF(IntHandler);
+<a name='L619'>        Py_DECREF(Handlers[SIGINT].func);
+<a name='L620'>        Handlers[SIGINT].func = IntHandler;
+<a name='L621'>        old_siginthandler = <a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(SIGINT, <a href='../S/2710.html#L169' title='Defined at 169 in Modules/signalmodule.c.'>signal_handler</a>);
+<a name='L622'>    <font color='red'>}</font>
+<a name='L623'>
+<a name='L624'><font color='darkred'>#ifdef</font> SIGHUP
+<a name='L625'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGHUP);
+<a name='L626'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGHUP", x);
+<a name='L627'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L628'><font color='darkred'>#endif</font>
+<a name='L629'><font color='darkred'>#ifdef</font> SIGINT
+<a name='L630'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGINT);
+<a name='L631'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGINT", x);
+<a name='L632'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L633'><font color='darkred'>#endif</font>
+<a name='L634'><font color='darkred'>#ifdef</font> SIGBREAK
+<a name='L635'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGBREAK);
+<a name='L636'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGBREAK", x);
+<a name='L637'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L638'><font color='darkred'>#endif</font>
+<a name='L639'><font color='darkred'>#ifdef</font> SIGQUIT
+<a name='L640'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGQUIT);
+<a name='L641'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGQUIT", x);
+<a name='L642'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L643'><font color='darkred'>#endif</font>
+<a name='L644'><font color='darkred'>#ifdef</font> SIGILL
+<a name='L645'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGILL);
+<a name='L646'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGILL", x);
+<a name='L647'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L648'><font color='darkred'>#endif</font>
+<a name='L649'><font color='darkred'>#ifdef</font> SIGTRAP
+<a name='L650'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGTRAP);
+<a name='L651'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGTRAP", x);
+<a name='L652'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L653'><font color='darkred'>#endif</font>
+<a name='L654'><font color='darkred'>#ifdef</font> SIGIOT
+<a name='L655'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGIOT);
+<a name='L656'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGIOT", x);
+<a name='L657'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L658'><font color='darkred'>#endif</font>
+<a name='L659'><font color='darkred'>#ifdef</font> SIGABRT
+<a name='L660'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGABRT);
+<a name='L661'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGABRT", x);
+<a name='L662'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L663'><font color='darkred'>#endif</font>
+<a name='L664'><font color='darkred'>#ifdef</font> SIGEMT
+<a name='L665'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGEMT);
+<a name='L666'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGEMT", x);
+<a name='L667'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L668'><font color='darkred'>#endif</font>
+<a name='L669'><font color='darkred'>#ifdef</font> SIGFPE
+<a name='L670'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGFPE);
+<a name='L671'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGFPE", x);
+<a name='L672'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L673'><font color='darkred'>#endif</font>
+<a name='L674'><font color='darkred'>#ifdef</font> SIGKILL
+<a name='L675'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGKILL);
+<a name='L676'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGKILL", x);
+<a name='L677'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L678'><font color='darkred'>#endif</font>
+<a name='L679'><font color='darkred'>#ifdef</font> SIGBUS
+<a name='L680'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGBUS);
+<a name='L681'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGBUS", x);
+<a name='L682'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L683'><font color='darkred'>#endif</font>
+<a name='L684'><font color='darkred'>#ifdef</font> SIGSEGV
+<a name='L685'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGSEGV);
+<a name='L686'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGSEGV", x);
+<a name='L687'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L688'><font color='darkred'>#endif</font>
+<a name='L689'><font color='darkred'>#ifdef</font> SIGSYS
+<a name='L690'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGSYS);
+<a name='L691'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGSYS", x);
+<a name='L692'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L693'><font color='darkred'>#endif</font>
+<a name='L694'><font color='darkred'>#ifdef</font> SIGPIPE
+<a name='L695'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGPIPE);
+<a name='L696'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGPIPE", x);
+<a name='L697'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L698'><font color='darkred'>#endif</font>
+<a name='L699'><font color='darkred'>#ifdef</font> SIGALRM
+<a name='L700'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGALRM);
+<a name='L701'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGALRM", x);
+<a name='L702'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L703'><font color='darkred'>#endif</font>
+<a name='L704'><font color='darkred'>#ifdef</font> SIGTERM
+<a name='L705'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGTERM);
+<a name='L706'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGTERM", x);
+<a name='L707'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L708'><font color='darkred'>#endif</font>
+<a name='L709'><font color='darkred'>#ifdef</font> SIGUSR1
+<a name='L710'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGUSR1);
+<a name='L711'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGUSR1", x);
+<a name='L712'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L713'><font color='darkred'>#endif</font>
+<a name='L714'><font color='darkred'>#ifdef</font> SIGUSR2
+<a name='L715'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGUSR2);
+<a name='L716'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGUSR2", x);
+<a name='L717'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L718'><font color='darkred'>#endif</font>
+<a name='L719'><font color='darkred'>#ifdef</font> SIGCLD
+<a name='L720'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGCLD);
+<a name='L721'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGCLD", x);
+<a name='L722'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L723'><font color='darkred'>#endif</font>
+<a name='L724'><font color='darkred'>#ifdef</font> SIGCHLD
+<a name='L725'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGCHLD);
+<a name='L726'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGCHLD", x);
+<a name='L727'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L728'><font color='darkred'>#endif</font>
+<a name='L729'><font color='darkred'>#ifdef</font> SIGPWR
+<a name='L730'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGPWR);
+<a name='L731'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGPWR", x);
+<a name='L732'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L733'><font color='darkred'>#endif</font>
+<a name='L734'><font color='darkred'>#ifdef</font> SIGIO
+<a name='L735'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGIO);
+<a name='L736'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGIO", x);
+<a name='L737'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L738'><font color='darkred'>#endif</font>
+<a name='L739'><font color='darkred'>#ifdef</font> SIGURG
+<a name='L740'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGURG);
+<a name='L741'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGURG", x);
+<a name='L742'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L743'><font color='darkred'>#endif</font>
+<a name='L744'><font color='darkred'>#ifdef</font> SIGWINCH
+<a name='L745'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGWINCH);
+<a name='L746'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGWINCH", x);
+<a name='L747'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L748'><font color='darkred'>#endif</font>
+<a name='L749'><font color='darkred'>#ifdef</font> SIGPOLL
+<a name='L750'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGPOLL);
+<a name='L751'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGPOLL", x);
+<a name='L752'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L753'><font color='darkred'>#endif</font>
+<a name='L754'><font color='darkred'>#ifdef</font> SIGSTOP
+<a name='L755'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGSTOP);
+<a name='L756'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGSTOP", x);
+<a name='L757'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L758'><font color='darkred'>#endif</font>
+<a name='L759'><font color='darkred'>#ifdef</font> SIGTSTP
+<a name='L760'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGTSTP);
+<a name='L761'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGTSTP", x);
+<a name='L762'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L763'><font color='darkred'>#endif</font>
+<a name='L764'><font color='darkred'>#ifdef</font> SIGCONT
+<a name='L765'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGCONT);
+<a name='L766'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGCONT", x);
+<a name='L767'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L768'><font color='darkred'>#endif</font>
+<a name='L769'><font color='darkred'>#ifdef</font> SIGTTIN
+<a name='L770'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGTTIN);
+<a name='L771'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGTTIN", x);
+<a name='L772'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L773'><font color='darkred'>#endif</font>
+<a name='L774'><font color='darkred'>#ifdef</font> SIGTTOU
+<a name='L775'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGTTOU);
+<a name='L776'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGTTOU", x);
+<a name='L777'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L778'><font color='darkred'>#endif</font>
+<a name='L779'><font color='darkred'>#ifdef</font> SIGVTALRM
+<a name='L780'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGVTALRM);
+<a name='L781'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGVTALRM", x);
+<a name='L782'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L783'><font color='darkred'>#endif</font>
+<a name='L784'><font color='darkred'>#ifdef</font> SIGPROF
+<a name='L785'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGPROF);
+<a name='L786'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGPROF", x);
+<a name='L787'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L788'><font color='darkred'>#endif</font>
+<a name='L789'><font color='darkred'>#ifdef</font> SIGXCPU
+<a name='L790'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGXCPU);
+<a name='L791'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGXCPU", x);
+<a name='L792'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L793'><font color='darkred'>#endif</font>
+<a name='L794'><font color='darkred'>#ifdef</font> SIGXFSZ
+<a name='L795'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGXFSZ);
+<a name='L796'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGXFSZ", x);
+<a name='L797'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L798'><font color='darkred'>#endif</font>
+<a name='L799'><font color='darkred'>#ifdef</font> SIGRTMIN
+<a name='L800'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGRTMIN);
+<a name='L801'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGRTMIN", x);
+<a name='L802'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L803'><font color='darkred'>#endif</font>
+<a name='L804'><font color='darkred'>#ifdef</font> SIGRTMAX
+<a name='L805'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGRTMAX);
+<a name='L806'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGRTMAX", x);
+<a name='L807'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L808'><font color='darkred'>#endif</font>
+<a name='L809'><font color='darkred'>#ifdef</font> SIGINFO
+<a name='L810'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(SIGINFO);
+<a name='L811'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "SIGINFO", x);
+<a name='L812'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(x);
+<a name='L813'><font color='darkred'>#endif</font>
+<a name='L814'>
+<a name='L815'><font color='darkred'>#ifdef</font> ITIMER_REAL
+<a name='L816'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ITIMER_REAL);
+<a name='L817'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "ITIMER_REAL", x);
+<a name='L818'>    Py_DECREF(x);
+<a name='L819'><font color='darkred'>#endif</font>
+<a name='L820'><font color='darkred'>#ifdef</font> ITIMER_VIRTUAL
+<a name='L821'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ITIMER_VIRTUAL);
+<a name='L822'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "ITIMER_VIRTUAL", x);
+<a name='L823'>    Py_DECREF(x);
+<a name='L824'><font color='darkred'>#endif</font>
+<a name='L825'><font color='darkred'>#ifdef</font> ITIMER_PROF
+<a name='L826'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(ITIMER_PROF);
+<a name='L827'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "ITIMER_PROF", x);
+<a name='L828'>    Py_DECREF(x);
+<a name='L829'><font color='darkred'>#endif</font>
+<a name='L830'>
+<a name='L831'><font color='darkred'>#if</font> <b>defined</b> (HAVE_SETITIMER) || <b>defined</b> (HAVE_GETITIMER)
+<a name='L832'>    ItimerError = <a href='../S/3106.html#L621' title='Defined at 621 in Python/errors.c.'>PyErr_NewException</a>("signal.ItimerError",
+<a name='L833'>     PyExc_IOError, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L834'>    <b>if</b> (ItimerError != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L835'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "ItimerError", ItimerError);
+<a name='L836'><font color='darkred'>#endif</font>
+<a name='L837'>
+<a name='L838'><font color='darkred'>#ifdef</font> CTRL_C_EVENT
+<a name='L839'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(CTRL_C_EVENT);
+<a name='L840'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "CTRL_C_EVENT", x);
+<a name='L841'>    Py_DECREF(x);
+<a name='L842'><font color='darkred'>#endif</font>
+<a name='L843'>
+<a name='L844'><font color='darkred'>#ifdef</font> CTRL_BREAK_EVENT
+<a name='L845'>    x = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(CTRL_BREAK_EVENT);
+<a name='L846'>    <a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(d, "CTRL_BREAK_EVENT", x);
+<a name='L847'>    Py_DECREF(x);
+<a name='L848'><font color='darkred'>#endif</font>
+<a name='L849'>
+<a name='L850'>    <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L851'>        Py_DECREF(m);
+<a name='L852'>        m = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L853'>    <font color='red'>}</font>
+<a name='L854'>
+<a name='L855'>  finally:
+<a name='L856'>    <b>return</b> m;
+<a name='L857'><font color='red'>}</font>
+<a name='L858'>
+<a name='L859'><b>static</b> <b>void</b>
+<a name='L860'><a href='../S/2710.html#L967' title='Refered from 967 in Modules/signalmodule.c.'>finisignal</a>(<b>void</b>)
+<a name='L861'><font color='red'>{</font>
+<a name='L862'>    <b>int</b> i;
+<a name='L863'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *func;
+<a name='L864'>
+<a name='L865'>    <a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(SIGINT, old_siginthandler);
+<a name='L866'>    old_siginthandler = SIG_DFL;
+<a name='L867'>
+<a name='L868'>    <b>for</b> (i = 1; i &lt; <a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>; i++) <font color='red'>{</font>
+<a name='L869'>        func = Handlers[i].func;
+<a name='L870'>        Handlers[i].tripped = 0;
+<a name='L871'>        Handlers[i].func = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L872'>        <b>if</b> (i != SIGINT &amp;&amp; func != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; func != Py_None &amp;&amp;
+<a name='L873'>            func != DefaultHandler &amp;&amp; func != IgnoreHandler)
+<a name='L874'>            <a href='../S/3138.html#L2339' title='Defined at 2339 in Python/pythonrun.c.'>PyOS_setsig</a>(i, SIG_DFL);
+<a name='L875'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(func);
+<a name='L876'>    <font color='red'>}</font>
+<a name='L877'>
+<a name='L878'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(IntHandler);
+<a name='L879'>    IntHandler = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L880'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(DefaultHandler);
+<a name='L881'>    DefaultHandler = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L882'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(IgnoreHandler);
+<a name='L883'>    IgnoreHandler = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L884'><font color='red'>}</font>
+<a name='L885'>
+<a name='L886'>
+<a name='L887'><i><font color='green'>/* Declared in pyerrors.h */</font></i>
+<a name='L888'><b>int</b>
+<a name='L889'><a href='../R/2866.html' title='Multiple refered from 26 places.'>PyErr_CheckSignals</a>(<b>void</b>)
+<a name='L890'><font color='red'>{</font>
+<a name='L891'>    <b>int</b> i;
+<a name='L892'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *f;
+<a name='L893'>
+<a name='L894'>    <b>if</b> (!is_tripped)
+<a name='L895'>        <b>return</b> 0;
+<a name='L896'>
+<a name='L897'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L898'>    <b>if</b> (<a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>() != main_thread)
+<a name='L899'>        <b>return</b> 0;
+<a name='L900'><font color='darkred'>#endif</font>
+<a name='L901'>
+<a name='L902'>    <i><font color='green'>/*</font></i>
+<a name='L903'><i><font color='green'>     * The is_tripped variable is meant to speed up the calls to</font></i>
+<a name='L904'><i><font color='green'>     * PyErr_CheckSignals (both directly or via pending calls) when no</font></i>
+<a name='L905'><i><font color='green'>     * signal has arrived. This variable is set to 1 when a signal arrives</font></i>
+<a name='L906'><i><font color='green'>     * and it is set to 0 here, when we know some signals arrived. This way</font></i>
+<a name='L907'><i><font color='green'>     * we can run the registered handlers with no signals blocked.</font></i>
+<a name='L908'><i><font color='green'>     *</font></i>
+<a name='L909'><i><font color='green'>     * NOTE: with this approach we can have a situation where is_tripped is</font></i>
+<a name='L910'><i><font color='green'>     *       1 but we have no more signals to handle (Handlers[i].tripped</font></i>
+<a name='L911'><i><font color='green'>     *       is 0 for every signal i). This won't do us any harm (except</font></i>
+<a name='L912'><i><font color='green'>     *       we're gonna spent some cycles for nothing). This happens when</font></i>
+<a name='L913'><i><font color='green'>     *       we receive a signal i after we zero is_tripped and before we</font></i>
+<a name='L914'><i><font color='green'>     *       check Handlers[i].tripped.</font></i>
+<a name='L915'><i><font color='green'>     */</font></i>
+<a name='L916'>    is_tripped = 0;
+<a name='L917'>
+<a name='L918'>    <b>if</b> (!(f = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)<a href='../S/3091.html#L3697' title='Defined at 3697 in Python/ceval.c.'>PyEval_GetFrame</a>()))
+<a name='L919'>        f = Py_None;
+<a name='L920'>
+<a name='L921'>    <b>for</b> (i = 1; i &lt; <a href='../D/2338.html' title='Multiple defined in 5 places.'>NSIG</a>; i++) <font color='red'>{</font>
+<a name='L922'>        <b>if</b> (Handlers[i].tripped) <font color='red'>{</font>
+<a name='L923'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L924'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6732.html' title='Multiple defined in 2 places.'>arglist</a> = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("(iO)", i, f);
+<a name='L925'>            Handlers[i].tripped = 0;
+<a name='L926'>
+<a name='L927'>            <b>if</b> (<a href='../D/6732.html' title='Multiple defined in 2 places.'>arglist</a>) <font color='red'>{</font>
+<a name='L928'>                <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PyEval_CallObject(Handlers[i].func,
+<a name='L929'>                                           <a href='../D/6732.html' title='Multiple defined in 2 places.'>arglist</a>);
+<a name='L930'>                Py_DECREF(<a href='../D/6732.html' title='Multiple defined in 2 places.'>arglist</a>);
+<a name='L931'>            <font color='red'>}</font>
+<a name='L932'>            <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)
+<a name='L933'>                <b>return</b> -1;
+<a name='L934'>
+<a name='L935'>            Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L936'>        <font color='red'>}</font>
+<a name='L937'>    <font color='red'>}</font>
+<a name='L938'>
+<a name='L939'>    <b>return</b> 0;
+<a name='L940'><font color='red'>}</font>
+<a name='L941'>
+<a name='L942'>
+<a name='L943'><i><font color='green'>/* Replacements for intrcheck.c functionality</font></i>
+<a name='L944'><i><font color='green'> * Declared in pyerrors.h</font></i>
+<a name='L945'><i><font color='green'> */</font></i>
+<a name='L946'><b>void</b>
+<a name='L947'><a href='../S/2615.html#L1102' title='Refered from 1102 in Modules/_threadmodule.c.'>PyErr_SetInterrupt</a>(<b>void</b>)
+<a name='L948'><font color='red'>{</font>
+<a name='L949'>    is_tripped = 1;
+<a name='L950'>    Handlers[SIGINT].tripped = 1;
+<a name='L951'>    <a href='../D/4078.html' title='Multiple defined in 2 places.'>Py_AddPendingCall</a>((<b>int</b> (*)(<b>void</b> *))<a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L952'><font color='red'>}</font>
+<a name='L953'>
+<a name='L954'><b>void</b>
+<a name='L955'><a href='../S/3138.html#L2215' title='Refered from 2215 in Python/pythonrun.c.'>PyOS_InitInterrupts</a>(<b>void</b>)
+<a name='L956'><font color='red'>{</font>
+<a name='L957'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m = <a href='../S/2710.html#L567' title='Defined at 567 in Modules/signalmodule.c.'>PyInit_signal</a>();
+<a name='L958'>    <b>if</b> (m) <font color='red'>{</font>
+<a name='L959'>        <a href='../S/3120.html#L626' title='Defined at 626 in Python/import.c.'>_PyImport_FixupBuiltin</a>(m, "signal");
+<a name='L960'>        Py_DECREF(m);
+<a name='L961'>    <font color='red'>}</font>
+<a name='L962'><font color='red'>}</font>
+<a name='L963'>
+<a name='L964'><b>void</b>
+<a name='L965'><a href='../S/3138.html#L400' title='Refered from 400 in Python/pythonrun.c.'>PyOS_FiniInterrupts</a>(<b>void</b>)
+<a name='L966'><font color='red'>{</font>
+<a name='L967'>    <a href='../S/2710.html#L860' title='Defined at 860 in Modules/signalmodule.c.'>finisignal</a>();
+<a name='L968'><font color='red'>}</font>
+<a name='L969'>
+<a name='L970'><b>int</b>
+<a name='L971'><a href='../R/3231.html' title='Multiple refered from 3 places.'>PyOS_InterruptOccurred</a>(<b>void</b>)
+<a name='L972'><font color='red'>{</font>
+<a name='L973'>    <b>if</b> (Handlers[SIGINT].tripped) <font color='red'>{</font>
+<a name='L974'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L975'>        <b>if</b> (<a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>() != main_thread)
+<a name='L976'>            <b>return</b> 0;
+<a name='L977'><font color='darkred'>#endif</font>
+<a name='L978'>        Handlers[SIGINT].tripped = 0;
+<a name='L979'>        <b>return</b> 1;
+<a name='L980'>    <font color='red'>}</font>
+<a name='L981'>    <b>return</b> 0;
+<a name='L982'><font color='red'>}</font>
+<a name='L983'>
+<a name='L984'><b>void</b>
+<a name='L985'><a href='../R/3227.html' title='Multiple refered from 4 places.'>PyOS_AfterFork</a>(<b>void</b>)
+<a name='L986'><font color='red'>{</font>
+<a name='L987'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L988'>    <a href='../S/3091.html#L373' title='Defined at 373 in Python/ceval.c.'>PyEval_ReInitThreads</a>();
+<a name='L989'>    main_thread = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L990'>    main_pid = getpid();
+<a name='L991'>    <a href='../S/3120.html#L324' title='Defined at 324 in Python/import.c.'>_PyImport_ReInitLock</a>();
+<a name='L992'>    <a href='../D/3844.html' title='Multiple defined in 3 places.'>PyThread_ReInitTLS</a>();
+<a name='L993'><font color='darkred'>#endif</font>
+<a name='L994'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L109'>[^]</a><a href='#L985'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

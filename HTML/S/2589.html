@@ -1,0 +1,528 @@
+<html>
+<head>
+<title>Modules/_posixsubprocess.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/_posixsubprocess.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L18'>[^]</a><a href='#L492'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L18' title='Defined at 18.'>_enable_gc</a>
+<li><a href='#L40' title='Defined at 40.'>child_exec</a>
+<li><a href='#L205' title='Defined at 205.'>subprocess_fork_exec</a>
+<li><a href='#L423' title='Defined at 423.'>subprocess_cloexec_pipe</a>
+<li><a href='#L492' title='Defined at 492.'>PyInit__posixsubprocess</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Authors: Gregory P. Smith &amp; Jeffrey Yasskin */</font></i>
+<a name='L2'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L3'><font color='darkred'>#ifdef</font> HAVE_PIPE2
+<a name='L4'><font color='darkred'>#define</font> <a href='../S/2312.html#L28' title='Refered from 28 in Modules/_ctypes/libffi/src/closures.c.'>_GNU_SOURCE</a>
+<a name='L5'><font color='darkred'>#endif</font>
+<a name='L6'><font color='darkred'>#include</font> &lt;unistd.h&gt;
+<a name='L7'><font color='darkred'>#include</font> &lt;fcntl.h&gt;
+<a name='L8'>
+<a name='L9'>
+<a name='L10'><font color='darkred'>#define</font> <a href='../R/2280.html' title='Multiple refered from 12 places.'>POSIX_CALL</a>(<a href='../S/2611.html#L1950' title='Defined at 1950 in Modules/_sre.c.'>call</a>)   <b>if</b> ((call) == -1) <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>
+<a name='L11'>
+<a name='L12'>
+<a name='L13'><i><font color='green'>/* Maximum file descriptor, initialized on module load. */</font></i>
+<a name='L14'><b>static</b> <b>long</b> max_fd;
+<a name='L15'>
+<a name='L16'>
+<a name='L17'><i><font color='green'>/* Given the gc module call gc.enable() and return 0 on success. */</font></i>
+<a name='L18'><b>static</b> <b>int</b> <a href='../R/5753.html' title='Multiple refered from 2 places.'>_enable_gc</a>(PyObject *gc_module)
+<a name='L19'><font color='red'>{</font>
+<a name='L20'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L21'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(gc_module, "enable", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L22'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L23'>        <b>return</b> 1;
+<a name='L24'>    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L25'>    <b>return</b> 0;
+<a name='L26'><font color='red'>}</font>
+<a name='L27'>
+<a name='L28'>
+<a name='L29'><i><font color='green'>/*</font></i>
+<a name='L30'><i><font color='green'> * This function is code executed in the child process immediately after fork</font></i>
+<a name='L31'><i><font color='green'> * to set things up and call exec().</font></i>
+<a name='L32'><i><font color='green'> *</font></i>
+<a name='L33'><i><font color='green'> * All of the code in this function must only use async-signal-safe functions,</font></i>
+<a name='L34'><i><font color='green'> * listed at `man 7 signal` or</font></i>
+<a name='L35'><i><font color='green'> * http://www.opengroup.org/onlinepubs/009695399/functions/xsh_chap02_04.html.</font></i>
+<a name='L36'><i><font color='green'> *</font></i>
+<a name='L37'><i><font color='green'> * This restriction is documented at</font></i>
+<a name='L38'><i><font color='green'> * http://www.opengroup.org/onlinepubs/009695399/functions/fork.html.</font></i>
+<a name='L39'><i><font color='green'> */</font></i>
+<a name='L40'><b>static</b> <b>void</b> <a href='../S/2589.html#L337' title='Refered from 337 in Modules/_posixsubprocess.c.'>child_exec</a>(<b>char</b> *<b>const</b> exec_array[],
+<a name='L41'>                       <b>char</b> *<b>const</b> argv[],
+<a name='L42'>                       <b>char</b> *<b>const</b> envp[],
+<a name='L43'>                       <b>const</b> <b>char</b> *cwd,
+<a name='L44'>                       <b>int</b> p2cread, <b>int</b> p2cwrite,
+<a name='L45'>                       <b>int</b> c2pread, <b>int</b> c2pwrite,
+<a name='L46'>                       <b>int</b> errread, <b>int</b> errwrite,
+<a name='L47'>                       <b>int</b> errpipe_read, <b>int</b> errpipe_write,
+<a name='L48'>                       <b>int</b> close_fds, <b>int</b> restore_signals,
+<a name='L49'>                       <b>int</b> call_setsid, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> num_fds_to_keep,
+<a name='L50'>                       PyObject *py_fds_to_keep,
+<a name='L51'>                       PyObject *preexec_fn,
+<a name='L52'>                       PyObject *preexec_fn_args_tuple)
+<a name='L53'><font color='red'>{</font>
+<a name='L54'>    <b>int</b> i, saved_errno, fd_num;
+<a name='L55'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L56'>    <b>const</b> <b>char</b>* err_msg = "";
+<a name='L57'>    <i><font color='green'>/* Buffer large enough to hold a hex integer.  We can't malloc. */</font></i>
+<a name='L58'>    <b>char</b> hex_errno[<b>sizeof</b>(saved_errno)*2+1];
+<a name='L59'>
+<a name='L60'>    <i><font color='green'>/* Close parent's pipe ends. */</font></i>
+<a name='L61'>    <b>if</b> (p2cwrite != -1) <font color='red'>{</font>
+<a name='L62'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(close(p2cwrite));
+<a name='L63'>    <font color='red'>}</font>
+<a name='L64'>    <b>if</b> (c2pread != -1) <font color='red'>{</font>
+<a name='L65'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(close(c2pread));
+<a name='L66'>    <font color='red'>}</font>
+<a name='L67'>    <b>if</b> (errread != -1) <font color='red'>{</font>
+<a name='L68'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(close(errread));
+<a name='L69'>    <font color='red'>}</font>
+<a name='L70'>    <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(close(errpipe_read));
+<a name='L71'>
+<a name='L72'>    <i><font color='green'>/* Dup fds for child.</font></i>
+<a name='L73'><i><font color='green'>       dup2() removes the CLOEXEC flag but we must do it ourselves if dup2()</font></i>
+<a name='L74'><i><font color='green'>       would be a no-op (issue #10806). */</font></i>
+<a name='L75'>    <b>if</b> (p2cread == 0) <font color='red'>{</font>
+<a name='L76'>        <b>int</b> old = fcntl(p2cread, F_GETFD);
+<a name='L77'>        <b>if</b> (old != -1)
+<a name='L78'>            fcntl(p2cread, F_SETFD, old &amp; ~FD_CLOEXEC);
+<a name='L79'>    <font color='red'>}</font> <b>else</b> <b>if</b> (p2cread != -1) <font color='red'>{</font>
+<a name='L80'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(<a href='../S/3096.html#L20' title='Defined at 20 in Python/dup2.c.'>dup2</a>(p2cread, 0));  <i><font color='green'>/* stdin */</font></i>
+<a name='L81'>    <font color='red'>}</font>
+<a name='L82'>    <b>if</b> (c2pwrite == 1) <font color='red'>{</font>
+<a name='L83'>        <b>int</b> old = fcntl(c2pwrite, F_GETFD);
+<a name='L84'>        <b>if</b> (old != -1)
+<a name='L85'>            fcntl(c2pwrite, F_SETFD, old &amp; ~FD_CLOEXEC);
+<a name='L86'>    <font color='red'>}</font> <b>else</b> <b>if</b> (c2pwrite != -1) <font color='red'>{</font>
+<a name='L87'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(<a href='../S/3096.html#L20' title='Defined at 20 in Python/dup2.c.'>dup2</a>(c2pwrite, 1));  <i><font color='green'>/* stdout */</font></i>
+<a name='L88'>    <font color='red'>}</font>
+<a name='L89'>    <b>if</b> (errwrite == 2) <font color='red'>{</font>
+<a name='L90'>        <b>int</b> old = fcntl(errwrite, F_GETFD);
+<a name='L91'>        <b>if</b> (old != -1)
+<a name='L92'>            fcntl(errwrite, F_SETFD, old &amp; ~FD_CLOEXEC);
+<a name='L93'>    <font color='red'>}</font> <b>else</b> <b>if</b> (errwrite != -1) <font color='red'>{</font>
+<a name='L94'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(<a href='../S/3096.html#L20' title='Defined at 20 in Python/dup2.c.'>dup2</a>(errwrite, 2));  <i><font color='green'>/* stderr */</font></i>
+<a name='L95'>    <font color='red'>}</font>
+<a name='L96'>
+<a name='L97'>    <i><font color='green'>/* Close pipe fds.  Make sure we don't close the same fd more than */</font></i>
+<a name='L98'>    <i><font color='green'>/* once, or standard fds. */</font></i>
+<a name='L99'>    <b>if</b> (p2cread &gt; 2) <font color='red'>{</font>
+<a name='L100'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(close(p2cread));
+<a name='L101'>    <font color='red'>}</font>
+<a name='L102'>    <b>if</b> (c2pwrite &gt; 2) <font color='red'>{</font>
+<a name='L103'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(close(c2pwrite));
+<a name='L104'>    <font color='red'>}</font>
+<a name='L105'>    <b>if</b> (errwrite != c2pwrite &amp;&amp; errwrite &gt; 2) <font color='red'>{</font>
+<a name='L106'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(close(errwrite));
+<a name='L107'>    <font color='red'>}</font>
+<a name='L108'>
+<a name='L109'>    <i><font color='green'>/* close() is intentionally not checked for errors here as we are closing */</font></i>
+<a name='L110'>    <i><font color='green'>/* a large range of fds, some of which may be invalid. */</font></i>
+<a name='L111'>    <b>if</b> (close_fds) <font color='red'>{</font>
+<a name='L112'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> keep_seq_idx;
+<a name='L113'>        <b>int</b> start_fd = 3;
+<a name='L114'>        <b>for</b> (keep_seq_idx = 0; keep_seq_idx &lt; num_fds_to_keep; ++keep_seq_idx) <font color='red'>{</font>
+<a name='L115'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* py_keep_fd = PySequence_Fast_GET_ITEM(py_fds_to_keep,
+<a name='L116'>                                                            keep_seq_idx);
+<a name='L117'>            <b>int</b> keep_fd = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(py_keep_fd);
+<a name='L118'>            <b>if</b> (keep_fd &lt; 0) <font color='red'>{</font>  <i><font color='green'>/* Negative number, overflow or not a Long. */</font></i>
+<a name='L119'>                err_msg = "bad value in fds_to_keep.";
+<a name='L120'>                errno = 0;  <i><font color='green'>/* We don't want to report an OSError. */</font></i>
+<a name='L121'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L122'>            <font color='red'>}</font>
+<a name='L123'>            <b>if</b> (keep_fd &lt; start_fd)
+<a name='L124'>                <b>continue</b>;
+<a name='L125'>            <b>for</b> (fd_num = start_fd; fd_num &lt; keep_fd; ++fd_num) <font color='red'>{</font>
+<a name='L126'>                close(fd_num);
+<a name='L127'>            <font color='red'>}</font>
+<a name='L128'>            start_fd = keep_fd + 1;
+<a name='L129'>        <font color='red'>}</font>
+<a name='L130'>        <b>if</b> (start_fd &lt;= max_fd) <font color='red'>{</font>
+<a name='L131'>            <b>for</b> (fd_num = start_fd; fd_num &lt; max_fd; ++fd_num) <font color='red'>{</font>
+<a name='L132'>                close(fd_num);
+<a name='L133'>            <font color='red'>}</font>
+<a name='L134'>        <font color='red'>}</font>
+<a name='L135'>    <font color='red'>}</font>
+<a name='L136'>
+<a name='L137'>    <b>if</b> (cwd)
+<a name='L138'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(chdir(cwd));
+<a name='L139'>
+<a name='L140'>    <b>if</b> (restore_signals)
+<a name='L141'>        <a href='../S/3138.html#L2226' title='Defined at 2226 in Python/pythonrun.c.'>_Py_RestoreSignals</a>();
+<a name='L142'>
+<a name='L143'><font color='darkred'>#ifdef</font> HAVE_SETSID
+<a name='L144'>    <b>if</b> (call_setsid)
+<a name='L145'>        <a href='../S/2589.html#L10' title='Defined at 10 in Modules/_posixsubprocess.c.'>POSIX_CALL</a>(setsid());
+<a name='L146'><font color='darkred'>#endif</font>
+<a name='L147'>
+<a name='L148'>    <b>if</b> (preexec_fn != Py_None &amp;&amp; preexec_fn_args_tuple) <font color='red'>{</font>
+<a name='L149'>        <i><font color='green'>/* This is where the user has asked us to deadlock their program. */</font></i>
+<a name='L150'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2775.html#L2141' title='Defined at 2141 in Objects/abstract.c.'>PyObject_Call</a>(preexec_fn, preexec_fn_args_tuple, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L151'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L152'>            <i><font color='green'>/* Stringifying the exception or traceback would involve</font></i>
+<a name='L153'><i><font color='green'>             * memory allocation and thus potential for deadlock.</font></i>
+<a name='L154'><i><font color='green'>             * We've already faced potential deadlock by calling back</font></i>
+<a name='L155'><i><font color='green'>             * into Python in the first place, so it probably doesn't</font></i>
+<a name='L156'><i><font color='green'>             * matter but we avoid it to minimize the possibility. */</font></i>
+<a name='L157'>            err_msg = "Exception occurred in preexec_fn.";
+<a name='L158'>            errno = 0;  <i><font color='green'>/* We don't want to report an OSError. */</font></i>
+<a name='L159'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L160'>        <font color='red'>}</font>
+<a name='L161'>        <i><font color='green'>/* Py_DECREF(result); - We're about to exec so why bother? */</font></i>
+<a name='L162'>    <font color='red'>}</font>
+<a name='L163'>
+<a name='L164'>    <i><font color='green'>/* This loop matches the Lib/os.py _execvpe()'s PATH search when */</font></i>
+<a name='L165'>    <i><font color='green'>/* given the executable_list generated by Lib/subprocess.py.     */</font></i>
+<a name='L166'>    saved_errno = 0;
+<a name='L167'>    <b>for</b> (i = 0; exec_array[i] != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; ++i) <font color='red'>{</font>
+<a name='L168'>        <b>const</b> <b>char</b> *executable = exec_array[i];
+<a name='L169'>        <b>if</b> (envp) <font color='red'>{</font>
+<a name='L170'>            execve(executable, argv, envp);
+<a name='L171'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L172'>            execv(executable, argv);
+<a name='L173'>        <font color='red'>}</font>
+<a name='L174'>        <b>if</b> (errno != ENOENT &amp;&amp; errno != ENOTDIR &amp;&amp; saved_errno == 0) <font color='red'>{</font>
+<a name='L175'>            saved_errno = errno;
+<a name='L176'>        <font color='red'>}</font>
+<a name='L177'>    <font color='red'>}</font>
+<a name='L178'>    <i><font color='green'>/* Report the first exec error, not the last. */</font></i>
+<a name='L179'>    <b>if</b> (saved_errno)
+<a name='L180'>        errno = saved_errno;
+<a name='L181'>
+<a name='L182'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L183'>    saved_errno = errno;
+<a name='L184'>    <i><font color='green'>/* Report the posix error to our parent process. */</font></i>
+<a name='L185'>    <b>if</b> (saved_errno) <font color='red'>{</font>
+<a name='L186'>        <b>char</b> *cur;
+<a name='L187'>        write(errpipe_write, "OSError:", 8);
+<a name='L188'>        cur = hex_errno + <b>sizeof</b>(hex_errno);
+<a name='L189'>        <b>while</b> (saved_errno != 0 &amp;&amp; cur &gt; hex_errno) <font color='red'>{</font>
+<a name='L190'>            *--cur = "0123456789ABCDEF"[saved_errno % 16];
+<a name='L191'>            saved_errno /= 16;
+<a name='L192'>        <font color='red'>}</font>
+<a name='L193'>        write(errpipe_write, cur, hex_errno + <b>sizeof</b>(hex_errno) - cur);
+<a name='L194'>        write(errpipe_write, ":", 1);
+<a name='L195'>        <i><font color='green'>/* We can't call strerror(saved_errno).  It is not async signal safe.</font></i>
+<a name='L196'><i><font color='green'>         * The parent process will look the error message up. */</font></i>
+<a name='L197'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L198'>        write(errpipe_write, "RuntimeError:0:", 15);
+<a name='L199'>        write(errpipe_write, err_msg, strlen(err_msg));
+<a name='L200'>    <font color='red'>}</font>
+<a name='L201'><font color='red'>}</font>
+<a name='L202'>
+<a name='L203'>
+<a name='L204'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L205'><a href='../S/2589.html#L477' title='Refered from 477 in Modules/_posixsubprocess.c.'>subprocess_fork_exec</a>(PyObject* self, PyObject *args)
+<a name='L206'><font color='red'>{</font>
+<a name='L207'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *gc_module = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L208'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *executable_list, *py_close_fds, *py_fds_to_keep;
+<a name='L209'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *env_list, *preexec_fn;
+<a name='L210'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *process_args, *converted_args = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *fast_args = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L211'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *preexec_fn_args_tuple = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L212'>    <b>int</b> p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite;
+<a name='L213'>    <b>int</b> errpipe_read, errpipe_write, close_fds, restore_signals;
+<a name='L214'>    <b>int</b> call_setsid;
+<a name='L215'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *cwd_obj, *cwd_obj2;
+<a name='L216'>    <b>const</b> <b>char</b> *cwd;
+<a name='L217'>    <a href='../D/10365.html' title='Multiple defined in 4 places.'>pid_t</a> pid;
+<a name='L218'>    <b>int</b> need_to_reenable_gc = 0;
+<a name='L219'>    <b>char</b> *<b>const</b> *exec_array, *<b>const</b> *argv = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *<b>const</b> *envp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L220'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> arg_num, num_fds_to_keep;
+<a name='L221'>
+<a name='L222'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(
+<a name='L223'>            <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "OOOOOOiiiiiiiiiiO:fork_exec",
+<a name='L224'>            &amp;process_args, &amp;executable_list, &amp;py_close_fds, &amp;py_fds_to_keep,
+<a name='L225'>            &amp;cwd_obj, &amp;env_list,
+<a name='L226'>            &amp;p2cread, &amp;p2cwrite, &amp;c2pread, &amp;c2pwrite,
+<a name='L227'>            &amp;errread, &amp;errwrite, &amp;errpipe_read, &amp;errpipe_write,
+<a name='L228'>            &amp;restore_signals, &amp;call_setsid, &amp;preexec_fn))
+<a name='L229'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L230'>
+<a name='L231'>    close_fds = <a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(py_close_fds);
+<a name='L232'>    <b>if</b> (close_fds &amp;&amp; errpipe_write &lt; 3) <font color='red'>{</font>  <i><font color='green'>/* precondition */</font></i>
+<a name='L233'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "errpipe_write must be &gt;= 3");
+<a name='L234'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L235'>    <font color='red'>}</font>
+<a name='L236'>    num_fds_to_keep = <a href='../D/3757.html' title='Multiple defined in 3 places.'>PySequence_Length</a>(py_fds_to_keep);
+<a name='L237'>    <b>if</b> (num_fds_to_keep &lt; 0) <font color='red'>{</font>
+<a name='L238'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "bad fds_to_keep");
+<a name='L239'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L240'>    <font color='red'>}</font>
+<a name='L241'>
+<a name='L242'>    <i><font color='green'>/* We need to call gc.disable() when we'll be calling preexec_fn */</font></i>
+<a name='L243'>    <b>if</b> (preexec_fn != Py_None) <font color='red'>{</font>
+<a name='L244'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L245'>        gc_module = <a href='../S/3120.html#L2325' title='Defined at 2325 in Python/import.c.'>PyImport_ImportModule</a>("gc");
+<a name='L246'>        <b>if</b> (gc_module == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L247'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L248'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(gc_module, "isenabled", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L249'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L250'>            Py_DECREF(gc_module);
+<a name='L251'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L252'>        <font color='red'>}</font>
+<a name='L253'>        need_to_reenable_gc = <a href='../S/2803.html#L1140' title='Defined at 1140 in Objects/object.c.'>PyObject_IsTrue</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L254'>        Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L255'>        <b>if</b> (need_to_reenable_gc == -1) <font color='red'>{</font>
+<a name='L256'>            Py_DECREF(gc_module);
+<a name='L257'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L258'>        <font color='red'>}</font>
+<a name='L259'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(gc_module, "disable", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L260'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L261'>            Py_DECREF(gc_module);
+<a name='L262'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L263'>        <font color='red'>}</font>
+<a name='L264'>        Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L265'>    <font color='red'>}</font>
+<a name='L266'>
+<a name='L267'>    exec_array = <a href='../S/2775.html#L2721' title='Defined at 2721 in Objects/abstract.c.'>_PySequence_BytesToCharpArray</a>(executable_list);
+<a name='L268'>    <b>if</b> (!exec_array)
+<a name='L269'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L270'>
+<a name='L271'>    <i><font color='green'>/* Convert args and env into appropriate arguments for exec() */</font></i>
+<a name='L272'>    <i><font color='green'>/* These conversions are done in the parent process to avoid allocating</font></i>
+<a name='L273'><i><font color='green'>       or freeing memory in the child process. */</font></i>
+<a name='L274'>    <b>if</b> (process_args != Py_None) <font color='red'>{</font>
+<a name='L275'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> num_args;
+<a name='L276'>        <i><font color='green'>/* Equivalent to:  */</font></i>
+<a name='L277'>        <i><font color='green'>/*  tuple(PyUnicode_FSConverter(arg) for arg in process_args)  */</font></i>
+<a name='L278'>        fast_args = <a href='../S/2775.html#L1836' title='Defined at 1836 in Objects/abstract.c.'>PySequence_Fast</a>(process_args, "argv must be a tuple");
+<a name='L279'>        num_args = PySequence_Fast_GET_SIZE(fast_args);
+<a name='L280'>        converted_args = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(num_args);
+<a name='L281'>        <b>if</b> (converted_args == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L282'>            <b>goto</b> cleanup;
+<a name='L283'>        <b>for</b> (arg_num = 0; arg_num &lt; num_args; ++arg_num) <font color='red'>{</font>
+<a name='L284'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *borrowed_arg, *converted_arg;
+<a name='L285'>            borrowed_arg = PySequence_Fast_GET_ITEM(fast_args, arg_num);
+<a name='L286'>            <b>if</b> (<a href='../D/4003.html' title='Multiple defined in 3 places.'>PyUnicode_FSConverter</a>(borrowed_arg, &amp;converted_arg) == 0)
+<a name='L287'>                <b>goto</b> cleanup;
+<a name='L288'>            PyTuple_SET_ITEM(converted_args, arg_num, converted_arg);
+<a name='L289'>        <font color='red'>}</font>
+<a name='L290'>
+<a name='L291'>        argv = <a href='../S/2775.html#L2721' title='Defined at 2721 in Objects/abstract.c.'>_PySequence_BytesToCharpArray</a>(converted_args);
+<a name='L292'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(converted_args);
+<a name='L293'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(fast_args);
+<a name='L294'>        <b>if</b> (!argv)
+<a name='L295'>            <b>goto</b> cleanup;
+<a name='L296'>    <font color='red'>}</font>
+<a name='L297'>
+<a name='L298'>    <b>if</b> (env_list != Py_None) <font color='red'>{</font>
+<a name='L299'>        envp = <a href='../S/2775.html#L2721' title='Defined at 2721 in Objects/abstract.c.'>_PySequence_BytesToCharpArray</a>(env_list);
+<a name='L300'>        <b>if</b> (!envp)
+<a name='L301'>            <b>goto</b> cleanup;
+<a name='L302'>    <font color='red'>}</font>
+<a name='L303'>
+<a name='L304'>    <b>if</b> (preexec_fn != Py_None) <font color='red'>{</font>
+<a name='L305'>        preexec_fn_args_tuple = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L306'>        <b>if</b> (!preexec_fn_args_tuple)
+<a name='L307'>            <b>goto</b> cleanup;
+<a name='L308'>        <a href='../S/3120.html#L278' title='Defined at 278 in Python/import.c.'>_PyImport_AcquireLock</a>();
+<a name='L309'>    <font color='red'>}</font>
+<a name='L310'>
+<a name='L311'>    <b>if</b> (cwd_obj != Py_None) <font color='red'>{</font>
+<a name='L312'>        <b>if</b> (<a href='../D/4003.html' title='Multiple defined in 3 places.'>PyUnicode_FSConverter</a>(cwd_obj, &amp;cwd_obj2) == 0)
+<a name='L313'>            <b>goto</b> cleanup;
+<a name='L314'>        cwd = <a href='../S/2779.html#L517' title='Defined at 517 in Objects/bytesobject.c.'>PyBytes_AsString</a>(cwd_obj2);
+<a name='L315'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L316'>        cwd = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L317'>        cwd_obj2 = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L318'>    <font color='red'>}</font>
+<a name='L319'>
+<a name='L320'>    pid = fork();
+<a name='L321'>    <b>if</b> (pid == 0) <font color='red'>{</font>
+<a name='L322'>        <i><font color='green'>/* Child process */</font></i>
+<a name='L323'>        <i><font color='green'>/*</font></i>
+<a name='L324'><i><font color='green'>         * Code from here to _exit() must only use async-signal-safe functions,</font></i>
+<a name='L325'><i><font color='green'>         * listed at `man 7 signal` or</font></i>
+<a name='L326'><i><font color='green'>         * http://www.opengroup.org/onlinepubs/009695399/functions/xsh_chap02_04.html.</font></i>
+<a name='L327'><i><font color='green'>         */</font></i>
+<a name='L328'>
+<a name='L329'>        <b>if</b> (preexec_fn != Py_None) <font color='red'>{</font>
+<a name='L330'>            <i><font color='green'>/* We'll be calling back into Python later so we need to do this.</font></i>
+<a name='L331'><i><font color='green'>             * This call may not be async-signal-safe but neither is calling</font></i>
+<a name='L332'><i><font color='green'>             * back into Python.  The user asked us to use hope as a strategy</font></i>
+<a name='L333'><i><font color='green'>             * to avoid deadlock... */</font></i>
+<a name='L334'>            <a href='../D/3577.html' title='Multiple defined in 2 places.'>PyOS_AfterFork</a>();
+<a name='L335'>        <font color='red'>}</font>
+<a name='L336'>
+<a name='L337'>        <a href='../S/2589.html#L40' title='Defined at 40 in Modules/_posixsubprocess.c.'>child_exec</a>(exec_array, argv, envp, cwd,
+<a name='L338'>                   p2cread, p2cwrite, c2pread, c2pwrite,
+<a name='L339'>                   errread, errwrite, errpipe_read, errpipe_write,
+<a name='L340'>                   close_fds, restore_signals, call_setsid,
+<a name='L341'>                   num_fds_to_keep, py_fds_to_keep,
+<a name='L342'>                   preexec_fn, preexec_fn_args_tuple);
+<a name='L343'>        _exit(255);
+<a name='L344'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;  <i><font color='green'>/* Dead code to avoid a potential compiler warning. */</font></i>
+<a name='L345'>    <font color='red'>}</font>
+<a name='L346'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(cwd_obj2);
+<a name='L347'>
+<a name='L348'>    <b>if</b> (pid == -1) <font color='red'>{</font>
+<a name='L349'>        <i><font color='green'>/* Capture the errno exception before errno can be clobbered. */</font></i>
+<a name='L350'>        <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L351'>    <font color='red'>}</font>
+<a name='L352'>    <b>if</b> (preexec_fn != Py_None &amp;&amp;
+<a name='L353'>        <a href='../S/3120.html#L303' title='Defined at 303 in Python/import.c.'>_PyImport_ReleaseLock</a>() &lt; 0 &amp;&amp; !<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()) <font color='red'>{</font>
+<a name='L354'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L355'>                        "not holding the import lock");
+<a name='L356'>    <font color='red'>}</font>
+<a name='L357'>
+<a name='L358'>    <i><font color='green'>/* Parent process */</font></i>
+<a name='L359'>    <b>if</b> (envp)
+<a name='L360'>        <a href='../S/2775.html#L2765' title='Defined at 2765 in Objects/abstract.c.'>_Py_FreeCharPArray</a>(envp);
+<a name='L361'>    <b>if</b> (argv)
+<a name='L362'>        <a href='../S/2775.html#L2765' title='Defined at 2765 in Objects/abstract.c.'>_Py_FreeCharPArray</a>(argv);
+<a name='L363'>    <a href='../S/2775.html#L2765' title='Defined at 2765 in Objects/abstract.c.'>_Py_FreeCharPArray</a>(exec_array);
+<a name='L364'>
+<a name='L365'>    <i><font color='green'>/* Reenable gc in the parent process (or if fork failed). */</font></i>
+<a name='L366'>    <b>if</b> (need_to_reenable_gc &amp;&amp; <a href='../S/2589.html#L18' title='Defined at 18 in Modules/_posixsubprocess.c.'>_enable_gc</a>(gc_module)) <font color='red'>{</font>
+<a name='L367'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(gc_module);
+<a name='L368'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L369'>    <font color='red'>}</font>
+<a name='L370'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(preexec_fn_args_tuple);
+<a name='L371'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(gc_module);
+<a name='L372'>
+<a name='L373'>    <b>if</b> (pid == -1)
+<a name='L374'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;  <i><font color='green'>/* fork() failed.  Exception set earlier. */</font></i>
+<a name='L375'>
+<a name='L376'>    <b>return</b> PyLong_FromPid(pid);
+<a name='L377'>
+<a name='L378'>cleanup:
+<a name='L379'>    <b>if</b> (envp)
+<a name='L380'>        <a href='../S/2775.html#L2765' title='Defined at 2765 in Objects/abstract.c.'>_Py_FreeCharPArray</a>(envp);
+<a name='L381'>    <b>if</b> (argv)
+<a name='L382'>        <a href='../S/2775.html#L2765' title='Defined at 2765 in Objects/abstract.c.'>_Py_FreeCharPArray</a>(argv);
+<a name='L383'>    <a href='../S/2775.html#L2765' title='Defined at 2765 in Objects/abstract.c.'>_Py_FreeCharPArray</a>(exec_array);
+<a name='L384'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(converted_args);
+<a name='L385'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(fast_args);
+<a name='L386'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(preexec_fn_args_tuple);
+<a name='L387'>
+<a name='L388'>    <i><font color='green'>/* Reenable gc if it was disabled. */</font></i>
+<a name='L389'>    <b>if</b> (need_to_reenable_gc)
+<a name='L390'>        <a href='../S/2589.html#L18' title='Defined at 18 in Modules/_posixsubprocess.c.'>_enable_gc</a>(gc_module);
+<a name='L391'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(gc_module);
+<a name='L392'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L393'><font color='red'>}</font>
+<a name='L394'>
+<a name='L395'>
+<a name='L396'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(subprocess_fork_exec_doc,
+<a name='L397'>"fork_exec(args, executable_list, close_fds, cwd, env,\n\
+<a name='L398'>          p2cread, p2cwrite, c2pread, c2pwrite,\n\
+<a name='L399'>          errread, errwrite, errpipe_read, errpipe_write,\n\
+<a name='L400'>          restore_signals, call_setsid, preexec_fn)\n\
+<a name='L401'>\n\
+<a name='L402'>Forks a child process, closes parent file descriptors as appropriate in the\n\
+<a name='L403'>child and dups the few that are needed before calling exec() in the child\n\
+<a name='L404'>process.\n\
+<a name='L405'>\n\
+<a name='L406'>The preexec_fn, if supplied, will be called immediately before exec.\n\
+<a name='L407'>WARNING: preexec_fn is NOT SAFE if your application uses threads.\n\
+<a name='L408'>         It may trigger infrequent, difficult to debug deadlocks.\n\
+<a name='L409'>\n\
+<a name='L410'>If an error occurs in the child process before the exec, it is\n\
+<a name='L411'>serialized and written to the errpipe_write fd per subprocess.py.\n\
+<a name='L412'>\n\
+<a name='L413'>Returns: the child process's PID.\n\
+<a name='L414'>\n\
+<a name='L415'>Raises: Only on an error in the parent process.\n\
+<a name='L416'>");
+<a name='L417'>
+<a name='L418'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(subprocess_cloexec_pipe_doc,
+<a name='L419'>"cloexec_pipe() -&gt; (read_end, write_end)\n\n\
+<a name='L420'>Create a pipe whose ends have the cloexec flag set.");
+<a name='L421'>
+<a name='L422'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L423'><a href='../S/2589.html#L478' title='Refered from 478 in Modules/_posixsubprocess.c.'>subprocess_cloexec_pipe</a>(PyObject *self, PyObject *noargs)
+<a name='L424'><font color='red'>{</font>
+<a name='L425'>    <b>int</b> fds[2];
+<a name='L426'>    <b>int</b> res;
+<a name='L427'><font color='darkred'>#ifdef</font> HAVE_PIPE2
+<a name='L428'>    <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L429'>    res = pipe2(fds, O_CLOEXEC);
+<a name='L430'>    <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L431'>    <b>if</b> (res != 0 &amp;&amp; errno == ENOSYS)
+<a name='L432'>    <font color='red'>{</font>
+<a name='L433'>        <b>if</b> (<a href='../S/3087.html#L756' title='Defined at 756 in Python/_warnings.c.'>PyErr_WarnEx</a>(
+<a name='L434'>                PyExc_RuntimeWarning,
+<a name='L435'>                "pipe2 set errno ENOSYS; falling "
+<a name='L436'>                "back to non-atomic pipe+fcntl.", 1) != 0) <font color='red'>{</font>
+<a name='L437'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L438'>        <font color='red'>}</font>
+<a name='L439'>        <font color='red'>{</font>
+<a name='L440'><font color='darkred'>#endif</font>
+<a name='L441'>        <i><font color='green'>/* We hold the GIL which offers some protection from other code calling</font></i>
+<a name='L442'><i><font color='green'>         * fork() before the CLOEXEC flags have been set but we can't guarantee</font></i>
+<a name='L443'><i><font color='green'>         * anything without pipe2(). */</font></i>
+<a name='L444'>        <b>long</b> oldflags;
+<a name='L445'>
+<a name='L446'>        res = pipe(fds);
+<a name='L447'>
+<a name='L448'>        <b>if</b> (res == 0) <font color='red'>{</font>
+<a name='L449'>            oldflags = fcntl(fds[0], F_GETFD, 0);
+<a name='L450'>            <b>if</b> (oldflags &lt; 0) res = oldflags;
+<a name='L451'>        <font color='red'>}</font>
+<a name='L452'>        <b>if</b> (res == 0)
+<a name='L453'>            res = fcntl(fds[0], F_SETFD, oldflags | FD_CLOEXEC);
+<a name='L454'>
+<a name='L455'>        <b>if</b> (res == 0) <font color='red'>{</font>
+<a name='L456'>            oldflags = fcntl(fds[1], F_GETFD, 0);
+<a name='L457'>            <b>if</b> (oldflags &lt; 0) res = oldflags;
+<a name='L458'>        <font color='red'>}</font>
+<a name='L459'>        <b>if</b> (res == 0)
+<a name='L460'>            res = fcntl(fds[1], F_SETFD, oldflags | FD_CLOEXEC);
+<a name='L461'><font color='darkred'>#ifdef</font> HAVE_PIPE2
+<a name='L462'>        <font color='red'>}</font>
+<a name='L463'>    <font color='red'>}</font>
+<a name='L464'><font color='darkred'>#endif</font>
+<a name='L465'>    <b>if</b> (res != 0)
+<a name='L466'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L467'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("(ii)", fds[0], fds[1]);
+<a name='L468'><font color='red'>}</font>
+<a name='L469'>
+<a name='L470'><i><font color='green'>/* module level code ********************************************************/</font></i>
+<a name='L471'>
+<a name='L472'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_doc,
+<a name='L473'>"A POSIX helper for the subprocess module.");
+<a name='L474'>
+<a name='L475'>
+<a name='L476'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> module_methods[] = <font color='red'>{</font>
+<a name='L477'>    <font color='red'>{</font>"fork_exec", <a href='../S/2589.html#L205' title='Defined at 205 in Modules/_posixsubprocess.c.'>subprocess_fork_exec</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, subprocess_fork_exec_doc<font color='red'>}</font>,
+<a name='L478'>    <font color='red'>{</font>"cloexec_pipe", <a href='../S/2589.html#L423' title='Defined at 423 in Modules/_posixsubprocess.c.'>subprocess_cloexec_pipe</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, subprocess_cloexec_pipe_doc<font color='red'>}</font>,
+<a name='L479'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>  <i><font color='green'>/* sentinel */</font></i>
+<a name='L480'><font color='red'>}</font>;
+<a name='L481'>
+<a name='L482'>
+<a name='L483'><b>static</b> <b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _posixsubprocessmodule = <font color='red'>{</font>
+<a name='L484'>        <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L485'>        "_posixsubprocess",
+<a name='L486'>        module_doc,
+<a name='L487'>        -1,  <i><font color='green'>/* No memory is needed. */</font></i>
+<a name='L488'>        module_methods,
+<a name='L489'><font color='red'>}</font>;
+<a name='L490'>
+<a name='L491'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L492'>PyInit__posixsubprocess(<b>void</b>)
+<a name='L493'><font color='red'>{</font>
+<a name='L494'><font color='darkred'>#ifdef</font> _SC_OPEN_MAX
+<a name='L495'>    max_fd = sysconf(_SC_OPEN_MAX);
+<a name='L496'>    <b>if</b> (max_fd == -1)
+<a name='L497'><font color='darkred'>#endif</font>
+<a name='L498'>        max_fd = 256;  <i><font color='green'>/* Matches Lib/subprocess.py */</font></i>
+<a name='L499'>
+<a name='L500'>    <b>return</b> PyModule_Create(&amp;_posixsubprocessmodule);
+<a name='L501'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L18'>[^]</a><a href='#L492'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

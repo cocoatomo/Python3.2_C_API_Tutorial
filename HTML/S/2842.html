@@ -1,0 +1,165 @@
+<html>
+<head>
+<title>Parser/node.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3401.html'>Parser</a>/node.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L8'>[^]</a><a href='#L129'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L8' title='Defined at 8.'>PyNode_New</a>
+<li><a href='#L23' title='Defined at 23.'>fancy_roundup</a>
+<li><a href='#L79' title='Defined at 79.'>PyNode_AddChild</a>
+<li><a href='#L120' title='Defined at 120.'>PyNode_Free</a>
+<li><a href='#L129' title='Defined at 129.'>freechildren</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Parse tree node implementation */</font></i>
+<a name='L2'>
+<a name='L3'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L4'><font color='darkred'>#include</font> "<a href='543.html'>node.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='521.html'>errcode.h</a>"
+<a name='L6'>
+<a name='L7'><a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *
+<a name='L8'><a href='../R/3204.html' title='Multiple refered from 3 places.'>PyNode_New</a>(<b>int</b> type)
+<a name='L9'><font color='red'>{</font>
+<a name='L10'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *n = (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *) PyObject_MALLOC(1 * <b>sizeof</b>(<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>));
+<a name='L11'>    <b>if</b> (n == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L12'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L13'>    n-&gt;n_type = type;
+<a name='L14'>    n-&gt;n_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L15'>    n-&gt;n_lineno = 0;
+<a name='L16'>    n-&gt;n_nchildren = 0;
+<a name='L17'>    n-&gt;n_child = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L18'>    <b>return</b> n;
+<a name='L19'><font color='red'>}</font>
+<a name='L20'>
+<a name='L21'><i><font color='green'>/* See comments at XXXROUNDUP below.  Returns -1 on overflow. */</font></i>
+<a name='L22'><b>static</b> <b>int</b>
+<a name='L23'><a href='../S/2842.html#L75' title='Refered from 75 in Parser/node.c.'>fancy_roundup</a>(<b>int</b> n)
+<a name='L24'><font color='red'>{</font>
+<a name='L25'>    <i><font color='green'>/* Round up to the closest power of 2 &gt;= n. */</font></i>
+<a name='L26'>    <b>int</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = 256;
+<a name='L27'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(n &gt; 128);
+<a name='L28'>    <b>while</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> &lt; n) <font color='red'>{</font>
+<a name='L29'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> &lt;&lt;= 1;
+<a name='L30'>        <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> &lt;= 0)
+<a name='L31'>            <b>return</b> -1;
+<a name='L32'>    <font color='red'>}</font>
+<a name='L33'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L34'><font color='red'>}</font>
+<a name='L35'>
+<a name='L36'><i><font color='green'>/* A gimmick to make massive numbers of reallocs quicker.  The result is</font></i>
+<a name='L37'><i><font color='green'> * a number &gt;= the input.  In PyNode_AddChild, it's used like so, when</font></i>
+<a name='L38'><i><font color='green'> * we're about to add child number current_size + 1:</font></i>
+<a name='L39'><i><font color='green'> *</font></i>
+<a name='L40'><i><font color='green'> *     if XXXROUNDUP(current_size) &lt; XXXROUNDUP(current_size + 1):</font></i>
+<a name='L41'><i><font color='green'> *         allocate space for XXXROUNDUP(current_size + 1) total children</font></i>
+<a name='L42'><i><font color='green'> *     else:</font></i>
+<a name='L43'><i><font color='green'> *         we already have enough space</font></i>
+<a name='L44'><i><font color='green'> *</font></i>
+<a name='L45'><i><font color='green'> * Since a node starts out empty, we must have</font></i>
+<a name='L46'><i><font color='green'> *</font></i>
+<a name='L47'><i><font color='green'> *     XXXROUNDUP(0) &lt; XXXROUNDUP(1)</font></i>
+<a name='L48'><i><font color='green'> *</font></i>
+<a name='L49'><i><font color='green'> * so that we allocate space for the first child.  One-child nodes are very</font></i>
+<a name='L50'><i><font color='green'> * common (presumably that would change if we used a more abstract form</font></i>
+<a name='L51'><i><font color='green'> * of syntax tree), so to avoid wasting memory it's desirable that</font></i>
+<a name='L52'><i><font color='green'> * XXXROUNDUP(1) == 1.  That in turn forces XXXROUNDUP(0) == 0.</font></i>
+<a name='L53'><i><font color='green'> *</font></i>
+<a name='L54'><i><font color='green'> * Else for 2 &lt;= n &lt;= 128, we round up to the closest multiple of 4.  Why 4?</font></i>
+<a name='L55'><i><font color='green'> * Rounding up to a multiple of an exact power of 2 is very efficient, and</font></i>
+<a name='L56'><i><font color='green'> * most nodes with more than one child have &lt;= 4 kids.</font></i>
+<a name='L57'><i><font color='green'> *</font></i>
+<a name='L58'><i><font color='green'> * Else we call fancy_roundup() to grow proportionately to n.  We've got an</font></i>
+<a name='L59'><i><font color='green'> * extreme case then (like test_longexp.py), and on many platforms doing</font></i>
+<a name='L60'><i><font color='green'> * anything less than proportional growth leads to exorbitant runtime</font></i>
+<a name='L61'><i><font color='green'> * (e.g., MacPython), or extreme fragmentation of user address space (e.g.,</font></i>
+<a name='L62'><i><font color='green'> * Win98).</font></i>
+<a name='L63'><i><font color='green'> *</font></i>
+<a name='L64'><i><font color='green'> * In a run of compileall across the 2.3a0 Lib directory, Andrew MacIntyre</font></i>
+<a name='L65'><i><font color='green'> * reported that, with this scheme, 89% of PyObject_REALLOC calls in</font></i>
+<a name='L66'><i><font color='green'> * PyNode_AddChild passed 1 for the size, and 9% passed 4.  So this usually</font></i>
+<a name='L67'><i><font color='green'> * wastes very little memory, but is very effective at sidestepping</font></i>
+<a name='L68'><i><font color='green'> * platform-realloc disasters on vulnerable platforms.</font></i>
+<a name='L69'><i><font color='green'> *</font></i>
+<a name='L70'><i><font color='green'> * Note that this would be straightforward if a node stored its current</font></i>
+<a name='L71'><i><font color='green'> * capacity.  The code is tricky to avoid that.</font></i>
+<a name='L72'><i><font color='green'> */</font></i>
+<a name='L73'><font color='darkred'>#define</font> <a href='../R/5201.html' title='Multiple refered from 2 places.'>XXXROUNDUP</a>(n) ((n) &lt;= 1 ? (n) :                 \
+<a name='L74'>               (n) &lt;= 128 ? (((n) + 3) &amp; ~3) :          \
+<a name='L75'>               <a href='../S/2842.html#L23' title='Defined at 23 in Parser/node.c.'>fancy_roundup</a>(n))
+<a name='L76'>
+<a name='L77'>
+<a name='L78'><b>int</b>
+<a name='L79'><a href='../R/3201.html' title='Multiple refered from 3 places.'>PyNode_AddChild</a>(<b>register</b> node *n1, <b>int</b> type, <b>char</b> *str, <b>int</b> lineno, <b>int</b> col_offset)
+<a name='L80'><font color='red'>{</font>
+<a name='L81'>    <b>const</b> <b>int</b> nch = n1-&gt;n_nchildren;
+<a name='L82'>    <b>int</b> current_capacity;
+<a name='L83'>    <b>int</b> required_capacity;
+<a name='L84'>    <a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *n;
+<a name='L85'>
+<a name='L86'>    <b>if</b> (nch == <a href='../S/565.html#L753' title='Defined at 753 in Include/pyport.h.'>INT_MAX</a> || nch &lt; 0)
+<a name='L87'>        <b>return</b> <a href='../S/521.html#L25' title='Defined at 25 in Include/errcode.h.'>E_OVERFLOW</a>;
+<a name='L88'>
+<a name='L89'>    current_capacity = <a href='../S/2842.html#L73' title='Defined at 73 in Parser/node.c.'>XXXROUNDUP</a>(nch);
+<a name='L90'>    required_capacity = <a href='../S/2842.html#L73' title='Defined at 73 in Parser/node.c.'>XXXROUNDUP</a>(nch + 1);
+<a name='L91'>    <b>if</b> (current_capacity &lt; 0 || required_capacity &lt; 0)
+<a name='L92'>        <b>return</b> <a href='../S/521.html#L25' title='Defined at 25 in Include/errcode.h.'>E_OVERFLOW</a>;
+<a name='L93'>    <b>if</b> (current_capacity &lt; required_capacity) <font color='red'>{</font>
+<a name='L94'>        <b>if</b> (required_capacity &gt; <a href='../D/2622.html' title='Multiple defined in 2 places.'>PY_SIZE_MAX</a> / <b>sizeof</b>(<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>)) <font color='red'>{</font>
+<a name='L95'>            <b>return</b> <a href='../S/521.html#L21' title='Defined at 21 in Include/errcode.h.'>E_NOMEM</a>;
+<a name='L96'>        <font color='red'>}</font>
+<a name='L97'>        n = n1-&gt;n_child;
+<a name='L98'>        n = (<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a> *) PyObject_REALLOC(n,
+<a name='L99'>                                      required_capacity * <b>sizeof</b>(<a href='../S/543.html#L17' title='Defined at 17 in Include/node.h.'>node</a>));
+<a name='L100'>        <b>if</b> (n == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L101'>            <b>return</b> <a href='../S/521.html#L21' title='Defined at 21 in Include/errcode.h.'>E_NOMEM</a>;
+<a name='L102'>        n1-&gt;n_child = n;
+<a name='L103'>    <font color='red'>}</font>
+<a name='L104'>
+<a name='L105'>    n = &amp;n1-&gt;n_child[n1-&gt;n_nchildren++];
+<a name='L106'>    n-&gt;n_type = type;
+<a name='L107'>    n-&gt;n_str = str;
+<a name='L108'>    n-&gt;n_lineno = lineno;
+<a name='L109'>    n-&gt;n_col_offset = col_offset;
+<a name='L110'>    n-&gt;n_nchildren = 0;
+<a name='L111'>    n-&gt;n_child = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L112'>    <b>return</b> 0;
+<a name='L113'><font color='red'>}</font>
+<a name='L114'>
+<a name='L115'><i><font color='green'>/* Forward */</font></i>
+<a name='L116'><b>static</b> <b>void</b> <a href='../S/2842.html#L129' title='Defined at 129 in Parser/node.c.'>freechildren</a>(node *);
+<a name='L117'>
+<a name='L118'>
+<a name='L119'><b>void</b>
+<a name='L120'><a href='../R/3202.html' title='Multiple refered from 10 places.'>PyNode_Free</a>(node *n)
+<a name='L121'><font color='red'>{</font>
+<a name='L122'>    <b>if</b> (n != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L123'>        <a href='../S/2842.html#L129' title='Defined at 129 in Parser/node.c.'>freechildren</a>(n);
+<a name='L124'>        PyObject_FREE(n);
+<a name='L125'>    <font color='red'>}</font>
+<a name='L126'><font color='red'>}</font>
+<a name='L127'>
+<a name='L128'><b>static</b> <b>void</b>
+<a name='L129'><a href='../R/7932.html' title='Multiple refered from 3 places.'>freechildren</a>(node *n)
+<a name='L130'><font color='red'>{</font>
+<a name='L131'>    <b>int</b> i;
+<a name='L132'>    <b>for</b> (i = NCH(n); --i &gt;= 0; )
+<a name='L133'>        <a href='../S/2842.html#L129' title='Defined at 129 in Parser/node.c.'>freechildren</a>(CHILD(n, i));
+<a name='L134'>    <b>if</b> (n-&gt;n_child != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L135'>        PyObject_FREE(n-&gt;n_child);
+<a name='L136'>    <b>if</b> (STR(n) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L137'>        PyObject_FREE(STR(n));
+<a name='L138'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L8'>[^]</a><a href='#L129'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

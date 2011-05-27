@@ -1,0 +1,1938 @@
+<html>
+<head>
+<title>Objects/obmalloc.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/obmalloc.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L524'>[^]</a><a href='#L1882'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L524' title='Defined at 524.'>new_arena</a>
+<li><a href='#L727' title='Defined at 727.'>Py_ADDRESS_IN_RANGE</a>
+<li><a href='#L950' title='Defined at 950.'>PyObject_Free</a>
+<li><a href='#L1176' title='Defined at 1176.'>PyObject_Realloc</a>
+<li><a href='#L1262' title='Defined at 1262.'>PyObject_Malloc</a>
+<li><a href='#L1268' title='Defined at 1268.'>PyObject_Realloc</a>
+<li><a href='#L1274' title='Defined at 1274.'>PyObject_Free</a>
+<li><a href='#L1307' title='Defined at 1307.'>bumpserialno</a>
+<li><a href='#L1316' title='Defined at 1316.'>read_size_t</a>
+<li><a href='#L1331' title='Defined at 1331.'>write_size_t</a>
+<li><a href='#L1348' title='Defined at 1348.'>pool_is_in_list</a>
+<li><a href='#L1393' title='Defined at 1393.'>_PyMem_DebugMalloc</a>
+<li><a href='#L1398' title='Defined at 1398.'>_PyMem_DebugRealloc</a>
+<li><a href='#L1403' title='Defined at 1403.'>_PyMem_DebugFree</a>
+<li><a href='#L1410' title='Defined at 1410.'>_PyObject_DebugMalloc</a>
+<li><a href='#L1415' title='Defined at 1415.'>_PyObject_DebugRealloc</a>
+<li><a href='#L1420' title='Defined at 1420.'>_PyObject_DebugFree</a>
+<li><a href='#L1425' title='Defined at 1425.'>_PyObject_DebugCheckAddress</a>
+<li><a href='#L1433' title='Defined at 1433.'>_PyObject_DebugMallocApi</a>
+<li><a href='#L1471' title='Defined at 1471.'>_PyObject_DebugFreeApi</a>
+<li><a href='#L1487' title='Defined at 1487.'>_PyObject_DebugReallocApi</a>
+<li><a href='#L1543' title='Defined at 1543.'>_PyObject_DebugCheckAddressApi</a>
+<li><a href='#L1596' title='Defined at 1596.'>_PyObject_DebugDumpAddress</a>
+<li><a href='#L1698' title='Defined at 1698.'>printone</a>
+<li><a href='#L1738' title='Defined at 1738.'>_PyObject_DebugMallocStats</a>
+<li><a href='#L1882' title='Defined at 1882.'>Py_ADDRESS_IN_RANGE</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L2'>
+<a name='L3'><font color='darkred'>#ifdef</font> <a href='../D/5536.html' title='Multiple defined in 2 places.'>WITH_PYMALLOC</a>
+<a name='L4'>
+<a name='L5'><font color='darkred'>#ifdef</font> WITH_VALGRIND
+<a name='L6'><font color='darkred'>#include</font> &lt;valgrind/valgrind.h&gt;
+<a name='L7'>
+<a name='L8'><i><font color='green'>/* If we're using GCC, use __builtin_expect() to reduce overhead of</font></i>
+<a name='L9'><i><font color='green'>   the valgrind checks */</font></i>
+<a name='L10'><font color='darkred'>#if</font> <b>defined</b>(__GNUC__) &amp;&amp; (__GNUC__ &gt; 2) &amp;&amp; <b>defined</b>(__OPTIMIZE__)
+<a name='L11'><font color='darkred'>#  define</font> <a href='../R/4736.html' title='Multiple refered from 4 places.'>UNLIKELY</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) __builtin_expect((value), 0)
+<a name='L12'><font color='darkred'>#else</font>
+<a name='L13'><font color='darkred'>#  define</font> <a href='../R/4736.html' title='Multiple refered from 4 places.'>UNLIKELY</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) (value)
+<a name='L14'><font color='darkred'>#endif</font>
+<a name='L15'>
+<a name='L16'><i><font color='green'>/* -1 indicates that we haven't checked that we're running on valgrind yet. */</font></i>
+<a name='L17'><b>static</b> <b>int</b> running_on_valgrind = -1;
+<a name='L18'><font color='darkred'>#endif</font>
+<a name='L19'>
+<a name='L20'><i><font color='green'>/* An object allocator for Python.</font></i>
+<a name='L21'><i><font color='green'></font></i>
+<a name='L22'><i><font color='green'>   Here is an introduction to the layers of the Python memory architecture,</font></i>
+<a name='L23'><i><font color='green'>   showing where the object allocator is actually used (layer +2), It is</font></i>
+<a name='L24'><i><font color='green'>   called for every object allocation and deallocation (PyObject_New/Del),</font></i>
+<a name='L25'><i><font color='green'>   unless the object-specific allocators implement a proprietary allocation</font></i>
+<a name='L26'><i><font color='green'>   scheme (ex.: ints use a simple free list). This is also the place where</font></i>
+<a name='L27'><i><font color='green'>   the cyclic garbage collector operates selectively on container objects.</font></i>
+<a name='L28'><i><font color='green'></font></i>
+<a name='L29'><i><font color='green'></font></i>
+<a name='L30'><i><font color='green'>    Object-specific allocators</font></i>
+<a name='L31'><i><font color='green'>    _____   ______   ______       ________</font></i>
+<a name='L32'><i><font color='green'>   [ int ] [ dict ] [ list ] ... [ string ]       Python core         |</font></i>
+<a name='L33'><i><font color='green'>+3 | &lt;----- Object-specific memory -----&gt; | &lt;-- Non-object memory --&gt; |</font></i>
+<a name='L34'><i><font color='green'>    _______________________________       |                           |</font></i>
+<a name='L35'><i><font color='green'>   [   Python's object allocator   ]      |                           |</font></i>
+<a name='L36'><i><font color='green'>+2 | ####### Object memory ####### | &lt;------ Internal buffers ------&gt; |</font></i>
+<a name='L37'><i><font color='green'>    ______________________________________________________________    |</font></i>
+<a name='L38'><i><font color='green'>   [          Python's raw memory allocator (PyMem_ API)          ]   |</font></i>
+<a name='L39'><i><font color='green'>+1 | &lt;----- Python memory (under PyMem manager's control) ------&gt; |   |</font></i>
+<a name='L40'><i><font color='green'>    __________________________________________________________________</font></i>
+<a name='L41'><i><font color='green'>   [    Underlying general-purpose allocator (ex: C library malloc)   ]</font></i>
+<a name='L42'><i><font color='green'> 0 | &lt;------ Virtual memory allocated for the python process -------&gt; |</font></i>
+<a name='L43'><i><font color='green'></font></i>
+<a name='L44'><i><font color='green'>   =========================================================================</font></i>
+<a name='L45'><i><font color='green'>    _______________________________________________________________________</font></i>
+<a name='L46'><i><font color='green'>   [                OS-specific Virtual Memory Manager (VMM)               ]</font></i>
+<a name='L47'><i><font color='green'>-1 | &lt;--- Kernel dynamic storage allocation &amp; management (page-based) ---&gt; |</font></i>
+<a name='L48'><i><font color='green'>    __________________________________   __________________________________</font></i>
+<a name='L49'><i><font color='green'>   [                                  ] [                                  ]</font></i>
+<a name='L50'><i><font color='green'>-2 | &lt;-- Physical memory: ROM/RAM --&gt; | | &lt;-- Secondary storage (swap) --&gt; |</font></i>
+<a name='L51'><i><font color='green'></font></i>
+<a name='L52'><i><font color='green'>*/</font></i>
+<a name='L53'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L54'>
+<a name='L55'><i><font color='green'>/* A fast, special-purpose memory allocator for small blocks, to be used</font></i>
+<a name='L56'><i><font color='green'>   on top of a general-purpose malloc -- heavily based on previous art. */</font></i>
+<a name='L57'>
+<a name='L58'><i><font color='green'>/* Vladimir Marangozov -- August 2000 */</font></i>
+<a name='L59'>
+<a name='L60'><i><font color='green'>/*</font></i>
+<a name='L61'><i><font color='green'> * "Memory management is where the rubber meets the road -- if we do the wrong</font></i>
+<a name='L62'><i><font color='green'> * thing at any level, the results will not be good. And if we don't make the</font></i>
+<a name='L63'><i><font color='green'> * levels work well together, we are in serious trouble." (1)</font></i>
+<a name='L64'><i><font color='green'> *</font></i>
+<a name='L65'><i><font color='green'> * (1) Paul R. Wilson, Mark S. Johnstone, Michael Neely, and David Boles,</font></i>
+<a name='L66'><i><font color='green'> *    "Dynamic Storage Allocation: A Survey and Critical Review",</font></i>
+<a name='L67'><i><font color='green'> *    in Proc. 1995 Int'l. Workshop on Memory Management, September 1995.</font></i>
+<a name='L68'><i><font color='green'> */</font></i>
+<a name='L69'>
+<a name='L70'><i><font color='green'>/* #undef WITH_MEMORY_LIMITS */</font></i>         <i><font color='green'>/* disable mem limit checks  */</font></i>
+<a name='L71'>
+<a name='L72'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L73'>
+<a name='L74'><i><font color='green'>/*</font></i>
+<a name='L75'><i><font color='green'> * Allocation strategy abstract:</font></i>
+<a name='L76'><i><font color='green'> *</font></i>
+<a name='L77'><i><font color='green'> * For small requests, the allocator sub-allocates &lt;Big&gt; blocks of memory.</font></i>
+<a name='L78'><i><font color='green'> * Requests greater than 256 bytes are routed to the system's allocator.</font></i>
+<a name='L79'><i><font color='green'> *</font></i>
+<a name='L80'><i><font color='green'> * Small requests are grouped in size classes spaced 8 bytes apart, due</font></i>
+<a name='L81'><i><font color='green'> * to the required valid alignment of the returned address. Requests of</font></i>
+<a name='L82'><i><font color='green'> * a particular size are serviced from memory pools of 4K (one VMM page).</font></i>
+<a name='L83'><i><font color='green'> * Pools are fragmented on demand and contain free lists of blocks of one</font></i>
+<a name='L84'><i><font color='green'> * particular size class. In other words, there is a fixed-size allocator</font></i>
+<a name='L85'><i><font color='green'> * for each size class. Free pools are shared by the different allocators</font></i>
+<a name='L86'><i><font color='green'> * thus minimizing the space reserved for a particular size class.</font></i>
+<a name='L87'><i><font color='green'> *</font></i>
+<a name='L88'><i><font color='green'> * This allocation strategy is a variant of what is known as "simple</font></i>
+<a name='L89'><i><font color='green'> * segregated storage based on array of free lists". The main drawback of</font></i>
+<a name='L90'><i><font color='green'> * simple segregated storage is that we might end up with lot of reserved</font></i>
+<a name='L91'><i><font color='green'> * memory for the different free lists, which degenerate in time. To avoid</font></i>
+<a name='L92'><i><font color='green'> * this, we partition each free list in pools and we share dynamically the</font></i>
+<a name='L93'><i><font color='green'> * reserved space between all free lists. This technique is quite efficient</font></i>
+<a name='L94'><i><font color='green'> * for memory intensive programs which allocate mainly small-sized blocks.</font></i>
+<a name='L95'><i><font color='green'> *</font></i>
+<a name='L96'><i><font color='green'> * For small requests we have the following table:</font></i>
+<a name='L97'><i><font color='green'> *</font></i>
+<a name='L98'><i><font color='green'> * Request in bytes     Size of allocated block      Size class idx</font></i>
+<a name='L99'><i><font color='green'> * ----------------------------------------------------------------</font></i>
+<a name='L100'><i><font color='green'> *        1-8                     8                       0</font></i>
+<a name='L101'><i><font color='green'> *        9-16                   16                       1</font></i>
+<a name='L102'><i><font color='green'> *       17-24                   24                       2</font></i>
+<a name='L103'><i><font color='green'> *       25-32                   32                       3</font></i>
+<a name='L104'><i><font color='green'> *       33-40                   40                       4</font></i>
+<a name='L105'><i><font color='green'> *       41-48                   48                       5</font></i>
+<a name='L106'><i><font color='green'> *       49-56                   56                       6</font></i>
+<a name='L107'><i><font color='green'> *       57-64                   64                       7</font></i>
+<a name='L108'><i><font color='green'> *       65-72                   72                       8</font></i>
+<a name='L109'><i><font color='green'> *        ...                   ...                     ...</font></i>
+<a name='L110'><i><font color='green'> *      241-248                 248                      30</font></i>
+<a name='L111'><i><font color='green'> *      249-256                 256                      31</font></i>
+<a name='L112'><i><font color='green'> *</font></i>
+<a name='L113'><i><font color='green'> *      0, 257 and up: routed to the underlying allocator.</font></i>
+<a name='L114'><i><font color='green'> */</font></i>
+<a name='L115'>
+<a name='L116'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L117'>
+<a name='L118'><i><font color='green'>/*</font></i>
+<a name='L119'><i><font color='green'> * -- Main tunable settings section --</font></i>
+<a name='L120'><i><font color='green'> */</font></i>
+<a name='L121'>
+<a name='L122'><i><font color='green'>/*</font></i>
+<a name='L123'><i><font color='green'> * Alignment of addresses returned to the user. 8-bytes alignment works</font></i>
+<a name='L124'><i><font color='green'> * on most current architectures (with 32-bit or 64-bit address busses).</font></i>
+<a name='L125'><i><font color='green'> * The alignment value is also used for grouping small requests in size</font></i>
+<a name='L126'><i><font color='green'> * classes spaced ALIGNMENT bytes apart.</font></i>
+<a name='L127'><i><font color='green'> *</font></i>
+<a name='L128'><i><font color='green'> * You shouldn't change this unless you know what you are doing.</font></i>
+<a name='L129'><i><font color='green'> */</font></i>
+<a name='L130'><font color='darkred'>#define</font> <a href='../R/47.html' title='Multiple refered from 3 places.'>ALIGNMENT</a>               8               <i><font color='green'>/* must be 2^N */</font></i>
+<a name='L131'><font color='darkred'>#define</font> <a href='../R/49.html' title='Multiple refered from 6 places.'>ALIGNMENT_SHIFT</a>         3
+<a name='L132'><font color='darkred'>#define</font> <a href='../R/48.html' title='Multiple refered from 2 places.'>ALIGNMENT_MASK</a>          (<a href='../D/57.html' title='Multiple defined in 2 places.'>ALIGNMENT</a> - 1)
+<a name='L133'>
+<a name='L134'><i><font color='green'>/* Return the number of bytes in size class I, as a uint. */</font></i>
+<a name='L135'><font color='darkred'>#define</font> <a href='../R/1511.html' title='Multiple refered from 5 places.'>INDEX2SIZE</a>(<a href='../S/2690.html#L104' title='Defined at 104 in Modules/md5module.c.'>I</a>) (((<a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a>)(I) + 1) &lt;&lt; <a href='../S/2804.html#L131' title='Defined at 131 in Objects/obmalloc.c.'>ALIGNMENT_SHIFT</a>)
+<a name='L136'>
+<a name='L137'><i><font color='green'>/*</font></i>
+<a name='L138'><i><font color='green'> * Max size threshold below which malloc requests are considered to be</font></i>
+<a name='L139'><i><font color='green'> * small enough in order to use preallocated memory pools. You can tune</font></i>
+<a name='L140'><i><font color='green'> * this value according to your application behaviour and memory needs.</font></i>
+<a name='L141'><i><font color='green'> *</font></i>
+<a name='L142'><i><font color='green'> * The following invariants must hold:</font></i>
+<a name='L143'><i><font color='green'> *      1) ALIGNMENT &lt;= SMALL_REQUEST_THRESHOLD &lt;= 256</font></i>
+<a name='L144'><i><font color='green'> *      2) SMALL_REQUEST_THRESHOLD is evenly divisible by ALIGNMENT</font></i>
+<a name='L145'><i><font color='green'> *</font></i>
+<a name='L146'><i><font color='green'> * Although not required, for better performance and space efficiency,</font></i>
+<a name='L147'><i><font color='green'> * it is recommended that SMALL_REQUEST_THRESHOLD is set to a power of 2.</font></i>
+<a name='L148'><i><font color='green'> */</font></i>
+<a name='L149'><font color='darkred'>#define</font> <a href='../R/4198.html' title='Multiple refered from 7 places.'>SMALL_REQUEST_THRESHOLD</a> 256
+<a name='L150'><font color='darkred'>#define</font> <a href='../R/2058.html' title='Multiple refered from 8 places.'>NB_SMALL_SIZE_CLASSES</a>   (<a href='../S/2804.html#L149' title='Defined at 149 in Objects/obmalloc.c.'>SMALL_REQUEST_THRESHOLD</a> / <a href='../D/57.html' title='Multiple defined in 2 places.'>ALIGNMENT</a>)
+<a name='L151'>
+<a name='L152'><i><font color='green'>/*</font></i>
+<a name='L153'><i><font color='green'> * The system's VMM page size can be obtained on most unices with a</font></i>
+<a name='L154'><i><font color='green'> * getpagesize() call or deduced from various header files. To make</font></i>
+<a name='L155'><i><font color='green'> * things simpler, we assume that it is 4K, which is OK for most systems.</font></i>
+<a name='L156'><i><font color='green'> * It is probably better if this is the native page size, but it doesn't</font></i>
+<a name='L157'><i><font color='green'> * have to be.  In theory, if SYSTEM_PAGE_SIZE is larger than the native page</font></i>
+<a name='L158'><i><font color='green'> * size, then `POOL_ADDR(p)-&gt;arenaindex' could rarely cause a segmentation</font></i>
+<a name='L159'><i><font color='green'> * violation fault.  4K is apparently OK for all the platforms that python</font></i>
+<a name='L160'><i><font color='green'> * currently targets.</font></i>
+<a name='L161'><i><font color='green'> */</font></i>
+<a name='L162'><font color='darkred'>#define</font> <a href='../R/4452.html' title='Multiple refered from 2 places.'>SYSTEM_PAGE_SIZE</a>        (4 * 1024)
+<a name='L163'><font color='darkred'>#define</font> <a href='../S/2804.html#L198' title='Refered from 198 in Objects/obmalloc.c.'>SYSTEM_PAGE_SIZE_MASK</a>   (<a href='../S/2804.html#L162' title='Defined at 162 in Objects/obmalloc.c.'>SYSTEM_PAGE_SIZE</a> - 1)
+<a name='L164'>
+<a name='L165'><i><font color='green'>/*</font></i>
+<a name='L166'><i><font color='green'> * Maximum amount of memory managed by the allocator for small requests.</font></i>
+<a name='L167'><i><font color='green'> */</font></i>
+<a name='L168'><font color='darkred'>#ifdef</font> WITH_MEMORY_LIMITS
+<a name='L169'><font color='darkred'>#ifndef</font> <a href='../S/2804.html#L170' title='Defined at 170 in Objects/obmalloc.c.'>SMALL_MEMORY_LIMIT</a>
+<a name='L170'><font color='darkred'>#define</font> <a href='../R/4197.html' title='Multiple refered from 2 places.'>SMALL_MEMORY_LIMIT</a>      (64 * 1024 * 1024)      <i><font color='green'>/* 64 MB -- more? */</font></i>
+<a name='L171'><font color='darkred'>#endif</font>
+<a name='L172'><font color='darkred'>#endif</font>
+<a name='L173'>
+<a name='L174'><i><font color='green'>/*</font></i>
+<a name='L175'><i><font color='green'> * The allocator sub-allocates &lt;Big&gt; blocks of memory (called arenas) aligned</font></i>
+<a name='L176'><i><font color='green'> * on a page boundary. This is a reserved virtual address space for the</font></i>
+<a name='L177'><i><font color='green'> * current process (obtained through a malloc call). In no way this means</font></i>
+<a name='L178'><i><font color='green'> * that the memory arenas will be used entirely. A malloc(&lt;Big&gt;) is usually</font></i>
+<a name='L179'><i><font color='green'> * an address range reservation for &lt;Big&gt; bytes, unless all pages within this</font></i>
+<a name='L180'><i><font color='green'> * space are referenced subsequently. So malloc'ing big blocks and not using</font></i>
+<a name='L181'><i><font color='green'> * them does not mean "wasting memory". It's an addressable range wastage...</font></i>
+<a name='L182'><i><font color='green'> *</font></i>
+<a name='L183'><i><font color='green'> * Therefore, allocating arenas with malloc is not optimal, because there is</font></i>
+<a name='L184'><i><font color='green'> * some address space wastage, but this is the most portable way to request</font></i>
+<a name='L185'><i><font color='green'> * memory from the system across various platforms.</font></i>
+<a name='L186'><i><font color='green'> */</font></i>
+<a name='L187'><font color='darkred'>#define</font> <a href='../R/64.html' title='Multiple refered from 10 places.'>ARENA_SIZE</a>              (256 &lt;&lt; 10)     <i><font color='green'>/* 256KB */</font></i>
+<a name='L188'>
+<a name='L189'><font color='darkred'>#ifdef</font> WITH_MEMORY_LIMITS
+<a name='L190'><font color='darkred'>#define</font> <a href='../S/2804.html#L819' title='Refered from 819 in Objects/obmalloc.c.'>MAX_ARENAS</a>              (<a href='../S/2804.html#L170' title='Defined at 170 in Objects/obmalloc.c.'>SMALL_MEMORY_LIMIT</a> / <a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a>)
+<a name='L191'><font color='darkred'>#endif</font>
+<a name='L192'>
+<a name='L193'><i><font color='green'>/*</font></i>
+<a name='L194'><i><font color='green'> * Size of the pools used for small blocks. Should be a power of 2,</font></i>
+<a name='L195'><i><font color='green'> * between 1K and SYSTEM_PAGE_SIZE, that is: 1k, 2k, 4k.</font></i>
+<a name='L196'><i><font color='green'> */</font></i>
+<a name='L197'><font color='darkred'>#define</font> <a href='../R/2270.html' title='Multiple refered from 14 places.'>POOL_SIZE</a>               <a href='../S/2804.html#L162' title='Defined at 162 in Objects/obmalloc.c.'>SYSTEM_PAGE_SIZE</a>        <i><font color='green'>/* must be 2^N */</font></i>
+<a name='L198'><font color='darkred'>#define</font> <a href='../R/2271.html' title='Multiple refered from 4 places.'>POOL_SIZE_MASK</a>          <a href='../S/2804.html#L163' title='Defined at 163 in Objects/obmalloc.c.'>SYSTEM_PAGE_SIZE_MASK</a>
+<a name='L199'>
+<a name='L200'><i><font color='green'>/*</font></i>
+<a name='L201'><i><font color='green'> * -- End of tunable settings section --</font></i>
+<a name='L202'><i><font color='green'> */</font></i>
+<a name='L203'>
+<a name='L204'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L205'>
+<a name='L206'><i><font color='green'>/*</font></i>
+<a name='L207'><i><font color='green'> * Locking</font></i>
+<a name='L208'><i><font color='green'> *</font></i>
+<a name='L209'><i><font color='green'> * To reduce lock contention, it would probably be better to refine the</font></i>
+<a name='L210'><i><font color='green'> * crude function locking with per size class locking. I'm not positive</font></i>
+<a name='L211'><i><font color='green'> * however, whether it's worth switching to such locking policy because</font></i>
+<a name='L212'><i><font color='green'> * of the performance penalty it might introduce.</font></i>
+<a name='L213'><i><font color='green'> *</font></i>
+<a name='L214'><i><font color='green'> * The following macros describe the simplest (should also be the fastest)</font></i>
+<a name='L215'><i><font color='green'> * lock object on a particular platform and the init/fini/lock/unlock</font></i>
+<a name='L216'><i><font color='green'> * operations on it. The locks defined here are not expected to be recursive</font></i>
+<a name='L217'><i><font color='green'> * because it is assumed that they will always be called in the order:</font></i>
+<a name='L218'><i><font color='green'> * INIT, [LOCK, UNLOCK]*, FINI.</font></i>
+<a name='L219'><i><font color='green'> */</font></i>
+<a name='L220'>
+<a name='L221'><i><font color='green'>/*</font></i>
+<a name='L222'><i><font color='green'> * Python's threads are serialized, so object malloc locking is disabled.</font></i>
+<a name='L223'><i><font color='green'> */</font></i>
+<a name='L224'><font color='darkred'>#define</font> <a href='../S/2804.html#L322' title='Refered from 322 in Objects/obmalloc.c.'>SIMPLELOCK_DECL</a>(lock)   <i><font color='green'>/* simple lock declaration              */</font></i>
+<a name='L225'><font color='darkred'>#define</font> <a href='../S/2804.html#L325' title='Refered from 325 in Objects/obmalloc.c.'>SIMPLELOCK_INIT</a>(lock)   <i><font color='green'>/* allocate (if needed) and initialize  */</font></i>
+<a name='L226'><font color='darkred'>#define</font> <a href='../S/2804.html#L326' title='Refered from 326 in Objects/obmalloc.c.'>SIMPLELOCK_FINI</a>(lock)   <i><font color='green'>/* free/destroy an existing lock        */</font></i>
+<a name='L227'><font color='darkred'>#define</font> <a href='../S/2804.html#L323' title='Refered from 323 in Objects/obmalloc.c.'>SIMPLELOCK_LOCK</a>(lock)   <i><font color='green'>/* acquire released lock */</font></i>
+<a name='L228'><font color='darkred'>#define</font> <a href='../S/2804.html#L324' title='Refered from 324 in Objects/obmalloc.c.'>SIMPLELOCK_UNLOCK</a>(lock) <i><font color='green'>/* release acquired lock */</font></i>
+<a name='L229'>
+<a name='L230'><i><font color='green'>/*</font></i>
+<a name='L231'><i><font color='green'> * Basic types</font></i>
+<a name='L232'><i><font color='green'> * I don't care if these are defined in &lt;sys/types.h&gt; or elsewhere. Axiom.</font></i>
+<a name='L233'><i><font color='green'> */</font></i>
+<a name='L234'><font color='darkred'>#undef</font>  <a href='../R/11044.html' title='Multiple refered from 19 places.'>uchar</a>
+<a name='L235'><font color='darkred'>#define</font> <a href='../R/11044.html' title='Multiple refered from 19 places.'>uchar</a>   <b>unsigned</b> <b>char</b>   <i><font color='green'>/* assuming == 8 bits  */</font></i>
+<a name='L236'>
+<a name='L237'><font color='darkred'>#undef</font>  <a href='../R/11049.html' title='Multiple refered from 40 places.'>uint</a>
+<a name='L238'><font color='darkred'>#define</font> <a href='../R/11049.html' title='Multiple refered from 40 places.'>uint</a>    <b>unsigned</b> <b>int</b>    <i><font color='green'>/* assuming &gt;= 16 bits */</font></i>
+<a name='L239'>
+<a name='L240'><font color='darkred'>#undef</font>  ulong
+<a name='L241'><font color='darkred'>#define</font> ulong   <b>unsigned</b> <b>long</b>   <i><font color='green'>/* assuming &gt;= 32 bits */</font></i>
+<a name='L242'>
+<a name='L243'><font color='darkred'>#undef</font> <a href='../R/11195.html' title='Multiple refered from 11 places.'>uptr</a>
+<a name='L244'><font color='darkred'>#define</font> <a href='../R/11195.html' title='Multiple refered from 11 places.'>uptr</a>    <a href='../D/4394.html' title='Multiple defined in 4 places.'>Py_uintptr_t</a>
+<a name='L245'>
+<a name='L246'><i><font color='green'>/* When you say memory, my mind reasons in terms of (pointers to) blocks */</font></i>
+<a name='L247'><b>typedef</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> <a href='../R/6245.html' title='Multiple refered from 103 places.'>block</a>;
+<a name='L248'>
+<a name='L249'><i><font color='green'>/* Pool for small blocks. */</font></i>
+<a name='L250'><b>struct</b> <a href='../R/9560.html' title='Multiple refered from 5 places.'>pool_header</a> <font color='red'>{</font>
+<a name='L251'>    <b>union</b> <font color='red'>{</font> <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *_padding;
+<a name='L252'>            <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> count; <font color='red'>}</font> ref;          <i><font color='green'>/* number of allocated blocks    */</font></i>
+<a name='L253'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>;                   <i><font color='green'>/* pool's free list head         */</font></i>
+<a name='L254'>    <b>struct</b> <a href='../S/2804.html#L250' title='Defined at 250 in Objects/obmalloc.c.'>pool_header</a> *nextpool;       <i><font color='green'>/* next pool of this size class  */</font></i>
+<a name='L255'>    <b>struct</b> <a href='../S/2804.html#L250' title='Defined at 250 in Objects/obmalloc.c.'>pool_header</a> *prevpool;       <i><font color='green'>/* previous pool       ""        */</font></i>
+<a name='L256'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> arenaindex;                    <i><font color='green'>/* index into arenas of base adr */</font></i>
+<a name='L257'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> szidx;                         <i><font color='green'>/* block size class index        */</font></i>
+<a name='L258'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> nextoffset;                    <i><font color='green'>/* bytes to virgin block         */</font></i>
+<a name='L259'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> maxnextoffset;                 <i><font color='green'>/* largest valid nextoffset      */</font></i>
+<a name='L260'><font color='red'>}</font>;
+<a name='L261'>
+<a name='L262'><b>typedef</b> <b>struct</b> <a href='../S/2804.html#L250' title='Defined at 250 in Objects/obmalloc.c.'>pool_header</a> *<a href='../R/9562.html' title='Multiple refered from 9 places.'>poolp</a>;
+<a name='L263'>
+<a name='L264'><i><font color='green'>/* Record keeping for arenas. */</font></i>
+<a name='L265'><b>struct</b> <a href='../R/5976.html' title='Multiple refered from 9 places.'>arena_object</a> <font color='red'>{</font>
+<a name='L266'>    <i><font color='green'>/* The address of the arena, as returned by malloc.  Note that 0</font></i>
+<a name='L267'><i><font color='green'>     * will never be returned by a successful malloc, and is used</font></i>
+<a name='L268'><i><font color='green'>     * here to mark an arena_object that doesn't correspond to an</font></i>
+<a name='L269'><i><font color='green'>     * allocated arena.</font></i>
+<a name='L270'><i><font color='green'>     */</font></i>
+<a name='L271'>    <a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a> address;
+<a name='L272'>
+<a name='L273'>    <i><font color='green'>/* Pool-aligned pointer to the next pool to be carved off. */</font></i>
+<a name='L274'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>* pool_address;
+<a name='L275'>
+<a name='L276'>    <i><font color='green'>/* The number of available pools in the arena:  free pools + never-</font></i>
+<a name='L277'><i><font color='green'>     * allocated pools.</font></i>
+<a name='L278'><i><font color='green'>     */</font></i>
+<a name='L279'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> nfreepools;
+<a name='L280'>
+<a name='L281'>    <i><font color='green'>/* The total number of pools in the arena, whether or not available. */</font></i>
+<a name='L282'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> ntotalpools;
+<a name='L283'>
+<a name='L284'>    <i><font color='green'>/* Singly-linked list of available pools. */</font></i>
+<a name='L285'>    <b>struct</b> <a href='../S/2804.html#L250' title='Defined at 250 in Objects/obmalloc.c.'>pool_header</a>* freepools;
+<a name='L286'>
+<a name='L287'>    <i><font color='green'>/* Whenever this arena_object is not associated with an allocated</font></i>
+<a name='L288'><i><font color='green'>     * arena, the nextarena member is used to link all unassociated</font></i>
+<a name='L289'><i><font color='green'>     * arena_objects in the singly-linked `unused_arena_objects` list.</font></i>
+<a name='L290'><i><font color='green'>     * The prevarena member is unused in this case.</font></i>
+<a name='L291'><i><font color='green'>     *</font></i>
+<a name='L292'><i><font color='green'>     * When this arena_object is associated with an allocated arena</font></i>
+<a name='L293'><i><font color='green'>     * with at least one available pool, both members are used in the</font></i>
+<a name='L294'><i><font color='green'>     * doubly-linked `usable_arenas` list, which is maintained in</font></i>
+<a name='L295'><i><font color='green'>     * increasing order of `nfreepools` values.</font></i>
+<a name='L296'><i><font color='green'>     *</font></i>
+<a name='L297'><i><font color='green'>     * Else this arena_object is associated with an allocated arena</font></i>
+<a name='L298'><i><font color='green'>     * all of whose pools are in use.  `nextarena` and `prevarena`</font></i>
+<a name='L299'><i><font color='green'>     * are both meaningless in this case.</font></i>
+<a name='L300'><i><font color='green'>     */</font></i>
+<a name='L301'>    <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>* nextarena;
+<a name='L302'>    <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>* prevarena;
+<a name='L303'><font color='red'>}</font>;
+<a name='L304'>
+<a name='L305'><font color='darkred'>#undef</font>  <a href='../R/3981.html' title='Multiple refered from 3 places.'>ROUNDUP</a>
+<a name='L306'><font color='darkred'>#define</font> <a href='../R/3981.html' title='Multiple refered from 3 places.'>ROUNDUP</a>(x)              (((x) + <a href='../D/58.html' title='Multiple defined in 2 places.'>ALIGNMENT_MASK</a>) &amp; ~<a href='../D/58.html' title='Multiple defined in 2 places.'>ALIGNMENT_MASK</a>)
+<a name='L307'><font color='darkred'>#define</font> <a href='../R/2269.html' title='Multiple refered from 5 places.'>POOL_OVERHEAD</a>           <a href='../D/4513.html' title='Multiple defined in 3 places.'>ROUNDUP</a>(<b>sizeof</b>(<b>struct</b> <a href='../S/2804.html#L250' title='Defined at 250 in Objects/obmalloc.c.'>pool_header</a>))
+<a name='L308'>
+<a name='L309'><font color='darkred'>#define</font> <a href='../S/2804.html#L914' title='Refered from 914 in Objects/obmalloc.c.'>DUMMY_SIZE_IDX</a>          0xffff  <i><font color='green'>/* size class of newly cached pools */</font></i>
+<a name='L310'>
+<a name='L311'><i><font color='green'>/* Round pointer P down to the closest pool-aligned address &lt;= P, as a poolp */</font></i>
+<a name='L312'><font color='darkred'>#define</font> <a href='../R/2268.html' title='Multiple refered from 2 places.'>POOL_ADDR</a>(<a href='../D/2444.html' title='Multiple defined in 2 places.'>P</a>) ((<a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a>)((<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)(P) &amp; ~(<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)<a href='../S/2804.html#L198' title='Defined at 198 in Objects/obmalloc.c.'>POOL_SIZE_MASK</a>))
+<a name='L313'>
+<a name='L314'><i><font color='green'>/* Return total number of blocks in pool of size index I, as a uint. */</font></i>
+<a name='L315'><font color='darkred'>#define</font> <a href='../S/2804.html#L1813' title='Refered from 1813 in Objects/obmalloc.c.'>NUMBLOCKS</a>(<a href='../S/2690.html#L104' title='Defined at 104 in Modules/md5module.c.'>I</a>) ((<a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a>)(<a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a> - <a href='../S/2804.html#L307' title='Defined at 307 in Objects/obmalloc.c.'>POOL_OVERHEAD</a>) / <a href='../S/2804.html#L135' title='Defined at 135 in Objects/obmalloc.c.'>INDEX2SIZE</a>(I))
+<a name='L316'>
+<a name='L317'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L318'>
+<a name='L319'><i><font color='green'>/*</font></i>
+<a name='L320'><i><font color='green'> * This malloc lock</font></i>
+<a name='L321'><i><font color='green'> */</font></i>
+<a name='L322'><a href='../S/2804.html#L224' title='Defined at 224 in Objects/obmalloc.c.'>SIMPLELOCK_DECL</a>(_malloc_lock)
+<a name='L323'><font color='darkred'>#define</font> LOCK()          <a href='../S/2804.html#L227' title='Defined at 227 in Objects/obmalloc.c.'>SIMPLELOCK_LOCK</a>(_malloc_lock)
+<a name='L324'><font color='darkred'>#define</font> UNLOCK()        <a href='../S/2804.html#L228' title='Defined at 228 in Objects/obmalloc.c.'>SIMPLELOCK_UNLOCK</a>(_malloc_lock)
+<a name='L325'><font color='darkred'>#define</font> LOCK_INIT()     <a href='../S/2804.html#L225' title='Defined at 225 in Objects/obmalloc.c.'>SIMPLELOCK_INIT</a>(_malloc_lock)
+<a name='L326'><font color='darkred'>#define</font> LOCK_FINI()     <a href='../S/2804.html#L226' title='Defined at 226 in Objects/obmalloc.c.'>SIMPLELOCK_FINI</a>(_malloc_lock)
+<a name='L327'>
+<a name='L328'><i><font color='green'>/*</font></i>
+<a name='L329'><i><font color='green'> * Pool table -- headed, circular, doubly-linked lists of partially used pools.</font></i>
+<a name='L330'><i><font color='green'></font></i>
+<a name='L331'><i><font color='green'>This is involved.  For an index i, usedpools[i+i] is the header for a list of</font></i>
+<a name='L332'><i><font color='green'>all partially used pools holding small blocks with "size class idx" i. So</font></i>
+<a name='L333'><i><font color='green'>usedpools[0] corresponds to blocks of size 8, usedpools[2] to blocks of size</font></i>
+<a name='L334'><i><font color='green'>16, and so on:  index 2*i &lt;-&gt; blocks of size (i+1)&lt;&lt;ALIGNMENT_SHIFT.</font></i>
+<a name='L335'><i><font color='green'></font></i>
+<a name='L336'><i><font color='green'>Pools are carved off an arena's highwater mark (an arena_object's pool_address</font></i>
+<a name='L337'><i><font color='green'>member) as needed.  Once carved off, a pool is in one of three states forever</font></i>
+<a name='L338'><i><font color='green'>after:</font></i>
+<a name='L339'><i><font color='green'></font></i>
+<a name='L340'><i><font color='green'>used == partially used, neither empty nor full</font></i>
+<a name='L341'><i><font color='green'>    At least one block in the pool is currently allocated, and at least one</font></i>
+<a name='L342'><i><font color='green'>    block in the pool is not currently allocated (note this implies a pool</font></i>
+<a name='L343'><i><font color='green'>    has room for at least two blocks).</font></i>
+<a name='L344'><i><font color='green'>    This is a pool's initial state, as a pool is created only when malloc</font></i>
+<a name='L345'><i><font color='green'>    needs space.</font></i>
+<a name='L346'><i><font color='green'>    The pool holds blocks of a fixed size, and is in the circular list headed</font></i>
+<a name='L347'><i><font color='green'>    at usedpools[i] (see above).  It's linked to the other used pools of the</font></i>
+<a name='L348'><i><font color='green'>    same size class via the pool_header's nextpool and prevpool members.</font></i>
+<a name='L349'><i><font color='green'>    If all but one block is currently allocated, a malloc can cause a</font></i>
+<a name='L350'><i><font color='green'>    transition to the full state.  If all but one block is not currently</font></i>
+<a name='L351'><i><font color='green'>    allocated, a free can cause a transition to the empty state.</font></i>
+<a name='L352'><i><font color='green'></font></i>
+<a name='L353'><i><font color='green'>full == all the pool's blocks are currently allocated</font></i>
+<a name='L354'><i><font color='green'>    On transition to full, a pool is unlinked from its usedpools[] list.</font></i>
+<a name='L355'><i><font color='green'>    It's not linked to from anything then anymore, and its nextpool and</font></i>
+<a name='L356'><i><font color='green'>    prevpool members are meaningless until it transitions back to used.</font></i>
+<a name='L357'><i><font color='green'>    A free of a block in a full pool puts the pool back in the used state.</font></i>
+<a name='L358'><i><font color='green'>    Then it's linked in at the front of the appropriate usedpools[] list, so</font></i>
+<a name='L359'><i><font color='green'>    that the next allocation for its size class will reuse the freed block.</font></i>
+<a name='L360'><i><font color='green'></font></i>
+<a name='L361'><i><font color='green'>empty == all the pool's blocks are currently available for allocation</font></i>
+<a name='L362'><i><font color='green'>    On transition to empty, a pool is unlinked from its usedpools[] list,</font></i>
+<a name='L363'><i><font color='green'>    and linked to the front of its arena_object's singly-linked freepools list,</font></i>
+<a name='L364'><i><font color='green'>    via its nextpool member.  The prevpool member has no meaning in this case.</font></i>
+<a name='L365'><i><font color='green'>    Empty pools have no inherent size class:  the next time a malloc finds</font></i>
+<a name='L366'><i><font color='green'>    an empty list in usedpools[], it takes the first pool off of freepools.</font></i>
+<a name='L367'><i><font color='green'>    If the size class needed happens to be the same as the size class the pool</font></i>
+<a name='L368'><i><font color='green'>    last had, some pool initialization can be skipped.</font></i>
+<a name='L369'><i><font color='green'></font></i>
+<a name='L370'><i><font color='green'></font></i>
+<a name='L371'><i><font color='green'>Block Management</font></i>
+<a name='L372'><i><font color='green'></font></i>
+<a name='L373'><i><font color='green'>Blocks within pools are again carved out as needed.  pool-&gt;freeblock points to</font></i>
+<a name='L374'><i><font color='green'>the start of a singly-linked list of free blocks within the pool.  When a</font></i>
+<a name='L375'><i><font color='green'>block is freed, it's inserted at the front of its pool's freeblock list.  Note</font></i>
+<a name='L376'><i><font color='green'>that the available blocks in a pool are *not* linked all together when a pool</font></i>
+<a name='L377'><i><font color='green'>is initialized.  Instead only "the first two" (lowest addresses) blocks are</font></i>
+<a name='L378'><i><font color='green'>set up, returning the first such block, and setting pool-&gt;freeblock to a</font></i>
+<a name='L379'><i><font color='green'>one-block list holding the second such block.  This is consistent with that</font></i>
+<a name='L380'><i><font color='green'>pymalloc strives at all levels (arena, pool, and block) never to touch a piece</font></i>
+<a name='L381'><i><font color='green'>of memory until it's actually needed.</font></i>
+<a name='L382'><i><font color='green'></font></i>
+<a name='L383'><i><font color='green'>So long as a pool is in the used state, we're certain there *is* a block</font></i>
+<a name='L384'><i><font color='green'>available for allocating, and pool-&gt;freeblock is not NULL.  If pool-&gt;freeblock</font></i>
+<a name='L385'><i><font color='green'>points to the end of the free list before we've carved the entire pool into</font></i>
+<a name='L386'><i><font color='green'>blocks, that means we simply haven't yet gotten to one of the higher-address</font></i>
+<a name='L387'><i><font color='green'>blocks.  The offset from the pool_header to the start of "the next" virgin</font></i>
+<a name='L388'><i><font color='green'>block is stored in the pool_header nextoffset member, and the largest value</font></i>
+<a name='L389'><i><font color='green'>of nextoffset that makes sense is stored in the maxnextoffset member when a</font></i>
+<a name='L390'><i><font color='green'>pool is initialized.  All the blocks in a pool have been passed out at least</font></i>
+<a name='L391'><i><font color='green'>once when and only when nextoffset &gt; maxnextoffset.</font></i>
+<a name='L392'><i><font color='green'></font></i>
+<a name='L393'><i><font color='green'></font></i>
+<a name='L394'><i><font color='green'>Major obscurity:  While the usedpools vector is declared to have poolp</font></i>
+<a name='L395'><i><font color='green'>entries, it doesn't really.  It really contains two pointers per (conceptual)</font></i>
+<a name='L396'><i><font color='green'>poolp entry, the nextpool and prevpool members of a pool_header.  The</font></i>
+<a name='L397'><i><font color='green'>excruciating initialization code below fools C so that</font></i>
+<a name='L398'><i><font color='green'></font></i>
+<a name='L399'><i><font color='green'>    usedpool[i+i]</font></i>
+<a name='L400'><i><font color='green'></font></i>
+<a name='L401'><i><font color='green'>"acts like" a genuine poolp, but only so long as you only reference its</font></i>
+<a name='L402'><i><font color='green'>nextpool and prevpool members.  The "- 2*sizeof(block *)" gibberish is</font></i>
+<a name='L403'><i><font color='green'>compensating for that a pool_header's nextpool and prevpool members</font></i>
+<a name='L404'><i><font color='green'>immediately follow a pool_header's first two members:</font></i>
+<a name='L405'><i><font color='green'></font></i>
+<a name='L406'><i><font color='green'>    union { block *_padding;</font></i>
+<a name='L407'><i><font color='green'>            uint count; } ref;</font></i>
+<a name='L408'><i><font color='green'>    block *freeblock;</font></i>
+<a name='L409'><i><font color='green'></font></i>
+<a name='L410'><i><font color='green'>each of which consume sizeof(block *) bytes.  So what usedpools[i+i] really</font></i>
+<a name='L411'><i><font color='green'>contains is a fudged-up pointer p such that *if* C believes it's a poolp</font></i>
+<a name='L412'><i><font color='green'>pointer, then p-&gt;nextpool and p-&gt;prevpool are both p (meaning that the headed</font></i>
+<a name='L413'><i><font color='green'>circular list is empty).</font></i>
+<a name='L414'><i><font color='green'></font></i>
+<a name='L415'><i><font color='green'>It's unclear why the usedpools setup is so convoluted.  It could be to</font></i>
+<a name='L416'><i><font color='green'>minimize the amount of cache required to hold this heavily-referenced table</font></i>
+<a name='L417'><i><font color='green'>(which only *needs* the two interpool pointer members of a pool_header). OTOH,</font></i>
+<a name='L418'><i><font color='green'>referencing code has to remember to "double the index" and doing so isn't</font></i>
+<a name='L419'><i><font color='green'>free, usedpools[0] isn't a strictly legal pointer, and we're crucially relying</font></i>
+<a name='L420'><i><font color='green'>on that C doesn't insert any padding anywhere in a pool_header at or before</font></i>
+<a name='L421'><i><font color='green'>the prevpool member.</font></i>
+<a name='L422'><i><font color='green'>**************************************************************************** */</font></i>
+<a name='L423'>
+<a name='L424'><font color='darkred'>#define</font> PTA(x)  ((poolp )((uchar *)&amp;(usedpools[2*(x)]) - 2*<b>sizeof</b>(block *)))
+<a name='L425'><font color='darkred'>#define</font> PT(x)   PTA(x), PTA(x)
+<a name='L426'>
+<a name='L427'><b>static</b> poolp usedpools[2 * ((<a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> + 7) / 8) * 8] = <font color='red'>{</font>
+<a name='L428'>    PT(0), PT(1), PT(2), PT(3), PT(4), PT(5), PT(6), PT(7)
+<a name='L429'><font color='darkred'>#if</font> <a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> &gt; 8
+<a name='L430'>    , PT(8), PT(9), PT(10), PT(11), PT(12), PT(13), PT(14), PT(15)
+<a name='L431'><font color='darkred'>#if</font> <a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> &gt; 16
+<a name='L432'>    , PT(16), PT(17), PT(18), PT(19), PT(20), PT(21), PT(22), PT(23)
+<a name='L433'><font color='darkred'>#if</font> <a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> &gt; 24
+<a name='L434'>    , PT(24), PT(25), PT(26), PT(27), PT(28), PT(29), PT(30), PT(31)
+<a name='L435'><font color='darkred'>#if</font> <a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> &gt; 32
+<a name='L436'>    , PT(32), PT(33), PT(34), PT(35), PT(36), PT(37), PT(38), PT(39)
+<a name='L437'><font color='darkred'>#if</font> <a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> &gt; 40
+<a name='L438'>    , PT(40), PT(41), PT(42), PT(43), PT(44), PT(45), PT(46), PT(47)
+<a name='L439'><font color='darkred'>#if</font> <a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> &gt; 48
+<a name='L440'>    , PT(48), PT(49), PT(50), PT(51), PT(52), PT(53), PT(54), PT(55)
+<a name='L441'><font color='darkred'>#if</font> <a href='../S/2804.html#L150' title='Defined at 150 in Objects/obmalloc.c.'>NB_SMALL_SIZE_CLASSES</a> &gt; 56
+<a name='L442'>    , PT(56), PT(57), PT(58), PT(59), PT(60), PT(61), PT(62), PT(63)
+<a name='L443'><font color='darkred'>#endif</font> <i><font color='green'>/* NB_SMALL_SIZE_CLASSES &gt; 56 */</font></i>
+<a name='L444'><font color='darkred'>#endif</font> <i><font color='green'>/* NB_SMALL_SIZE_CLASSES &gt; 48 */</font></i>
+<a name='L445'><font color='darkred'>#endif</font> <i><font color='green'>/* NB_SMALL_SIZE_CLASSES &gt; 40 */</font></i>
+<a name='L446'><font color='darkred'>#endif</font> <i><font color='green'>/* NB_SMALL_SIZE_CLASSES &gt; 32 */</font></i>
+<a name='L447'><font color='darkred'>#endif</font> <i><font color='green'>/* NB_SMALL_SIZE_CLASSES &gt; 24 */</font></i>
+<a name='L448'><font color='darkred'>#endif</font> <i><font color='green'>/* NB_SMALL_SIZE_CLASSES &gt; 16 */</font></i>
+<a name='L449'><font color='darkred'>#endif</font> <i><font color='green'>/* NB_SMALL_SIZE_CLASSES &gt;  8 */</font></i>
+<a name='L450'><font color='red'>}</font>;
+<a name='L451'>
+<a name='L452'><i><font color='green'>/*==========================================================================</font></i>
+<a name='L453'><i><font color='green'>Arena management.</font></i>
+<a name='L454'><i><font color='green'></font></i>
+<a name='L455'><i><font color='green'>`arenas` is a vector of arena_objects.  It contains maxarenas entries, some of</font></i>
+<a name='L456'><i><font color='green'>which may not be currently used (== they're arena_objects that aren't</font></i>
+<a name='L457'><i><font color='green'>currently associated with an allocated arena).  Note that arenas proper are</font></i>
+<a name='L458'><i><font color='green'>separately malloc'ed.</font></i>
+<a name='L459'><i><font color='green'></font></i>
+<a name='L460'><i><font color='green'>Prior to Python 2.5, arenas were never free()'ed.  Starting with Python 2.5,</font></i>
+<a name='L461'><i><font color='green'>we do try to free() arenas, and use some mild heuristic strategies to increase</font></i>
+<a name='L462'><i><font color='green'>the likelihood that arenas eventually can be freed.</font></i>
+<a name='L463'><i><font color='green'></font></i>
+<a name='L464'><i><font color='green'>unused_arena_objects</font></i>
+<a name='L465'><i><font color='green'></font></i>
+<a name='L466'><i><font color='green'>    This is a singly-linked list of the arena_objects that are currently not</font></i>
+<a name='L467'><i><font color='green'>    being used (no arena is associated with them).  Objects are taken off the</font></i>
+<a name='L468'><i><font color='green'>    head of the list in new_arena(), and are pushed on the head of the list in</font></i>
+<a name='L469'><i><font color='green'>    PyObject_Free() when the arena is empty.  Key invariant:  an arena_object</font></i>
+<a name='L470'><i><font color='green'>    is on this list if and only if its .address member is 0.</font></i>
+<a name='L471'><i><font color='green'></font></i>
+<a name='L472'><i><font color='green'>usable_arenas</font></i>
+<a name='L473'><i><font color='green'></font></i>
+<a name='L474'><i><font color='green'>    This is a doubly-linked list of the arena_objects associated with arenas</font></i>
+<a name='L475'><i><font color='green'>    that have pools available.  These pools are either waiting to be reused,</font></i>
+<a name='L476'><i><font color='green'>    or have not been used before.  The list is sorted to have the most-</font></i>
+<a name='L477'><i><font color='green'>    allocated arenas first (ascending order based on the nfreepools member).</font></i>
+<a name='L478'><i><font color='green'>    This means that the next allocation will come from a heavily used arena,</font></i>
+<a name='L479'><i><font color='green'>    which gives the nearly empty arenas a chance to be returned to the system.</font></i>
+<a name='L480'><i><font color='green'>    In my unscientific tests this dramatically improved the number of arenas</font></i>
+<a name='L481'><i><font color='green'>    that could be freed.</font></i>
+<a name='L482'><i><font color='green'></font></i>
+<a name='L483'><i><font color='green'>Note that an arena_object associated with an arena all of whose pools are</font></i>
+<a name='L484'><i><font color='green'>currently in use isn't on either list.</font></i>
+<a name='L485'><i><font color='green'>*/</font></i>
+<a name='L486'>
+<a name='L487'><i><font color='green'>/* Array of objects used to track chunks of memory (arenas). */</font></i>
+<a name='L488'><b>static</b> <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>* arenas = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L489'><i><font color='green'>/* Number of slots currently allocated in the `arenas` vector. */</font></i>
+<a name='L490'><b>static</b> <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> maxarenas = 0;
+<a name='L491'>
+<a name='L492'><i><font color='green'>/* The head of the singly-linked, NULL-terminated list of available</font></i>
+<a name='L493'><i><font color='green'> * arena_objects.</font></i>
+<a name='L494'><i><font color='green'> */</font></i>
+<a name='L495'><b>static</b> <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>* unused_arena_objects = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L496'>
+<a name='L497'><i><font color='green'>/* The head of the doubly-linked, NULL-terminated at each end, list of</font></i>
+<a name='L498'><i><font color='green'> * arena_objects associated with arenas that have pools available.</font></i>
+<a name='L499'><i><font color='green'> */</font></i>
+<a name='L500'><b>static</b> <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>* usable_arenas = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L501'>
+<a name='L502'><i><font color='green'>/* How many arena_objects do we initially allocate?</font></i>
+<a name='L503'><i><font color='green'> * 16 = can allocate 16 arenas = 16 * ARENA_SIZE = 4MB before growing the</font></i>
+<a name='L504'><i><font color='green'> * `arenas` vector.</font></i>
+<a name='L505'><i><font color='green'> */</font></i>
+<a name='L506'><font color='darkred'>#define</font> <a href='../S/2804.html#L541' title='Refered from 541 in Objects/obmalloc.c.'>INITIAL_ARENA_OBJECTS</a> 16
+<a name='L507'>
+<a name='L508'><i><font color='green'>/* Number of arenas allocated that haven't been free()'d. */</font></i>
+<a name='L509'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> narenas_currently_allocated = 0;
+<a name='L510'>
+<a name='L511'><font color='darkred'>#ifdef</font> <a href='../S/570.html#L58' title='Defined at 58 in Include/Python.h.'>PYMALLOC_DEBUG</a>
+<a name='L512'><i><font color='green'>/* Total number of times malloc() called to allocate an arena. */</font></i>
+<a name='L513'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> ntimes_arena_allocated = 0;
+<a name='L514'><i><font color='green'>/* High water mark (max value ever seen) for narenas_currently_allocated. */</font></i>
+<a name='L515'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> narenas_highwater = 0;
+<a name='L516'><font color='darkred'>#endif</font>
+<a name='L517'>
+<a name='L518'><i><font color='green'>/* Allocate a new arena.  If we run out of memory, return NULL.  Else</font></i>
+<a name='L519'><i><font color='green'> * allocate a new arena, and return the address of an arena_object</font></i>
+<a name='L520'><i><font color='green'> * describing the new arena.  It's expected that the caller will set</font></i>
+<a name='L521'><i><font color='green'> * `usable_arenas` to the return value.</font></i>
+<a name='L522'><i><font color='green'> */</font></i>
+<a name='L523'><b>static</b> <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>*
+<a name='L524'><a href='../S/2804.html#L824' title='Refered from 824 in Objects/obmalloc.c.'>new_arena</a>(<b>void</b>)
+<a name='L525'><font color='red'>{</font>
+<a name='L526'>    <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>* arenaobj;
+<a name='L527'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> excess;        <i><font color='green'>/* number of bytes above pool alignment */</font></i>
+<a name='L528'>
+<a name='L529'><font color='darkred'>#ifdef</font> <a href='../S/570.html#L58' title='Defined at 58 in Include/Python.h.'>PYMALLOC_DEBUG</a>
+<a name='L530'>    <b>if</b> (Py_GETENV("PYTHONMALLOCSTATS"))
+<a name='L531'>        <a href='../S/2804.html#L1738' title='Defined at 1738 in Objects/obmalloc.c.'>_PyObject_DebugMallocStats</a>();
+<a name='L532'><font color='darkred'>#endif</font>
+<a name='L533'>    <b>if</b> (unused_arena_objects == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L534'>        <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> i;
+<a name='L535'>        <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> numarenas;
+<a name='L536'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes;
+<a name='L537'>
+<a name='L538'>        <i><font color='green'>/* Double the number of arena objects on each allocation.</font></i>
+<a name='L539'><i><font color='green'>         * Note that it's possible for `numarenas` to overflow.</font></i>
+<a name='L540'><i><font color='green'>         */</font></i>
+<a name='L541'>        numarenas = maxarenas ? maxarenas &lt;&lt; 1 : <a href='../S/2804.html#L506' title='Defined at 506 in Objects/obmalloc.c.'>INITIAL_ARENA_OBJECTS</a>;
+<a name='L542'>        <b>if</b> (numarenas &lt;= maxarenas)
+<a name='L543'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;                <i><font color='green'>/* overflow */</font></i>
+<a name='L544'><font color='darkred'>#if</font> <a href='../D/4740.html' title='Multiple defined in 6 places.'>SIZEOF_SIZE_T</a> &lt;= <a href='../D/4733.html' title='Multiple defined in 3 places.'>SIZEOF_INT</a>
+<a name='L545'>        <b>if</b> (numarenas &gt; <a href='../D/2622.html' title='Multiple defined in 2 places.'>PY_SIZE_MAX</a> / <b>sizeof</b>(*arenas))
+<a name='L546'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;                <i><font color='green'>/* overflow */</font></i>
+<a name='L547'><font color='darkred'>#endif</font>
+<a name='L548'>        nbytes = numarenas * <b>sizeof</b>(*arenas);
+<a name='L549'>        arenaobj = (<b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a> *)realloc(arenas, nbytes);
+<a name='L550'>        <b>if</b> (arenaobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L551'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L552'>        arenas = arenaobj;
+<a name='L553'>
+<a name='L554'>        <i><font color='green'>/* We might need to fix pointers that were copied.  However,</font></i>
+<a name='L555'><i><font color='green'>         * new_arena only gets called when all the pages in the</font></i>
+<a name='L556'><i><font color='green'>         * previous arenas are full.  Thus, there are *no* pointers</font></i>
+<a name='L557'><i><font color='green'>         * into the old array. Thus, we don't have to worry about</font></i>
+<a name='L558'><i><font color='green'>         * invalid pointers.  Just to be sure, some asserts:</font></i>
+<a name='L559'><i><font color='green'>         */</font></i>
+<a name='L560'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L561'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(unused_arena_objects == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L562'>
+<a name='L563'>        <i><font color='green'>/* Put the new arenas on the unused_arena_objects list. */</font></i>
+<a name='L564'>        <b>for</b> (i = maxarenas; i &lt; numarenas; ++i) <font color='red'>{</font>
+<a name='L565'>            arenas[i].address = 0;              <i><font color='green'>/* mark as unassociated */</font></i>
+<a name='L566'>            arenas[i].nextarena = i &lt; numarenas - 1 ?
+<a name='L567'>                                   &amp;arenas[i+1] : <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L568'>        <font color='red'>}</font>
+<a name='L569'>
+<a name='L570'>        <i><font color='green'>/* Update globals. */</font></i>
+<a name='L571'>        unused_arena_objects = &amp;arenas[maxarenas];
+<a name='L572'>        maxarenas = numarenas;
+<a name='L573'>    <font color='red'>}</font>
+<a name='L574'>
+<a name='L575'>    <i><font color='green'>/* Take the next available arena object off the head of the list. */</font></i>
+<a name='L576'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(unused_arena_objects != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L577'>    arenaobj = unused_arena_objects;
+<a name='L578'>    unused_arena_objects = arenaobj-&gt;nextarena;
+<a name='L579'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(arenaobj-&gt;address == 0);
+<a name='L580'>    arenaobj-&gt;address = (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)malloc(<a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a>);
+<a name='L581'>    <b>if</b> (arenaobj-&gt;address == 0) <font color='red'>{</font>
+<a name='L582'>        <i><font color='green'>/* The allocation failed: return NULL after putting the</font></i>
+<a name='L583'><i><font color='green'>         * arenaobj back.</font></i>
+<a name='L584'><i><font color='green'>         */</font></i>
+<a name='L585'>        arenaobj-&gt;nextarena = unused_arena_objects;
+<a name='L586'>        unused_arena_objects = arenaobj;
+<a name='L587'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L588'>    <font color='red'>}</font>
+<a name='L589'>
+<a name='L590'>    ++narenas_currently_allocated;
+<a name='L591'><font color='darkred'>#ifdef</font> <a href='../S/570.html#L58' title='Defined at 58 in Include/Python.h.'>PYMALLOC_DEBUG</a>
+<a name='L592'>    ++ntimes_arena_allocated;
+<a name='L593'>    <b>if</b> (narenas_currently_allocated &gt; narenas_highwater)
+<a name='L594'>        narenas_highwater = narenas_currently_allocated;
+<a name='L595'><font color='darkred'>#endif</font>
+<a name='L596'>    arenaobj-&gt;freepools = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L597'>    <i><font color='green'>/* pool_address &lt;- first pool-aligned address in the arena</font></i>
+<a name='L598'><i><font color='green'>       nfreepools &lt;- number of whole pools that fit after alignment */</font></i>
+<a name='L599'>    arenaobj-&gt;pool_address = (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>*)arenaobj-&gt;address;
+<a name='L600'>    arenaobj-&gt;nfreepools = <a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a> / <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>;
+<a name='L601'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a> * arenaobj-&gt;nfreepools == <a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a>);
+<a name='L602'>    excess = (<a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a>)(arenaobj-&gt;address &amp; <a href='../S/2804.html#L198' title='Defined at 198 in Objects/obmalloc.c.'>POOL_SIZE_MASK</a>);
+<a name='L603'>    <b>if</b> (excess != 0) <font color='red'>{</font>
+<a name='L604'>        --arenaobj-&gt;nfreepools;
+<a name='L605'>        arenaobj-&gt;pool_address += <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a> - excess;
+<a name='L606'>    <font color='red'>}</font>
+<a name='L607'>    arenaobj-&gt;ntotalpools = arenaobj-&gt;nfreepools;
+<a name='L608'>
+<a name='L609'>    <b>return</b> arenaobj;
+<a name='L610'><font color='red'>}</font>
+<a name='L611'>
+<a name='L612'><i><font color='green'>/*</font></i>
+<a name='L613'><i><font color='green'>Py_ADDRESS_IN_RANGE(P, POOL)</font></i>
+<a name='L614'><i><font color='green'></font></i>
+<a name='L615'><i><font color='green'>Return true if and only if P is an address that was allocated by pymalloc.</font></i>
+<a name='L616'><i><font color='green'>POOL must be the pool address associated with P, i.e., POOL = POOL_ADDR(P)</font></i>
+<a name='L617'><i><font color='green'>(the caller is asked to compute this because the macro expands POOL more than</font></i>
+<a name='L618'><i><font color='green'>once, and for efficiency it's best for the caller to assign POOL_ADDR(P) to a</font></i>
+<a name='L619'><i><font color='green'>variable and pass the latter to the macro; because Py_ADDRESS_IN_RANGE is</font></i>
+<a name='L620'><i><font color='green'>called on every alloc/realloc/free, micro-efficiency is important here).</font></i>
+<a name='L621'><i><font color='green'></font></i>
+<a name='L622'><i><font color='green'>Tricky:  Let B be the arena base address associated with the pool, B =</font></i>
+<a name='L623'><i><font color='green'>arenas[(POOL)-&gt;arenaindex].address.  Then P belongs to the arena if and only if</font></i>
+<a name='L624'><i><font color='green'></font></i>
+<a name='L625'><i><font color='green'>    B &lt;= P &lt; B + ARENA_SIZE</font></i>
+<a name='L626'><i><font color='green'></font></i>
+<a name='L627'><i><font color='green'>Subtracting B throughout, this is true iff</font></i>
+<a name='L628'><i><font color='green'></font></i>
+<a name='L629'><i><font color='green'>    0 &lt;= P-B &lt; ARENA_SIZE</font></i>
+<a name='L630'><i><font color='green'></font></i>
+<a name='L631'><i><font color='green'>By using unsigned arithmetic, the "0 &lt;=" half of the test can be skipped.</font></i>
+<a name='L632'><i><font color='green'></font></i>
+<a name='L633'><i><font color='green'>Obscure:  A PyMem "free memory" function can call the pymalloc free or realloc</font></i>
+<a name='L634'><i><font color='green'>before the first arena has been allocated.  `arenas` is still NULL in that</font></i>
+<a name='L635'><i><font color='green'>case.  We're relying on that maxarenas is also 0 in that case, so that</font></i>
+<a name='L636'><i><font color='green'>(POOL)-&gt;arenaindex &lt; maxarenas  must be false, saving us from trying to index</font></i>
+<a name='L637'><i><font color='green'>into a NULL arenas.</font></i>
+<a name='L638'><i><font color='green'></font></i>
+<a name='L639'><i><font color='green'>Details:  given P and POOL, the arena_object corresponding to P is AO =</font></i>
+<a name='L640'><i><font color='green'>arenas[(POOL)-&gt;arenaindex].  Suppose obmalloc controls P.  Then (barring wild</font></i>
+<a name='L641'><i><font color='green'>stores, etc), POOL is the correct address of P's pool, AO.address is the</font></i>
+<a name='L642'><i><font color='green'>correct base address of the pool's arena, and P must be within ARENA_SIZE of</font></i>
+<a name='L643'><i><font color='green'>AO.address.  In addition, AO.address is not 0 (no arena can start at address 0</font></i>
+<a name='L644'><i><font color='green'>(NULL)).  Therefore Py_ADDRESS_IN_RANGE correctly reports that obmalloc</font></i>
+<a name='L645'><i><font color='green'>controls P.</font></i>
+<a name='L646'><i><font color='green'></font></i>
+<a name='L647'><i><font color='green'>Now suppose obmalloc does not control P (e.g., P was obtained via a direct</font></i>
+<a name='L648'><i><font color='green'>call to the system malloc() or realloc()).  (POOL)-&gt;arenaindex may be anything</font></i>
+<a name='L649'><i><font color='green'>in this case -- it may even be uninitialized trash.  If the trash arenaindex</font></i>
+<a name='L650'><i><font color='green'>is &gt;= maxarenas, the macro correctly concludes at once that obmalloc doesn't</font></i>
+<a name='L651'><i><font color='green'>control P.</font></i>
+<a name='L652'><i><font color='green'></font></i>
+<a name='L653'><i><font color='green'>Else arenaindex is &lt; maxarena, and AO is read up.  If AO corresponds to an</font></i>
+<a name='L654'><i><font color='green'>allocated arena, obmalloc controls all the memory in slice AO.address :</font></i>
+<a name='L655'><i><font color='green'>AO.address+ARENA_SIZE.  By case assumption, P is not controlled by obmalloc,</font></i>
+<a name='L656'><i><font color='green'>so P doesn't lie in that slice, so the macro correctly reports that P is not</font></i>
+<a name='L657'><i><font color='green'>controlled by obmalloc.</font></i>
+<a name='L658'><i><font color='green'></font></i>
+<a name='L659'><i><font color='green'>Finally, if P is not controlled by obmalloc and AO corresponds to an unused</font></i>
+<a name='L660'><i><font color='green'>arena_object (one not currently associated with an allocated arena),</font></i>
+<a name='L661'><i><font color='green'>AO.address is 0, and the second test in the macro reduces to:</font></i>
+<a name='L662'><i><font color='green'></font></i>
+<a name='L663'><i><font color='green'>    P &lt; ARENA_SIZE</font></i>
+<a name='L664'><i><font color='green'></font></i>
+<a name='L665'><i><font color='green'>If P &gt;= ARENA_SIZE (extremely likely), the macro again correctly concludes</font></i>
+<a name='L666'><i><font color='green'>that P is not controlled by obmalloc.  However, if P &lt; ARENA_SIZE, this part</font></i>
+<a name='L667'><i><font color='green'>of the test still passes, and the third clause (AO.address != 0) is necessary</font></i>
+<a name='L668'><i><font color='green'>to get the correct result:  AO.address is 0 in this case, so the macro</font></i>
+<a name='L669'><i><font color='green'>correctly reports that P is not controlled by obmalloc (despite that P lies in</font></i>
+<a name='L670'><i><font color='green'>slice AO.address : AO.address + ARENA_SIZE).</font></i>
+<a name='L671'><i><font color='green'></font></i>
+<a name='L672'><i><font color='green'>Note:  The third (AO.address != 0) clause was added in Python 2.5.  Before</font></i>
+<a name='L673'><i><font color='green'>2.5, arenas were never free()'ed, and an arenaindex &lt; maxarena always</font></i>
+<a name='L674'><i><font color='green'>corresponded to a currently-allocated arena, so the "P is not controlled by</font></i>
+<a name='L675'><i><font color='green'>obmalloc, AO corresponds to an unused arena_object, and P &lt; ARENA_SIZE" case</font></i>
+<a name='L676'><i><font color='green'>was impossible.</font></i>
+<a name='L677'><i><font color='green'></font></i>
+<a name='L678'><i><font color='green'>Note that the logic is excruciating, and reading up possibly uninitialized</font></i>
+<a name='L679'><i><font color='green'>memory when P is not controlled by obmalloc (to get at (POOL)-&gt;arenaindex)</font></i>
+<a name='L680'><i><font color='green'>creates problems for some memory debuggers.  The overwhelming advantage is</font></i>
+<a name='L681'><i><font color='green'>that this test determines whether an arbitrary address is controlled by</font></i>
+<a name='L682'><i><font color='green'>obmalloc in a small constant time, independent of the number of arenas</font></i>
+<a name='L683'><i><font color='green'>obmalloc controls.  Since this test is needed at every entry point, it's</font></i>
+<a name='L684'><i><font color='green'>extremely desirable that it be this fast.</font></i>
+<a name='L685'><i><font color='green'></font></i>
+<a name='L686'><i><font color='green'>Since Py_ADDRESS_IN_RANGE may be reading from memory which was not allocated</font></i>
+<a name='L687'><i><font color='green'>by Python, it is important that (POOL)-&gt;arenaindex is read only once, as</font></i>
+<a name='L688'><i><font color='green'>another thread may be concurrently modifying the value without holding the</font></i>
+<a name='L689'><i><font color='green'>GIL.  To accomplish this, the arenaindex_temp variable is used to store</font></i>
+<a name='L690'><i><font color='green'>(POOL)-&gt;arenaindex for the duration of the Py_ADDRESS_IN_RANGE macro's</font></i>
+<a name='L691'><i><font color='green'>execution.  The caller of the macro is responsible for declaring this</font></i>
+<a name='L692'><i><font color='green'>variable.</font></i>
+<a name='L693'><i><font color='green'>*/</font></i>
+<a name='L694'><font color='darkred'>#define</font> <a href='../R/3641.html' title='Multiple refered from 2 places.'>Py_ADDRESS_IN_RANGE</a>(P, POOL)                    \
+<a name='L695'>    ((arenaindex_temp = (POOL)-&gt;arenaindex) &lt; maxarenas &amp;&amp;              \
+<a name='L696'>     (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)(<a href='../D/2444.html' title='Multiple defined in 2 places.'>P</a>) - arenas[arenaindex_temp].address &lt; (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)<a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a> &amp;&amp; \
+<a name='L697'>     arenas[arenaindex_temp].address != 0)
+<a name='L698'>
+<a name='L699'>
+<a name='L700'><i><font color='green'>/* This is only useful when running memory debuggers such as</font></i>
+<a name='L701'><i><font color='green'> * Purify or Valgrind.  Uncomment to use.</font></i>
+<a name='L702'><i><font color='green'> *</font></i>
+<a name='L703'><i><font color='green'>#define Py_USING_MEMORY_DEBUGGER</font></i>
+<a name='L704'><i><font color='green'> */</font></i>
+<a name='L705'>
+<a name='L706'><font color='darkred'>#ifdef</font> Py_USING_MEMORY_DEBUGGER
+<a name='L707'>
+<a name='L708'><i><font color='green'>/* Py_ADDRESS_IN_RANGE may access uninitialized memory by design</font></i>
+<a name='L709'><i><font color='green'> * This leads to thousands of spurious warnings when using</font></i>
+<a name='L710'><i><font color='green'> * Purify or Valgrind.  By making a function, we can easily</font></i>
+<a name='L711'><i><font color='green'> * suppress the uninitialized memory reads in this one function.</font></i>
+<a name='L712'><i><font color='green'> * So we won't ignore real errors elsewhere.</font></i>
+<a name='L713'><i><font color='green'> *</font></i>
+<a name='L714'><i><font color='green'> * Disable the macro and use a function.</font></i>
+<a name='L715'><i><font color='green'> */</font></i>
+<a name='L716'>
+<a name='L717'><font color='darkred'>#undef</font> <a href='../R/3641.html' title='Multiple refered from 2 places.'>Py_ADDRESS_IN_RANGE</a>
+<a name='L718'>
+<a name='L719'><font color='darkred'>#if</font> <b>defined</b>(__GNUC__) &amp;&amp; ((__GNUC__ == 3) &amp;&amp; (__GNUC_MINOR__ &gt;= 1) || \
+<a name='L720'>                          (__GNUC__ &gt;= 4))
+<a name='L721'><font color='darkred'>#define</font> Py_NO_INLINE <b>__attribute__</b>((__noinline__))
+<a name='L722'><font color='darkred'>#else</font>
+<a name='L723'><font color='darkred'>#define</font> Py_NO_INLINE
+<a name='L724'><font color='darkred'>#endif</font>
+<a name='L725'>
+<a name='L726'><i><font color='green'>/* Don't make static, to try to ensure this isn't inlined. */</font></i>
+<a name='L727'><b>int</b> <a href='../R/3641.html' title='Multiple refered from 2 places.'>Py_ADDRESS_IN_RANGE</a>(<b>void</b> *<a href='../D/2444.html' title='Multiple defined in 2 places.'>P</a>, poolp pool) Py_NO_INLINE;
+<a name='L728'><font color='darkred'>#undef</font> Py_NO_INLINE
+<a name='L729'><font color='darkred'>#endif</font>
+<a name='L730'>
+<a name='L731'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L732'>
+<a name='L733'><i><font color='green'>/* malloc.  Note that nbytes==0 tries to return a non-NULL pointer, distinct</font></i>
+<a name='L734'><i><font color='green'> * from all other currently live pointers.  This may not be possible.</font></i>
+<a name='L735'><i><font color='green'> */</font></i>
+<a name='L736'>
+<a name='L737'><i><font color='green'>/*</font></i>
+<a name='L738'><i><font color='green'> * The basic blocks are ordered by decreasing execution frequency,</font></i>
+<a name='L739'><i><font color='green'> * which minimizes the number of jumps in the most common cases,</font></i>
+<a name='L740'><i><font color='green'> * improves branching prediction and instruction scheduling (small</font></i>
+<a name='L741'><i><font color='green'> * block allocations typically result in a couple of instructions).</font></i>
+<a name='L742'><i><font color='green'> * Unless the optimizer reorders everything, being too smart...</font></i>
+<a name='L743'><i><font color='green'> */</font></i>
+<a name='L744'>
+<a name='L745'><font color='darkred'>#undef</font> PyObject_Malloc
+<a name='L746'><b>void</b> *
+<a name='L747'>PyObject_Malloc(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L748'><font color='red'>{</font>
+<a name='L749'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *bp;
+<a name='L750'>    <a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a> pool;
+<a name='L751'>    <a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a> next;
+<a name='L752'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> size;
+<a name='L753'>
+<a name='L754'><font color='darkred'>#ifdef</font> WITH_VALGRIND
+<a name='L755'>    <b>if</b> (<a href='../D/5355.html' title='Multiple defined in 2 places.'>UNLIKELY</a>(running_on_valgrind == -1))
+<a name='L756'>        running_on_valgrind = RUNNING_ON_VALGRIND;
+<a name='L757'>    <b>if</b> (<a href='../D/5355.html' title='Multiple defined in 2 places.'>UNLIKELY</a>(running_on_valgrind))
+<a name='L758'>        <b>goto</b> redirect;
+<a name='L759'><font color='darkred'>#endif</font>
+<a name='L760'>
+<a name='L761'>    <i><font color='green'>/*</font></i>
+<a name='L762'><i><font color='green'>     * Limit ourselves to PY_SSIZE_T_MAX bytes to prevent security holes.</font></i>
+<a name='L763'><i><font color='green'>     * Most python internals blindly use a signed Py_ssize_t to track</font></i>
+<a name='L764'><i><font color='green'>     * things without checking for overflows or negatives.</font></i>
+<a name='L765'><i><font color='green'>     * As size_t is unsigned, checking for nbytes &lt; 0 is not required.</font></i>
+<a name='L766'><i><font color='green'>     */</font></i>
+<a name='L767'>    <b>if</b> (nbytes &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a>)
+<a name='L768'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L769'>
+<a name='L770'>    <i><font color='green'>/*</font></i>
+<a name='L771'><i><font color='green'>     * This implicitly redirects malloc(0).</font></i>
+<a name='L772'><i><font color='green'>     */</font></i>
+<a name='L773'>    <b>if</b> ((nbytes - 1) &lt; <a href='../S/2804.html#L149' title='Defined at 149 in Objects/obmalloc.c.'>SMALL_REQUEST_THRESHOLD</a>) <font color='red'>{</font>
+<a name='L774'>        LOCK();
+<a name='L775'>        <i><font color='green'>/*</font></i>
+<a name='L776'><i><font color='green'>         * Most frequent paths first</font></i>
+<a name='L777'><i><font color='green'>         */</font></i>
+<a name='L778'>        size = (<a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a>)(nbytes - 1) &gt;&gt; <a href='../S/2804.html#L131' title='Defined at 131 in Objects/obmalloc.c.'>ALIGNMENT_SHIFT</a>;
+<a name='L779'>        pool = usedpools[size + size];
+<a name='L780'>        <b>if</b> (pool != pool-&gt;nextpool) <font color='red'>{</font>
+<a name='L781'>            <i><font color='green'>/*</font></i>
+<a name='L782'><i><font color='green'>             * There is a used pool for this size class.</font></i>
+<a name='L783'><i><font color='green'>             * Pick up the head block of its free list.</font></i>
+<a name='L784'><i><font color='green'>             */</font></i>
+<a name='L785'>            ++pool-&gt;ref.count;
+<a name='L786'>            bp = pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>;
+<a name='L787'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(bp != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L788'>            <b>if</b> ((pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a> = *(<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> **)bp) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L789'>                UNLOCK();
+<a name='L790'>                <b>return</b> (<b>void</b> *)bp;
+<a name='L791'>            <font color='red'>}</font>
+<a name='L792'>            <i><font color='green'>/*</font></i>
+<a name='L793'><i><font color='green'>             * Reached the end of the free list, try to extend it.</font></i>
+<a name='L794'><i><font color='green'>             */</font></i>
+<a name='L795'>            <b>if</b> (pool-&gt;nextoffset &lt;= pool-&gt;maxnextoffset) <font color='red'>{</font>
+<a name='L796'>                <i><font color='green'>/* There is room for another block. */</font></i>
+<a name='L797'>                pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a> = (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>*)pool +
+<a name='L798'>                                  pool-&gt;nextoffset;
+<a name='L799'>                pool-&gt;nextoffset += <a href='../S/2804.html#L135' title='Defined at 135 in Objects/obmalloc.c.'>INDEX2SIZE</a>(size);
+<a name='L800'>                *(<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> **)(pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>) = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L801'>                UNLOCK();
+<a name='L802'>                <b>return</b> (<b>void</b> *)bp;
+<a name='L803'>            <font color='red'>}</font>
+<a name='L804'>            <i><font color='green'>/* Pool is full, unlink from used pools. */</font></i>
+<a name='L805'>            next = pool-&gt;nextpool;
+<a name='L806'>            pool = pool-&gt;prevpool;
+<a name='L807'>            next-&gt;prevpool = pool;
+<a name='L808'>            pool-&gt;nextpool = next;
+<a name='L809'>            UNLOCK();
+<a name='L810'>            <b>return</b> (<b>void</b> *)bp;
+<a name='L811'>        <font color='red'>}</font>
+<a name='L812'>
+<a name='L813'>        <i><font color='green'>/* There isn't a pool of the right size class immediately</font></i>
+<a name='L814'><i><font color='green'>         * available:  use a free pool.</font></i>
+<a name='L815'><i><font color='green'>         */</font></i>
+<a name='L816'>        <b>if</b> (usable_arenas == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L817'>            <i><font color='green'>/* No arena has a free pool:  allocate a new arena. */</font></i>
+<a name='L818'><font color='darkred'>#ifdef</font> WITH_MEMORY_LIMITS
+<a name='L819'>            <b>if</b> (narenas_currently_allocated &gt;= <a href='../S/2804.html#L190' title='Defined at 190 in Objects/obmalloc.c.'>MAX_ARENAS</a>) <font color='red'>{</font>
+<a name='L820'>                UNLOCK();
+<a name='L821'>                <b>goto</b> redirect;
+<a name='L822'>            <font color='red'>}</font>
+<a name='L823'><font color='darkred'>#endif</font>
+<a name='L824'>            usable_arenas = <a href='../S/2804.html#L524' title='Defined at 524 in Objects/obmalloc.c.'>new_arena</a>();
+<a name='L825'>            <b>if</b> (usable_arenas == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L826'>                UNLOCK();
+<a name='L827'>                <b>goto</b> redirect;
+<a name='L828'>            <font color='red'>}</font>
+<a name='L829'>            usable_arenas-&gt;nextarena =
+<a name='L830'>                usable_arenas-&gt;prevarena = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L831'>        <font color='red'>}</font>
+<a name='L832'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;address != 0);
+<a name='L833'>
+<a name='L834'>        <i><font color='green'>/* Try to get a cached free pool. */</font></i>
+<a name='L835'>        pool = usable_arenas-&gt;freepools;
+<a name='L836'>        <b>if</b> (pool != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L837'>            <i><font color='green'>/* Unlink from cached pools. */</font></i>
+<a name='L838'>            usable_arenas-&gt;freepools = pool-&gt;nextpool;
+<a name='L839'>
+<a name='L840'>            <i><font color='green'>/* This arena already had the smallest nfreepools</font></i>
+<a name='L841'><i><font color='green'>             * value, so decreasing nfreepools doesn't change</font></i>
+<a name='L842'><i><font color='green'>             * that, and we don't need to rearrange the</font></i>
+<a name='L843'><i><font color='green'>             * usable_arenas list.  However, if the arena has</font></i>
+<a name='L844'><i><font color='green'>             * become wholly allocated, we need to remove its</font></i>
+<a name='L845'><i><font color='green'>             * arena_object from usable_arenas.</font></i>
+<a name='L846'><i><font color='green'>             */</font></i>
+<a name='L847'>            --usable_arenas-&gt;nfreepools;
+<a name='L848'>            <b>if</b> (usable_arenas-&gt;nfreepools == 0) <font color='red'>{</font>
+<a name='L849'>                <i><font color='green'>/* Wholly allocated:  remove. */</font></i>
+<a name='L850'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;freepools == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L851'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;nextarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L852'>                       usable_arenas-&gt;nextarena-&gt;prevarena ==
+<a name='L853'>                       usable_arenas);
+<a name='L854'>
+<a name='L855'>                usable_arenas = usable_arenas-&gt;nextarena;
+<a name='L856'>                <b>if</b> (usable_arenas != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L857'>                    usable_arenas-&gt;prevarena = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L858'>                    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;address != 0);
+<a name='L859'>                <font color='red'>}</font>
+<a name='L860'>            <font color='red'>}</font>
+<a name='L861'>            <b>else</b> <font color='red'>{</font>
+<a name='L862'>                <i><font color='green'>/* nfreepools &gt; 0:  it must be that freepools</font></i>
+<a name='L863'><i><font color='green'>                 * isn't NULL, or that we haven't yet carved</font></i>
+<a name='L864'><i><font color='green'>                 * off all the arena's pools for the first</font></i>
+<a name='L865'><i><font color='green'>                 * time.</font></i>
+<a name='L866'><i><font color='green'>                 */</font></i>
+<a name='L867'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;freepools != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L868'>                       usable_arenas-&gt;pool_address &lt;=
+<a name='L869'>                       (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>*)usable_arenas-&gt;address +
+<a name='L870'>                           <a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a> - <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>);
+<a name='L871'>            <font color='red'>}</font>
+<a name='L872'>        init_pool:
+<a name='L873'>            <i><font color='green'>/* Frontlink to used pools. */</font></i>
+<a name='L874'>            next = usedpools[size + size]; <i><font color='green'>/* == prev */</font></i>
+<a name='L875'>            pool-&gt;nextpool = next;
+<a name='L876'>            pool-&gt;prevpool = next;
+<a name='L877'>            next-&gt;nextpool = pool;
+<a name='L878'>            next-&gt;prevpool = pool;
+<a name='L879'>            pool-&gt;ref.count = 1;
+<a name='L880'>            <b>if</b> (pool-&gt;szidx == size) <font color='red'>{</font>
+<a name='L881'>                <i><font color='green'>/* Luckily, this pool last contained blocks</font></i>
+<a name='L882'><i><font color='green'>                 * of the same size class, so its header</font></i>
+<a name='L883'><i><font color='green'>                 * and free list are already initialized.</font></i>
+<a name='L884'><i><font color='green'>                 */</font></i>
+<a name='L885'>                bp = pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>;
+<a name='L886'>                pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a> = *(<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> **)bp;
+<a name='L887'>                UNLOCK();
+<a name='L888'>                <b>return</b> (<b>void</b> *)bp;
+<a name='L889'>            <font color='red'>}</font>
+<a name='L890'>            <i><font color='green'>/*</font></i>
+<a name='L891'><i><font color='green'>             * Initialize the pool header, set up the free list to</font></i>
+<a name='L892'><i><font color='green'>             * contain just the second block, and return the first</font></i>
+<a name='L893'><i><font color='green'>             * block.</font></i>
+<a name='L894'><i><font color='green'>             */</font></i>
+<a name='L895'>            pool-&gt;szidx = size;
+<a name='L896'>            size = <a href='../S/2804.html#L135' title='Defined at 135 in Objects/obmalloc.c.'>INDEX2SIZE</a>(size);
+<a name='L897'>            bp = (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *)pool + <a href='../S/2804.html#L307' title='Defined at 307 in Objects/obmalloc.c.'>POOL_OVERHEAD</a>;
+<a name='L898'>            pool-&gt;nextoffset = <a href='../S/2804.html#L307' title='Defined at 307 in Objects/obmalloc.c.'>POOL_OVERHEAD</a> + (size &lt;&lt; 1);
+<a name='L899'>            pool-&gt;maxnextoffset = <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a> - size;
+<a name='L900'>            pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a> = bp + size;
+<a name='L901'>            *(<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> **)(pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>) = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L902'>            UNLOCK();
+<a name='L903'>            <b>return</b> (<b>void</b> *)bp;
+<a name='L904'>        <font color='red'>}</font>
+<a name='L905'>
+<a name='L906'>        <i><font color='green'>/* Carve off a new pool. */</font></i>
+<a name='L907'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;nfreepools &gt; 0);
+<a name='L908'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;freepools == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L909'>        pool = (<a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a>)usable_arenas-&gt;pool_address;
+<a name='L910'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>((<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>*)pool &lt;= (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>*)usable_arenas-&gt;address +
+<a name='L911'>                               <a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a> - <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>);
+<a name='L912'>        pool-&gt;arenaindex = usable_arenas - arenas;
+<a name='L913'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(&amp;arenas[pool-&gt;arenaindex] == usable_arenas);
+<a name='L914'>        pool-&gt;szidx = <a href='../S/2804.html#L309' title='Defined at 309 in Objects/obmalloc.c.'>DUMMY_SIZE_IDX</a>;
+<a name='L915'>        usable_arenas-&gt;pool_address += <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>;
+<a name='L916'>        --usable_arenas-&gt;nfreepools;
+<a name='L917'>
+<a name='L918'>        <b>if</b> (usable_arenas-&gt;nfreepools == 0) <font color='red'>{</font>
+<a name='L919'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;nextarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L920'>                   usable_arenas-&gt;nextarena-&gt;prevarena ==
+<a name='L921'>                   usable_arenas);
+<a name='L922'>            <i><font color='green'>/* Unlink the arena:  it is completely allocated. */</font></i>
+<a name='L923'>            usable_arenas = usable_arenas-&gt;nextarena;
+<a name='L924'>            <b>if</b> (usable_arenas != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L925'>                usable_arenas-&gt;prevarena = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L926'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;address != 0);
+<a name='L927'>            <font color='red'>}</font>
+<a name='L928'>        <font color='red'>}</font>
+<a name='L929'>
+<a name='L930'>        <b>goto</b> init_pool;
+<a name='L931'>    <font color='red'>}</font>
+<a name='L932'>
+<a name='L933'>    <i><font color='green'>/* The small block allocator ends here. */</font></i>
+<a name='L934'>
+<a name='L935'>redirect:
+<a name='L936'>    <i><font color='green'>/* Redirect the original request to the underlying (libc) allocator.</font></i>
+<a name='L937'><i><font color='green'>     * We jump here on bigger requests, on error in the code above (as a</font></i>
+<a name='L938'><i><font color='green'>     * last chance to serve the request) or when the max memory limit</font></i>
+<a name='L939'><i><font color='green'>     * has been reached.</font></i>
+<a name='L940'><i><font color='green'>     */</font></i>
+<a name='L941'>    <b>if</b> (nbytes == 0)
+<a name='L942'>        nbytes = 1;
+<a name='L943'>    <b>return</b> (<b>void</b> *)malloc(nbytes);
+<a name='L944'><font color='red'>}</font>
+<a name='L945'>
+<a name='L946'><i><font color='green'>/* free */</font></i>
+<a name='L947'>
+<a name='L948'><font color='darkred'>#undef</font> <a href='../R/3261.html' title='Multiple refered from 21 places.'>PyObject_Free</a>
+<a name='L949'><b>void</b>
+<a name='L950'><a href='../R/3261.html' title='Multiple refered from 21 places.'>PyObject_Free</a>(<b>void</b> *p)
+<a name='L951'><font color='red'>{</font>
+<a name='L952'>    <a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a> pool;
+<a name='L953'>    <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *lastfree;
+<a name='L954'>    <a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a> next, prev;
+<a name='L955'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> size;
+<a name='L956'><font color='darkred'>#ifndef</font> Py_USING_MEMORY_DEBUGGER
+<a name='L957'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> arenaindex_temp;
+<a name='L958'><font color='darkred'>#endif</font>
+<a name='L959'>
+<a name='L960'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)      <i><font color='green'>/* free(NULL) has no effect */</font></i>
+<a name='L961'>        <b>return</b>;
+<a name='L962'>
+<a name='L963'><font color='darkred'>#ifdef</font> WITH_VALGRIND
+<a name='L964'>    <b>if</b> (<a href='../D/5355.html' title='Multiple defined in 2 places.'>UNLIKELY</a>(running_on_valgrind &gt; 0))
+<a name='L965'>        <b>goto</b> redirect;
+<a name='L966'><font color='darkred'>#endif</font>
+<a name='L967'>
+<a name='L968'>    pool = <a href='../S/2804.html#L312' title='Defined at 312 in Objects/obmalloc.c.'>POOL_ADDR</a>(p);
+<a name='L969'>    <b>if</b> (<a href='../D/4070.html' title='Multiple defined in 4 places.'>Py_ADDRESS_IN_RANGE</a>(p, pool)) <font color='red'>{</font>
+<a name='L970'>        <i><font color='green'>/* We allocated this address. */</font></i>
+<a name='L971'>        LOCK();
+<a name='L972'>        <i><font color='green'>/* Link p to the start of the pool's freeblock list.  Since</font></i>
+<a name='L973'><i><font color='green'>         * the pool had at least the p block outstanding, the pool</font></i>
+<a name='L974'><i><font color='green'>         * wasn't empty (so it's already in a usedpools[] list, or</font></i>
+<a name='L975'><i><font color='green'>         * was full and is in no list -- it's not in the freeblocks</font></i>
+<a name='L976'><i><font color='green'>         * list in any case).</font></i>
+<a name='L977'><i><font color='green'>         */</font></i>
+<a name='L978'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(pool-&gt;ref.count &gt; 0);            <i><font color='green'>/* else it was empty */</font></i>
+<a name='L979'>        *(<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> **)p = lastfree = pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a>;
+<a name='L980'>        pool-&gt;<a href='../S/2244.html#L89' title='Defined at 89 in Modules/_collectionsmodule.c.'>freeblock</a> = (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> *)p;
+<a name='L981'>        <b>if</b> (lastfree) <font color='red'>{</font>
+<a name='L982'>            <b>struct</b> <a href='../S/2804.html#L265' title='Defined at 265 in Objects/obmalloc.c.'>arena_object</a>* ao;
+<a name='L983'>            <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> nf;  <i><font color='green'>/* ao-&gt;nfreepools */</font></i>
+<a name='L984'>
+<a name='L985'>            <i><font color='green'>/* freeblock wasn't NULL, so the pool wasn't full,</font></i>
+<a name='L986'><i><font color='green'>             * and the pool is in a usedpools[] list.</font></i>
+<a name='L987'><i><font color='green'>             */</font></i>
+<a name='L988'>            <b>if</b> (--pool-&gt;ref.count != 0) <font color='red'>{</font>
+<a name='L989'>                <i><font color='green'>/* pool isn't empty:  leave it in usedpools */</font></i>
+<a name='L990'>                UNLOCK();
+<a name='L991'>                <b>return</b>;
+<a name='L992'>            <font color='red'>}</font>
+<a name='L993'>            <i><font color='green'>/* Pool is now empty:  unlink from usedpools, and</font></i>
+<a name='L994'><i><font color='green'>             * link to the front of freepools.  This ensures that</font></i>
+<a name='L995'><i><font color='green'>             * previously freed pools will be allocated later</font></i>
+<a name='L996'><i><font color='green'>             * (being not referenced, they are perhaps paged out).</font></i>
+<a name='L997'><i><font color='green'>             */</font></i>
+<a name='L998'>            next = pool-&gt;nextpool;
+<a name='L999'>            prev = pool-&gt;prevpool;
+<a name='L1000'>            next-&gt;prevpool = prev;
+<a name='L1001'>            prev-&gt;nextpool = next;
+<a name='L1002'>
+<a name='L1003'>            <i><font color='green'>/* Link the pool to freepools.  This is a singly-linked</font></i>
+<a name='L1004'><i><font color='green'>             * list, and pool-&gt;prevpool isn't used there.</font></i>
+<a name='L1005'><i><font color='green'>             */</font></i>
+<a name='L1006'>            ao = &amp;arenas[pool-&gt;arenaindex];
+<a name='L1007'>            pool-&gt;nextpool = ao-&gt;freepools;
+<a name='L1008'>            ao-&gt;freepools = pool;
+<a name='L1009'>            nf = ++ao-&gt;nfreepools;
+<a name='L1010'>
+<a name='L1011'>            <i><font color='green'>/* All the rest is arena management.  We just freed</font></i>
+<a name='L1012'><i><font color='green'>             * a pool, and there are 4 cases for arena mgmt:</font></i>
+<a name='L1013'><i><font color='green'>             * 1. If all the pools are free, return the arena to</font></i>
+<a name='L1014'><i><font color='green'>             *    the system free().</font></i>
+<a name='L1015'><i><font color='green'>             * 2. If this is the only free pool in the arena,</font></i>
+<a name='L1016'><i><font color='green'>             *    add the arena back to the `usable_arenas` list.</font></i>
+<a name='L1017'><i><font color='green'>             * 3. If the "next" arena has a smaller count of free</font></i>
+<a name='L1018'><i><font color='green'>             *    pools, we have to "slide this arena right" to</font></i>
+<a name='L1019'><i><font color='green'>             *    restore that usable_arenas is sorted in order of</font></i>
+<a name='L1020'><i><font color='green'>             *    nfreepools.</font></i>
+<a name='L1021'><i><font color='green'>             * 4. Else there's nothing more to do.</font></i>
+<a name='L1022'><i><font color='green'>             */</font></i>
+<a name='L1023'>            <b>if</b> (nf == ao-&gt;ntotalpools) <font color='red'>{</font>
+<a name='L1024'>                <i><font color='green'>/* Case 1.  First unlink ao from usable_arenas.</font></i>
+<a name='L1025'><i><font color='green'>                 */</font></i>
+<a name='L1026'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;prevarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1027'>                       ao-&gt;prevarena-&gt;address != 0);
+<a name='L1028'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao -&gt;nextarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1029'>                       ao-&gt;nextarena-&gt;address != 0);
+<a name='L1030'>
+<a name='L1031'>                <i><font color='green'>/* Fix the pointer in the prevarena, or the</font></i>
+<a name='L1032'><i><font color='green'>                 * usable_arenas pointer.</font></i>
+<a name='L1033'><i><font color='green'>                 */</font></i>
+<a name='L1034'>                <b>if</b> (ao-&gt;prevarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1035'>                    usable_arenas = ao-&gt;nextarena;
+<a name='L1036'>                    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1037'>                           usable_arenas-&gt;address != 0);
+<a name='L1038'>                <font color='red'>}</font>
+<a name='L1039'>                <b>else</b> <font color='red'>{</font>
+<a name='L1040'>                    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;prevarena-&gt;nextarena == ao);
+<a name='L1041'>                    ao-&gt;prevarena-&gt;nextarena =
+<a name='L1042'>                        ao-&gt;nextarena;
+<a name='L1043'>                <font color='red'>}</font>
+<a name='L1044'>                <i><font color='green'>/* Fix the pointer in the nextarena. */</font></i>
+<a name='L1045'>                <b>if</b> (ao-&gt;nextarena != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1046'>                    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;nextarena-&gt;prevarena == ao);
+<a name='L1047'>                    ao-&gt;nextarena-&gt;prevarena =
+<a name='L1048'>                        ao-&gt;prevarena;
+<a name='L1049'>                <font color='red'>}</font>
+<a name='L1050'>                <i><font color='green'>/* Record that this arena_object slot is</font></i>
+<a name='L1051'><i><font color='green'>                 * available to be reused.</font></i>
+<a name='L1052'><i><font color='green'>                 */</font></i>
+<a name='L1053'>                ao-&gt;nextarena = unused_arena_objects;
+<a name='L1054'>                unused_arena_objects = ao;
+<a name='L1055'>
+<a name='L1056'>                <i><font color='green'>/* Free the entire arena. */</font></i>
+<a name='L1057'>                free((<b>void</b> *)ao-&gt;address);
+<a name='L1058'>                ao-&gt;address = 0;                        <i><font color='green'>/* mark unassociated */</font></i>
+<a name='L1059'>                --narenas_currently_allocated;
+<a name='L1060'>
+<a name='L1061'>                UNLOCK();
+<a name='L1062'>                <b>return</b>;
+<a name='L1063'>            <font color='red'>}</font>
+<a name='L1064'>            <b>if</b> (nf == 1) <font color='red'>{</font>
+<a name='L1065'>                <i><font color='green'>/* Case 2.  Put ao at the head of</font></i>
+<a name='L1066'><i><font color='green'>                 * usable_arenas.  Note that because</font></i>
+<a name='L1067'><i><font color='green'>                 * ao-&gt;nfreepools was 0 before, ao isn't</font></i>
+<a name='L1068'><i><font color='green'>                 * currently on the usable_arenas list.</font></i>
+<a name='L1069'><i><font color='green'>                 */</font></i>
+<a name='L1070'>                ao-&gt;nextarena = usable_arenas;
+<a name='L1071'>                ao-&gt;prevarena = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1072'>                <b>if</b> (usable_arenas)
+<a name='L1073'>                    usable_arenas-&gt;prevarena = ao;
+<a name='L1074'>                usable_arenas = ao;
+<a name='L1075'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas-&gt;address != 0);
+<a name='L1076'>
+<a name='L1077'>                UNLOCK();
+<a name='L1078'>                <b>return</b>;
+<a name='L1079'>            <font color='red'>}</font>
+<a name='L1080'>            <i><font color='green'>/* If this arena is now out of order, we need to keep</font></i>
+<a name='L1081'><i><font color='green'>             * the list sorted.  The list is kept sorted so that</font></i>
+<a name='L1082'><i><font color='green'>             * the "most full" arenas are used first, which allows</font></i>
+<a name='L1083'><i><font color='green'>             * the nearly empty arenas to be completely freed.  In</font></i>
+<a name='L1084'><i><font color='green'>             * a few un-scientific tests, it seems like this</font></i>
+<a name='L1085'><i><font color='green'>             * approach allowed a lot more memory to be freed.</font></i>
+<a name='L1086'><i><font color='green'>             */</font></i>
+<a name='L1087'>            <b>if</b> (ao-&gt;nextarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1088'>                         nf &lt;= ao-&gt;nextarena-&gt;nfreepools) <font color='red'>{</font>
+<a name='L1089'>                <i><font color='green'>/* Case 4.  Nothing to do. */</font></i>
+<a name='L1090'>                UNLOCK();
+<a name='L1091'>                <b>return</b>;
+<a name='L1092'>            <font color='red'>}</font>
+<a name='L1093'>            <i><font color='green'>/* Case 3:  We have to move the arena towards the end</font></i>
+<a name='L1094'><i><font color='green'>             * of the list, because it has more free pools than</font></i>
+<a name='L1095'><i><font color='green'>             * the arena to its right.</font></i>
+<a name='L1096'><i><font color='green'>             * First unlink ao from usable_arenas.</font></i>
+<a name='L1097'><i><font color='green'>             */</font></i>
+<a name='L1098'>            <b>if</b> (ao-&gt;prevarena != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1099'>                <i><font color='green'>/* ao isn't at the head of the list */</font></i>
+<a name='L1100'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;prevarena-&gt;nextarena == ao);
+<a name='L1101'>                ao-&gt;prevarena-&gt;nextarena = ao-&gt;nextarena;
+<a name='L1102'>            <font color='red'>}</font>
+<a name='L1103'>            <b>else</b> <font color='red'>{</font>
+<a name='L1104'>                <i><font color='green'>/* ao is at the head of the list */</font></i>
+<a name='L1105'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(usable_arenas == ao);
+<a name='L1106'>                usable_arenas = ao-&gt;nextarena;
+<a name='L1107'>            <font color='red'>}</font>
+<a name='L1108'>            ao-&gt;nextarena-&gt;prevarena = ao-&gt;prevarena;
+<a name='L1109'>
+<a name='L1110'>            <i><font color='green'>/* Locate the new insertion point by iterating over</font></i>
+<a name='L1111'><i><font color='green'>             * the list, using our nextarena pointer.</font></i>
+<a name='L1112'><i><font color='green'>             */</font></i>
+<a name='L1113'>            <b>while</b> (ao-&gt;nextarena != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp;
+<a name='L1114'>                            nf &gt; ao-&gt;nextarena-&gt;nfreepools) <font color='red'>{</font>
+<a name='L1115'>                ao-&gt;prevarena = ao-&gt;nextarena;
+<a name='L1116'>                ao-&gt;nextarena = ao-&gt;nextarena-&gt;nextarena;
+<a name='L1117'>            <font color='red'>}</font>
+<a name='L1118'>
+<a name='L1119'>            <i><font color='green'>/* Insert ao at this point. */</font></i>
+<a name='L1120'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;nextarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1121'>                ao-&gt;prevarena == ao-&gt;nextarena-&gt;prevarena);
+<a name='L1122'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;prevarena-&gt;nextarena == ao-&gt;nextarena);
+<a name='L1123'>
+<a name='L1124'>            ao-&gt;prevarena-&gt;nextarena = ao;
+<a name='L1125'>            <b>if</b> (ao-&gt;nextarena != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1126'>                ao-&gt;nextarena-&gt;prevarena = ao;
+<a name='L1127'>
+<a name='L1128'>            <i><font color='green'>/* Verify that the swaps worked. */</font></i>
+<a name='L1129'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;nextarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1130'>                      nf &lt;= ao-&gt;nextarena-&gt;nfreepools);
+<a name='L1131'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;prevarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1132'>                      nf &gt; ao-&gt;prevarena-&gt;nfreepools);
+<a name='L1133'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(ao-&gt;nextarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ||
+<a name='L1134'>                ao-&gt;nextarena-&gt;prevarena == ao);
+<a name='L1135'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>((usable_arenas == ao &amp;&amp;
+<a name='L1136'>                ao-&gt;prevarena == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) ||
+<a name='L1137'>                ao-&gt;prevarena-&gt;nextarena == ao);
+<a name='L1138'>
+<a name='L1139'>            UNLOCK();
+<a name='L1140'>            <b>return</b>;
+<a name='L1141'>        <font color='red'>}</font>
+<a name='L1142'>        <i><font color='green'>/* Pool was full, so doesn't currently live in any list:</font></i>
+<a name='L1143'><i><font color='green'>         * link it to the front of the appropriate usedpools[] list.</font></i>
+<a name='L1144'><i><font color='green'>         * This mimics LRU pool usage for new allocations and</font></i>
+<a name='L1145'><i><font color='green'>         * targets optimal filling when several pools contain</font></i>
+<a name='L1146'><i><font color='green'>         * blocks of the same size class.</font></i>
+<a name='L1147'><i><font color='green'>         */</font></i>
+<a name='L1148'>        --pool-&gt;ref.count;
+<a name='L1149'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(pool-&gt;ref.count &gt; 0);            <i><font color='green'>/* else the pool is empty */</font></i>
+<a name='L1150'>        size = pool-&gt;szidx;
+<a name='L1151'>        next = usedpools[size + size];
+<a name='L1152'>        prev = next-&gt;prevpool;
+<a name='L1153'>        <i><font color='green'>/* insert pool before next:   prev &lt;-&gt; pool &lt;-&gt; next */</font></i>
+<a name='L1154'>        pool-&gt;nextpool = next;
+<a name='L1155'>        pool-&gt;prevpool = prev;
+<a name='L1156'>        next-&gt;prevpool = pool;
+<a name='L1157'>        prev-&gt;nextpool = pool;
+<a name='L1158'>        UNLOCK();
+<a name='L1159'>        <b>return</b>;
+<a name='L1160'>    <font color='red'>}</font>
+<a name='L1161'>
+<a name='L1162'><font color='darkred'>#ifdef</font> WITH_VALGRIND
+<a name='L1163'>redirect:
+<a name='L1164'><font color='darkred'>#endif</font>
+<a name='L1165'>    <i><font color='green'>/* We didn't allocate this address. */</font></i>
+<a name='L1166'>    free(p);
+<a name='L1167'><font color='red'>}</font>
+<a name='L1168'>
+<a name='L1169'><i><font color='green'>/* realloc.  If p is NULL, this acts like malloc(nbytes).  Else if nbytes==0,</font></i>
+<a name='L1170'><i><font color='green'> * then as the Python docs promise, we do not treat this like free(p), and</font></i>
+<a name='L1171'><i><font color='green'> * return a non-NULL result.</font></i>
+<a name='L1172'><i><font color='green'> */</font></i>
+<a name='L1173'>
+<a name='L1174'><font color='darkred'>#undef</font> <a href='../R/3291.html' title='Multiple refered from 4 places.'>PyObject_Realloc</a>
+<a name='L1175'><b>void</b> *
+<a name='L1176'><a href='../R/3291.html' title='Multiple refered from 4 places.'>PyObject_Realloc</a>(<b>void</b> *p, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L1177'><font color='red'>{</font>
+<a name='L1178'>    <b>void</b> *bp;
+<a name='L1179'>    <a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a> pool;
+<a name='L1180'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size;
+<a name='L1181'><font color='darkred'>#ifndef</font> Py_USING_MEMORY_DEBUGGER
+<a name='L1182'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> arenaindex_temp;
+<a name='L1183'><font color='darkred'>#endif</font>
+<a name='L1184'>
+<a name='L1185'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1186'>        <b>return</b> <a href='../S/2804.html#L1262' title='Defined at 1262 in Objects/obmalloc.c.'>PyObject_Malloc</a>(nbytes);
+<a name='L1187'>
+<a name='L1188'>    <i><font color='green'>/*</font></i>
+<a name='L1189'><i><font color='green'>     * Limit ourselves to PY_SSIZE_T_MAX bytes to prevent security holes.</font></i>
+<a name='L1190'><i><font color='green'>     * Most python internals blindly use a signed Py_ssize_t to track</font></i>
+<a name='L1191'><i><font color='green'>     * things without checking for overflows or negatives.</font></i>
+<a name='L1192'><i><font color='green'>     * As size_t is unsigned, checking for nbytes &lt; 0 is not required.</font></i>
+<a name='L1193'><i><font color='green'>     */</font></i>
+<a name='L1194'>    <b>if</b> (nbytes &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a>)
+<a name='L1195'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1196'>
+<a name='L1197'><font color='darkred'>#ifdef</font> WITH_VALGRIND
+<a name='L1198'>    <i><font color='green'>/* Treat running_on_valgrind == -1 the same as 0 */</font></i>
+<a name='L1199'>    <b>if</b> (<a href='../D/5355.html' title='Multiple defined in 2 places.'>UNLIKELY</a>(running_on_valgrind &gt; 0))
+<a name='L1200'>        <b>goto</b> redirect;
+<a name='L1201'><font color='darkred'>#endif</font>
+<a name='L1202'>
+<a name='L1203'>    pool = <a href='../S/2804.html#L312' title='Defined at 312 in Objects/obmalloc.c.'>POOL_ADDR</a>(p);
+<a name='L1204'>    <b>if</b> (<a href='../D/4070.html' title='Multiple defined in 4 places.'>Py_ADDRESS_IN_RANGE</a>(p, pool)) <font color='red'>{</font>
+<a name='L1205'>        <i><font color='green'>/* We're in charge of this block */</font></i>
+<a name='L1206'>        size = <a href='../S/2804.html#L135' title='Defined at 135 in Objects/obmalloc.c.'>INDEX2SIZE</a>(pool-&gt;szidx);
+<a name='L1207'>        <b>if</b> (nbytes &lt;= size) <font color='red'>{</font>
+<a name='L1208'>            <i><font color='green'>/* The block is staying the same or shrinking.  If</font></i>
+<a name='L1209'><i><font color='green'>             * it's shrinking, there's a tradeoff:  it costs</font></i>
+<a name='L1210'><i><font color='green'>             * cycles to copy the block to a smaller size class,</font></i>
+<a name='L1211'><i><font color='green'>             * but it wastes memory not to copy it.  The</font></i>
+<a name='L1212'><i><font color='green'>             * compromise here is to copy on shrink only if at</font></i>
+<a name='L1213'><i><font color='green'>             * least 25% of size can be shaved off.</font></i>
+<a name='L1214'><i><font color='green'>             */</font></i>
+<a name='L1215'>            <b>if</b> (4 * nbytes &gt; 3 * size) <font color='red'>{</font>
+<a name='L1216'>                <i><font color='green'>/* It's the same,</font></i>
+<a name='L1217'><i><font color='green'>                 * or shrinking and new/old &gt; 3/4.</font></i>
+<a name='L1218'><i><font color='green'>                 */</font></i>
+<a name='L1219'>                <b>return</b> p;
+<a name='L1220'>            <font color='red'>}</font>
+<a name='L1221'>            size = nbytes;
+<a name='L1222'>        <font color='red'>}</font>
+<a name='L1223'>        bp = <a href='../S/2804.html#L1262' title='Defined at 1262 in Objects/obmalloc.c.'>PyObject_Malloc</a>(nbytes);
+<a name='L1224'>        <b>if</b> (bp != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1225'>            <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(bp, p, size);
+<a name='L1226'>            <a href='../D/3616.html' title='Multiple defined in 3 places.'>PyObject_Free</a>(p);
+<a name='L1227'>        <font color='red'>}</font>
+<a name='L1228'>        <b>return</b> bp;
+<a name='L1229'>    <font color='red'>}</font>
+<a name='L1230'><font color='darkred'>#ifdef</font> WITH_VALGRIND
+<a name='L1231'> redirect:
+<a name='L1232'><font color='darkred'>#endif</font>
+<a name='L1233'>    <i><font color='green'>/* We're not managing this block.  If nbytes &lt;=</font></i>
+<a name='L1234'><i><font color='green'>     * SMALL_REQUEST_THRESHOLD, it's tempting to try to take over this</font></i>
+<a name='L1235'><i><font color='green'>     * block.  However, if we do, we need to copy the valid data from</font></i>
+<a name='L1236'><i><font color='green'>     * the C-managed block to one of our blocks, and there's no portable</font></i>
+<a name='L1237'><i><font color='green'>     * way to know how much of the memory space starting at p is valid.</font></i>
+<a name='L1238'><i><font color='green'>     * As bug 1185883 pointed out the hard way, it's possible that the</font></i>
+<a name='L1239'><i><font color='green'>     * C-managed block is "at the end" of allocated VM space, so that</font></i>
+<a name='L1240'><i><font color='green'>     * a memory fault can occur if we try to copy nbytes bytes starting</font></i>
+<a name='L1241'><i><font color='green'>     * at p.  Instead we punt:  let C continue to manage this block.</font></i>
+<a name='L1242'><i><font color='green'>     */</font></i>
+<a name='L1243'>    <b>if</b> (nbytes)
+<a name='L1244'>        <b>return</b> realloc(p, nbytes);
+<a name='L1245'>    <i><font color='green'>/* C doesn't define the result of realloc(p, 0) (it may or may not</font></i>
+<a name='L1246'><i><font color='green'>     * return NULL then), but Python's docs promise that nbytes==0 never</font></i>
+<a name='L1247'><i><font color='green'>     * returns NULL.  We don't pass 0 to realloc(), to avoid that endcase</font></i>
+<a name='L1248'><i><font color='green'>     * to begin with.  Even then, we can't be sure that realloc() won't</font></i>
+<a name='L1249'><i><font color='green'>     * return NULL.</font></i>
+<a name='L1250'><i><font color='green'>     */</font></i>
+<a name='L1251'>    bp = realloc(p, 1);
+<a name='L1252'>    <b>return</b> bp ? bp : p;
+<a name='L1253'><font color='red'>}</font>
+<a name='L1254'>
+<a name='L1255'><font color='darkred'>#else</font>   <i><font color='green'>/* ! WITH_PYMALLOC */</font></i>
+<a name='L1256'>
+<a name='L1257'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L1258'><i><font color='green'>/* pymalloc not enabled:  Redirect the entry points to malloc.  These will</font></i>
+<a name='L1259'><i><font color='green'> * only be used by extensions that are compiled with pymalloc enabled. */</font></i>
+<a name='L1260'>
+<a name='L1261'><b>void</b> *
+<a name='L1262'><a href='../R/3286.html' title='Multiple refered from 13 places.'>PyObject_Malloc</a>(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> n)
+<a name='L1263'><font color='red'>{</font>
+<a name='L1264'>    <b>return</b> PyMem_MALLOC(n);
+<a name='L1265'><font color='red'>}</font>
+<a name='L1266'>
+<a name='L1267'><b>void</b> *
+<a name='L1268'><a href='../R/3291.html' title='Multiple refered from 4 places.'>PyObject_Realloc</a>(<b>void</b> *p, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> n)
+<a name='L1269'><font color='red'>{</font>
+<a name='L1270'>    <b>return</b> PyMem_REALLOC(p, n);
+<a name='L1271'><font color='red'>}</font>
+<a name='L1272'>
+<a name='L1273'><b>void</b>
+<a name='L1274'><a href='../R/3261.html' title='Multiple refered from 21 places.'>PyObject_Free</a>(<b>void</b> *p)
+<a name='L1275'><font color='red'>{</font>
+<a name='L1276'>    PyMem_FREE(p);
+<a name='L1277'><font color='red'>}</font>
+<a name='L1278'><font color='darkred'>#endif</font> <i><font color='green'>/* WITH_PYMALLOC */</font></i>
+<a name='L1279'>
+<a name='L1280'><font color='darkred'>#ifdef</font> <a href='../S/570.html#L58' title='Defined at 58 in Include/Python.h.'>PYMALLOC_DEBUG</a>
+<a name='L1281'><i><font color='green'>/*==========================================================================*/</font></i>
+<a name='L1282'><i><font color='green'>/* A x-platform debugging allocator.  This doesn't manage memory directly,</font></i>
+<a name='L1283'><i><font color='green'> * it wraps a real allocator, adding extra debugging info to the memory blocks.</font></i>
+<a name='L1284'><i><font color='green'> */</font></i>
+<a name='L1285'>
+<a name='L1286'><i><font color='green'>/* Special bytes broadcast into debug memory blocks at appropriate times.</font></i>
+<a name='L1287'><i><font color='green'> * Strings of these are unlikely to be valid addresses, floats, ints or</font></i>
+<a name='L1288'><i><font color='green'> * 7-bit ASCII.</font></i>
+<a name='L1289'><i><font color='green'> */</font></i>
+<a name='L1290'><font color='darkred'>#undef</font> <a href='../R/523.html' title='Multiple refered from 2 places.'>CLEANBYTE</a>
+<a name='L1291'><font color='darkred'>#undef</font> <a href='../R/681.html' title='Multiple refered from 2 places.'>DEADBYTE</a>
+<a name='L1292'><font color='darkred'>#undef</font> <a href='../R/1148.html' title='Multiple refered from 12 places.'>FORBIDDENBYTE</a>
+<a name='L1293'><font color='darkred'>#define</font> <a href='../R/523.html' title='Multiple refered from 2 places.'>CLEANBYTE</a>      0xCB    <i><font color='green'>/* clean (newly allocated) memory */</font></i>
+<a name='L1294'><font color='darkred'>#define</font> <a href='../R/681.html' title='Multiple refered from 2 places.'>DEADBYTE</a>       0xDB    <i><font color='green'>/* dead (newly freed) memory */</font></i>
+<a name='L1295'><font color='darkred'>#define</font> <a href='../R/1148.html' title='Multiple refered from 12 places.'>FORBIDDENBYTE</a>  0xFB    <i><font color='green'>/* untouchable bytes at each end of a block */</font></i>
+<a name='L1296'>
+<a name='L1297'><i><font color='green'>/* We tag each block with an API ID in order to tag API violations */</font></i>
+<a name='L1298'><font color='darkred'>#define</font> <a href='../R/5344.html' title='Multiple refered from 3 places.'>_PYMALLOC_MEM_ID</a> 'm'   <i><font color='green'>/* the PyMem_Malloc() API */</font></i>
+<a name='L1299'><font color='darkred'>#define</font> <a href='../R/5345.html' title='Multiple refered from 4 places.'>_PYMALLOC_OBJ_ID</a> 'o'   <i><font color='green'>/* The PyObject_Malloc() API */</font></i>
+<a name='L1300'>
+<a name='L1301'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> serialno = 0;     <i><font color='green'>/* incremented on each debug {m,re}alloc */</font></i>
+<a name='L1302'>
+<a name='L1303'><i><font color='green'>/* serialno is always incremented via calling this routine.  The point is</font></i>
+<a name='L1304'><i><font color='green'> * to supply a single place to set a breakpoint.</font></i>
+<a name='L1305'><i><font color='green'> */</font></i>
+<a name='L1306'><b>static</b> <b>void</b>
+<a name='L1307'><a href='../R/6390.html' title='Multiple refered from 2 places.'>bumpserialno</a>(<b>void</b>)
+<a name='L1308'><font color='red'>{</font>
+<a name='L1309'>    ++serialno;
+<a name='L1310'><font color='red'>}</font>
+<a name='L1311'>
+<a name='L1312'><font color='darkred'>#define</font> <a href='../R/4324.html' title='Multiple refered from 36 places.'>SST</a> <a href='../D/4740.html' title='Multiple defined in 6 places.'>SIZEOF_SIZE_T</a>
+<a name='L1313'>
+<a name='L1314'><i><font color='green'>/* Read sizeof(size_t) bytes at p as a big-endian size_t. */</font></i>
+<a name='L1315'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>
+<a name='L1316'><a href='../R/9975.html' title='Multiple refered from 5 places.'>read_size_t</a>(<b>const</b> <b>void</b> *p)
+<a name='L1317'><font color='red'>{</font>
+<a name='L1318'>    <b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *q = (<b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)p;
+<a name='L1319'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = *q++;
+<a name='L1320'>    <b>int</b> i;
+<a name='L1321'>
+<a name='L1322'>    <b>for</b> (i = <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>; --i &gt; 0; ++q)
+<a name='L1323'>        <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> &lt;&lt; 8) | *q;
+<a name='L1324'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L1325'><font color='red'>}</font>
+<a name='L1326'>
+<a name='L1327'><i><font color='green'>/* Write n as a big-endian size_t, MSB at address p, LSB at</font></i>
+<a name='L1328'><i><font color='green'> * p + sizeof(size_t) - 1.</font></i>
+<a name='L1329'><i><font color='green'> */</font></i>
+<a name='L1330'><b>static</b> <b>void</b>
+<a name='L1331'><a href='../R/11478.html' title='Multiple refered from 4 places.'>write_size_t</a>(<b>void</b> *p, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> n)
+<a name='L1332'><font color='red'>{</font>
+<a name='L1333'>    <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *q = (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)p + <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a> - 1;
+<a name='L1334'>    <b>int</b> i;
+<a name='L1335'>
+<a name='L1336'>    <b>for</b> (i = <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>; --i &gt;= 0; --q) <font color='red'>{</font>
+<a name='L1337'>        *q = (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a>)(n &amp; 0xff);
+<a name='L1338'>        n &gt;&gt;= 8;
+<a name='L1339'>    <font color='red'>}</font>
+<a name='L1340'><font color='red'>}</font>
+<a name='L1341'>
+<a name='L1342'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L1343'><i><font color='green'>/* Is target in the list?  The list is traversed via the nextpool pointers.</font></i>
+<a name='L1344'><i><font color='green'> * The list may be NULL-terminated, or circular.  Return 1 if target is in</font></i>
+<a name='L1345'><i><font color='green'> * list, else 0.</font></i>
+<a name='L1346'><i><font color='green'> */</font></i>
+<a name='L1347'><b>static</b> <b>int</b>
+<a name='L1348'><a href='../R/9561.html' title='Multiple refered from 2 places.'>pool_is_in_list</a>(<b>const</b> poolp target, poolp list)
+<a name='L1349'><font color='red'>{</font>
+<a name='L1350'>    <a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a> origlist = list;
+<a name='L1351'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(target != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1352'>    <b>if</b> (list == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1353'>        <b>return</b> 0;
+<a name='L1354'>    <b>do</b> <font color='red'>{</font>
+<a name='L1355'>        <b>if</b> (target == list)
+<a name='L1356'>            <b>return</b> 1;
+<a name='L1357'>        list = list-&gt;nextpool;
+<a name='L1358'>    <font color='red'>}</font> <b>while</b> (list != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; list != origlist);
+<a name='L1359'>    <b>return</b> 0;
+<a name='L1360'><font color='red'>}</font>
+<a name='L1361'>
+<a name='L1362'><font color='darkred'>#else</font>
+<a name='L1363'><font color='darkred'>#define</font> <a href='../R/9561.html' title='Multiple refered from 2 places.'>pool_is_in_list</a>(X, Y) 1
+<a name='L1364'>
+<a name='L1365'><font color='darkred'>#endif</font>  <i><font color='green'>/* Py_DEBUG */</font></i>
+<a name='L1366'>
+<a name='L1367'><i><font color='green'>/* Let S = sizeof(size_t).  The debug malloc asks for 4*S extra bytes and</font></i>
+<a name='L1368'><i><font color='green'>   fills them with useful stuff, here calling the underlying malloc's result p:</font></i>
+<a name='L1369'><i><font color='green'></font></i>
+<a name='L1370'><i><font color='green'>p[0: S]</font></i>
+<a name='L1371'><i><font color='green'>    Number of bytes originally asked for.  This is a size_t, big-endian (easier</font></i>
+<a name='L1372'><i><font color='green'>    to read in a memory dump).</font></i>
+<a name='L1373'><i><font color='green'>p[S: 2*S]</font></i>
+<a name='L1374'><i><font color='green'>    Copies of FORBIDDENBYTE.  Used to catch under- writes and reads.</font></i>
+<a name='L1375'><i><font color='green'>p[2*S: 2*S+n]</font></i>
+<a name='L1376'><i><font color='green'>    The requested memory, filled with copies of CLEANBYTE.</font></i>
+<a name='L1377'><i><font color='green'>    Used to catch reference to uninitialized memory.</font></i>
+<a name='L1378'><i><font color='green'>    &amp;p[2*S] is returned.  Note that this is 8-byte aligned if pymalloc</font></i>
+<a name='L1379'><i><font color='green'>    handled the request itself.</font></i>
+<a name='L1380'><i><font color='green'>p[2*S+n: 2*S+n+S]</font></i>
+<a name='L1381'><i><font color='green'>    Copies of FORBIDDENBYTE.  Used to catch over- writes and reads.</font></i>
+<a name='L1382'><i><font color='green'>p[2*S+n+S: 2*S+n+2*S]</font></i>
+<a name='L1383'><i><font color='green'>    A serial number, incremented by 1 on each call to _PyObject_DebugMalloc</font></i>
+<a name='L1384'><i><font color='green'>    and _PyObject_DebugRealloc.</font></i>
+<a name='L1385'><i><font color='green'>    This is a big-endian size_t.</font></i>
+<a name='L1386'><i><font color='green'>    If "bad memory" is detected later, the serial number gives an</font></i>
+<a name='L1387'><i><font color='green'>    excellent way to set a breakpoint on the next run, to capture the</font></i>
+<a name='L1388'><i><font color='green'>    instant at which this block was passed out.</font></i>
+<a name='L1389'><i><font color='green'>*/</font></i>
+<a name='L1390'>
+<a name='L1391'><i><font color='green'>/* debug replacements for the PyMem_* memory API */</font></i>
+<a name='L1392'><b>void</b> *
+<a name='L1393'>_PyMem_DebugMalloc(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L1394'><font color='red'>{</font>
+<a name='L1395'>    <b>return</b> <a href='../S/2804.html#L1433' title='Defined at 1433 in Objects/obmalloc.c.'>_PyObject_DebugMallocApi</a>(<a href='../S/2804.html#L1298' title='Defined at 1298 in Objects/obmalloc.c.'>_PYMALLOC_MEM_ID</a>, nbytes);
+<a name='L1396'><font color='red'>}</font>
+<a name='L1397'><b>void</b> *
+<a name='L1398'>_PyMem_DebugRealloc(<b>void</b> *p, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L1399'><font color='red'>{</font>
+<a name='L1400'>    <b>return</b> <a href='../S/2804.html#L1487' title='Defined at 1487 in Objects/obmalloc.c.'>_PyObject_DebugReallocApi</a>(<a href='../S/2804.html#L1298' title='Defined at 1298 in Objects/obmalloc.c.'>_PYMALLOC_MEM_ID</a>, p, nbytes);
+<a name='L1401'><font color='red'>}</font>
+<a name='L1402'><b>void</b>
+<a name='L1403'>_PyMem_DebugFree(<b>void</b> *p)
+<a name='L1404'><font color='red'>{</font>
+<a name='L1405'>    <a href='../S/2804.html#L1471' title='Defined at 1471 in Objects/obmalloc.c.'>_PyObject_DebugFreeApi</a>(<a href='../S/2804.html#L1298' title='Defined at 1298 in Objects/obmalloc.c.'>_PYMALLOC_MEM_ID</a>, p);
+<a name='L1406'><font color='red'>}</font>
+<a name='L1407'>
+<a name='L1408'><i><font color='green'>/* debug replacements for the PyObject_* memory API */</font></i>
+<a name='L1409'><b>void</b> *
+<a name='L1410'>_PyObject_DebugMalloc(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L1411'><font color='red'>{</font>
+<a name='L1412'>    <b>return</b> <a href='../S/2804.html#L1433' title='Defined at 1433 in Objects/obmalloc.c.'>_PyObject_DebugMallocApi</a>(<a href='../S/2804.html#L1299' title='Defined at 1299 in Objects/obmalloc.c.'>_PYMALLOC_OBJ_ID</a>, nbytes);
+<a name='L1413'><font color='red'>}</font>
+<a name='L1414'><b>void</b> *
+<a name='L1415'>_PyObject_DebugRealloc(<b>void</b> *p, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L1416'><font color='red'>{</font>
+<a name='L1417'>    <b>return</b> <a href='../S/2804.html#L1487' title='Defined at 1487 in Objects/obmalloc.c.'>_PyObject_DebugReallocApi</a>(<a href='../S/2804.html#L1299' title='Defined at 1299 in Objects/obmalloc.c.'>_PYMALLOC_OBJ_ID</a>, p, nbytes);
+<a name='L1418'><font color='red'>}</font>
+<a name='L1419'><b>void</b>
+<a name='L1420'>_PyObject_DebugFree(<b>void</b> *p)
+<a name='L1421'><font color='red'>{</font>
+<a name='L1422'>    <a href='../S/2804.html#L1471' title='Defined at 1471 in Objects/obmalloc.c.'>_PyObject_DebugFreeApi</a>(<a href='../S/2804.html#L1299' title='Defined at 1299 in Objects/obmalloc.c.'>_PYMALLOC_OBJ_ID</a>, p);
+<a name='L1423'><font color='red'>}</font>
+<a name='L1424'><b>void</b>
+<a name='L1425'>_PyObject_DebugCheckAddress(<b>const</b> <b>void</b> *p)
+<a name='L1426'><font color='red'>{</font>
+<a name='L1427'>    <a href='../S/2804.html#L1543' title='Defined at 1543 in Objects/obmalloc.c.'>_PyObject_DebugCheckAddressApi</a>(<a href='../S/2804.html#L1299' title='Defined at 1299 in Objects/obmalloc.c.'>_PYMALLOC_OBJ_ID</a>, p);
+<a name='L1428'><font color='red'>}</font>
+<a name='L1429'>
+<a name='L1430'>
+<a name='L1431'><i><font color='green'>/* generic debug memory api, with an "id" to identify the API in use */</font></i>
+<a name='L1432'><b>void</b> *
+<a name='L1433'><a href='../R/5462.html' title='Multiple refered from 3 places.'>_PyObject_DebugMallocApi</a>(<b>char</b> id, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L1434'><font color='red'>{</font>
+<a name='L1435'>    <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *p;           <i><font color='green'>/* base address of malloc'ed block */</font></i>
+<a name='L1436'>    <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *tail;        <i><font color='green'>/* p + 2*SST + nbytes == pointer to tail pad bytes */</font></i>
+<a name='L1437'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total;       <i><font color='green'>/* nbytes + 4*SST */</font></i>
+<a name='L1438'>
+<a name='L1439'>    <a href='../S/2804.html#L1307' title='Defined at 1307 in Objects/obmalloc.c.'>bumpserialno</a>();
+<a name='L1440'>    total = nbytes + 4*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>;
+<a name='L1441'>    <b>if</b> (total &lt; nbytes)
+<a name='L1442'>        <i><font color='green'>/* overflow:  can't represent total as a size_t */</font></i>
+<a name='L1443'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1444'>
+<a name='L1445'>    p = (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)<a href='../S/2804.html#L1262' title='Defined at 1262 in Objects/obmalloc.c.'>PyObject_Malloc</a>(total);
+<a name='L1446'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1447'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1448'>
+<a name='L1449'>    <i><font color='green'>/* at p, write size (SST bytes), id (1 byte), pad (SST-1 bytes) */</font></i>
+<a name='L1450'>    <a href='../S/2804.html#L1331' title='Defined at 1331 in Objects/obmalloc.c.'>write_size_t</a>(p, nbytes);
+<a name='L1451'>    p[<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>] = (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a>)id;
+<a name='L1452'>    memset(p + <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a> + 1 , <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>, <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>-1);
+<a name='L1453'>
+<a name='L1454'>    <b>if</b> (nbytes &gt; 0)
+<a name='L1455'>        memset(p + 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>, <a href='../D/560.html' title='Multiple defined in 2 places.'>CLEANBYTE</a>, nbytes);
+<a name='L1456'>
+<a name='L1457'>    <i><font color='green'>/* at tail, write pad (SST bytes) and serialno (SST bytes) */</font></i>
+<a name='L1458'>    tail = p + 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a> + nbytes;
+<a name='L1459'>    memset(tail, <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>, <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>);
+<a name='L1460'>    <a href='../S/2804.html#L1331' title='Defined at 1331 in Objects/obmalloc.c.'>write_size_t</a>(tail + <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>, serialno);
+<a name='L1461'>
+<a name='L1462'>    <b>return</b> p + 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>;
+<a name='L1463'><font color='red'>}</font>
+<a name='L1464'>
+<a name='L1465'><i><font color='green'>/* The debug free first checks the 2*SST bytes on each end for sanity (in</font></i>
+<a name='L1466'><i><font color='green'>   particular, that the FORBIDDENBYTEs with the api ID are still intact).</font></i>
+<a name='L1467'><i><font color='green'>   Then fills the original bytes with DEADBYTE.</font></i>
+<a name='L1468'><i><font color='green'>   Then calls the underlying free.</font></i>
+<a name='L1469'><i><font color='green'>*/</font></i>
+<a name='L1470'><b>void</b>
+<a name='L1471'><a href='../R/5461.html' title='Multiple refered from 2 places.'>_PyObject_DebugFreeApi</a>(<b>char</b> api, <b>void</b> *p)
+<a name='L1472'><font color='red'>{</font>
+<a name='L1473'>    <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *q = (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)p - 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>;  <i><font color='green'>/* address returned from malloc */</font></i>
+<a name='L1474'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes;
+<a name='L1475'>
+<a name='L1476'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1477'>        <b>return</b>;
+<a name='L1478'>    <a href='../S/2804.html#L1543' title='Defined at 1543 in Objects/obmalloc.c.'>_PyObject_DebugCheckAddressApi</a>(api, p);
+<a name='L1479'>    nbytes = <a href='../S/2804.html#L1316' title='Defined at 1316 in Objects/obmalloc.c.'>read_size_t</a>(q);
+<a name='L1480'>    nbytes += 4*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>;
+<a name='L1481'>    <b>if</b> (nbytes &gt; 0)
+<a name='L1482'>        memset(q, <a href='../D/727.html' title='Multiple defined in 2 places.'>DEADBYTE</a>, nbytes);
+<a name='L1483'>    <a href='../D/3616.html' title='Multiple defined in 3 places.'>PyObject_Free</a>(q);
+<a name='L1484'><font color='red'>}</font>
+<a name='L1485'>
+<a name='L1486'><b>void</b> *
+<a name='L1487'><a href='../R/5464.html' title='Multiple refered from 2 places.'>_PyObject_DebugReallocApi</a>(<b>char</b> api, <b>void</b> *p, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes)
+<a name='L1488'><font color='red'>{</font>
+<a name='L1489'>    <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *q = (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)p;
+<a name='L1490'>    <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *tail;
+<a name='L1491'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total;       <i><font color='green'>/* nbytes + 4*SST */</font></i>
+<a name='L1492'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> original_nbytes;
+<a name='L1493'>    <b>int</b> i;
+<a name='L1494'>
+<a name='L1495'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1496'>        <b>return</b> <a href='../S/2804.html#L1433' title='Defined at 1433 in Objects/obmalloc.c.'>_PyObject_DebugMallocApi</a>(api, nbytes);
+<a name='L1497'>
+<a name='L1498'>    <a href='../S/2804.html#L1543' title='Defined at 1543 in Objects/obmalloc.c.'>_PyObject_DebugCheckAddressApi</a>(api, p);
+<a name='L1499'>    <a href='../S/2804.html#L1307' title='Defined at 1307 in Objects/obmalloc.c.'>bumpserialno</a>();
+<a name='L1500'>    original_nbytes = <a href='../S/2804.html#L1316' title='Defined at 1316 in Objects/obmalloc.c.'>read_size_t</a>(q - 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>);
+<a name='L1501'>    total = nbytes + 4*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>;
+<a name='L1502'>    <b>if</b> (total &lt; nbytes)
+<a name='L1503'>        <i><font color='green'>/* overflow:  can't represent total as a size_t */</font></i>
+<a name='L1504'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1505'>
+<a name='L1506'>    <b>if</b> (nbytes &lt; original_nbytes) <font color='red'>{</font>
+<a name='L1507'>        <i><font color='green'>/* shrinking:  mark old extra memory dead */</font></i>
+<a name='L1508'>        memset(q + nbytes, <a href='../D/727.html' title='Multiple defined in 2 places.'>DEADBYTE</a>, original_nbytes - nbytes + 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>);
+<a name='L1509'>    <font color='red'>}</font>
+<a name='L1510'>
+<a name='L1511'>    <i><font color='green'>/* Resize and add decorations. We may get a new pointer here, in which</font></i>
+<a name='L1512'><i><font color='green'>     * case we didn't get the chance to mark the old memory with DEADBYTE,</font></i>
+<a name='L1513'><i><font color='green'>     * but we live with that.</font></i>
+<a name='L1514'><i><font color='green'>     */</font></i>
+<a name='L1515'>    q = (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)<a href='../D/3646.html' title='Multiple defined in 3 places.'>PyObject_Realloc</a>(q - 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>, total);
+<a name='L1516'>    <b>if</b> (q == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1517'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1518'>
+<a name='L1519'>    <a href='../S/2804.html#L1331' title='Defined at 1331 in Objects/obmalloc.c.'>write_size_t</a>(q, nbytes);
+<a name='L1520'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(q[<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>] == (<a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a>)api);
+<a name='L1521'>    <b>for</b> (i = 1; i &lt; <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>; ++i)
+<a name='L1522'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(q[<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a> + i] == <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>);
+<a name='L1523'>    q += 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>;
+<a name='L1524'>    tail = q + nbytes;
+<a name='L1525'>    memset(tail, <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>, <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>);
+<a name='L1526'>    <a href='../S/2804.html#L1331' title='Defined at 1331 in Objects/obmalloc.c.'>write_size_t</a>(tail + <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>, serialno);
+<a name='L1527'>
+<a name='L1528'>    <b>if</b> (nbytes &gt; original_nbytes) <font color='red'>{</font>
+<a name='L1529'>        <i><font color='green'>/* growing:  mark new extra memory clean */</font></i>
+<a name='L1530'>        memset(q + original_nbytes, <a href='../D/560.html' title='Multiple defined in 2 places.'>CLEANBYTE</a>,
+<a name='L1531'>               nbytes - original_nbytes);
+<a name='L1532'>    <font color='red'>}</font>
+<a name='L1533'>
+<a name='L1534'>    <b>return</b> q;
+<a name='L1535'><font color='red'>}</font>
+<a name='L1536'>
+<a name='L1537'><i><font color='green'>/* Check the forbidden bytes on both ends of the memory allocated for p.</font></i>
+<a name='L1538'><i><font color='green'> * If anything is wrong, print info to stderr via _PyObject_DebugDumpAddress,</font></i>
+<a name='L1539'><i><font color='green'> * and call Py_FatalError to kill the program.</font></i>
+<a name='L1540'><i><font color='green'> * The API id, is also checked.</font></i>
+<a name='L1541'><i><font color='green'> */</font></i>
+<a name='L1542'> <b>void</b>
+<a name='L1543'><a href='../R/5459.html' title='Multiple refered from 3 places.'>_PyObject_DebugCheckAddressApi</a>(<b>char</b> api, <b>const</b> <b>void</b> *p)
+<a name='L1544'><font color='red'>{</font>
+<a name='L1545'>    <b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *q = (<b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)p;
+<a name='L1546'>    <b>char</b> msgbuf[64];
+<a name='L1547'>    <b>char</b> *msg;
+<a name='L1548'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes;
+<a name='L1549'>    <b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *tail;
+<a name='L1550'>    <b>int</b> i;
+<a name='L1551'>    <b>char</b> id;
+<a name='L1552'>
+<a name='L1553'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1554'>        msg = "didn't expect a NULL pointer";
+<a name='L1555'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L1556'>    <font color='red'>}</font>
+<a name='L1557'>
+<a name='L1558'>    <i><font color='green'>/* Check the API id */</font></i>
+<a name='L1559'>    id = (<b>char</b>)q[-<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>];
+<a name='L1560'>    <b>if</b> (id != api) <font color='red'>{</font>
+<a name='L1561'>        msg = msgbuf;
+<a name='L1562'>        <a href='../S/2711.html#L370' title='Defined at 370 in Modules/socketmodule.c.'>snprintf</a>(msg, <b>sizeof</b>(msgbuf), "bad ID: Allocated using API '%c', verified using API '%c'", id, api);
+<a name='L1563'>        msgbuf[<b>sizeof</b>(msgbuf)-1] = 0;
+<a name='L1564'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L1565'>    <font color='red'>}</font>
+<a name='L1566'>
+<a name='L1567'>    <i><font color='green'>/* Check the stuff at the start of p first:  if there's underwrite</font></i>
+<a name='L1568'><i><font color='green'>     * corruption, the number-of-bytes field may be nuts, and checking</font></i>
+<a name='L1569'><i><font color='green'>     * the tail could lead to a segfault then.</font></i>
+<a name='L1570'><i><font color='green'>     */</font></i>
+<a name='L1571'>    <b>for</b> (i = <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>-1; i &gt;= 1; --i) <font color='red'>{</font>
+<a name='L1572'>        <b>if</b> (*(q-i) != <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>) <font color='red'>{</font>
+<a name='L1573'>            msg = "bad leading pad byte";
+<a name='L1574'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L1575'>        <font color='red'>}</font>
+<a name='L1576'>    <font color='red'>}</font>
+<a name='L1577'>
+<a name='L1578'>    nbytes = <a href='../S/2804.html#L1316' title='Defined at 1316 in Objects/obmalloc.c.'>read_size_t</a>(q - 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>);
+<a name='L1579'>    tail = q + nbytes;
+<a name='L1580'>    <b>for</b> (i = 0; i &lt; <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>; ++i) <font color='red'>{</font>
+<a name='L1581'>        <b>if</b> (tail[i] != <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>) <font color='red'>{</font>
+<a name='L1582'>            msg = "bad trailing pad byte";
+<a name='L1583'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L1584'>        <font color='red'>}</font>
+<a name='L1585'>    <font color='red'>}</font>
+<a name='L1586'>
+<a name='L1587'>    <b>return</b>;
+<a name='L1588'>
+<a name='L1589'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L1590'>    <a href='../S/2804.html#L1596' title='Defined at 1596 in Objects/obmalloc.c.'>_PyObject_DebugDumpAddress</a>(p);
+<a name='L1591'>    <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>(msg);
+<a name='L1592'><font color='red'>}</font>
+<a name='L1593'>
+<a name='L1594'><i><font color='green'>/* Display info to stderr about the memory block at p. */</font></i>
+<a name='L1595'><b>void</b>
+<a name='L1596'><a href='../S/2804.html#L1590' title='Refered from 1590 in Objects/obmalloc.c.'>_PyObject_DebugDumpAddress</a>(<b>const</b> <b>void</b> *p)
+<a name='L1597'><font color='red'>{</font>
+<a name='L1598'>    <b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *q = (<b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *)p;
+<a name='L1599'>    <b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> *tail;
+<a name='L1600'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nbytes, serial;
+<a name='L1601'>    <b>int</b> i;
+<a name='L1602'>    <b>int</b> ok;
+<a name='L1603'>    <b>char</b> id;
+<a name='L1604'>
+<a name='L1605'>    fprintf(stderr, "Debug memory block at address p=%p:", p);
+<a name='L1606'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L1607'>        fprintf(stderr, "\n");
+<a name='L1608'>        <b>return</b>;
+<a name='L1609'>    <font color='red'>}</font>
+<a name='L1610'>    id = (<b>char</b>)q[-<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>];
+<a name='L1611'>    fprintf(stderr, " API '%c'\n", id);
+<a name='L1612'>
+<a name='L1613'>    nbytes = <a href='../S/2804.html#L1316' title='Defined at 1316 in Objects/obmalloc.c.'>read_size_t</a>(q - 2*<a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>);
+<a name='L1614'>    fprintf(stderr, "    %" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a> "u bytes originally "
+<a name='L1615'>                    "requested\n", nbytes);
+<a name='L1616'>
+<a name='L1617'>    <i><font color='green'>/* In case this is nuts, check the leading pad bytes first. */</font></i>
+<a name='L1618'>    fprintf(stderr, "    The %d pad bytes at p-%d are ", <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>-1, <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>-1);
+<a name='L1619'>    ok = 1;
+<a name='L1620'>    <b>for</b> (i = 1; i &lt;= <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>-1; ++i) <font color='red'>{</font>
+<a name='L1621'>        <b>if</b> (*(q-i) != <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>) <font color='red'>{</font>
+<a name='L1622'>            ok = 0;
+<a name='L1623'>            <b>break</b>;
+<a name='L1624'>        <font color='red'>}</font>
+<a name='L1625'>    <font color='red'>}</font>
+<a name='L1626'>    <b>if</b> (ok)
+<a name='L1627'>        fputs("FORBIDDENBYTE, as expected.\n", stderr);
+<a name='L1628'>    <b>else</b> <font color='red'>{</font>
+<a name='L1629'>        fprintf(stderr, "not all FORBIDDENBYTE (0x%02x):\n",
+<a name='L1630'>            <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>);
+<a name='L1631'>        <b>for</b> (i = <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>-1; i &gt;= 1; --i) <font color='red'>{</font>
+<a name='L1632'>            <b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> byte = *(q-i);
+<a name='L1633'>            fprintf(stderr, "        at p-%d: 0x%02x", i, byte);
+<a name='L1634'>            <b>if</b> (byte != <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>)
+<a name='L1635'>                fputs(" *** OUCH", stderr);
+<a name='L1636'>            fputc('\n', stderr);
+<a name='L1637'>        <font color='red'>}</font>
+<a name='L1638'>
+<a name='L1639'>        fputs("    Because memory is corrupted at the start, the "
+<a name='L1640'>              "count of bytes requested\n"
+<a name='L1641'>              "       may be bogus, and checking the trailing pad "
+<a name='L1642'>              "bytes may segfault.\n", stderr);
+<a name='L1643'>    <font color='red'>}</font>
+<a name='L1644'>
+<a name='L1645'>    tail = q + nbytes;
+<a name='L1646'>    fprintf(stderr, "    The %d pad bytes at tail=%p are ", <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>, tail);
+<a name='L1647'>    ok = 1;
+<a name='L1648'>    <b>for</b> (i = 0; i &lt; <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>; ++i) <font color='red'>{</font>
+<a name='L1649'>        <b>if</b> (tail[i] != <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>) <font color='red'>{</font>
+<a name='L1650'>            ok = 0;
+<a name='L1651'>            <b>break</b>;
+<a name='L1652'>        <font color='red'>}</font>
+<a name='L1653'>    <font color='red'>}</font>
+<a name='L1654'>    <b>if</b> (ok)
+<a name='L1655'>        fputs("FORBIDDENBYTE, as expected.\n", stderr);
+<a name='L1656'>    <b>else</b> <font color='red'>{</font>
+<a name='L1657'>        fprintf(stderr, "not all FORBIDDENBYTE (0x%02x):\n",
+<a name='L1658'>                <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>);
+<a name='L1659'>        <b>for</b> (i = 0; i &lt; <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>; ++i) <font color='red'>{</font>
+<a name='L1660'>            <b>const</b> <a href='../D/11928.html' title='Multiple defined in 2 places.'>uchar</a> byte = tail[i];
+<a name='L1661'>            fprintf(stderr, "        at tail+%d: 0x%02x",
+<a name='L1662'>                    i, byte);
+<a name='L1663'>            <b>if</b> (byte != <a href='../D/1286.html' title='Multiple defined in 2 places.'>FORBIDDENBYTE</a>)
+<a name='L1664'>                fputs(" *** OUCH", stderr);
+<a name='L1665'>            fputc('\n', stderr);
+<a name='L1666'>        <font color='red'>}</font>
+<a name='L1667'>    <font color='red'>}</font>
+<a name='L1668'>
+<a name='L1669'>    serial = <a href='../S/2804.html#L1316' title='Defined at 1316 in Objects/obmalloc.c.'>read_size_t</a>(tail + <a href='../S/2804.html#L1312' title='Defined at 1312 in Objects/obmalloc.c.'>SST</a>);
+<a name='L1670'>    fprintf(stderr, "    The block was made by call #%" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a>
+<a name='L1671'>                    "u to debug malloc/realloc.\n", serial);
+<a name='L1672'>
+<a name='L1673'>    <b>if</b> (nbytes &gt; 0) <font color='red'>{</font>
+<a name='L1674'>        i = 0;
+<a name='L1675'>        fputs("    Data at p:", stderr);
+<a name='L1676'>        <i><font color='green'>/* print up to 8 bytes at the start */</font></i>
+<a name='L1677'>        <b>while</b> (q &lt; tail &amp;&amp; i &lt; 8) <font color='red'>{</font>
+<a name='L1678'>            fprintf(stderr, " %02x", *q);
+<a name='L1679'>            ++i;
+<a name='L1680'>            ++q;
+<a name='L1681'>        <font color='red'>}</font>
+<a name='L1682'>        <i><font color='green'>/* and up to 8 at the end */</font></i>
+<a name='L1683'>        <b>if</b> (q &lt; tail) <font color='red'>{</font>
+<a name='L1684'>            <b>if</b> (tail - q &gt; 8) <font color='red'>{</font>
+<a name='L1685'>                fputs(" ...", stderr);
+<a name='L1686'>                q = tail - 8;
+<a name='L1687'>            <font color='red'>}</font>
+<a name='L1688'>            <b>while</b> (q &lt; tail) <font color='red'>{</font>
+<a name='L1689'>                fprintf(stderr, " %02x", *q);
+<a name='L1690'>                ++q;
+<a name='L1691'>            <font color='red'>}</font>
+<a name='L1692'>        <font color='red'>}</font>
+<a name='L1693'>        fputc('\n', stderr);
+<a name='L1694'>    <font color='red'>}</font>
+<a name='L1695'><font color='red'>}</font>
+<a name='L1696'>
+<a name='L1697'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>
+<a name='L1698'><a href='../R/9714.html' title='Multiple refered from 13 places.'>printone</a>(<b>const</b> <b>char</b>* msg, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> value)
+<a name='L1699'><font color='red'>{</font>
+<a name='L1700'>    <b>int</b> i, k;
+<a name='L1701'>    <b>char</b> buf[100];
+<a name='L1702'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> origvalue = <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L1703'>
+<a name='L1704'>    fputs(msg, stderr);
+<a name='L1705'>    <b>for</b> (i = (<b>int</b>)strlen(msg); i &lt; 35; ++i)
+<a name='L1706'>        fputc(' ', stderr);
+<a name='L1707'>    fputc('=', stderr);
+<a name='L1708'>
+<a name='L1709'>    <i><font color='green'>/* Write the value with commas. */</font></i>
+<a name='L1710'>    i = 22;
+<a name='L1711'>    buf[i--] = '\0';
+<a name='L1712'>    buf[i--] = '\n';
+<a name='L1713'>    k = 3;
+<a name='L1714'>    <b>do</b> <font color='red'>{</font>
+<a name='L1715'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> nextvalue = <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> / 10;
+<a name='L1716'>        <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> <a href='../D/8164.html' title='Multiple defined in 2 places.'>digit</a> = (<a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a>)(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> - nextvalue * 10);
+<a name='L1717'>        <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = nextvalue;
+<a name='L1718'>        buf[i--] = (<b>char</b>)(<a href='../D/8164.html' title='Multiple defined in 2 places.'>digit</a> + '0');
+<a name='L1719'>        --k;
+<a name='L1720'>        <b>if</b> (k == 0 &amp;&amp; <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &amp;&amp; i &gt;= 0) <font color='red'>{</font>
+<a name='L1721'>            k = 3;
+<a name='L1722'>            buf[i--] = ',';
+<a name='L1723'>        <font color='red'>}</font>
+<a name='L1724'>    <font color='red'>}</font> <b>while</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &amp;&amp; i &gt;= 0);
+<a name='L1725'>
+<a name='L1726'>    <b>while</b> (i &gt;= 0)
+<a name='L1727'>        buf[i--] = ' ';
+<a name='L1728'>    fputs(buf, stderr);
+<a name='L1729'>
+<a name='L1730'>    <b>return</b> origvalue;
+<a name='L1731'><font color='red'>}</font>
+<a name='L1732'>
+<a name='L1733'><i><font color='green'>/* Print summary info to stderr about the state of pymalloc's structures.</font></i>
+<a name='L1734'><i><font color='green'> * In Py_DEBUG mode, also perform some expensive internal consistency</font></i>
+<a name='L1735'><i><font color='green'> * checks.</font></i>
+<a name='L1736'><i><font color='green'> */</font></i>
+<a name='L1737'><b>void</b>
+<a name='L1738'><a href='../R/5463.html' title='Multiple refered from 2 places.'>_PyObject_DebugMallocStats</a>(<b>void</b>)
+<a name='L1739'><font color='red'>{</font>
+<a name='L1740'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> i;
+<a name='L1741'>    <b>const</b> <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> numclasses = <a href='../S/2804.html#L149' title='Defined at 149 in Objects/obmalloc.c.'>SMALL_REQUEST_THRESHOLD</a> &gt;&gt; <a href='../S/2804.html#L131' title='Defined at 131 in Objects/obmalloc.c.'>ALIGNMENT_SHIFT</a>;
+<a name='L1742'>    <i><font color='green'>/* # of pools, allocated blocks, and free blocks per class index */</font></i>
+<a name='L1743'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> numpools[<a href='../S/2804.html#L149' title='Defined at 149 in Objects/obmalloc.c.'>SMALL_REQUEST_THRESHOLD</a> &gt;&gt; <a href='../S/2804.html#L131' title='Defined at 131 in Objects/obmalloc.c.'>ALIGNMENT_SHIFT</a>];
+<a name='L1744'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> numblocks[<a href='../S/2804.html#L149' title='Defined at 149 in Objects/obmalloc.c.'>SMALL_REQUEST_THRESHOLD</a> &gt;&gt; <a href='../S/2804.html#L131' title='Defined at 131 in Objects/obmalloc.c.'>ALIGNMENT_SHIFT</a>];
+<a name='L1745'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> numfreeblocks[<a href='../S/2804.html#L149' title='Defined at 149 in Objects/obmalloc.c.'>SMALL_REQUEST_THRESHOLD</a> &gt;&gt; <a href='../S/2804.html#L131' title='Defined at 131 in Objects/obmalloc.c.'>ALIGNMENT_SHIFT</a>];
+<a name='L1746'>    <i><font color='green'>/* total # of allocated bytes in used and full pools */</font></i>
+<a name='L1747'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> allocated_bytes = 0;
+<a name='L1748'>    <i><font color='green'>/* total # of available bytes in used pools */</font></i>
+<a name='L1749'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> available_bytes = 0;
+<a name='L1750'>    <i><font color='green'>/* # of free pools + pools not yet carved out of current arena */</font></i>
+<a name='L1751'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> numfreepools = 0;
+<a name='L1752'>    <i><font color='green'>/* # of bytes for arena alignment padding */</font></i>
+<a name='L1753'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> arena_alignment = 0;
+<a name='L1754'>    <i><font color='green'>/* # of bytes in used and full pools used for pool_headers */</font></i>
+<a name='L1755'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> pool_header_bytes = 0;
+<a name='L1756'>    <i><font color='green'>/* # of bytes in used and full pools wasted due to quantization,</font></i>
+<a name='L1757'><i><font color='green'>     * i.e. the necessarily leftover space at the ends of used and</font></i>
+<a name='L1758'><i><font color='green'>     * full pools.</font></i>
+<a name='L1759'><i><font color='green'>     */</font></i>
+<a name='L1760'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> quantization = 0;
+<a name='L1761'>    <i><font color='green'>/* # of arenas actually allocated. */</font></i>
+<a name='L1762'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> narenas = 0;
+<a name='L1763'>    <i><font color='green'>/* running total -- should equal narenas * ARENA_SIZE */</font></i>
+<a name='L1764'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> total;
+<a name='L1765'>    <b>char</b> buf[128];
+<a name='L1766'>
+<a name='L1767'>    fprintf(stderr, "Small block threshold = %d, in %u size classes.\n",
+<a name='L1768'>            <a href='../S/2804.html#L149' title='Defined at 149 in Objects/obmalloc.c.'>SMALL_REQUEST_THRESHOLD</a>, numclasses);
+<a name='L1769'>
+<a name='L1770'>    <b>for</b> (i = 0; i &lt; numclasses; ++i)
+<a name='L1771'>        numpools[i] = numblocks[i] = numfreeblocks[i] = 0;
+<a name='L1772'>
+<a name='L1773'>    <i><font color='green'>/* Because full pools aren't linked to from anything, it's easiest</font></i>
+<a name='L1774'><i><font color='green'>     * to march over all the arenas.  If we're lucky, most of the memory</font></i>
+<a name='L1775'><i><font color='green'>     * will be living in full pools -- would be a shame to miss them.</font></i>
+<a name='L1776'><i><font color='green'>     */</font></i>
+<a name='L1777'>    <b>for</b> (i = 0; i &lt; maxarenas; ++i) <font color='red'>{</font>
+<a name='L1778'>        <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> poolsinarena;
+<a name='L1779'>        <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> j;
+<a name='L1780'>        <a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a> base = arenas[i].address;
+<a name='L1781'>
+<a name='L1782'>        <i><font color='green'>/* Skip arenas which are not allocated. */</font></i>
+<a name='L1783'>        <b>if</b> (arenas[i].address == (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1784'>            <b>continue</b>;
+<a name='L1785'>        narenas += 1;
+<a name='L1786'>
+<a name='L1787'>        poolsinarena = arenas[i].ntotalpools;
+<a name='L1788'>        numfreepools += arenas[i].nfreepools;
+<a name='L1789'>
+<a name='L1790'>        <i><font color='green'>/* round up to pool alignment */</font></i>
+<a name='L1791'>        <b>if</b> (base &amp; (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)<a href='../S/2804.html#L198' title='Defined at 198 in Objects/obmalloc.c.'>POOL_SIZE_MASK</a>) <font color='red'>{</font>
+<a name='L1792'>            arena_alignment += <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>;
+<a name='L1793'>            base &amp;= ~(<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)<a href='../S/2804.html#L198' title='Defined at 198 in Objects/obmalloc.c.'>POOL_SIZE_MASK</a>;
+<a name='L1794'>            base += <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>;
+<a name='L1795'>        <font color='red'>}</font>
+<a name='L1796'>
+<a name='L1797'>        <i><font color='green'>/* visit every pool in the arena */</font></i>
+<a name='L1798'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(base &lt;= (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>) arenas[i].pool_address);
+<a name='L1799'>        <b>for</b> (j = 0;
+<a name='L1800'>                    base &lt; (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>) arenas[i].pool_address;
+<a name='L1801'>                    ++j, base += <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>) <font color='red'>{</font>
+<a name='L1802'>            <a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a> p = (<a href='../S/2804.html#L262' title='Defined at 262 in Objects/obmalloc.c.'>poolp</a>)base;
+<a name='L1803'>            <b>const</b> <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> sz = p-&gt;szidx;
+<a name='L1804'>            <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> freeblocks;
+<a name='L1805'>
+<a name='L1806'>            <b>if</b> (p-&gt;ref.count == 0) <font color='red'>{</font>
+<a name='L1807'>                <i><font color='green'>/* currently unused */</font></i>
+<a name='L1808'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/10398.html' title='Multiple defined in 2 places.'>pool_is_in_list</a>(p, arenas[i].freepools));
+<a name='L1809'>                <b>continue</b>;
+<a name='L1810'>            <font color='red'>}</font>
+<a name='L1811'>            ++numpools[sz];
+<a name='L1812'>            numblocks[sz] += p-&gt;ref.count;
+<a name='L1813'>            freeblocks = <a href='../S/2804.html#L315' title='Defined at 315 in Objects/obmalloc.c.'>NUMBLOCKS</a>(sz) - p-&gt;ref.count;
+<a name='L1814'>            numfreeblocks[sz] += freeblocks;
+<a name='L1815'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L1816'>            <b>if</b> (freeblocks &gt; 0)
+<a name='L1817'>                <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/10398.html' title='Multiple defined in 2 places.'>pool_is_in_list</a>(p, usedpools[sz + sz]));
+<a name='L1818'><font color='darkred'>#endif</font>
+<a name='L1819'>        <font color='red'>}</font>
+<a name='L1820'>    <font color='red'>}</font>
+<a name='L1821'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(narenas == narenas_currently_allocated);
+<a name='L1822'>
+<a name='L1823'>    fputc('\n', stderr);
+<a name='L1824'>    fputs("class   size   num pools   blocks in use  avail blocks\n"
+<a name='L1825'>          "-----   ----   ---------   -------------  ------------\n",
+<a name='L1826'>          stderr);
+<a name='L1827'>
+<a name='L1828'>    <b>for</b> (i = 0; i &lt; numclasses; ++i) <font color='red'>{</font>
+<a name='L1829'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> p = numpools[i];
+<a name='L1830'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = numblocks[i];
+<a name='L1831'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> f = numfreeblocks[i];
+<a name='L1832'>        <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> size = <a href='../S/2804.html#L135' title='Defined at 135 in Objects/obmalloc.c.'>INDEX2SIZE</a>(i);
+<a name='L1833'>        <b>if</b> (p == 0) <font color='red'>{</font>
+<a name='L1834'>            <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> == 0 &amp;&amp; f == 0);
+<a name='L1835'>            <b>continue</b>;
+<a name='L1836'>        <font color='red'>}</font>
+<a name='L1837'>        fprintf(stderr, "%5u %6u "
+<a name='L1838'>                        "%11" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a> "u "
+<a name='L1839'>                        "%15" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a> "u "
+<a name='L1840'>                        "%13" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a> "u\n",
+<a name='L1841'>                i, size, p, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>, f);
+<a name='L1842'>        allocated_bytes += <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> * size;
+<a name='L1843'>        available_bytes += f * size;
+<a name='L1844'>        pool_header_bytes += p * <a href='../S/2804.html#L307' title='Defined at 307 in Objects/obmalloc.c.'>POOL_OVERHEAD</a>;
+<a name='L1845'>        quantization += p * ((<a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a> - <a href='../S/2804.html#L307' title='Defined at 307 in Objects/obmalloc.c.'>POOL_OVERHEAD</a>) % size);
+<a name='L1846'>    <font color='red'>}</font>
+<a name='L1847'>    fputc('\n', stderr);
+<a name='L1848'>    (<b>void</b>)<a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# times object malloc called", serialno);
+<a name='L1849'>
+<a name='L1850'>    (<b>void</b>)<a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# arenas allocated total", ntimes_arena_allocated);
+<a name='L1851'>    (<b>void</b>)<a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# arenas reclaimed", ntimes_arena_allocated - narenas);
+<a name='L1852'>    (<b>void</b>)<a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# arenas highwater mark", narenas_highwater);
+<a name='L1853'>    (<b>void</b>)<a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# arenas allocated current", narenas);
+<a name='L1854'>
+<a name='L1855'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L1856'>        "%" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a> "u arenas * %d bytes/arena",
+<a name='L1857'>        narenas, <a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a>);
+<a name='L1858'>    (<b>void</b>)<a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>(buf, narenas * <a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a>);
+<a name='L1859'>
+<a name='L1860'>    fputc('\n', stderr);
+<a name='L1861'>
+<a name='L1862'>    total = <a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# bytes in allocated blocks", allocated_bytes);
+<a name='L1863'>    total += <a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# bytes in available blocks", available_bytes);
+<a name='L1864'>
+<a name='L1865'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L1866'>        "%u unused pools * %d bytes", numfreepools, <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>);
+<a name='L1867'>    total += <a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>(buf, (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)numfreepools * <a href='../S/2804.html#L197' title='Defined at 197 in Objects/obmalloc.c.'>POOL_SIZE</a>);
+<a name='L1868'>
+<a name='L1869'>    total += <a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# bytes lost to pool headers", pool_header_bytes);
+<a name='L1870'>    total += <a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# bytes lost to quantization", quantization);
+<a name='L1871'>    total += <a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("# bytes lost to arena alignment", arena_alignment);
+<a name='L1872'>    (<b>void</b>)<a href='../S/2804.html#L1698' title='Defined at 1698 in Objects/obmalloc.c.'>printone</a>("Total", total);
+<a name='L1873'><font color='red'>}</font>
+<a name='L1874'>
+<a name='L1875'><font color='darkred'>#endif</font>  <i><font color='green'>/* PYMALLOC_DEBUG */</font></i>
+<a name='L1876'>
+<a name='L1877'><font color='darkred'>#ifdef</font> Py_USING_MEMORY_DEBUGGER
+<a name='L1878'><i><font color='green'>/* Make this function last so gcc won't inline it since the definition is</font></i>
+<a name='L1879'><i><font color='green'> * after the reference.</font></i>
+<a name='L1880'><i><font color='green'> */</font></i>
+<a name='L1881'><b>int</b>
+<a name='L1882'><a href='../R/3641.html' title='Multiple refered from 2 places.'>Py_ADDRESS_IN_RANGE</a>(<b>void</b> *<a href='../D/2444.html' title='Multiple defined in 2 places.'>P</a>, poolp pool)
+<a name='L1883'><font color='red'>{</font>
+<a name='L1884'>    <a href='../D/11933.html' title='Multiple defined in 2 places.'>uint</a> arenaindex_temp = pool-&gt;arenaindex;
+<a name='L1885'>
+<a name='L1886'>    <b>return</b> arenaindex_temp &lt; maxarenas &amp;&amp;
+<a name='L1887'>           (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)<a href='../D/2444.html' title='Multiple defined in 2 places.'>P</a> - arenas[arenaindex_temp].address &lt; (<a href='../D/12081.html' title='Multiple defined in 2 places.'>uptr</a>)<a href='../S/2804.html#L187' title='Defined at 187 in Objects/obmalloc.c.'>ARENA_SIZE</a> &amp;&amp;
+<a name='L1888'>           arenas[arenaindex_temp].address != 0;
+<a name='L1889'><font color='red'>}</font>
+<a name='L1890'><font color='darkred'>#endif</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L524'>[^]</a><a href='#L1882'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

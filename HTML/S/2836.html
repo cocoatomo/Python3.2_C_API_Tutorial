@@ -1,0 +1,280 @@
+<html>
+<head>
+<title>Parser/grammar.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3401.html'>Parser</a>/grammar.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L15'>[^]</a><a href='#L145'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L15' title='Defined at 15.'>newgrammar</a>
+<li><a href='#L32' title='Defined at 32.'>adddfa</a>
+<li><a href='#L51' title='Defined at 51.'>addstate</a>
+<li><a href='#L70' title='Defined at 70.'>addarc</a>
+<li><a href='#L88' title='Defined at 88.'>addlabel</a>
+<li><a href='#L114' title='Defined at 114.'>findlabel</a>
+<li><a href='#L132' title='Defined at 132.'>translatelabels</a>
+<li><a href='#L145' title='Defined at 145.'>translabel</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Grammar implementation */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='551.html'>pgenheaders.h</a>"
+<a name='L6'>
+<a name='L7'><font color='darkred'>#include</font> &lt;<a href='2809.html'>ctype.h</a>&gt;
+<a name='L8'>
+<a name='L9'><font color='darkred'>#include</font> "<a href='582.html'>token.h</a>"
+<a name='L10'><font color='darkred'>#include</font> "<a href='530.html'>grammar.h</a>"
+<a name='L11'>
+<a name='L12'><b>extern</b> <b>int</b> Py_DebugFlag;
+<a name='L13'>
+<a name='L14'><a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *
+<a name='L15'><a href='../R/9219.html' title='Multiple refered from 2 places.'>newgrammar</a>(<b>int</b> start)
+<a name='L16'><font color='red'>{</font>
+<a name='L17'>    <a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *g;
+<a name='L18'>
+<a name='L19'>    g = (<a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *)PyObject_MALLOC(<b>sizeof</b>(<a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a>));
+<a name='L20'>    <b>if</b> (g == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L21'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem for new grammar");
+<a name='L22'>    g-&gt;g_ndfas = 0;
+<a name='L23'>    g-&gt;g_dfa = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L24'>    g-&gt;g_start = start;
+<a name='L25'>    g-&gt;g_ll.ll_nlabels = 0;
+<a name='L26'>    g-&gt;g_ll.ll_label = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L27'>    g-&gt;g_accel = 0;
+<a name='L28'>    <b>return</b> g;
+<a name='L29'><font color='red'>}</font>
+<a name='L30'>
+<a name='L31'><a href='../S/530.html#L57' title='Defined at 57 in Include/grammar.h.'>dfa</a> *
+<a name='L32'><a href='../R/5932.html' title='Multiple refered from 2 places.'>adddfa</a>(grammar *g, <b>int</b> type, <b>char</b> *name)
+<a name='L33'><font color='red'>{</font>
+<a name='L34'>    <a href='../S/530.html#L57' title='Defined at 57 in Include/grammar.h.'>dfa</a> *d;
+<a name='L35'>
+<a name='L36'>    g-&gt;g_dfa = (<a href='../S/530.html#L57' title='Defined at 57 in Include/grammar.h.'>dfa</a> *)PyObject_REALLOC(g-&gt;g_dfa,
+<a name='L37'>                                        <b>sizeof</b>(<a href='../S/530.html#L57' title='Defined at 57 in Include/grammar.h.'>dfa</a>) * (g-&gt;g_ndfas + 1));
+<a name='L38'>    <b>if</b> (g-&gt;g_dfa == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L39'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem to resize dfa in adddfa");
+<a name='L40'>    d = &amp;g-&gt;g_dfa[g-&gt;g_ndfas++];
+<a name='L41'>    d-&gt;d_type = type;
+<a name='L42'>    d-&gt;d_name = <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(name);
+<a name='L43'>    d-&gt;d_nstates = 0;
+<a name='L44'>    d-&gt;d_state = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L45'>    d-&gt;d_initial = -1;
+<a name='L46'>    d-&gt;d_first = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L47'>    <b>return</b> d; <i><font color='green'>/* Only use while fresh! */</font></i>
+<a name='L48'><font color='red'>}</font>
+<a name='L49'>
+<a name='L50'><b>int</b>
+<a name='L51'><a href='../R/5940.html' title='Multiple refered from 2 places.'>addstate</a>(dfa *d)
+<a name='L52'><font color='red'>{</font>
+<a name='L53'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> *s;
+<a name='L54'>
+<a name='L55'>    d-&gt;d_state = (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> *)PyObject_REALLOC(d-&gt;d_state,
+<a name='L56'>                                  <b>sizeof</b>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>) * (d-&gt;d_nstates + 1));
+<a name='L57'>    <b>if</b> (d-&gt;d_state == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L58'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem to resize state in addstate");
+<a name='L59'>    s = &amp;d-&gt;d_state[d-&gt;d_nstates++];
+<a name='L60'>    s-&gt;s_narcs = 0;
+<a name='L61'>    s-&gt;s_arc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L62'>    s-&gt;s_lower = 0;
+<a name='L63'>    s-&gt;s_upper = 0;
+<a name='L64'>    s-&gt;s_accel = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L65'>    s-&gt;s_accept = 0;
+<a name='L66'>    <b>return</b> s - d-&gt;d_state;
+<a name='L67'><font color='red'>}</font>
+<a name='L68'>
+<a name='L69'><b>void</b>
+<a name='L70'><a href='../R/5927.html' title='Multiple refered from 3 places.'>addarc</a>(dfa *d, <b>int</b> from, <b>int</b> to, <b>int</b> lbl)
+<a name='L71'><font color='red'>{</font>
+<a name='L72'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> *s;
+<a name='L73'>    <a href='../S/530.html#L33' title='Defined at 33 in Include/grammar.h.'>arc</a> *a;
+<a name='L74'>
+<a name='L75'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(0 &lt;= from &amp;&amp; from &lt; d-&gt;d_nstates);
+<a name='L76'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(0 &lt;= to &amp;&amp; to &lt; d-&gt;d_nstates);
+<a name='L77'>
+<a name='L78'>    s = &amp;d-&gt;d_state[from];
+<a name='L79'>    s-&gt;s_arc = (<a href='../S/530.html#L33' title='Defined at 33 in Include/grammar.h.'>arc</a> *)PyObject_REALLOC(s-&gt;s_arc, <b>sizeof</b>(<a href='../S/530.html#L33' title='Defined at 33 in Include/grammar.h.'>arc</a>) * (s-&gt;s_narcs + 1));
+<a name='L80'>    <b>if</b> (s-&gt;s_arc == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L81'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem to resize arc list in addarc");
+<a name='L82'>    a = &amp;s-&gt;s_arc[s-&gt;s_narcs++];
+<a name='L83'>    a-&gt;a_lbl = lbl;
+<a name='L84'>    a-&gt;a_arrow = to;
+<a name='L85'><font color='red'>}</font>
+<a name='L86'>
+<a name='L87'><b>int</b>
+<a name='L88'><a href='../R/5934.html' title='Multiple refered from 4 places.'>addlabel</a>(labellist *ll, <b>int</b> type, <b>char</b> *str)
+<a name='L89'><font color='red'>{</font>
+<a name='L90'>    <b>int</b> i;
+<a name='L91'>    <a href='../S/530.html#L17' title='Defined at 17 in Include/grammar.h.'>label</a> *lb;
+<a name='L92'>
+<a name='L93'>    <b>for</b> (i = 0; i &lt; ll-&gt;ll_nlabels; i++) <font color='red'>{</font>
+<a name='L94'>        <b>if</b> (ll-&gt;ll_label[i].lb_type == type &amp;&amp;
+<a name='L95'>            strcmp(ll-&gt;ll_label[i].lb_str, str) == 0)
+<a name='L96'>            <b>return</b> i;
+<a name='L97'>    <font color='red'>}</font>
+<a name='L98'>    ll-&gt;ll_label = (<a href='../S/530.html#L17' title='Defined at 17 in Include/grammar.h.'>label</a> *)PyObject_REALLOC(ll-&gt;ll_label,
+<a name='L99'>                                    <b>sizeof</b>(<a href='../S/530.html#L17' title='Defined at 17 in Include/grammar.h.'>label</a>) * (ll-&gt;ll_nlabels + 1));
+<a name='L100'>    <b>if</b> (ll-&gt;ll_label == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L101'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem to resize labellist in addlabel");
+<a name='L102'>    lb = &amp;ll-&gt;ll_label[ll-&gt;ll_nlabels++];
+<a name='L103'>    lb-&gt;lb_type = type;
+<a name='L104'>    lb-&gt;lb_str = <a href='../D/11408.html' title='Multiple defined in 2 places.'>strdup</a>(str);
+<a name='L105'>    <b>if</b> (Py_DebugFlag)
+<a name='L106'>        printf("Label @ %8p, %d: %s\n", ll, ll-&gt;ll_nlabels,
+<a name='L107'>               <a href='../S/2837.html#L34' title='Defined at 34 in Parser/grammar1.c.'>PyGrammar_LabelRepr</a>(lb));
+<a name='L108'>    <b>return</b> lb - ll-&gt;ll_label;
+<a name='L109'><font color='red'>}</font>
+<a name='L110'>
+<a name='L111'><i><font color='green'>/* Same, but rather dies than adds */</font></i>
+<a name='L112'>
+<a name='L113'><b>int</b>
+<a name='L114'><a href='../R/7809.html' title='Multiple refered from 2 places.'>findlabel</a>(labellist *ll, <b>int</b> type, <b>char</b> *str)
+<a name='L115'><font color='red'>{</font>
+<a name='L116'>    <b>int</b> i;
+<a name='L117'>
+<a name='L118'>    <b>for</b> (i = 0; i &lt; ll-&gt;ll_nlabels; i++) <font color='red'>{</font>
+<a name='L119'>        <b>if</b> (ll-&gt;ll_label[i].lb_type == type <i><font color='green'>/*&amp;&amp;</font></i>
+<a name='L120'><i><font color='green'>            strcmp(ll-&gt;ll_label[i].lb_str, str) == 0*/</font></i>)
+<a name='L121'>            <b>return</b> i;
+<a name='L122'>    <font color='red'>}</font>
+<a name='L123'>    fprintf(stderr, "Label %d/'%s' not found\n", type, str);
+<a name='L124'>    <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("grammar.c:findlabel()");
+<a name='L125'>    <b>return</b> 0; <i><font color='green'>/* Make gcc -Wall happy */</font></i>
+<a name='L126'><font color='red'>}</font>
+<a name='L127'>
+<a name='L128'><i><font color='green'>/* Forward */</font></i>
+<a name='L129'><b>static</b> <b>void</b> <a href='../S/2836.html#L145' title='Defined at 145 in Parser/grammar.c.'>translabel</a>(grammar *, label *);
+<a name='L130'>
+<a name='L131'><b>void</b>
+<a name='L132'><a href='../R/10950.html' title='Multiple refered from 2 places.'>translatelabels</a>(grammar *g)
+<a name='L133'><font color='red'>{</font>
+<a name='L134'>    <b>int</b> i;
+<a name='L135'>
+<a name='L136'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L137'>    printf("Translating labels ...\n");
+<a name='L138'><font color='darkred'>#endif</font>
+<a name='L139'>    <i><font color='green'>/* Don't translate EMPTY */</font></i>
+<a name='L140'>    <b>for</b> (i = <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>+1; i &lt; g-&gt;g_ll.ll_nlabels; i++)
+<a name='L141'>        <a href='../S/2836.html#L145' title='Defined at 145 in Parser/grammar.c.'>translabel</a>(g, &amp;g-&gt;g_ll.ll_label[i]);
+<a name='L142'><font color='red'>}</font>
+<a name='L143'>
+<a name='L144'><b>static</b> <b>void</b>
+<a name='L145'><a href='../R/10947.html' title='Multiple refered from 2 places.'>translabel</a>(grammar *g, label *lb)
+<a name='L146'><font color='red'>{</font>
+<a name='L147'>    <b>int</b> i;
+<a name='L148'>
+<a name='L149'>    <b>if</b> (Py_DebugFlag)
+<a name='L150'>        printf("Translating label %s ...\n", <a href='../S/2837.html#L34' title='Defined at 34 in Parser/grammar1.c.'>PyGrammar_LabelRepr</a>(lb));
+<a name='L151'>
+<a name='L152'>    <b>if</b> (lb-&gt;lb_type == <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>) <font color='red'>{</font>
+<a name='L153'>        <b>for</b> (i = 0; i &lt; g-&gt;g_ndfas; i++) <font color='red'>{</font>
+<a name='L154'>            <b>if</b> (strcmp(lb-&gt;lb_str, g-&gt;g_dfa[i].d_name) == 0) <font color='red'>{</font>
+<a name='L155'>                <b>if</b> (Py_DebugFlag)
+<a name='L156'>                    printf(
+<a name='L157'>                        "Label %s is non-terminal %d.\n",
+<a name='L158'>                        lb-&gt;lb_str,
+<a name='L159'>                        g-&gt;g_dfa[i].d_type);
+<a name='L160'>                lb-&gt;lb_type = g-&gt;g_dfa[i].d_type;
+<a name='L161'>                free(lb-&gt;lb_str);
+<a name='L162'>                lb-&gt;lb_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L163'>                <b>return</b>;
+<a name='L164'>            <font color='red'>}</font>
+<a name='L165'>        <font color='red'>}</font>
+<a name='L166'>        <b>for</b> (i = 0; i &lt; (<b>int</b>)<a href='../S/582.html#L68' title='Defined at 68 in Include/token.h.'>N_TOKENS</a>; i++) <font color='red'>{</font>
+<a name='L167'>            <b>if</b> (strcmp(lb-&gt;lb_str, _PyParser_TokenNames[i]) == 0) <font color='red'>{</font>
+<a name='L168'>                <b>if</b> (Py_DebugFlag)
+<a name='L169'>                    printf("Label %s is terminal %d.\n",
+<a name='L170'>                        lb-&gt;lb_str, i);
+<a name='L171'>                lb-&gt;lb_type = i;
+<a name='L172'>                free(lb-&gt;lb_str);
+<a name='L173'>                lb-&gt;lb_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L174'>                <b>return</b>;
+<a name='L175'>            <font color='red'>}</font>
+<a name='L176'>        <font color='red'>}</font>
+<a name='L177'>        printf("Can't translate NAME label '%s'\n", lb-&gt;lb_str);
+<a name='L178'>        <b>return</b>;
+<a name='L179'>    <font color='red'>}</font>
+<a name='L180'>
+<a name='L181'>    <b>if</b> (lb-&gt;lb_type == <a href='../D/4973.html' title='Multiple defined in 2 places.'>STRING</a>) <font color='red'>{</font>
+<a name='L182'>        <b>if</b> (<a href='../D/9331.html' title='Multiple defined in 2 places.'>isalpha</a>(<a href='../S/570.html#L144' title='Defined at 144 in Include/Python.h.'>Py_CHARMASK</a>(lb-&gt;lb_str[1])) ||
+<a name='L183'>            lb-&gt;lb_str[1] == '_') <font color='red'>{</font>
+<a name='L184'>            <b>char</b> *p;
+<a name='L185'>            <b>char</b> *src;
+<a name='L186'>            <b>char</b> *dest;
+<a name='L187'>            <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> name_len;
+<a name='L188'>            <b>if</b> (Py_DebugFlag)
+<a name='L189'>                printf("Label %s is a keyword\n", lb-&gt;lb_str);
+<a name='L190'>            lb-&gt;lb_type = <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>;
+<a name='L191'>            src = lb-&gt;lb_str + 1;
+<a name='L192'>            p = strchr(src, '\'');
+<a name='L193'>            <b>if</b> (p)
+<a name='L194'>                name_len = p - src;
+<a name='L195'>            <b>else</b>
+<a name='L196'>                name_len = strlen(src);
+<a name='L197'>            dest = (<b>char</b> *)malloc(name_len + 1);
+<a name='L198'>            <b>if</b> (!dest) <font color='red'>{</font>
+<a name='L199'>                printf("Can't alloc dest '%s'\n", src);
+<a name='L200'>                <b>return</b>;
+<a name='L201'>            <font color='red'>}</font>
+<a name='L202'>            strncpy(dest, src, name_len);
+<a name='L203'>            dest[name_len] = '\0';
+<a name='L204'>            free(lb-&gt;lb_str);
+<a name='L205'>            lb-&gt;lb_str = dest;
+<a name='L206'>        <font color='red'>}</font>
+<a name='L207'>        <b>else</b> <b>if</b> (lb-&gt;lb_str[2] == lb-&gt;lb_str[0]) <font color='red'>{</font>
+<a name='L208'>            <b>int</b> type = (<b>int</b>) <a href='../S/2851.html#L1078' title='Defined at 1078 in Parser/tokenizer.c.'>PyToken_OneChar</a>(lb-&gt;lb_str[1]);
+<a name='L209'>            <b>if</b> (type != <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>) <font color='red'>{</font>
+<a name='L210'>                lb-&gt;lb_type = type;
+<a name='L211'>                free(lb-&gt;lb_str);
+<a name='L212'>                lb-&gt;lb_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L213'>            <font color='red'>}</font>
+<a name='L214'>            <b>else</b>
+<a name='L215'>                printf("Unknown OP label %s\n",
+<a name='L216'>                    lb-&gt;lb_str);
+<a name='L217'>        <font color='red'>}</font>
+<a name='L218'>        <b>else</b> <b>if</b> (lb-&gt;lb_str[2] &amp;&amp; lb-&gt;lb_str[3] == lb-&gt;lb_str[0]) <font color='red'>{</font>
+<a name='L219'>            <b>int</b> type = (<b>int</b>) <a href='../S/2851.html#L1110' title='Defined at 1110 in Parser/tokenizer.c.'>PyToken_TwoChars</a>(lb-&gt;lb_str[1],
+<a name='L220'>                                       lb-&gt;lb_str[2]);
+<a name='L221'>            <b>if</b> (type != <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>) <font color='red'>{</font>
+<a name='L222'>                lb-&gt;lb_type = type;
+<a name='L223'>                free(lb-&gt;lb_str);
+<a name='L224'>                lb-&gt;lb_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L225'>            <font color='red'>}</font>
+<a name='L226'>            <b>else</b>
+<a name='L227'>                printf("Unknown OP label %s\n",
+<a name='L228'>                    lb-&gt;lb_str);
+<a name='L229'>        <font color='red'>}</font>
+<a name='L230'>        <b>else</b> <b>if</b> (lb-&gt;lb_str[2] &amp;&amp; lb-&gt;lb_str[3] &amp;&amp; lb-&gt;lb_str[4] == lb-&gt;lb_str[0]) <font color='red'>{</font>
+<a name='L231'>            <b>int</b> type = (<b>int</b>) <a href='../S/2851.html#L1184' title='Defined at 1184 in Parser/tokenizer.c.'>PyToken_ThreeChars</a>(lb-&gt;lb_str[1],
+<a name='L232'>                                                lb-&gt;lb_str[2],
+<a name='L233'>                                                lb-&gt;lb_str[3]);
+<a name='L234'>            <b>if</b> (type != <a href='../D/2417.html' title='Multiple defined in 2 places.'>OP</a>) <font color='red'>{</font>
+<a name='L235'>                lb-&gt;lb_type = type;
+<a name='L236'>                free(lb-&gt;lb_str);
+<a name='L237'>                lb-&gt;lb_str = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L238'>            <font color='red'>}</font>
+<a name='L239'>            <b>else</b>
+<a name='L240'>                printf("Unknown OP label %s\n",
+<a name='L241'>                    lb-&gt;lb_str);
+<a name='L242'>        <font color='red'>}</font>
+<a name='L243'>        <b>else</b>
+<a name='L244'>            printf("Can't translate STRING label %s\n",
+<a name='L245'>                lb-&gt;lb_str);
+<a name='L246'>    <font color='red'>}</font>
+<a name='L247'>    <b>else</b>
+<a name='L248'>        printf("Can't translate label '%s'\n",
+<a name='L249'>               <a href='../S/2837.html#L34' title='Defined at 34 in Parser/grammar1.c.'>PyGrammar_LabelRepr</a>(lb));
+<a name='L250'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L15'>[^]</a><a href='#L145'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

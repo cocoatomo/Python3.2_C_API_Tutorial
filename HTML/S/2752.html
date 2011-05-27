@@ -1,0 +1,1520 @@
+<html>
+<head>
+<title>Modules/zlib/inflate.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3390.html'>zlib</a>/inflate.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L103'>[^]</a><a href='#L1470'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L103' title='Defined at 103.'>inflateReset</a>
+<li><a href='#L130' title='Defined at 130.'>inflateReset2</a>
+<li><a href='#L168' title='Defined at 168.'>inflateInit2_</a>
+<li><a href='#L201' title='Defined at 201.'>inflateInit_</a>
+<li><a href='#L209' title='Defined at 209.'>inflatePrime</a>
+<li><a href='#L240' title='Defined at 240.'>fixedtables</a>
+<li><a href='#L304' title='Defined at 304.'>makefixed</a>
+<li><a href='#L358' title='Defined at 358.'>updatewindow</a>
+<li><a href='#L589' title='Defined at 589.'>inflate</a>
+<li><a href='#L1238' title='Defined at 1238.'>inflateEnd</a>
+<li><a href='#L1252' title='Defined at 1252.'>inflateSetDictionary</a>
+<li><a href='#L1294' title='Defined at 1294.'>inflateGetHeader</a>
+<li><a href='#L1322' title='Defined at 1322.'>syncsearch</a>
+<li><a href='#L1345' title='Defined at 1345.'>inflateSync</a>
+<li><a href='#L1396' title='Defined at 1396.'>inflateSyncPoint</a>
+<li><a href='#L1406' title='Defined at 1406.'>inflateCopy</a>
+<li><a href='#L1453' title='Defined at 1453.'>inflateUndermine</a>
+<li><a href='#L1470' title='Defined at 1470.'>inflateMark</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* inflate.c -- zlib decompression</font></i>
+<a name='L2'><i><font color='green'> * Copyright (C) 1995-2010 Mark Adler</font></i>
+<a name='L3'><i><font color='green'> * For conditions of distribution and use, see copyright notice in zlib.h</font></i>
+<a name='L4'><i><font color='green'> */</font></i>
+<a name='L5'>
+<a name='L6'><i><font color='green'>/*</font></i>
+<a name='L7'><i><font color='green'> * Change history:</font></i>
+<a name='L8'><i><font color='green'> *</font></i>
+<a name='L9'><i><font color='green'> * 1.2.beta0    24 Nov 2002</font></i>
+<a name='L10'><i><font color='green'> * - First version -- complete rewrite of inflate to simplify code, avoid</font></i>
+<a name='L11'><i><font color='green'> *   creation of window when not needed, minimize use of window when it is</font></i>
+<a name='L12'><i><font color='green'> *   needed, make inffast.c even faster, implement gzip decoding, and to</font></i>
+<a name='L13'><i><font color='green'> *   improve code readability and style over the previous zlib inflate code</font></i>
+<a name='L14'><i><font color='green'> *</font></i>
+<a name='L15'><i><font color='green'> * 1.2.beta1    25 Nov 2002</font></i>
+<a name='L16'><i><font color='green'> * - Use pointers for available input and output checking in inffast.c</font></i>
+<a name='L17'><i><font color='green'> * - Remove input and output counters in inffast.c</font></i>
+<a name='L18'><i><font color='green'> * - Change inffast.c entry and loop from avail_in &gt;= 7 to &gt;= 6</font></i>
+<a name='L19'><i><font color='green'> * - Remove unnecessary second byte pull from length extra in inffast.c</font></i>
+<a name='L20'><i><font color='green'> * - Unroll direct copy to three copies per loop in inffast.c</font></i>
+<a name='L21'><i><font color='green'> *</font></i>
+<a name='L22'><i><font color='green'> * 1.2.beta2    4 Dec 2002</font></i>
+<a name='L23'><i><font color='green'> * - Change external routine names to reduce potential conflicts</font></i>
+<a name='L24'><i><font color='green'> * - Correct filename to inffixed.h for fixed tables in inflate.c</font></i>
+<a name='L25'><i><font color='green'> * - Make hbuf[] unsigned char to match parameter type in inflate.c</font></i>
+<a name='L26'><i><font color='green'> * - Change strm-&gt;next_out[-state-&gt;offset] to *(strm-&gt;next_out - state-&gt;offset)</font></i>
+<a name='L27'><i><font color='green'> *   to avoid negation problem on Alphas (64 bit) in inflate.c</font></i>
+<a name='L28'><i><font color='green'> *</font></i>
+<a name='L29'><i><font color='green'> * 1.2.beta3    22 Dec 2002</font></i>
+<a name='L30'><i><font color='green'> * - Add comments on state-&gt;bits assertion in inffast.c</font></i>
+<a name='L31'><i><font color='green'> * - Add comments on op field in inftrees.h</font></i>
+<a name='L32'><i><font color='green'> * - Fix bug in reuse of allocated window after inflateReset()</font></i>
+<a name='L33'><i><font color='green'> * - Remove bit fields--back to byte structure for speed</font></i>
+<a name='L34'><i><font color='green'> * - Remove distance extra == 0 check in inflate_fast()--only helps for lengths</font></i>
+<a name='L35'><i><font color='green'> * - Change post-increments to pre-increments in inflate_fast(), PPC biased?</font></i>
+<a name='L36'><i><font color='green'> * - Add compile time option, POSTINC, to use post-increments instead (Intel?)</font></i>
+<a name='L37'><i><font color='green'> * - Make MATCH copy in inflate() much faster for when inflate_fast() not used</font></i>
+<a name='L38'><i><font color='green'> * - Use local copies of stream next and avail values, as well as local bit</font></i>
+<a name='L39'><i><font color='green'> *   buffer and bit count in inflate()--for speed when inflate_fast() not used</font></i>
+<a name='L40'><i><font color='green'> *</font></i>
+<a name='L41'><i><font color='green'> * 1.2.beta4    1 Jan 2003</font></i>
+<a name='L42'><i><font color='green'> * - Split ptr - 257 statements in inflate_table() to avoid compiler warnings</font></i>
+<a name='L43'><i><font color='green'> * - Move a comment on output buffer sizes from inffast.c to inflate.c</font></i>
+<a name='L44'><i><font color='green'> * - Add comments in inffast.c to introduce the inflate_fast() routine</font></i>
+<a name='L45'><i><font color='green'> * - Rearrange window copies in inflate_fast() for speed and simplification</font></i>
+<a name='L46'><i><font color='green'> * - Unroll last copy for window match in inflate_fast()</font></i>
+<a name='L47'><i><font color='green'> * - Use local copies of window variables in inflate_fast() for speed</font></i>
+<a name='L48'><i><font color='green'> * - Pull out common wnext == 0 case for speed in inflate_fast()</font></i>
+<a name='L49'><i><font color='green'> * - Make op and len in inflate_fast() unsigned for consistency</font></i>
+<a name='L50'><i><font color='green'> * - Add FAR to lcode and dcode declarations in inflate_fast()</font></i>
+<a name='L51'><i><font color='green'> * - Simplified bad distance check in inflate_fast()</font></i>
+<a name='L52'><i><font color='green'> * - Added inflateBackInit(), inflateBack(), and inflateBackEnd() in new</font></i>
+<a name='L53'><i><font color='green'> *   source file infback.c to provide a call-back interface to inflate for</font></i>
+<a name='L54'><i><font color='green'> *   programs like gzip and unzip -- uses window as output buffer to avoid</font></i>
+<a name='L55'><i><font color='green'> *   window copying</font></i>
+<a name='L56'><i><font color='green'> *</font></i>
+<a name='L57'><i><font color='green'> * 1.2.beta5    1 Jan 2003</font></i>
+<a name='L58'><i><font color='green'> * - Improved inflateBack() interface to allow the caller to provide initial</font></i>
+<a name='L59'><i><font color='green'> *   input in strm.</font></i>
+<a name='L60'><i><font color='green'> * - Fixed stored blocks bug in inflateBack()</font></i>
+<a name='L61'><i><font color='green'> *</font></i>
+<a name='L62'><i><font color='green'> * 1.2.beta6    4 Jan 2003</font></i>
+<a name='L63'><i><font color='green'> * - Added comments in inffast.c on effectiveness of POSTINC</font></i>
+<a name='L64'><i><font color='green'> * - Typecasting all around to reduce compiler warnings</font></i>
+<a name='L65'><i><font color='green'> * - Changed loops from while (1) or do {} while (1) to for (;;), again to</font></i>
+<a name='L66'><i><font color='green'> *   make compilers happy</font></i>
+<a name='L67'><i><font color='green'> * - Changed type of window in inflateBackInit() to unsigned char *</font></i>
+<a name='L68'><i><font color='green'> *</font></i>
+<a name='L69'><i><font color='green'> * 1.2.beta7    27 Jan 2003</font></i>
+<a name='L70'><i><font color='green'> * - Changed many types to unsigned or unsigned short to avoid warnings</font></i>
+<a name='L71'><i><font color='green'> * - Added inflateCopy() function</font></i>
+<a name='L72'><i><font color='green'> *</font></i>
+<a name='L73'><i><font color='green'> * 1.2.0        9 Mar 2003</font></i>
+<a name='L74'><i><font color='green'> * - Changed inflateBack() interface to provide separate opaque descriptors</font></i>
+<a name='L75'><i><font color='green'> *   for the in() and out() functions</font></i>
+<a name='L76'><i><font color='green'> * - Changed inflateBack() argument and in_func typedef to swap the length</font></i>
+<a name='L77'><i><font color='green'> *   and buffer address return values for the input function</font></i>
+<a name='L78'><i><font color='green'> * - Check next_in and next_out for Z_NULL on entry to inflate()</font></i>
+<a name='L79'><i><font color='green'> *</font></i>
+<a name='L80'><i><font color='green'> * The history for versions after 1.2.0 are in ChangeLog in zlib distribution.</font></i>
+<a name='L81'><i><font color='green'> */</font></i>
+<a name='L82'>
+<a name='L83'><font color='darkred'>#include</font> "<a href='2773.html'>zutil.h</a>"
+<a name='L84'><font color='darkred'>#include</font> "<a href='2755.html'>inftrees.h</a>"
+<a name='L85'><font color='darkred'>#include</font> "<a href='2753.html'>inflate.h</a>"
+<a name='L86'><font color='darkred'>#include</font> "<a href='2750.html'>inffast.h</a>"
+<a name='L87'>
+<a name='L88'><font color='darkred'>#ifdef</font> MAKEFIXED
+<a name='L89'><font color='darkred'>#  ifndef</font> <a href='../S/2752.html#L90' title='Defined at 90 in Modules/zlib/inflate.c.'>BUILDFIXED</a>
+<a name='L90'><font color='darkred'>#    define</font> <a href='../R/331.html' title='Multiple refered from 5 places.'>BUILDFIXED</a>
+<a name='L91'><font color='darkred'>#  endif</font>
+<a name='L92'><font color='darkred'>#endif</font>
+<a name='L93'>
+<a name='L94'><i><font color='green'>/* function prototypes */</font></i>
+<a name='L95'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../D/8615.html' title='Multiple defined in 2 places.'>fixedtables</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>struct</b> inflate_state <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *state));
+<a name='L96'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> <a href='../S/2752.html#L358' title='Defined at 358 in Modules/zlib/inflate.c.'>updatewindow</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((z_streamp strm, <b>unsigned</b> out));
+<a name='L97'><font color='darkred'>#ifdef</font> <a href='../S/2752.html#L90' title='Defined at 90 in Modules/zlib/inflate.c.'>BUILDFIXED</a>
+<a name='L98'>   <b>void</b> <a href='../S/2752.html#L304' title='Defined at 304 in Modules/zlib/inflate.c.'>makefixed</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>void</b>));
+<a name='L99'><font color='darkred'>#endif</font>
+<a name='L100'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <a href='../S/2752.html#L1322' title='Defined at 1322 in Modules/zlib/inflate.c.'>syncsearch</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>unsigned</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *have, <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *buf,
+<a name='L101'>                              <b>unsigned</b> len));
+<a name='L102'>
+<a name='L103'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8361.html' title='Multiple refered from 6 places.'>inflateReset</a>(strm)
+<a name='L104'>z_streamp strm;
+<a name='L105'><font color='red'>{</font>
+<a name='L106'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L107'>
+<a name='L108'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L109'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L110'>    strm-&gt;total_in = strm-&gt;total_out = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;total = 0;
+<a name='L111'>    strm-&gt;msg = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L112'>    strm-&gt;adler = 1;        <i><font color='green'>/* to support ill-conceived Java test suite */</font></i>
+<a name='L113'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L21' title='Defined at 21 in Modules/zlib/inflate.h.'>HEAD</a>;
+<a name='L114'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;last = 0;
+<a name='L115'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;havedict = 0;
+<a name='L116'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;dmax = 32768U;
+<a name='L117'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L118'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize = 0;
+<a name='L119'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave = 0;
+<a name='L120'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext = 0;
+<a name='L121'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold = 0;
+<a name='L122'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits = 0;
+<a name='L123'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distcode = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes;
+<a name='L124'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;sane = 1;
+<a name='L125'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back = -1;
+<a name='L126'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate: reset\n"));
+<a name='L127'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L128'><font color='red'>}</font>
+<a name='L129'>
+<a name='L130'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8362.html' title='Multiple refered from 2 places.'>inflateReset2</a>(strm, windowBits)
+<a name='L131'>z_streamp strm;
+<a name='L132'><b>int</b> windowBits;
+<a name='L133'><font color='red'>{</font>
+<a name='L134'>    <b>int</b> wrap;
+<a name='L135'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L136'>
+<a name='L137'>    <i><font color='green'>/* get the state */</font></i>
+<a name='L138'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L139'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L140'>
+<a name='L141'>    <i><font color='green'>/* extract wrap request from windowBits parameter */</font></i>
+<a name='L142'>    <b>if</b> (windowBits &lt; 0) <font color='red'>{</font>
+<a name='L143'>        wrap = 0;
+<a name='L144'>        windowBits = -windowBits;
+<a name='L145'>    <font color='red'>}</font>
+<a name='L146'>    <b>else</b> <font color='red'>{</font>
+<a name='L147'>        wrap = (windowBits &gt;&gt; 4) + 1;
+<a name='L148'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L149'>        <b>if</b> (windowBits &lt; 48)
+<a name='L150'>            windowBits &amp;= 15;
+<a name='L151'><font color='darkred'>#endif</font>
+<a name='L152'>    <font color='red'>}</font>
+<a name='L153'>
+<a name='L154'>    <i><font color='green'>/* set number of window bits, free window if different */</font></i>
+<a name='L155'>    <b>if</b> (windowBits &amp;&amp; (windowBits &lt; 8 || windowBits &gt; 15))
+<a name='L156'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L157'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits != (<b>unsigned</b>)windowBits) <font color='red'>{</font>
+<a name='L158'>        <a href='../S/2773.html#L271' title='Defined at 271 in Modules/zlib/zutil.h.'>ZFREE</a>(strm, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window);
+<a name='L159'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L160'>    <font color='red'>}</font>
+<a name='L161'>
+<a name='L162'>    <i><font color='green'>/* update state and reset the rest of it */</font></i>
+<a name='L163'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap = wrap;
+<a name='L164'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits = (<b>unsigned</b>)windowBits;
+<a name='L165'>    <b>return</b> <a href='../D/9170.html' title='Multiple defined in 3 places.'>inflateReset</a>(strm);
+<a name='L166'><font color='red'>}</font>
+<a name='L167'>
+<a name='L168'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8357.html' title='Multiple refered from 3 places.'>inflateInit2_</a>(strm, windowBits, version, stream_size)
+<a name='L169'>z_streamp strm;
+<a name='L170'><b>int</b> windowBits;
+<a name='L171'><b>const</b> <b>char</b> *version;
+<a name='L172'><b>int</b> stream_size;
+<a name='L173'><font color='red'>{</font>
+<a name='L174'>    <b>int</b> ret;
+<a name='L175'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L176'>
+<a name='L177'>    <b>if</b> (version == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || version[0] != <a href='../S/2769.html#L40' title='Defined at 40 in Modules/zlib/zlib.h.'>ZLIB_VERSION</a>[0] ||
+<a name='L178'>        stream_size != (<b>int</b>)(<b>sizeof</b>(<a href='../S/2769.html#L104' title='Defined at 104 in Modules/zlib/zlib.h.'>z_stream</a>)))
+<a name='L179'>        <b>return</b> <a href='../S/2769.html#L181' title='Defined at 181 in Modules/zlib/zlib.h.'>Z_VERSION_ERROR</a>;
+<a name='L180'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L181'>    strm-&gt;msg = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;                 <i><font color='green'>/* in case we return an error */</font></i>
+<a name='L182'>    <b>if</b> (strm-&gt;zalloc == (<a href='../D/6713.html' title='Multiple defined in 2 places.'>alloc_func</a>)0) <font color='red'>{</font>
+<a name='L183'>        strm-&gt;zalloc = <a href='../D/12443.html' title='Multiple defined in 4 places.'>zcalloc</a>;
+<a name='L184'>        strm-&gt;opaque = (<a href='../D/12267.html' title='Multiple defined in 6 places.'>voidpf</a>)0;
+<a name='L185'>    <font color='red'>}</font>
+<a name='L186'>    <b>if</b> (strm-&gt;zfree == (<a href='../D/8725.html' title='Multiple defined in 2 places.'>free_func</a>)0) strm-&gt;zfree = <a href='../D/12444.html' title='Multiple defined in 4 places.'>zcfree</a>;
+<a name='L187'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)
+<a name='L188'>            <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(strm, 1, <b>sizeof</b>(<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a>));
+<a name='L189'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L190'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate: allocated\n"));
+<a name='L191'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../D/9267.html' title='Multiple defined in 5 places.'>internal_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L192'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L193'>    ret = <a href='../D/9171.html' title='Multiple defined in 2 places.'>inflateReset2</a>(strm, windowBits);
+<a name='L194'>    <b>if</b> (ret != <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>) <font color='red'>{</font>
+<a name='L195'>        <a href='../S/2773.html#L271' title='Defined at 271 in Modules/zlib/zutil.h.'>ZFREE</a>(strm, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L196'>        strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L197'>    <font color='red'>}</font>
+<a name='L198'>    <b>return</b> ret;
+<a name='L199'><font color='red'>}</font>
+<a name='L200'>
+<a name='L201'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8358.html' title='Multiple refered from 2 places.'>inflateInit_</a>(strm, version, stream_size)
+<a name='L202'>z_streamp strm;
+<a name='L203'><b>const</b> <b>char</b> *version;
+<a name='L204'><b>int</b> stream_size;
+<a name='L205'><font color='red'>{</font>
+<a name='L206'>    <b>return</b> <a href='../D/9166.html' title='Multiple defined in 3 places.'>inflateInit2_</a>(strm, <a href='../D/769.html' title='Multiple defined in 2 places.'>DEF_WBITS</a>, version, stream_size);
+<a name='L207'><font color='red'>}</font>
+<a name='L208'>
+<a name='L209'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L859' title='Refered from 859 in Modules/zlib/zlib.h.'>inflatePrime</a>(strm, bits, value)
+<a name='L210'>z_streamp strm;
+<a name='L211'><b>int</b> bits;
+<a name='L212'><b>int</b> value;
+<a name='L213'><font color='red'>{</font>
+<a name='L214'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L215'>
+<a name='L216'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L217'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L218'>    <b>if</b> (bits &lt; 0) <font color='red'>{</font>
+<a name='L219'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold = 0;
+<a name='L220'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits = 0;
+<a name='L221'>        <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L222'>    <font color='red'>}</font>
+<a name='L223'>    <b>if</b> (bits &gt; 16 || <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits + bits &gt; 32) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L224'>    <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &amp;= (1L &lt;&lt; bits) - 1;
+<a name='L225'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold += <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &lt;&lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits;
+<a name='L226'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits += bits;
+<a name='L227'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L228'><font color='red'>}</font>
+<a name='L229'>
+<a name='L230'><i><font color='green'>/*</font></i>
+<a name='L231'><i><font color='green'>   Return state with length and distance decoding tables and index sizes set to</font></i>
+<a name='L232'><i><font color='green'>   fixed code decoding.  Normally this returns fixed tables from inffixed.h.</font></i>
+<a name='L233'><i><font color='green'>   If BUILDFIXED is defined, then instead this routine builds the tables the</font></i>
+<a name='L234'><i><font color='green'>   first time it's called, and returns those tables the first time and</font></i>
+<a name='L235'><i><font color='green'>   thereafter.  This reduces the size of the code by about 2K bytes, in</font></i>
+<a name='L236'><i><font color='green'>   exchange for a little execution time.  However, BUILDFIXED should not be</font></i>
+<a name='L237'><i><font color='green'>   used for threaded applications, since the rewriting of the tables and virgin</font></i>
+<a name='L238'><i><font color='green'>   may not be thread-safe.</font></i>
+<a name='L239'><i><font color='green'> */</font></i>
+<a name='L240'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/7816.html' title='Multiple refered from 5 places.'>fixedtables</a>(state)
+<a name='L241'><b>struct</b> inflate_state <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *state;
+<a name='L242'><font color='red'>{</font>
+<a name='L243'><font color='darkred'>#ifdef</font> <a href='../S/2752.html#L90' title='Defined at 90 in Modules/zlib/inflate.c.'>BUILDFIXED</a>
+<a name='L244'>    <b>static</b> <b>int</b> virgin = 1;
+<a name='L245'>    <b>static</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> *lenfix, *distfix;
+<a name='L246'>    <b>static</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> fixed[544];
+<a name='L247'>
+<a name='L248'>    <i><font color='green'>/* build fixed huffman tables if first call (may not be thread safe) */</font></i>
+<a name='L249'>    <b>if</b> (virgin) <font color='red'>{</font>
+<a name='L250'>        <b>unsigned</b> sym, bits;
+<a name='L251'>        <b>static</b> <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> *next;
+<a name='L252'>
+<a name='L253'>        <i><font color='green'>/* literal/length table */</font></i>
+<a name='L254'>        sym = 0;
+<a name='L255'>        <b>while</b> (sym &lt; 144) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[sym++] = 8;
+<a name='L256'>        <b>while</b> (sym &lt; 256) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[sym++] = 9;
+<a name='L257'>        <b>while</b> (sym &lt; 280) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[sym++] = 7;
+<a name='L258'>        <b>while</b> (sym &lt; 288) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[sym++] = 8;
+<a name='L259'>        next = fixed;
+<a name='L260'>        lenfix = next;
+<a name='L261'>        bits = 9;
+<a name='L262'>        <a href='../D/9180.html' title='Multiple defined in 2 places.'>inflate_table</a>(<a href='../S/2755.html#L56' title='Defined at 56 in Modules/zlib/inftrees.h.'>LENS</a>, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens, 288, &amp;(next), &amp;(bits), <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;work);
+<a name='L263'>
+<a name='L264'>        <i><font color='green'>/* distance table */</font></i>
+<a name='L265'>        sym = 0;
+<a name='L266'>        <b>while</b> (sym &lt; 32) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[sym++] = 5;
+<a name='L267'>        distfix = next;
+<a name='L268'>        bits = 5;
+<a name='L269'>        <a href='../D/9180.html' title='Multiple defined in 2 places.'>inflate_table</a>(<a href='../S/2755.html#L57' title='Defined at 57 in Modules/zlib/inftrees.h.'>DISTS</a>, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens, 32, &amp;(next), &amp;(bits), <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;work);
+<a name='L270'>
+<a name='L271'>        <i><font color='green'>/* do this just once */</font></i>
+<a name='L272'>        virgin = 0;
+<a name='L273'>    <font color='red'>}</font>
+<a name='L274'><font color='darkred'>#else</font> <i><font color='green'>/* !BUILDFIXED */</font></i>
+<a name='L275'><font color='darkred'>#   include</font> "<a href='2751.html'>inffixed.h</a>"
+<a name='L276'><font color='darkred'>#endif</font> <i><font color='green'>/* BUILDFIXED */</font></i>
+<a name='L277'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode = lenfix;
+<a name='L278'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits = 9;
+<a name='L279'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distcode = distfix;
+<a name='L280'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distbits = 5;
+<a name='L281'><font color='red'>}</font>
+<a name='L282'>
+<a name='L283'><font color='darkred'>#ifdef</font> MAKEFIXED
+<a name='L284'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L285'>
+<a name='L286'><i><font color='green'>/*</font></i>
+<a name='L287'><i><font color='green'>   Write out the inffixed.h that is #include'd above.  Defining MAKEFIXED also</font></i>
+<a name='L288'><i><font color='green'>   defines BUILDFIXED, so the tables are built on the fly.  makefixed() writes</font></i>
+<a name='L289'><i><font color='green'>   those tables to stdout, which would be piped to inffixed.h.  A small program</font></i>
+<a name='L290'><i><font color='green'>   can simply call makefixed to do this:</font></i>
+<a name='L291'><i><font color='green'></font></i>
+<a name='L292'><i><font color='green'>    void makefixed(void);</font></i>
+<a name='L293'><i><font color='green'></font></i>
+<a name='L294'><i><font color='green'>    int main(void)</font></i>
+<a name='L295'><i><font color='green'>    {</font></i>
+<a name='L296'><i><font color='green'>        makefixed();</font></i>
+<a name='L297'><i><font color='green'>        return 0;</font></i>
+<a name='L298'><i><font color='green'>    }</font></i>
+<a name='L299'><i><font color='green'></font></i>
+<a name='L300'><i><font color='green'>   Then that can be linked with zlib built with MAKEFIXED defined and run:</font></i>
+<a name='L301'><i><font color='green'></font></i>
+<a name='L302'><i><font color='green'>    a.out &gt; inffixed.h</font></i>
+<a name='L303'><i><font color='green'> */</font></i>
+<a name='L304'><b>void</b> <a href='../S/2752.html#L98' title='Refered from 98 in Modules/zlib/inflate.c.'>makefixed</a>()
+<a name='L305'><font color='red'>{</font>
+<a name='L306'>    <b>unsigned</b> low, size;
+<a name='L307'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L308'>
+<a name='L309'>    <a href='../D/8615.html' title='Multiple defined in 2 places.'>fixedtables</a>(&amp;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L310'>    puts("    /* inffixed.h -- table for decoding fixed codes");
+<a name='L311'>    puts("     * Generated automatically by makefixed().");
+<a name='L312'>    puts("     */");
+<a name='L313'>    puts("");
+<a name='L314'>    puts("    /* WARNING: this file should *not* be used by applications.");
+<a name='L315'>    puts("       It is part of the implementation of this library and is");
+<a name='L316'>    puts("       subject to change. Applications should only use zlib.h.");
+<a name='L317'>    puts("     */");
+<a name='L318'>    puts("");
+<a name='L319'>    size = 1U &lt;&lt; 9;
+<a name='L320'>    printf("    static const code lenfix[%u] = {", size);
+<a name='L321'>    low = 0;
+<a name='L322'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L323'>        <b>if</b> ((low % 7) == 0) printf("\n        ");
+<a name='L324'>        printf("{%u,%u,%d}", <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>.lencode[low].op, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>.lencode[low].bits,
+<a name='L325'>               <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>.lencode[low].val);
+<a name='L326'>        <b>if</b> (++low == size) <b>break</b>;
+<a name='L327'>        putchar(',');
+<a name='L328'>    <font color='red'>}</font>
+<a name='L329'>    puts("\n    };");
+<a name='L330'>    size = 1U &lt;&lt; 5;
+<a name='L331'>    printf("\n    static const code distfix[%u] = {", size);
+<a name='L332'>    low = 0;
+<a name='L333'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L334'>        <b>if</b> ((low % 6) == 0) printf("\n        ");
+<a name='L335'>        printf("{%u,%u,%d}", <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>.distcode[low].op, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>.distcode[low].bits,
+<a name='L336'>               <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>.distcode[low].val);
+<a name='L337'>        <b>if</b> (++low == size) <b>break</b>;
+<a name='L338'>        putchar(',');
+<a name='L339'>    <font color='red'>}</font>
+<a name='L340'>    puts("\n    };");
+<a name='L341'><font color='red'>}</font>
+<a name='L342'><font color='darkred'>#endif</font> <i><font color='green'>/* MAKEFIXED */</font></i>
+<a name='L343'>
+<a name='L344'><i><font color='green'>/*</font></i>
+<a name='L345'><i><font color='green'>   Update the window with the last wsize (normally 32K) bytes written before</font></i>
+<a name='L346'><i><font color='green'>   returning.  If window does not exist yet, create it.  This is only called</font></i>
+<a name='L347'><i><font color='green'>   when a window is already in use, or when output has been written during this</font></i>
+<a name='L348'><i><font color='green'>   inflate call, but the end of the deflate stream has not been reached yet.</font></i>
+<a name='L349'><i><font color='green'>   It is also called to create a window for dictionary data when a dictionary</font></i>
+<a name='L350'><i><font color='green'>   is loaded.</font></i>
+<a name='L351'><i><font color='green'></font></i>
+<a name='L352'><i><font color='green'>   Providing output buffers larger than 32K to inflate() should provide a speed</font></i>
+<a name='L353'><i><font color='green'>   advantage, since only the last 32K of output is copied to the sliding window</font></i>
+<a name='L354'><i><font color='green'>   upon return from inflate(), and since all distances after the first 32K of</font></i>
+<a name='L355'><i><font color='green'>   output will fall in the output data, making match copies simpler and faster.</font></i>
+<a name='L356'><i><font color='green'>   The advantage may be dependent on the size of the processor's data caches.</font></i>
+<a name='L357'><i><font color='green'> */</font></i>
+<a name='L358'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>int</b> <a href='../R/11194.html' title='Multiple refered from 3 places.'>updatewindow</a>(strm, out)
+<a name='L359'>z_streamp strm;
+<a name='L360'><b>unsigned</b> out;
+<a name='L361'><font color='red'>{</font>
+<a name='L362'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L363'>    <b>unsigned</b> copy, dist;
+<a name='L364'>
+<a name='L365'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L366'>
+<a name='L367'>    <i><font color='green'>/* if it hasn't been done already, allocate space for the window */</font></i>
+<a name='L368'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L369'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window = (<b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)
+<a name='L370'>                        <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(strm, 1U &lt;&lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits,
+<a name='L371'>                               <b>sizeof</b>(<b>unsigned</b> <b>char</b>));
+<a name='L372'>        <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> 1;
+<a name='L373'>    <font color='red'>}</font>
+<a name='L374'>
+<a name='L375'>    <i><font color='green'>/* if window not in use yet, initialize */</font></i>
+<a name='L376'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize == 0) <font color='red'>{</font>
+<a name='L377'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize = 1U &lt;&lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits;
+<a name='L378'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext = 0;
+<a name='L379'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave = 0;
+<a name='L380'>    <font color='red'>}</font>
+<a name='L381'>
+<a name='L382'>    <i><font color='green'>/* copy state-&gt;wsize or less output bytes into the circular window */</font></i>
+<a name='L383'>    copy = out - strm-&gt;avail_out;
+<a name='L384'>    <b>if</b> (copy &gt;= <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize) <font color='red'>{</font>
+<a name='L385'>        <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window, strm-&gt;next_out - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize);
+<a name='L386'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext = 0;
+<a name='L387'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize;
+<a name='L388'>    <font color='red'>}</font>
+<a name='L389'>    <b>else</b> <font color='red'>{</font>
+<a name='L390'>        dist = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext;
+<a name='L391'>        <b>if</b> (dist &gt; copy) dist = copy;
+<a name='L392'>        <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window + <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext, strm-&gt;next_out - copy, dist);
+<a name='L393'>        copy -= dist;
+<a name='L394'>        <b>if</b> (copy) <font color='red'>{</font>
+<a name='L395'>            <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window, strm-&gt;next_out - copy, copy);
+<a name='L396'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext = copy;
+<a name='L397'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize;
+<a name='L398'>        <font color='red'>}</font>
+<a name='L399'>        <b>else</b> <font color='red'>{</font>
+<a name='L400'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext += dist;
+<a name='L401'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext == <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext = 0;
+<a name='L402'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave &lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave += dist;
+<a name='L403'>        <font color='red'>}</font>
+<a name='L404'>    <font color='red'>}</font>
+<a name='L405'>    <b>return</b> 0;
+<a name='L406'><font color='red'>}</font>
+<a name='L407'>
+<a name='L408'><i><font color='green'>/* Macros for inflate(): */</font></i>
+<a name='L409'>
+<a name='L410'><i><font color='green'>/* check function to use adler32() for zlib or crc32() for gzip */</font></i>
+<a name='L411'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L412'><font color='darkred'>#  define</font> <a href='../R/4755.html' title='Multiple refered from 2 places.'>UPDATE</a>(check, buf, len) \
+<a name='L413'>    (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> ? <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(check, buf, len) : <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(check, buf, len))
+<a name='L414'><font color='darkred'>#else</font>
+<a name='L415'><font color='darkred'>#  define</font> <a href='../R/4755.html' title='Multiple refered from 2 places.'>UPDATE</a>(check, buf, len) <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(check, buf, len)
+<a name='L416'><font color='darkred'>#endif</font>
+<a name='L417'>
+<a name='L418'><i><font color='green'>/* check macros for header crc */</font></i>
+<a name='L419'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L420'><font color='darkred'>#  define</font> <a href='../R/608.html' title='Multiple refered from 4 places.'>CRC2</a>(check, word) \
+<a name='L421'>    <b>do</b> <font color='red'>{</font> \
+<a name='L422'>        hbuf[0] = (<b>unsigned</b> <b>char</b>)(word); \
+<a name='L423'>        hbuf[1] = (<b>unsigned</b> <b>char</b>)((word) &gt;&gt; 8); \
+<a name='L424'>        check = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(check, hbuf, 2); \
+<a name='L425'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L426'>
+<a name='L427'><font color='darkred'>#  define</font> <a href='../S/2752.html#L693' title='Refered from 693 in Modules/zlib/inflate.c.'>CRC4</a>(check, word) \
+<a name='L428'>    <b>do</b> <font color='red'>{</font> \
+<a name='L429'>        hbuf[0] = (<b>unsigned</b> <b>char</b>)(word); \
+<a name='L430'>        hbuf[1] = (<b>unsigned</b> <b>char</b>)((word) &gt;&gt; 8); \
+<a name='L431'>        hbuf[2] = (<b>unsigned</b> <b>char</b>)((word) &gt;&gt; 16); \
+<a name='L432'>        hbuf[3] = (<b>unsigned</b> <b>char</b>)((word) &gt;&gt; 24); \
+<a name='L433'>        check = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(check, hbuf, 4); \
+<a name='L434'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L435'><font color='darkred'>#endif</font>
+<a name='L436'>
+<a name='L437'><i><font color='green'>/* Load registers with state in inflate() for speed */</font></i>
+<a name='L438'><font color='darkred'>#define</font> <a href='../R/1737.html' title='Multiple refered from 3 places.'>LOAD</a>() \
+<a name='L439'>    <b>do</b> <font color='red'>{</font> \
+<a name='L440'>        put = strm-&gt;next_out; \
+<a name='L441'>        left = strm-&gt;avail_out; \
+<a name='L442'>        next = strm-&gt;next_in; \
+<a name='L443'>        have = strm-&gt;avail_in; \
+<a name='L444'>        hold = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold; \
+<a name='L445'>        bits = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits; \
+<a name='L446'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L447'>
+<a name='L448'><i><font color='green'>/* Restore state from registers in inflate() */</font></i>
+<a name='L449'><font color='darkred'>#define</font> <a href='../R/3951.html' title='Multiple refered from 4 places.'>RESTORE</a>() \
+<a name='L450'>    <b>do</b> <font color='red'>{</font> \
+<a name='L451'>        strm-&gt;next_out = put; \
+<a name='L452'>        strm-&gt;avail_out = left; \
+<a name='L453'>        strm-&gt;next_in = next; \
+<a name='L454'>        strm-&gt;avail_in = have; \
+<a name='L455'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold = hold; \
+<a name='L456'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits = bits; \
+<a name='L457'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L458'>
+<a name='L459'><i><font color='green'>/* Clear the input bit accumulator */</font></i>
+<a name='L460'><font color='darkred'>#define</font> <a href='../R/1514.html' title='Multiple refered from 12 places.'>INITBITS</a>() \
+<a name='L461'>    <b>do</b> <font color='red'>{</font> \
+<a name='L462'>        hold = 0; \
+<a name='L463'>        bits = 0; \
+<a name='L464'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L465'>
+<a name='L466'><i><font color='green'>/* Get a byte of input into the bit accumulator, or return from inflate()</font></i>
+<a name='L467'><i><font color='green'>   if there is no input available. */</font></i>
+<a name='L468'><font color='darkred'>#define</font> <a href='../R/2319.html' title='Multiple refered from 12 places.'>PULLBYTE</a>() \
+<a name='L469'>    <b>do</b> <font color='red'>{</font> \
+<a name='L470'>        <b>if</b> (have == 0) <b>goto</b> inf_leave; \
+<a name='L471'>        have--; \
+<a name='L472'>        hold += (<b>unsigned</b> <b>long</b>)(*next++) &lt;&lt; bits; \
+<a name='L473'>        bits += 8; \
+<a name='L474'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L475'>
+<a name='L476'><i><font color='green'>/* Assure that there are at least n bits in the bit accumulator.  If there is</font></i>
+<a name='L477'><i><font color='green'>   not enough available input to do that, then return from inflate(). */</font></i>
+<a name='L478'><font color='darkred'>#define</font> <a href='../R/2063.html' title='Multiple refered from 29 places.'>NEEDBITS</a>(n) \
+<a name='L479'>    <b>do</b> <font color='red'>{</font> \
+<a name='L480'>        <b>while</b> (bits &lt; (<b>unsigned</b>)(n)) \
+<a name='L481'>            <a href='../D/2555.html' title='Multiple defined in 2 places.'>PULLBYTE</a>(); \
+<a name='L482'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L483'>
+<a name='L484'><i><font color='green'>/* Return the low n bits of the bit accumulator (n &lt; 16) */</font></i>
+<a name='L485'><font color='darkred'>#define</font> <a href='../R/265.html' title='Multiple refered from 38 places.'>BITS</a>(n) \
+<a name='L486'>    ((<b>unsigned</b>)hold &amp; ((1U &lt;&lt; (n)) - 1))
+<a name='L487'>
+<a name='L488'><i><font color='green'>/* Remove n bits from the bit accumulator */</font></i>
+<a name='L489'><font color='darkred'>#define</font> <a href='../R/769.html' title='Multiple refered from 40 places.'>DROPBITS</a>(n) \
+<a name='L490'>    <b>do</b> <font color='red'>{</font> \
+<a name='L491'>        hold &gt;&gt;= (n); \
+<a name='L492'>        bits -= (<b>unsigned</b>)(n); \
+<a name='L493'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L494'>
+<a name='L495'><i><font color='green'>/* Remove zero to seven bits as needed to go to a byte boundary */</font></i>
+<a name='L496'><font color='darkred'>#define</font> <a href='../R/340.html' title='Multiple refered from 4 places.'>BYTEBITS</a>() \
+<a name='L497'>    <b>do</b> <font color='red'>{</font> \
+<a name='L498'>        hold &gt;&gt;= bits &amp; 7; \
+<a name='L499'>        bits -= bits &amp; 7; \
+<a name='L500'>    <font color='red'>}</font> <b>while</b> (0)
+<a name='L501'>
+<a name='L502'><i><font color='green'>/* Reverse the bytes in a 32-bit value */</font></i>
+<a name='L503'><font color='darkred'>#define</font> <a href='../R/3966.html' title='Multiple refered from 2 places.'>REVERSE</a>(q) \
+<a name='L504'>    ((((q) &gt;&gt; 24) &amp; 0xff) + (((q) &gt;&gt; 8) &amp; 0xff00) + \
+<a name='L505'>     (((q) &amp; 0xff00) &lt;&lt; 8) + (((q) &amp; 0xff) &lt;&lt; 24))
+<a name='L506'>
+<a name='L507'><i><font color='green'>/*</font></i>
+<a name='L508'><i><font color='green'>   inflate() uses a state machine to process as much input data and generate as</font></i>
+<a name='L509'><i><font color='green'>   much output data as possible before returning.  The state machine is</font></i>
+<a name='L510'><i><font color='green'>   structured roughly as follows:</font></i>
+<a name='L511'><i><font color='green'></font></i>
+<a name='L512'><i><font color='green'>    for (;;) switch (state) {</font></i>
+<a name='L513'><i><font color='green'>    ...</font></i>
+<a name='L514'><i><font color='green'>    case STATEn:</font></i>
+<a name='L515'><i><font color='green'>        if (not enough input data or output space to make progress)</font></i>
+<a name='L516'><i><font color='green'>            return;</font></i>
+<a name='L517'><i><font color='green'>        ... make progress ...</font></i>
+<a name='L518'><i><font color='green'>        state = STATEm;</font></i>
+<a name='L519'><i><font color='green'>        break;</font></i>
+<a name='L520'><i><font color='green'>    ...</font></i>
+<a name='L521'><i><font color='green'>    }</font></i>
+<a name='L522'><i><font color='green'></font></i>
+<a name='L523'><i><font color='green'>   so when inflate() is called again, the same case is attempted again, and</font></i>
+<a name='L524'><i><font color='green'>   if the appropriate resources are provided, the machine proceeds to the</font></i>
+<a name='L525'><i><font color='green'>   next state.  The NEEDBITS() macro is usually the way the state evaluates</font></i>
+<a name='L526'><i><font color='green'>   whether it can proceed or should return.  NEEDBITS() does the return if</font></i>
+<a name='L527'><i><font color='green'>   the requested bits are not available.  The typical use of the BITS macros</font></i>
+<a name='L528'><i><font color='green'>   is:</font></i>
+<a name='L529'><i><font color='green'></font></i>
+<a name='L530'><i><font color='green'>        NEEDBITS(n);</font></i>
+<a name='L531'><i><font color='green'>        ... do something with BITS(n) ...</font></i>
+<a name='L532'><i><font color='green'>        DROPBITS(n);</font></i>
+<a name='L533'><i><font color='green'></font></i>
+<a name='L534'><i><font color='green'>   where NEEDBITS(n) either returns from inflate() if there isn't enough</font></i>
+<a name='L535'><i><font color='green'>   input left to load n bits into the accumulator, or it continues.  BITS(n)</font></i>
+<a name='L536'><i><font color='green'>   gives the low n bits in the accumulator.  When done, DROPBITS(n) drops</font></i>
+<a name='L537'><i><font color='green'>   the low n bits off the accumulator.  INITBITS() clears the accumulator</font></i>
+<a name='L538'><i><font color='green'>   and sets the number of available bits to zero.  BYTEBITS() discards just</font></i>
+<a name='L539'><i><font color='green'>   enough bits to put the accumulator on a byte boundary.  After BYTEBITS()</font></i>
+<a name='L540'><i><font color='green'>   and a NEEDBITS(8), then BITS(8) would return the next byte in the stream.</font></i>
+<a name='L541'><i><font color='green'></font></i>
+<a name='L542'><i><font color='green'>   NEEDBITS(n) uses PULLBYTE() to get an available byte of input, or to return</font></i>
+<a name='L543'><i><font color='green'>   if there is no input available.  The decoding of variable length codes uses</font></i>
+<a name='L544'><i><font color='green'>   PULLBYTE() directly in order to pull just enough bytes to decode the next</font></i>
+<a name='L545'><i><font color='green'>   code, and no more.</font></i>
+<a name='L546'><i><font color='green'></font></i>
+<a name='L547'><i><font color='green'>   Some states loop until they get enough input, making sure that enough</font></i>
+<a name='L548'><i><font color='green'>   state information is maintained to continue the loop where it left off</font></i>
+<a name='L549'><i><font color='green'>   if NEEDBITS() returns in the loop.  For example, want, need, and keep</font></i>
+<a name='L550'><i><font color='green'>   would all have to actually be part of the saved state in case NEEDBITS()</font></i>
+<a name='L551'><i><font color='green'>   returns:</font></i>
+<a name='L552'><i><font color='green'></font></i>
+<a name='L553'><i><font color='green'>    case STATEw:</font></i>
+<a name='L554'><i><font color='green'>        while (want &lt; need) {</font></i>
+<a name='L555'><i><font color='green'>            NEEDBITS(n);</font></i>
+<a name='L556'><i><font color='green'>            keep[want++] = BITS(n);</font></i>
+<a name='L557'><i><font color='green'>            DROPBITS(n);</font></i>
+<a name='L558'><i><font color='green'>        }</font></i>
+<a name='L559'><i><font color='green'>        state = STATEx;</font></i>
+<a name='L560'><i><font color='green'>    case STATEx:</font></i>
+<a name='L561'><i><font color='green'></font></i>
+<a name='L562'><i><font color='green'>   As shown above, if the next state is also the next case, then the break</font></i>
+<a name='L563'><i><font color='green'>   is omitted.</font></i>
+<a name='L564'><i><font color='green'></font></i>
+<a name='L565'><i><font color='green'>   A state may also return if there is not enough output space available to</font></i>
+<a name='L566'><i><font color='green'>   complete that state.  Those states are copying stored data, writing a</font></i>
+<a name='L567'><i><font color='green'>   literal byte, and copying a matching string.</font></i>
+<a name='L568'><i><font color='green'></font></i>
+<a name='L569'><i><font color='green'>   When returning, a "goto inf_leave" is used to update the total counters,</font></i>
+<a name='L570'><i><font color='green'>   update the check value, and determine whether any progress has been made</font></i>
+<a name='L571'><i><font color='green'>   during that inflate() call in order to return the proper return code.</font></i>
+<a name='L572'><i><font color='green'>   Progress is defined as a change in either strm-&gt;avail_in or strm-&gt;avail_out.</font></i>
+<a name='L573'><i><font color='green'>   When there is a window, goto inf_leave will update the window with the last</font></i>
+<a name='L574'><i><font color='green'>   output written.  If a goto inf_leave occurs in the middle of decompression</font></i>
+<a name='L575'><i><font color='green'>   and there is no window currently, goto inf_leave will create one and copy</font></i>
+<a name='L576'><i><font color='green'>   output to the window for the next call of inflate().</font></i>
+<a name='L577'><i><font color='green'></font></i>
+<a name='L578'><i><font color='green'>   In this implementation, the flush parameter of inflate() only affects the</font></i>
+<a name='L579'><i><font color='green'>   return code (per zlib.h).  inflate() always writes as much as possible to</font></i>
+<a name='L580'><i><font color='green'>   strm-&gt;next_out, given the space available and the provided input--the effect</font></i>
+<a name='L581'><i><font color='green'>   documented in zlib.h of Z_SYNC_FLUSH.  Furthermore, inflate() always defers</font></i>
+<a name='L582'><i><font color='green'>   the allocation of and copying into a sliding window until necessary, which</font></i>
+<a name='L583'><i><font color='green'>   provides the effect documented in zlib.h for Z_FINISH when the entire input</font></i>
+<a name='L584'><i><font color='green'>   stream available.  So the only thing the flush parameter actually does is:</font></i>
+<a name='L585'><i><font color='green'>   when flush is set to Z_FINISH, inflate() cannot return Z_OK.  Instead it</font></i>
+<a name='L586'><i><font color='green'>   will return Z_BUF_ERROR if it has not reached the end of the stream.</font></i>
+<a name='L587'><i><font color='green'> */</font></i>
+<a name='L588'>
+<a name='L589'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8348.html' title='Multiple refered from 15 places.'>inflate</a>(strm, flush)
+<a name='L590'>z_streamp strm;
+<a name='L591'><b>int</b> flush;
+<a name='L592'><font color='red'>{</font>
+<a name='L593'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L594'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *next;    <i><font color='green'>/* next input */</font></i>
+<a name='L595'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *put;     <i><font color='green'>/* next output */</font></i>
+<a name='L596'>    <b>unsigned</b> have, left;        <i><font color='green'>/* available input and output */</font></i>
+<a name='L597'>    <b>unsigned</b> <b>long</b> hold;         <i><font color='green'>/* bit buffer */</font></i>
+<a name='L598'>    <b>unsigned</b> bits;              <i><font color='green'>/* bits in bit buffer */</font></i>
+<a name='L599'>    <b>unsigned</b> in, out;           <i><font color='green'>/* save starting available input and output */</font></i>
+<a name='L600'>    <b>unsigned</b> copy;              <i><font color='green'>/* number of stored or match bytes to copy */</font></i>
+<a name='L601'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *from;    <i><font color='green'>/* where to copy match bytes from */</font></i>
+<a name='L602'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> here;                  <i><font color='green'>/* current decoding table entry */</font></i>
+<a name='L603'>    <a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> last;                  <i><font color='green'>/* parent table entry */</font></i>
+<a name='L604'>    <b>unsigned</b> len;               <i><font color='green'>/* length to copy for repeats, bits to drop */</font></i>
+<a name='L605'>    <b>int</b> ret;                    <i><font color='green'>/* return code */</font></i>
+<a name='L606'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L607'>    <b>unsigned</b> <b>char</b> hbuf[4];      <i><font color='green'>/* buffer for gzip header crc calculation */</font></i>
+<a name='L608'><font color='darkred'>#endif</font>
+<a name='L609'>    <b>static</b> <b>const</b> <b>unsigned</b> <b>short</b> order[19] = <i><font color='green'>/* permutation of code lengths */</font></i>
+<a name='L610'>        <font color='red'>{</font>16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15<font color='red'>}</font>;
+<a name='L611'>
+<a name='L612'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;next_out == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L613'>        (strm-&gt;next_in == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp; strm-&gt;avail_in != 0))
+<a name='L614'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L615'>
+<a name='L616'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L617'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L33' title='Defined at 33 in Modules/zlib/inflate.h.'>TYPEDO</a>;      <i><font color='green'>/* skip check */</font></i>
+<a name='L618'>    <a href='../D/1933.html' title='Multiple defined in 2 places.'>LOAD</a>();
+<a name='L619'>    in = have;
+<a name='L620'>    out = left;
+<a name='L621'>    ret = <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L622'>    <b>for</b> (;;)
+<a name='L623'>        <b>switch</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode) <font color='red'>{</font>
+<a name='L624'>        <b>case</b> <a href='../S/2753.html#L21' title='Defined at 21 in Modules/zlib/inflate.h.'>HEAD</a>:
+<a name='L625'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap == 0) <font color='red'>{</font>
+<a name='L626'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L33' title='Defined at 33 in Modules/zlib/inflate.h.'>TYPEDO</a>;
+<a name='L627'>                <b>break</b>;
+<a name='L628'>            <font color='red'>}</font>
+<a name='L629'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(16);
+<a name='L630'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L631'>            <b>if</b> ((<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap &amp; 2) &amp;&amp; hold == 0x8b1f) <font color='red'>{</font>  <i><font color='green'>/* gzip header */</font></i>
+<a name='L632'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L633'>                <a href='../S/2752.html#L420' title='Defined at 420 in Modules/zlib/inflate.c.'>CRC2</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, hold);
+<a name='L634'>                <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L635'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L22' title='Defined at 22 in Modules/zlib/inflate.h.'>FLAGS</a>;
+<a name='L636'>                <b>break</b>;
+<a name='L637'>            <font color='red'>}</font>
+<a name='L638'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = 0;           <i><font color='green'>/* expect zlib header */</font></i>
+<a name='L639'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L640'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;done = -1;
+<a name='L641'>            <b>if</b> (!(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap &amp; 1) ||   <i><font color='green'>/* check if zlib header allowed */</font></i>
+<a name='L642'><font color='darkred'>#else</font>
+<a name='L643'>            <b>if</b> (
+<a name='L644'><font color='darkred'>#endif</font>
+<a name='L645'>                ((<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(8) &lt;&lt; 8) + (hold &gt;&gt; 8)) % 31) <font color='red'>{</font>
+<a name='L646'>                strm-&gt;msg = (<b>char</b> *)"incorrect header check";
+<a name='L647'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L648'>                <b>break</b>;
+<a name='L649'>            <font color='red'>}</font>
+<a name='L650'>            <b>if</b> (<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(4) != <a href='../S/2769.html#L205' title='Defined at 205 in Modules/zlib/zlib.h.'>Z_DEFLATED</a>) <font color='red'>{</font>
+<a name='L651'>                strm-&gt;msg = (<b>char</b> *)"unknown compression method";
+<a name='L652'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L653'>                <b>break</b>;
+<a name='L654'>            <font color='red'>}</font>
+<a name='L655'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(4);
+<a name='L656'>            len = <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(4) + 8;
+<a name='L657'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits == 0)
+<a name='L658'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits = len;
+<a name='L659'>            <b>else</b> <b>if</b> (len &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits) <font color='red'>{</font>
+<a name='L660'>                strm-&gt;msg = (<b>char</b> *)"invalid window size";
+<a name='L661'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L662'>                <b>break</b>;
+<a name='L663'>            <font color='red'>}</font>
+<a name='L664'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;dmax = 1U &lt;&lt; len;
+<a name='L665'>            <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:   zlib header ok\n"));
+<a name='L666'>            strm-&gt;adler = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L667'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = hold &amp; 0x200 ? <a href='../S/2753.html#L30' title='Defined at 30 in Modules/zlib/inflate.h.'>DICTID</a> : <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>;
+<a name='L668'>            <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L669'>            <b>break</b>;
+<a name='L670'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L671'>        <b>case</b> <a href='../S/2753.html#L22' title='Defined at 22 in Modules/zlib/inflate.h.'>FLAGS</a>:
+<a name='L672'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(16);
+<a name='L673'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = (<b>int</b>)(hold);
+<a name='L674'>            <b>if</b> ((<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0xff) != <a href='../S/2769.html#L205' title='Defined at 205 in Modules/zlib/zlib.h.'>Z_DEFLATED</a>) <font color='red'>{</font>
+<a name='L675'>                strm-&gt;msg = (<b>char</b> *)"unknown compression method";
+<a name='L676'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L677'>                <b>break</b>;
+<a name='L678'>            <font color='red'>}</font>
+<a name='L679'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0xe000) <font color='red'>{</font>
+<a name='L680'>                strm-&gt;msg = (<b>char</b> *)"unknown header flags set";
+<a name='L681'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L682'>                <b>break</b>;
+<a name='L683'>            <font color='red'>}</font>
+<a name='L684'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L685'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;text = (<b>int</b>)((hold &gt;&gt; 8) &amp; 1);
+<a name='L686'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200) <a href='../S/2752.html#L420' title='Defined at 420 in Modules/zlib/inflate.c.'>CRC2</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, hold);
+<a name='L687'>            <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L688'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../D/5148.html' title='Multiple defined in 3 places.'>TIME</a>;
+<a name='L689'>        <b>case</b> <a href='../D/5148.html' title='Multiple defined in 3 places.'>TIME</a>:
+<a name='L690'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(32);
+<a name='L691'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L692'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;time = hold;
+<a name='L693'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200) <a href='../S/2752.html#L427' title='Defined at 427 in Modules/zlib/inflate.c.'>CRC4</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, hold);
+<a name='L694'>            <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L695'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L24' title='Defined at 24 in Modules/zlib/inflate.h.'>OS</a>;
+<a name='L696'>        <b>case</b> <a href='../S/2753.html#L24' title='Defined at 24 in Modules/zlib/inflate.h.'>OS</a>:
+<a name='L697'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(16);
+<a name='L698'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L699'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;xflags = (<b>int</b>)(hold &amp; 0xff);
+<a name='L700'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;os = (<b>int</b>)(hold &gt;&gt; 8);
+<a name='L701'>            <font color='red'>}</font>
+<a name='L702'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200) <a href='../S/2752.html#L420' title='Defined at 420 in Modules/zlib/inflate.c.'>CRC2</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, hold);
+<a name='L703'>            <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L704'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L25' title='Defined at 25 in Modules/zlib/inflate.h.'>EXLEN</a>;
+<a name='L705'>        <b>case</b> <a href='../S/2753.html#L25' title='Defined at 25 in Modules/zlib/inflate.h.'>EXLEN</a>:
+<a name='L706'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0400) <font color='red'>{</font>
+<a name='L707'>                <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(16);
+<a name='L708'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length = (<b>unsigned</b>)(hold);
+<a name='L709'>                <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L710'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;extra_len = (<b>unsigned</b>)hold;
+<a name='L711'>                <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200) <a href='../S/2752.html#L420' title='Defined at 420 in Modules/zlib/inflate.c.'>CRC2</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, hold);
+<a name='L712'>                <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L713'>            <font color='red'>}</font>
+<a name='L714'>            <b>else</b> <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L715'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;extra = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L716'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L26' title='Defined at 26 in Modules/zlib/inflate.h.'>EXTRA</a>;
+<a name='L717'>        <b>case</b> <a href='../S/2753.html#L26' title='Defined at 26 in Modules/zlib/inflate.h.'>EXTRA</a>:
+<a name='L718'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0400) <font color='red'>{</font>
+<a name='L719'>                copy = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length;
+<a name='L720'>                <b>if</b> (copy &gt; have) copy = have;
+<a name='L721'>                <b>if</b> (copy) <font color='red'>{</font>
+<a name='L722'>                    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp;
+<a name='L723'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;extra != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L724'>                        len = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;extra_len - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length;
+<a name='L725'>                        <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;extra + len, next,
+<a name='L726'>                                len + copy &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;extra_max ?
+<a name='L727'>                                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;extra_max - len : copy);
+<a name='L728'>                    <font color='red'>}</font>
+<a name='L729'>                    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200)
+<a name='L730'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, next, copy);
+<a name='L731'>                    have -= copy;
+<a name='L732'>                    next += copy;
+<a name='L733'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length -= copy;
+<a name='L734'>                <font color='red'>}</font>
+<a name='L735'>                <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length) <b>goto</b> inf_leave;
+<a name='L736'>            <font color='red'>}</font>
+<a name='L737'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length = 0;
+<a name='L738'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>;
+<a name='L739'>        <b>case</b> <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>:
+<a name='L740'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0800) <font color='red'>{</font>
+<a name='L741'>                <b>if</b> (have == 0) <b>goto</b> inf_leave;
+<a name='L742'>                copy = 0;
+<a name='L743'>                <b>do</b> <font color='red'>{</font>
+<a name='L744'>                    len = (<b>unsigned</b>)(next[copy++]);
+<a name='L745'>                    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp;
+<a name='L746'>                            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;name != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp;
+<a name='L747'>                            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length &lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;name_max)
+<a name='L748'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;name[<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length++] = len;
+<a name='L749'>                <font color='red'>}</font> <b>while</b> (len &amp;&amp; copy &lt; have);
+<a name='L750'>                <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200)
+<a name='L751'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, next, copy);
+<a name='L752'>                have -= copy;
+<a name='L753'>                next += copy;
+<a name='L754'>                <b>if</b> (len) <b>goto</b> inf_leave;
+<a name='L755'>            <font color='red'>}</font>
+<a name='L756'>            <b>else</b> <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L757'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;name = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L758'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length = 0;
+<a name='L759'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../D/584.html' title='Multiple defined in 2 places.'>COMMENT</a>;
+<a name='L760'>        <b>case</b> <a href='../D/584.html' title='Multiple defined in 2 places.'>COMMENT</a>:
+<a name='L761'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x1000) <font color='red'>{</font>
+<a name='L762'>                <b>if</b> (have == 0) <b>goto</b> inf_leave;
+<a name='L763'>                copy = 0;
+<a name='L764'>                <b>do</b> <font color='red'>{</font>
+<a name='L765'>                    len = (<b>unsigned</b>)(next[copy++]);
+<a name='L766'>                    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp;
+<a name='L767'>                            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;comment != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> &amp;&amp;
+<a name='L768'>                            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length &lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;comm_max)
+<a name='L769'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;comment[<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length++] = len;
+<a name='L770'>                <font color='red'>}</font> <b>while</b> (len &amp;&amp; copy &lt; have);
+<a name='L771'>                <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200)
+<a name='L772'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, next, copy);
+<a name='L773'>                have -= copy;
+<a name='L774'>                next += copy;
+<a name='L775'>                <b>if</b> (len) <b>goto</b> inf_leave;
+<a name='L776'>            <font color='red'>}</font>
+<a name='L777'>            <b>else</b> <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>)
+<a name='L778'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;comment = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L779'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L29' title='Defined at 29 in Modules/zlib/inflate.h.'>HCRC</a>;
+<a name='L780'>        <b>case</b> <a href='../S/2753.html#L29' title='Defined at 29 in Modules/zlib/inflate.h.'>HCRC</a>:
+<a name='L781'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; 0x0200) <font color='red'>{</font>
+<a name='L782'>                <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(16);
+<a name='L783'>                <b>if</b> (hold != (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check &amp; 0xffff)) <font color='red'>{</font>
+<a name='L784'>                    strm-&gt;msg = (<b>char</b> *)"header crc mismatch";
+<a name='L785'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L786'>                    <b>break</b>;
+<a name='L787'>                <font color='red'>}</font>
+<a name='L788'>                <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L789'>            <font color='red'>}</font>
+<a name='L790'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L791'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;hcrc = (<b>int</b>)((<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &gt;&gt; 9) &amp; 1);
+<a name='L792'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head-&gt;done = 1;
+<a name='L793'>            <font color='red'>}</font>
+<a name='L794'>            strm-&gt;adler = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../D/7813.html' title='Multiple defined in 3 places.'>crc32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L795'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>;
+<a name='L796'>            <b>break</b>;
+<a name='L797'><font color='darkred'>#endif</font>
+<a name='L798'>        <b>case</b> <a href='../S/2753.html#L30' title='Defined at 30 in Modules/zlib/inflate.h.'>DICTID</a>:
+<a name='L799'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(32);
+<a name='L800'>            strm-&gt;adler = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../S/2752.html#L503' title='Defined at 503 in Modules/zlib/inflate.c.'>REVERSE</a>(hold);
+<a name='L801'>            <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L802'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../D/783.html' title='Multiple defined in 2 places.'>DICT</a>;
+<a name='L803'>        <b>case</b> <a href='../D/783.html' title='Multiple defined in 2 places.'>DICT</a>:
+<a name='L804'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;havedict == 0) <font color='red'>{</font>
+<a name='L805'>                <a href='../D/4481.html' title='Multiple defined in 2 places.'>RESTORE</a>();
+<a name='L806'>                <b>return</b> <a href='../S/2769.html#L175' title='Defined at 175 in Modules/zlib/zlib.h.'>Z_NEED_DICT</a>;
+<a name='L807'>            <font color='red'>}</font>
+<a name='L808'>            strm-&gt;adler = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check = <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L809'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>;
+<a name='L810'>        <b>case</b> <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>:
+<a name='L811'>            <b>if</b> (flush == <a href='../S/2769.html#L169' title='Defined at 169 in Modules/zlib/zlib.h.'>Z_BLOCK</a> || flush == <a href='../S/2769.html#L170' title='Defined at 170 in Modules/zlib/zlib.h.'>Z_TREES</a>) <b>goto</b> inf_leave;
+<a name='L812'>        <b>case</b> <a href='../S/2753.html#L33' title='Defined at 33 in Modules/zlib/inflate.h.'>TYPEDO</a>:
+<a name='L813'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;last) <font color='red'>{</font>
+<a name='L814'>                <a href='../D/366.html' title='Multiple defined in 2 places.'>BYTEBITS</a>();
+<a name='L815'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../D/517.html' title='Multiple defined in 4 places.'>CHECK</a>;
+<a name='L816'>                <b>break</b>;
+<a name='L817'>            <font color='red'>}</font>
+<a name='L818'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(3);
+<a name='L819'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;last = <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(1);
+<a name='L820'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(1);
+<a name='L821'>            <b>switch</b> (<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(2)) <font color='red'>{</font>
+<a name='L822'>            <b>case</b> 0:                             <i><font color='green'>/* stored block */</font></i>
+<a name='L823'>                <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:     stored block%s\n",
+<a name='L824'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;last ? " (last)" : ""));
+<a name='L825'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L34' title='Defined at 34 in Modules/zlib/inflate.h.'>STORED</a>;
+<a name='L826'>                <b>break</b>;
+<a name='L827'>            <b>case</b> 1:                             <i><font color='green'>/* fixed block */</font></i>
+<a name='L828'>                <a href='../D/8615.html' title='Multiple defined in 2 places.'>fixedtables</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L829'>                <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:     fixed codes block%s\n",
+<a name='L830'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;last ? " (last)" : ""));
+<a name='L831'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L40' title='Defined at 40 in Modules/zlib/inflate.h.'>LEN_</a>;             <i><font color='green'>/* decode codes */</font></i>
+<a name='L832'>                <b>if</b> (flush == <a href='../S/2769.html#L170' title='Defined at 170 in Modules/zlib/zlib.h.'>Z_TREES</a>) <font color='red'>{</font>
+<a name='L833'>                    <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(2);
+<a name='L834'>                    <b>goto</b> inf_leave;
+<a name='L835'>                <font color='red'>}</font>
+<a name='L836'>                <b>break</b>;
+<a name='L837'>            <b>case</b> 2:                             <i><font color='green'>/* dynamic block */</font></i>
+<a name='L838'>                <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:     dynamic codes block%s\n",
+<a name='L839'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;last ? " (last)" : ""));
+<a name='L840'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L37' title='Defined at 37 in Modules/zlib/inflate.h.'>TABLE</a>;
+<a name='L841'>                <b>break</b>;
+<a name='L842'>            <b>case</b> 3:
+<a name='L843'>                strm-&gt;msg = (<b>char</b> *)"invalid block type";
+<a name='L844'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L845'>            <font color='red'>}</font>
+<a name='L846'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(2);
+<a name='L847'>            <b>break</b>;
+<a name='L848'>        <b>case</b> <a href='../S/2753.html#L34' title='Defined at 34 in Modules/zlib/inflate.h.'>STORED</a>:
+<a name='L849'>            <a href='../D/366.html' title='Multiple defined in 2 places.'>BYTEBITS</a>();                         <i><font color='green'>/* go to byte boundary */</font></i>
+<a name='L850'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(32);
+<a name='L851'>            <b>if</b> ((hold &amp; 0xffff) != ((hold &gt;&gt; 16) ^ 0xffff)) <font color='red'>{</font>
+<a name='L852'>                strm-&gt;msg = (<b>char</b> *)"invalid stored block lengths";
+<a name='L853'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L854'>                <b>break</b>;
+<a name='L855'>            <font color='red'>}</font>
+<a name='L856'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length = (<b>unsigned</b>)hold &amp; 0xffff;
+<a name='L857'>            <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:       stored length %u\n",
+<a name='L858'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length));
+<a name='L859'>            <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L860'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L35' title='Defined at 35 in Modules/zlib/inflate.h.'>COPY_</a>;
+<a name='L861'>            <b>if</b> (flush == <a href='../S/2769.html#L170' title='Defined at 170 in Modules/zlib/zlib.h.'>Z_TREES</a>) <b>goto</b> inf_leave;
+<a name='L862'>        <b>case</b> <a href='../S/2753.html#L35' title='Defined at 35 in Modules/zlib/inflate.h.'>COPY_</a>:
+<a name='L863'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../D/626.html' title='Multiple defined in 2 places.'>COPY</a>;
+<a name='L864'>        <b>case</b> <a href='../D/626.html' title='Multiple defined in 2 places.'>COPY</a>:
+<a name='L865'>            copy = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length;
+<a name='L866'>            <b>if</b> (copy) <font color='red'>{</font>
+<a name='L867'>                <b>if</b> (copy &gt; have) copy = have;
+<a name='L868'>                <b>if</b> (copy &gt; left) copy = left;
+<a name='L869'>                <b>if</b> (copy == 0) <b>goto</b> inf_leave;
+<a name='L870'>                <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(put, next, copy);
+<a name='L871'>                have -= copy;
+<a name='L872'>                next += copy;
+<a name='L873'>                left -= copy;
+<a name='L874'>                put += copy;
+<a name='L875'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length -= copy;
+<a name='L876'>                <b>break</b>;
+<a name='L877'>            <font color='red'>}</font>
+<a name='L878'>            <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:       stored end\n"));
+<a name='L879'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>;
+<a name='L880'>            <b>break</b>;
+<a name='L881'>        <b>case</b> <a href='../S/2753.html#L37' title='Defined at 37 in Modules/zlib/inflate.h.'>TABLE</a>:
+<a name='L882'>            <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(14);
+<a name='L883'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;nlen = <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(5) + 257;
+<a name='L884'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(5);
+<a name='L885'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;ndist = <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(5) + 1;
+<a name='L886'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(5);
+<a name='L887'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;ncode = <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(4) + 4;
+<a name='L888'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(4);
+<a name='L889'><font color='darkred'>#ifndef</font> PKZIP_BUG_WORKAROUND
+<a name='L890'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;nlen &gt; 286 || <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;ndist &gt; 30) <font color='red'>{</font>
+<a name='L891'>                strm-&gt;msg = (<b>char</b> *)"too many length or distance symbols";
+<a name='L892'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L893'>                <b>break</b>;
+<a name='L894'>            <font color='red'>}</font>
+<a name='L895'><font color='darkred'>#endif</font>
+<a name='L896'>            <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:       table sizes ok\n"));
+<a name='L897'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have = 0;
+<a name='L898'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L38' title='Defined at 38 in Modules/zlib/inflate.h.'>LENLENS</a>;
+<a name='L899'>        <b>case</b> <a href='../S/2753.html#L38' title='Defined at 38 in Modules/zlib/inflate.h.'>LENLENS</a>:
+<a name='L900'>            <b>while</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have &lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;ncode) <font color='red'>{</font>
+<a name='L901'>                <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(3);
+<a name='L902'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[order[<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have++]] = (<b>unsigned</b> <b>short</b>)<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(3);
+<a name='L903'>                <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(3);
+<a name='L904'>            <font color='red'>}</font>
+<a name='L905'>            <b>while</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have &lt; 19)
+<a name='L906'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[order[<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have++]] = 0;
+<a name='L907'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes;
+<a name='L908'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode = (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> <b>const</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next);
+<a name='L909'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits = 7;
+<a name='L910'>            ret = <a href='../D/9180.html' title='Multiple defined in 2 places.'>inflate_table</a>(<a href='../S/2755.html#L55' title='Defined at 55 in Modules/zlib/inftrees.h.'>CODES</a>, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens, 19, &amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next),
+<a name='L911'>                                &amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits), <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;work);
+<a name='L912'>            <b>if</b> (ret) <font color='red'>{</font>
+<a name='L913'>                strm-&gt;msg = (<b>char</b> *)"invalid code lengths set";
+<a name='L914'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L915'>                <b>break</b>;
+<a name='L916'>            <font color='red'>}</font>
+<a name='L917'>            <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:       code lengths ok\n"));
+<a name='L918'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have = 0;
+<a name='L919'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L39' title='Defined at 39 in Modules/zlib/inflate.h.'>CODELENS</a>;
+<a name='L920'>        <b>case</b> <a href='../S/2753.html#L39' title='Defined at 39 in Modules/zlib/inflate.h.'>CODELENS</a>:
+<a name='L921'>            <b>while</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have &lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;nlen + <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;ndist) <font color='red'>{</font>
+<a name='L922'>                <b>for</b> (;;) <font color='red'>{</font>
+<a name='L923'>                    here = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode[<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits)];
+<a name='L924'>                    <b>if</b> ((<b>unsigned</b>)(here.bits) &lt;= bits) <b>break</b>;
+<a name='L925'>                    <a href='../D/2555.html' title='Multiple defined in 2 places.'>PULLBYTE</a>();
+<a name='L926'>                <font color='red'>}</font>
+<a name='L927'>                <b>if</b> (here.val &lt; 16) <font color='red'>{</font>
+<a name='L928'>                    <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(here.bits);
+<a name='L929'>                    <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(here.bits);
+<a name='L930'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have++] = here.val;
+<a name='L931'>                <font color='red'>}</font>
+<a name='L932'>                <b>else</b> <font color='red'>{</font>
+<a name='L933'>                    <b>if</b> (here.val == 16) <font color='red'>{</font>
+<a name='L934'>                        <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(here.bits + 2);
+<a name='L935'>                        <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(here.bits);
+<a name='L936'>                        <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have == 0) <font color='red'>{</font>
+<a name='L937'>                            strm-&gt;msg = (<b>char</b> *)"invalid bit length repeat";
+<a name='L938'>                            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L939'>                            <b>break</b>;
+<a name='L940'>                        <font color='red'>}</font>
+<a name='L941'>                        len = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have - 1];
+<a name='L942'>                        copy = 3 + <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(2);
+<a name='L943'>                        <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(2);
+<a name='L944'>                    <font color='red'>}</font>
+<a name='L945'>                    <b>else</b> <b>if</b> (here.val == 17) <font color='red'>{</font>
+<a name='L946'>                        <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(here.bits + 3);
+<a name='L947'>                        <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(here.bits);
+<a name='L948'>                        len = 0;
+<a name='L949'>                        copy = 3 + <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(3);
+<a name='L950'>                        <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(3);
+<a name='L951'>                    <font color='red'>}</font>
+<a name='L952'>                    <b>else</b> <font color='red'>{</font>
+<a name='L953'>                        <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(here.bits + 7);
+<a name='L954'>                        <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(here.bits);
+<a name='L955'>                        len = 0;
+<a name='L956'>                        copy = 11 + <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(7);
+<a name='L957'>                        <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(7);
+<a name='L958'>                    <font color='red'>}</font>
+<a name='L959'>                    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have + copy &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;nlen + <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;ndist) <font color='red'>{</font>
+<a name='L960'>                        strm-&gt;msg = (<b>char</b> *)"invalid bit length repeat";
+<a name='L961'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L962'>                        <b>break</b>;
+<a name='L963'>                    <font color='red'>}</font>
+<a name='L964'>                    <b>while</b> (copy--)
+<a name='L965'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have++] = (<b>unsigned</b> <b>short</b>)len;
+<a name='L966'>                <font color='red'>}</font>
+<a name='L967'>            <font color='red'>}</font>
+<a name='L968'>
+<a name='L969'>            <i><font color='green'>/* handle error breaks in while */</font></i>
+<a name='L970'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>) <b>break</b>;
+<a name='L971'>
+<a name='L972'>            <i><font color='green'>/* check for end-of-block code (better have one) */</font></i>
+<a name='L973'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens[256] == 0) <font color='red'>{</font>
+<a name='L974'>                strm-&gt;msg = (<b>char</b> *)"invalid code -- missing end-of-block";
+<a name='L975'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L976'>                <b>break</b>;
+<a name='L977'>            <font color='red'>}</font>
+<a name='L978'>
+<a name='L979'>            <i><font color='green'>/* build code tables -- note: do not change the lenbits or distbits</font></i>
+<a name='L980'><i><font color='green'>               values here (9 and 6) without reading the comments in inftrees.h</font></i>
+<a name='L981'><i><font color='green'>               concerning the ENOUGH constants, which depend on those values */</font></i>
+<a name='L982'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes;
+<a name='L983'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode = (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> <b>const</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next);
+<a name='L984'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits = 9;
+<a name='L985'>            ret = <a href='../D/9180.html' title='Multiple defined in 2 places.'>inflate_table</a>(<a href='../S/2755.html#L56' title='Defined at 56 in Modules/zlib/inftrees.h.'>LENS</a>, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;nlen, &amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next),
+<a name='L986'>                                &amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits), <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;work);
+<a name='L987'>            <b>if</b> (ret) <font color='red'>{</font>
+<a name='L988'>                strm-&gt;msg = (<b>char</b> *)"invalid literal/lengths set";
+<a name='L989'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L990'>                <b>break</b>;
+<a name='L991'>            <font color='red'>}</font>
+<a name='L992'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distcode = (<a href='../S/2755.html#L28' title='Defined at 28 in Modules/zlib/inftrees.h.'>code</a> <b>const</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next);
+<a name='L993'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distbits = 6;
+<a name='L994'>            ret = <a href='../D/9180.html' title='Multiple defined in 2 places.'>inflate_table</a>(<a href='../S/2755.html#L57' title='Defined at 57 in Modules/zlib/inftrees.h.'>DISTS</a>, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lens + <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;nlen, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;ndist,
+<a name='L995'>                            &amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next), &amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distbits), <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;work);
+<a name='L996'>            <b>if</b> (ret) <font color='red'>{</font>
+<a name='L997'>                strm-&gt;msg = (<b>char</b> *)"invalid distances set";
+<a name='L998'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L999'>                <b>break</b>;
+<a name='L1000'>            <font color='red'>}</font>
+<a name='L1001'>            <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:       codes ok\n"));
+<a name='L1002'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L40' title='Defined at 40 in Modules/zlib/inflate.h.'>LEN_</a>;
+<a name='L1003'>            <b>if</b> (flush == <a href='../S/2769.html#L170' title='Defined at 170 in Modules/zlib/zlib.h.'>Z_TREES</a>) <b>goto</b> inf_leave;
+<a name='L1004'>        <b>case</b> <a href='../S/2753.html#L40' title='Defined at 40 in Modules/zlib/inflate.h.'>LEN_</a>:
+<a name='L1005'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L41' title='Defined at 41 in Modules/zlib/inflate.h.'>LEN</a>;
+<a name='L1006'>        <b>case</b> <a href='../S/2753.html#L41' title='Defined at 41 in Modules/zlib/inflate.h.'>LEN</a>:
+<a name='L1007'>            <b>if</b> (have &gt;= 6 &amp;&amp; left &gt;= 258) <font color='red'>{</font>
+<a name='L1008'>                <a href='../D/4481.html' title='Multiple defined in 2 places.'>RESTORE</a>();
+<a name='L1009'>                <a href='../D/9177.html' title='Multiple defined in 2 places.'>inflate_fast</a>(strm, out);
+<a name='L1010'>                <a href='../D/1933.html' title='Multiple defined in 2 places.'>LOAD</a>();
+<a name='L1011'>                <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>)
+<a name='L1012'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back = -1;
+<a name='L1013'>                <b>break</b>;
+<a name='L1014'>            <font color='red'>}</font>
+<a name='L1015'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back = 0;
+<a name='L1016'>            <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1017'>                here = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode[<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lenbits)];
+<a name='L1018'>                <b>if</b> ((<b>unsigned</b>)(here.bits) &lt;= bits) <b>break</b>;
+<a name='L1019'>                <a href='../D/2555.html' title='Multiple defined in 2 places.'>PULLBYTE</a>();
+<a name='L1020'>            <font color='red'>}</font>
+<a name='L1021'>            <b>if</b> (here.op &amp;&amp; (here.op &amp; 0xf0) == 0) <font color='red'>{</font>
+<a name='L1022'>                last = here;
+<a name='L1023'>                <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1024'>                    here = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode[last.val +
+<a name='L1025'>                            (<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(last.bits + last.op) &gt;&gt; last.bits)];
+<a name='L1026'>                    <b>if</b> ((<b>unsigned</b>)(last.bits + here.bits) &lt;= bits) <b>break</b>;
+<a name='L1027'>                    <a href='../D/2555.html' title='Multiple defined in 2 places.'>PULLBYTE</a>();
+<a name='L1028'>                <font color='red'>}</font>
+<a name='L1029'>                <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(last.bits);
+<a name='L1030'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back += last.bits;
+<a name='L1031'>            <font color='red'>}</font>
+<a name='L1032'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(here.bits);
+<a name='L1033'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back += here.bits;
+<a name='L1034'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length = (<b>unsigned</b>)here.val;
+<a name='L1035'>            <b>if</b> ((<b>int</b>)(here.op) == 0) <font color='red'>{</font>
+<a name='L1036'>                <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, here.val &gt;= 0x20 &amp;&amp; here.val &lt; 0x7f ?
+<a name='L1037'>                        "inflate:         literal '%c'\n" :
+<a name='L1038'>                        "inflate:         literal 0x%02x\n", here.val));
+<a name='L1039'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L46' title='Defined at 46 in Modules/zlib/inflate.h.'>LIT</a>;
+<a name='L1040'>                <b>break</b>;
+<a name='L1041'>            <font color='red'>}</font>
+<a name='L1042'>            <b>if</b> (here.op &amp; 32) <font color='red'>{</font>
+<a name='L1043'>                <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, "inflate:         end of block\n"));
+<a name='L1044'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back = -1;
+<a name='L1045'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>;
+<a name='L1046'>                <b>break</b>;
+<a name='L1047'>            <font color='red'>}</font>
+<a name='L1048'>            <b>if</b> (here.op &amp; 64) <font color='red'>{</font>
+<a name='L1049'>                strm-&gt;msg = (<b>char</b> *)"invalid literal/length code";
+<a name='L1050'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L1051'>                <b>break</b>;
+<a name='L1052'>            <font color='red'>}</font>
+<a name='L1053'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra = (<b>unsigned</b>)(here.op) &amp; 15;
+<a name='L1054'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L42' title='Defined at 42 in Modules/zlib/inflate.h.'>LENEXT</a>;
+<a name='L1055'>        <b>case</b> <a href='../S/2753.html#L42' title='Defined at 42 in Modules/zlib/inflate.h.'>LENEXT</a>:
+<a name='L1056'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra) <font color='red'>{</font>
+<a name='L1057'>                <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra);
+<a name='L1058'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length += <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra);
+<a name='L1059'>                <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra);
+<a name='L1060'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back += <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra;
+<a name='L1061'>            <font color='red'>}</font>
+<a name='L1062'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, "inflate:         length %u\n", <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length));
+<a name='L1063'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;was = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length;
+<a name='L1064'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L43' title='Defined at 43 in Modules/zlib/inflate.h.'>DIST</a>;
+<a name='L1065'>        <b>case</b> <a href='../S/2753.html#L43' title='Defined at 43 in Modules/zlib/inflate.h.'>DIST</a>:
+<a name='L1066'>            <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1067'>                here = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distcode[<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distbits)];
+<a name='L1068'>                <b>if</b> ((<b>unsigned</b>)(here.bits) &lt;= bits) <b>break</b>;
+<a name='L1069'>                <a href='../D/2555.html' title='Multiple defined in 2 places.'>PULLBYTE</a>();
+<a name='L1070'>            <font color='red'>}</font>
+<a name='L1071'>            <b>if</b> ((here.op &amp; 0xf0) == 0) <font color='red'>{</font>
+<a name='L1072'>                last = here;
+<a name='L1073'>                <b>for</b> (;;) <font color='red'>{</font>
+<a name='L1074'>                    here = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distcode[last.val +
+<a name='L1075'>                            (<a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(last.bits + last.op) &gt;&gt; last.bits)];
+<a name='L1076'>                    <b>if</b> ((<b>unsigned</b>)(last.bits + here.bits) &lt;= bits) <b>break</b>;
+<a name='L1077'>                    <a href='../D/2555.html' title='Multiple defined in 2 places.'>PULLBYTE</a>();
+<a name='L1078'>                <font color='red'>}</font>
+<a name='L1079'>                <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(last.bits);
+<a name='L1080'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back += last.bits;
+<a name='L1081'>            <font color='red'>}</font>
+<a name='L1082'>            <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(here.bits);
+<a name='L1083'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back += here.bits;
+<a name='L1084'>            <b>if</b> (here.op &amp; 64) <font color='red'>{</font>
+<a name='L1085'>                strm-&gt;msg = (<b>char</b> *)"invalid distance code";
+<a name='L1086'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L1087'>                <b>break</b>;
+<a name='L1088'>            <font color='red'>}</font>
+<a name='L1089'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;offset = (<b>unsigned</b>)here.val;
+<a name='L1090'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra = (<b>unsigned</b>)(here.op) &amp; 15;
+<a name='L1091'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L44' title='Defined at 44 in Modules/zlib/inflate.h.'>DISTEXT</a>;
+<a name='L1092'>        <b>case</b> <a href='../S/2753.html#L44' title='Defined at 44 in Modules/zlib/inflate.h.'>DISTEXT</a>:
+<a name='L1093'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra) <font color='red'>{</font>
+<a name='L1094'>                <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra);
+<a name='L1095'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;offset += <a href='../D/289.html' title='Multiple defined in 2 places.'>BITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra);
+<a name='L1096'>                <a href='../D/827.html' title='Multiple defined in 2 places.'>DROPBITS</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra);
+<a name='L1097'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back += <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;extra;
+<a name='L1098'>            <font color='red'>}</font>
+<a name='L1099'><font color='darkred'>#ifdef</font> INFLATE_STRICT
+<a name='L1100'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;offset &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;dmax) <font color='red'>{</font>
+<a name='L1101'>                strm-&gt;msg = (<b>char</b> *)"invalid distance too far back";
+<a name='L1102'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L1103'>                <b>break</b>;
+<a name='L1104'>            <font color='red'>}</font>
+<a name='L1105'><font color='darkred'>#endif</font>
+<a name='L1106'>            <a href='../D/5314.html' title='Multiple defined in 2 places.'>Tracevv</a>((stderr, "inflate:         distance %u\n", <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;offset));
+<a name='L1107'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L45' title='Defined at 45 in Modules/zlib/inflate.h.'>MATCH</a>;
+<a name='L1108'>        <b>case</b> <a href='../S/2753.html#L45' title='Defined at 45 in Modules/zlib/inflate.h.'>MATCH</a>:
+<a name='L1109'>            <b>if</b> (left == 0) <b>goto</b> inf_leave;
+<a name='L1110'>            copy = out - left;
+<a name='L1111'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;offset &gt; copy) <font color='red'>{</font>         <i><font color='green'>/* copy from window */</font></i>
+<a name='L1112'>                copy = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;offset - copy;
+<a name='L1113'>                <b>if</b> (copy &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave) <font color='red'>{</font>
+<a name='L1114'>                    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;sane) <font color='red'>{</font>
+<a name='L1115'>                        strm-&gt;msg = (<b>char</b> *)"invalid distance too far back";
+<a name='L1116'>                        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L1117'>                        <b>break</b>;
+<a name='L1118'>                    <font color='red'>}</font>
+<a name='L1119'><font color='darkred'>#ifdef</font> INFLATE_ALLOW_INVALID_DISTANCE_TOOFAR_ARRR
+<a name='L1120'>                    <a href='../D/5310.html' title='Multiple defined in 2 places.'>Trace</a>((stderr, "inflate.c too far\n"));
+<a name='L1121'>                    copy -= <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave;
+<a name='L1122'>                    <b>if</b> (copy &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length) copy = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length;
+<a name='L1123'>                    <b>if</b> (copy &gt; left) copy = left;
+<a name='L1124'>                    left -= copy;
+<a name='L1125'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length -= copy;
+<a name='L1126'>                    <b>do</b> <font color='red'>{</font>
+<a name='L1127'>                        *put++ = 0;
+<a name='L1128'>                    <font color='red'>}</font> <b>while</b> (--copy);
+<a name='L1129'>                    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length == 0) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L41' title='Defined at 41 in Modules/zlib/inflate.h.'>LEN</a>;
+<a name='L1130'>                    <b>break</b>;
+<a name='L1131'><font color='darkred'>#endif</font>
+<a name='L1132'>                <font color='red'>}</font>
+<a name='L1133'>                <b>if</b> (copy &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext) <font color='red'>{</font>
+<a name='L1134'>                    copy -= <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext;
+<a name='L1135'>                    from = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window + (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize - copy);
+<a name='L1136'>                <font color='red'>}</font>
+<a name='L1137'>                <b>else</b>
+<a name='L1138'>                    from = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window + (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wnext - copy);
+<a name='L1139'>                <b>if</b> (copy &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length) copy = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length;
+<a name='L1140'>            <font color='red'>}</font>
+<a name='L1141'>            <b>else</b> <font color='red'>{</font>                              <i><font color='green'>/* copy from output */</font></i>
+<a name='L1142'>                from = put - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;offset;
+<a name='L1143'>                copy = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length;
+<a name='L1144'>            <font color='red'>}</font>
+<a name='L1145'>            <b>if</b> (copy &gt; left) copy = left;
+<a name='L1146'>            left -= copy;
+<a name='L1147'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length -= copy;
+<a name='L1148'>            <b>do</b> <font color='red'>{</font>
+<a name='L1149'>                *put++ = *from++;
+<a name='L1150'>            <font color='red'>}</font> <b>while</b> (--copy);
+<a name='L1151'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length == 0) <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L41' title='Defined at 41 in Modules/zlib/inflate.h.'>LEN</a>;
+<a name='L1152'>            <b>break</b>;
+<a name='L1153'>        <b>case</b> <a href='../S/2753.html#L46' title='Defined at 46 in Modules/zlib/inflate.h.'>LIT</a>:
+<a name='L1154'>            <b>if</b> (left == 0) <b>goto</b> inf_leave;
+<a name='L1155'>            *put++ = (<b>unsigned</b> <b>char</b>)(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length);
+<a name='L1156'>            left--;
+<a name='L1157'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L41' title='Defined at 41 in Modules/zlib/inflate.h.'>LEN</a>;
+<a name='L1158'>            <b>break</b>;
+<a name='L1159'>        <b>case</b> <a href='../D/517.html' title='Multiple defined in 4 places.'>CHECK</a>:
+<a name='L1160'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap) <font color='red'>{</font>
+<a name='L1161'>                <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(32);
+<a name='L1162'>                out -= left;
+<a name='L1163'>                strm-&gt;total_out += out;
+<a name='L1164'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;total += out;
+<a name='L1165'>                <b>if</b> (out)
+<a name='L1166'>                    strm-&gt;adler = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check =
+<a name='L1167'>                        <a href='../D/5376.html' title='Multiple defined in 2 places.'>UPDATE</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, put - out, out);
+<a name='L1168'>                out = left;
+<a name='L1169'>                <b>if</b> ((
+<a name='L1170'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L1171'>                     <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> ? hold :
+<a name='L1172'><font color='darkred'>#endif</font>
+<a name='L1173'>                     <a href='../S/2752.html#L503' title='Defined at 503 in Modules/zlib/inflate.c.'>REVERSE</a>(hold)) != <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check) <font color='red'>{</font>
+<a name='L1174'>                    strm-&gt;msg = (<b>char</b> *)"incorrect data check";
+<a name='L1175'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L1176'>                    <b>break</b>;
+<a name='L1177'>                <font color='red'>}</font>
+<a name='L1178'>                <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L1179'>                <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:   check matches trailer\n"));
+<a name='L1180'>            <font color='red'>}</font>
+<a name='L1181'><font color='darkred'>#ifdef</font> <a href='../S/2753.html#L16' title='Defined at 16 in Modules/zlib/inflate.h.'>GUNZIP</a>
+<a name='L1182'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L48' title='Defined at 48 in Modules/zlib/inflate.h.'>LENGTH</a>;
+<a name='L1183'>        <b>case</b> <a href='../S/2753.html#L48' title='Defined at 48 in Modules/zlib/inflate.h.'>LENGTH</a>:
+<a name='L1184'>            <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap &amp;&amp; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>) <font color='red'>{</font>
+<a name='L1185'>                <a href='../D/2269.html' title='Multiple defined in 2 places.'>NEEDBITS</a>(32);
+<a name='L1186'>                <b>if</b> (hold != (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;total &amp; 0xffffffffUL)) <font color='red'>{</font>
+<a name='L1187'>                    strm-&gt;msg = (<b>char</b> *)"incorrect length check";
+<a name='L1188'>                    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>;
+<a name='L1189'>                    <b>break</b>;
+<a name='L1190'>                <font color='red'>}</font>
+<a name='L1191'>                <a href='../D/1702.html' title='Multiple defined in 2 places.'>INITBITS</a>();
+<a name='L1192'>                <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:   length matches trailer\n"));
+<a name='L1193'>            <font color='red'>}</font>
+<a name='L1194'><font color='darkred'>#endif</font>
+<a name='L1195'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../D/809.html' title='Multiple defined in 2 places.'>DONE</a>;
+<a name='L1196'>        <b>case</b> <a href='../D/809.html' title='Multiple defined in 2 places.'>DONE</a>:
+<a name='L1197'>            ret = <a href='../S/2769.html#L174' title='Defined at 174 in Modules/zlib/zlib.h.'>Z_STREAM_END</a>;
+<a name='L1198'>            <b>goto</b> inf_leave;
+<a name='L1199'>        <b>case</b> <a href='../S/2753.html#L50' title='Defined at 50 in Modules/zlib/inflate.h.'>BAD</a>:
+<a name='L1200'>            ret = <a href='../S/2769.html#L178' title='Defined at 178 in Modules/zlib/zlib.h.'>Z_DATA_ERROR</a>;
+<a name='L1201'>            <b>goto</b> inf_leave;
+<a name='L1202'>        <b>case</b> <a href='../S/2753.html#L51' title='Defined at 51 in Modules/zlib/inflate.h.'>MEM</a>:
+<a name='L1203'>            <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L1204'>        <b>case</b> <a href='../S/2753.html#L52' title='Defined at 52 in Modules/zlib/inflate.h.'>SYNC</a>:
+<a name='L1205'>        <b>default</b>:
+<a name='L1206'>            <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1207'>        <font color='red'>}</font>
+<a name='L1208'>
+<a name='L1209'>    <i><font color='green'>/*</font></i>
+<a name='L1210'><i><font color='green'>       Return from inflate(), updating the total counts and the check value.</font></i>
+<a name='L1211'><i><font color='green'>       If there was no progress during the inflate() call, return a buffer</font></i>
+<a name='L1212'><i><font color='green'>       error.  Call updatewindow() to create and/or update the window state.</font></i>
+<a name='L1213'><i><font color='green'>       Note: a memory error from inflate() is non-recoverable.</font></i>
+<a name='L1214'><i><font color='green'>     */</font></i>
+<a name='L1215'>  inf_leave:
+<a name='L1216'>    <a href='../D/4481.html' title='Multiple defined in 2 places.'>RESTORE</a>();
+<a name='L1217'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize || (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode &lt; <a href='../D/517.html' title='Multiple defined in 4 places.'>CHECK</a> &amp;&amp; out != strm-&gt;avail_out))
+<a name='L1218'>        <b>if</b> (<a href='../S/2752.html#L358' title='Defined at 358 in Modules/zlib/inflate.c.'>updatewindow</a>(strm, out)) <font color='red'>{</font>
+<a name='L1219'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L51' title='Defined at 51 in Modules/zlib/inflate.h.'>MEM</a>;
+<a name='L1220'>            <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L1221'>        <font color='red'>}</font>
+<a name='L1222'>    in -= strm-&gt;avail_in;
+<a name='L1223'>    out -= strm-&gt;avail_out;
+<a name='L1224'>    strm-&gt;total_in += in;
+<a name='L1225'>    strm-&gt;total_out += out;
+<a name='L1226'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;total += out;
+<a name='L1227'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap &amp;&amp; out)
+<a name='L1228'>        strm-&gt;adler = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check =
+<a name='L1229'>            <a href='../D/5376.html' title='Multiple defined in 2 places.'>UPDATE</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check, strm-&gt;next_out - out, out);
+<a name='L1230'>    strm-&gt;data_type = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits + (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;last ? 64 : 0) +
+<a name='L1231'>                      (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ? 128 : 0) +
+<a name='L1232'>                      (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L40' title='Defined at 40 in Modules/zlib/inflate.h.'>LEN_</a> || <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L35' title='Defined at 35 in Modules/zlib/inflate.h.'>COPY_</a> ? 256 : 0);
+<a name='L1233'>    <b>if</b> (((in == 0 &amp;&amp; out == 0) || flush == <a href='../S/2769.html#L168' title='Defined at 168 in Modules/zlib/zlib.h.'>Z_FINISH</a>) &amp;&amp; ret == <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>)
+<a name='L1234'>        ret = <a href='../S/2769.html#L180' title='Defined at 180 in Modules/zlib/zlib.h.'>Z_BUF_ERROR</a>;
+<a name='L1235'>    <b>return</b> ret;
+<a name='L1236'><font color='red'>}</font>
+<a name='L1237'>
+<a name='L1238'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8353.html' title='Multiple refered from 17 places.'>inflateEnd</a>(strm)
+<a name='L1239'>z_streamp strm;
+<a name='L1240'><font color='red'>{</font>
+<a name='L1241'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1242'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;zfree == (<a href='../D/8725.html' title='Multiple defined in 2 places.'>free_func</a>)0)
+<a name='L1243'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1244'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1245'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <a href='../S/2773.html#L271' title='Defined at 271 in Modules/zlib/zutil.h.'>ZFREE</a>(strm, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window);
+<a name='L1246'>    <a href='../S/2773.html#L271' title='Defined at 271 in Modules/zlib/zutil.h.'>ZFREE</a>(strm, strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>);
+<a name='L1247'>    strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L1248'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate: end\n"));
+<a name='L1249'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L1250'><font color='red'>}</font>
+<a name='L1251'>
+<a name='L1252'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8363.html' title='Multiple refered from 2 places.'>inflateSetDictionary</a>(strm, dictionary, dictLength)
+<a name='L1253'>z_streamp strm;
+<a name='L1254'><b>const</b> Bytef *dictionary;
+<a name='L1255'>uInt dictLength;
+<a name='L1256'><font color='red'>{</font>
+<a name='L1257'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1258'>    <b>unsigned</b> <b>long</b> id;
+<a name='L1259'>
+<a name='L1260'>    <i><font color='green'>/* check state */</font></i>
+<a name='L1261'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1262'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1263'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap != 0 &amp;&amp; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode != <a href='../D/783.html' title='Multiple defined in 2 places.'>DICT</a>)
+<a name='L1264'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1265'>
+<a name='L1266'>    <i><font color='green'>/* check for correct dictionary id */</font></i>
+<a name='L1267'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../D/783.html' title='Multiple defined in 2 places.'>DICT</a>) <font color='red'>{</font>
+<a name='L1268'>        id = <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(0L, <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>, 0);
+<a name='L1269'>        id = <a href='../D/6692.html' title='Multiple defined in 3 places.'>adler32</a>(id, dictionary, dictLength);
+<a name='L1270'>        <b>if</b> (id != <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;check)
+<a name='L1271'>            <b>return</b> <a href='../S/2769.html#L178' title='Defined at 178 in Modules/zlib/zlib.h.'>Z_DATA_ERROR</a>;
+<a name='L1272'>    <font color='red'>}</font>
+<a name='L1273'>
+<a name='L1274'>    <i><font color='green'>/* copy dictionary to window */</font></i>
+<a name='L1275'>    <b>if</b> (<a href='../S/2752.html#L358' title='Defined at 358 in Modules/zlib/inflate.c.'>updatewindow</a>(strm, strm-&gt;avail_out)) <font color='red'>{</font>
+<a name='L1276'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L51' title='Defined at 51 in Modules/zlib/inflate.h.'>MEM</a>;
+<a name='L1277'>        <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L1278'>    <font color='red'>}</font>
+<a name='L1279'>    <b>if</b> (dictLength &gt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize) <font color='red'>{</font>
+<a name='L1280'>        <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window, dictionary + dictLength - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize,
+<a name='L1281'>                <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize);
+<a name='L1282'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave = <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize;
+<a name='L1283'>    <font color='red'>}</font>
+<a name='L1284'>    <b>else</b> <font color='red'>{</font>
+<a name='L1285'>        <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window + <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wsize - dictLength, dictionary,
+<a name='L1286'>                dictLength);
+<a name='L1287'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;whave = dictLength;
+<a name='L1288'>    <font color='red'>}</font>
+<a name='L1289'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;havedict = 1;
+<a name='L1290'>    <a href='../D/5313.html' title='Multiple defined in 2 places.'>Tracev</a>((stderr, "inflate:   dictionary set\n"));
+<a name='L1291'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L1292'><font color='red'>}</font>
+<a name='L1293'>
+<a name='L1294'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L908' title='Refered from 908 in Modules/zlib/zlib.h.'>inflateGetHeader</a>(strm, head)
+<a name='L1295'>z_streamp strm;
+<a name='L1296'>gz_headerp head;
+<a name='L1297'><font color='red'>{</font>
+<a name='L1298'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1299'>
+<a name='L1300'>    <i><font color='green'>/* check state */</font></i>
+<a name='L1301'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1302'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1303'>    <b>if</b> ((<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wrap &amp; 2) == 0) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1304'>
+<a name='L1305'>    <i><font color='green'>/* save header structure */</font></i>
+<a name='L1306'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;head = head;
+<a name='L1307'>    head-&gt;done = 0;
+<a name='L1308'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L1309'><font color='red'>}</font>
+<a name='L1310'>
+<a name='L1311'><i><font color='green'>/*</font></i>
+<a name='L1312'><i><font color='green'>   Search buf[0..len-1] for the pattern: 0, 0, 0xff, 0xff.  Return when found</font></i>
+<a name='L1313'><i><font color='green'>   or when out of input.  When called, *have is the number of pattern bytes</font></i>
+<a name='L1314'><i><font color='green'>   found in order so far, in 0..3.  On return *have is updated to the new</font></i>
+<a name='L1315'><i><font color='green'>   state.  If on return *have equals four, then the pattern was found and the</font></i>
+<a name='L1316'><i><font color='green'>   return value is how many bytes were read including the last byte of the</font></i>
+<a name='L1317'><i><font color='green'>   pattern.  If *have is less than four, then the pattern has not been found</font></i>
+<a name='L1318'><i><font color='green'>   yet and the return value is len.  In the latter case, syncsearch() can be</font></i>
+<a name='L1319'><i><font color='green'>   called again with more data and the *have state.  *have is initialized to</font></i>
+<a name='L1320'><i><font color='green'>   zero for the first call.</font></i>
+<a name='L1321'><i><font color='green'> */</font></i>
+<a name='L1322'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <a href='../R/10667.html' title='Multiple refered from 3 places.'>syncsearch</a>(have, buf, len)
+<a name='L1323'><b>unsigned</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *have;
+<a name='L1324'><b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *buf;
+<a name='L1325'><b>unsigned</b> len;
+<a name='L1326'><font color='red'>{</font>
+<a name='L1327'>    <b>unsigned</b> got;
+<a name='L1328'>    <b>unsigned</b> next;
+<a name='L1329'>
+<a name='L1330'>    got = *have;
+<a name='L1331'>    next = 0;
+<a name='L1332'>    <b>while</b> (next &lt; len &amp;&amp; got &lt; 4) <font color='red'>{</font>
+<a name='L1333'>        <b>if</b> ((<b>int</b>)(buf[next]) == (got &lt; 2 ? 0 : 0xff))
+<a name='L1334'>            got++;
+<a name='L1335'>        <b>else</b> <b>if</b> (buf[next])
+<a name='L1336'>            got = 0;
+<a name='L1337'>        <b>else</b>
+<a name='L1338'>            got = 4 - got;
+<a name='L1339'>        next++;
+<a name='L1340'>    <font color='red'>}</font>
+<a name='L1341'>    *have = got;
+<a name='L1342'>    <b>return</b> next;
+<a name='L1343'><font color='red'>}</font>
+<a name='L1344'>
+<a name='L1345'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8364.html' title='Multiple refered from 2 places.'>inflateSync</a>(strm)
+<a name='L1346'>z_streamp strm;
+<a name='L1347'><font color='red'>{</font>
+<a name='L1348'>    <b>unsigned</b> len;               <i><font color='green'>/* number of bytes to look at or looked at */</font></i>
+<a name='L1349'>    <b>unsigned</b> <b>long</b> in, out;      <i><font color='green'>/* temporary to save total_in and total_out */</font></i>
+<a name='L1350'>    <b>unsigned</b> <b>char</b> buf[4];       <i><font color='green'>/* to restore bit buffer to byte string */</font></i>
+<a name='L1351'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1352'>
+<a name='L1353'>    <i><font color='green'>/* check parameters */</font></i>
+<a name='L1354'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1355'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1356'>    <b>if</b> (strm-&gt;avail_in == 0 &amp;&amp; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits &lt; 8) <b>return</b> <a href='../S/2769.html#L180' title='Defined at 180 in Modules/zlib/zlib.h.'>Z_BUF_ERROR</a>;
+<a name='L1357'>
+<a name='L1358'>    <i><font color='green'>/* if first time, start search in bit buffer */</font></i>
+<a name='L1359'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode != <a href='../S/2753.html#L52' title='Defined at 52 in Modules/zlib/inflate.h.'>SYNC</a>) <font color='red'>{</font>
+<a name='L1360'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L52' title='Defined at 52 in Modules/zlib/inflate.h.'>SYNC</a>;
+<a name='L1361'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold &lt;&lt;= <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits &amp; 7;
+<a name='L1362'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits -= <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits &amp; 7;
+<a name='L1363'>        len = 0;
+<a name='L1364'>        <b>while</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits &gt;= 8) <font color='red'>{</font>
+<a name='L1365'>            buf[len++] = (<b>unsigned</b> <b>char</b>)(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold);
+<a name='L1366'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;hold &gt;&gt;= 8;
+<a name='L1367'>            <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits -= 8;
+<a name='L1368'>        <font color='red'>}</font>
+<a name='L1369'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have = 0;
+<a name='L1370'>        <a href='../S/2752.html#L1322' title='Defined at 1322 in Modules/zlib/inflate.c.'>syncsearch</a>(&amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have), buf, len);
+<a name='L1371'>    <font color='red'>}</font>
+<a name='L1372'>
+<a name='L1373'>    <i><font color='green'>/* search available input */</font></i>
+<a name='L1374'>    len = <a href='../S/2752.html#L1322' title='Defined at 1322 in Modules/zlib/inflate.c.'>syncsearch</a>(&amp;(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have), strm-&gt;next_in, strm-&gt;avail_in);
+<a name='L1375'>    strm-&gt;avail_in -= len;
+<a name='L1376'>    strm-&gt;next_in += len;
+<a name='L1377'>    strm-&gt;total_in += len;
+<a name='L1378'>
+<a name='L1379'>    <i><font color='green'>/* return no joy or set up to restart inflate() on a new block */</font></i>
+<a name='L1380'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;have != 4) <b>return</b> <a href='../S/2769.html#L178' title='Defined at 178 in Modules/zlib/zlib.h.'>Z_DATA_ERROR</a>;
+<a name='L1381'>    in = strm-&gt;total_in;  out = strm-&gt;total_out;
+<a name='L1382'>    <a href='../D/9170.html' title='Multiple defined in 3 places.'>inflateReset</a>(strm);
+<a name='L1383'>    strm-&gt;total_in = in;  strm-&gt;total_out = out;
+<a name='L1384'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode = <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>;
+<a name='L1385'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L1386'><font color='red'>}</font>
+<a name='L1387'>
+<a name='L1388'><i><font color='green'>/*</font></i>
+<a name='L1389'><i><font color='green'>   Returns true if inflate is currently at the end of a block generated by</font></i>
+<a name='L1390'><i><font color='green'>   Z_SYNC_FLUSH or Z_FULL_FLUSH. This function is used by one PPP</font></i>
+<a name='L1391'><i><font color='green'>   implementation to provide an additional safety check. PPP uses</font></i>
+<a name='L1392'><i><font color='green'>   Z_SYNC_FLUSH but removes the length bytes of the resulting empty stored</font></i>
+<a name='L1393'><i><font color='green'>   block. When decompressing, PPP checks that at the end of input packet,</font></i>
+<a name='L1394'><i><font color='green'>   inflate is waiting for these length bytes.</font></i>
+<a name='L1395'><i><font color='green'> */</font></i>
+<a name='L1396'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L1605' title='Refered from 1605 in Modules/zlib/zlib.h.'>inflateSyncPoint</a>(strm)
+<a name='L1397'>z_streamp strm;
+<a name='L1398'><font color='red'>{</font>
+<a name='L1399'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1400'>
+<a name='L1401'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1402'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1403'>    <b>return</b> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L34' title='Defined at 34 in Modules/zlib/inflate.h.'>STORED</a> &amp;&amp; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;bits == 0;
+<a name='L1404'><font color='red'>}</font>
+<a name='L1405'>
+<a name='L1406'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/8352.html' title='Multiple refered from 2 places.'>inflateCopy</a>(dest, source)
+<a name='L1407'>z_streamp dest;
+<a name='L1408'>z_streamp source;
+<a name='L1409'><font color='red'>{</font>
+<a name='L1410'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1411'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *copy;
+<a name='L1412'>    <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *window;
+<a name='L1413'>    <b>unsigned</b> wsize;
+<a name='L1414'>
+<a name='L1415'>    <i><font color='green'>/* check input */</font></i>
+<a name='L1416'>    <b>if</b> (dest == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || source == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || source-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> ||
+<a name='L1417'>        source-&gt;zalloc == (<a href='../D/6713.html' title='Multiple defined in 2 places.'>alloc_func</a>)0 || source-&gt;zfree == (<a href='../D/8725.html' title='Multiple defined in 2 places.'>free_func</a>)0)
+<a name='L1418'>        <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1419'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)source-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1420'>
+<a name='L1421'>    <i><font color='green'>/* allocate space */</font></i>
+<a name='L1422'>    copy = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)
+<a name='L1423'>           <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(source, 1, <b>sizeof</b>(<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a>));
+<a name='L1424'>    <b>if</b> (copy == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L1425'>    window = <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>;
+<a name='L1426'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L1427'>        window = (<b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)
+<a name='L1428'>                 <a href='../S/2773.html#L269' title='Defined at 269 in Modules/zlib/zutil.h.'>ZALLOC</a>(source, 1U &lt;&lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits, <b>sizeof</b>(<b>unsigned</b> <b>char</b>));
+<a name='L1429'>        <b>if</b> (window == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L1430'>            <a href='../S/2773.html#L271' title='Defined at 271 in Modules/zlib/zutil.h.'>ZFREE</a>(source, copy);
+<a name='L1431'>            <b>return</b> <a href='../S/2769.html#L179' title='Defined at 179 in Modules/zlib/zlib.h.'>Z_MEM_ERROR</a>;
+<a name='L1432'>        <font color='red'>}</font>
+<a name='L1433'>    <font color='red'>}</font>
+<a name='L1434'>
+<a name='L1435'>    <i><font color='green'>/* copy state */</font></i>
+<a name='L1436'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(dest, source, <b>sizeof</b>(<a href='../S/2769.html#L104' title='Defined at 104 in Modules/zlib/zlib.h.'>z_stream</a>));
+<a name='L1437'>    <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(copy, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>, <b>sizeof</b>(<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a>));
+<a name='L1438'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode &gt;= <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes &amp;&amp;
+<a name='L1439'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode &lt;= <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes + <a href='../S/2755.html#L51' title='Defined at 51 in Modules/zlib/inftrees.h.'>ENOUGH</a> - 1) <font color='red'>{</font>
+<a name='L1440'>        copy-&gt;lencode = copy-&gt;codes + (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;lencode - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes);
+<a name='L1441'>        copy-&gt;distcode = copy-&gt;codes + (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;distcode - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes);
+<a name='L1442'>    <font color='red'>}</font>
+<a name='L1443'>    copy-&gt;next = copy-&gt;codes + (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;next - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;codes);
+<a name='L1444'>    <b>if</b> (window != <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <font color='red'>{</font>
+<a name='L1445'>        wsize = 1U &lt;&lt; <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;wbits;
+<a name='L1446'>        <a href='../D/12472.html' title='Multiple defined in 3 places.'>zmemcpy</a>(window, <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;window, wsize);
+<a name='L1447'>    <font color='red'>}</font>
+<a name='L1448'>    copy-&gt;window = window;
+<a name='L1449'>    dest-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../D/9267.html' title='Multiple defined in 5 places.'>internal_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)copy;
+<a name='L1450'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L1451'><font color='red'>}</font>
+<a name='L1452'>
+<a name='L1453'><b>int</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L1607' title='Refered from 1607 in Modules/zlib/zlib.h.'>inflateUndermine</a>(strm, subvert)
+<a name='L1454'>z_streamp strm;
+<a name='L1455'><b>int</b> subvert;
+<a name='L1456'><font color='red'>{</font>
+<a name='L1457'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1458'>
+<a name='L1459'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> <a href='../S/2769.html#L177' title='Defined at 177 in Modules/zlib/zlib.h.'>Z_STREAM_ERROR</a>;
+<a name='L1460'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1461'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;sane = !subvert;
+<a name='L1462'><font color='darkred'>#ifdef</font> INFLATE_ALLOW_INVALID_DISTANCE_TOOFAR_ARRR
+<a name='L1463'>    <b>return</b> <a href='../S/2769.html#L173' title='Defined at 173 in Modules/zlib/zlib.h.'>Z_OK</a>;
+<a name='L1464'><font color='darkred'>#else</font>
+<a name='L1465'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;sane = 1;
+<a name='L1466'>    <b>return</b> <a href='../S/2769.html#L178' title='Defined at 178 in Modules/zlib/zlib.h.'>Z_DATA_ERROR</a>;
+<a name='L1467'><font color='darkred'>#endif</font>
+<a name='L1468'><font color='red'>}</font>
+<a name='L1469'>
+<a name='L1470'><b>long</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L880' title='Refered from 880 in Modules/zlib/zlib.h.'>inflateMark</a>(strm)
+<a name='L1471'>z_streamp strm;
+<a name='L1472'><font color='red'>{</font>
+<a name='L1473'>    <b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1474'>
+<a name='L1475'>    <b>if</b> (strm == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a> || strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> -1L &lt;&lt; 16;
+<a name='L1476'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = (<b>struct</b> <a href='../S/2753.html#L81' title='Defined at 81 in Modules/zlib/inflate.h.'>inflate_state</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)strm-&gt;<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L1477'>    <b>return</b> ((<b>long</b>)(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;back) &lt;&lt; 16) +
+<a name='L1478'>        (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../D/626.html' title='Multiple defined in 2 places.'>COPY</a> ? <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length :
+<a name='L1479'>            (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;mode == <a href='../S/2753.html#L45' title='Defined at 45 in Modules/zlib/inflate.h.'>MATCH</a> ? <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;was - <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;length : 0));
+<a name='L1480'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L103'>[^]</a><a href='#L1470'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

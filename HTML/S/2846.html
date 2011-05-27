@@ -1,0 +1,753 @@
+<html>
+<head>
+<title>Parser/pgen.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3401.html'>Parser</a>/pgen.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L48'>[^]</a><a href='#L675'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L48' title='Defined at 48.'>addnfastate</a>
+<li><a href='#L63' title='Defined at 63.'>addnfaarc</a>
+<li><a href='#L79' title='Defined at 79.'>newnfa</a>
+<li><a href='#L105' title='Defined at 105.'>newnfagrammar</a>
+<li><a href='#L121' title='Defined at 121.'>addnfa</a>
+<li><a href='#L150' title='Defined at 150.'>metacompile</a>
+<li><a href='#L169' title='Defined at 169.'>compile_rule</a>
+<li><a href='#L188' title='Defined at 188.'>compile_rhs</a>
+<li><a href='#L221' title='Defined at 221.'>compile_alt</a>
+<li><a href='#L243' title='Defined at 243.'>compile_item</a>
+<li><a href='#L280' title='Defined at 280.'>compile_atom</a>
+<li><a href='#L306' title='Defined at 306.'>dumpstate</a>
+<li><a href='#L329' title='Defined at 329.'>dumpnfa</a>
+<li><a href='#L343' title='Defined at 343.'>addclosure</a>
+<li><a href='#L385' title='Defined at 385.'>makedfa</a>
+<li><a href='#L494' title='Defined at 494.'>printssdfa</a>
+<li><a href='#L536' title='Defined at 536.'>samestate</a>
+<li><a href='#L551' title='Defined at 551.'>renamestates</a>
+<li><a href='#L568' title='Defined at 568.'>simplify</a>
+<li><a href='#L599' title='Defined at 599.'>convert</a>
+<li><a href='#L633' title='Defined at 633.'>maketables</a>
+<li><a href='#L661' title='Defined at 661.'>pgen</a>
+<li><a href='#L675' title='Defined at 675.'>Py_pgen</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* Parser generator */</font></i>
+<a name='L2'>
+<a name='L3'><i><font color='green'>/* For a description, see the comments at end of this file */</font></i>
+<a name='L4'>
+<a name='L5'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L6'><font color='darkred'>#include</font> "<a href='551.html'>pgenheaders.h</a>"
+<a name='L7'><font color='darkred'>#include</font> "<a href='582.html'>token.h</a>"
+<a name='L8'><font color='darkred'>#include</font> "<a href='543.html'>node.h</a>"
+<a name='L9'><font color='darkred'>#include</font> "<a href='530.html'>grammar.h</a>"
+<a name='L10'><font color='darkred'>#include</font> "<a href='539.html'>metagrammar.h</a>"
+<a name='L11'><font color='darkred'>#include</font> "<a href='550.html'>pgen.h</a>"
+<a name='L12'>
+<a name='L13'><b>extern</b> <b>int</b> Py_DebugFlag;
+<a name='L14'><b>extern</b> <b>int</b> Py_IgnoreEnvironmentFlag; <i><font color='green'>/* needed by Py_GETENV */</font></i>
+<a name='L15'>
+<a name='L16'>
+<a name='L17'><i><font color='green'>/* PART ONE -- CONSTRUCT NFA -- Cf. Algorithm 3.2 from [Aho&amp;Ullman 77] */</font></i>
+<a name='L18'>
+<a name='L19'><b>typedef</b> <b>struct</b> _nfaarc <font color='red'>{</font>
+<a name='L20'>    <b>int</b>         ar_label;
+<a name='L21'>    <b>int</b>         ar_arrow;
+<a name='L22'><font color='red'>}</font> <a href='../R/9232.html' title='Multiple refered from 7 places.'>nfaarc</a>;
+<a name='L23'>
+<a name='L24'><b>typedef</b> <b>struct</b> _nfastate <font color='red'>{</font>
+<a name='L25'>    <b>int</b>         st_narcs;
+<a name='L26'>    <a href='../S/2846.html#L22' title='Defined at 22 in Parser/pgen.c.'>nfaarc</a>      *st_arc;
+<a name='L27'><font color='red'>}</font> <a href='../R/9234.html' title='Multiple refered from 8 places.'>nfastate</a>;
+<a name='L28'>
+<a name='L29'><b>typedef</b> <b>struct</b> _nfa <font color='red'>{</font>
+<a name='L30'>    <b>int</b>                 nf_type;
+<a name='L31'>    <b>char</b>                *nf_name;
+<a name='L32'>    <b>int</b>                 nf_nstates;
+<a name='L33'>    <a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a>            *nf_state;
+<a name='L34'>    <b>int</b>                 nf_start, nf_finish;
+<a name='L35'><font color='red'>}</font> <a href='../R/9231.html' title='Multiple refered from 10 places.'>nfa</a>;
+<a name='L36'>
+<a name='L37'><i><font color='green'>/* Forward */</font></i>
+<a name='L38'><b>static</b> <b>void</b> <a href='../S/2846.html#L188' title='Defined at 188 in Parser/pgen.c.'>compile_rhs</a>(labellist *ll,
+<a name='L39'>                        nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb);
+<a name='L40'><b>static</b> <b>void</b> <a href='../S/2846.html#L221' title='Defined at 221 in Parser/pgen.c.'>compile_alt</a>(labellist *ll,
+<a name='L41'>                        nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb);
+<a name='L42'><b>static</b> <b>void</b> <a href='../S/2846.html#L243' title='Defined at 243 in Parser/pgen.c.'>compile_item</a>(labellist *ll,
+<a name='L43'>                         nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb);
+<a name='L44'><b>static</b> <b>void</b> <a href='../S/2846.html#L280' title='Defined at 280 in Parser/pgen.c.'>compile_atom</a>(labellist *ll,
+<a name='L45'>                         nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb);
+<a name='L46'>
+<a name='L47'><b>static</b> <b>int</b>
+<a name='L48'><a href='../R/5937.html' title='Multiple refered from 6 places.'>addnfastate</a>(nfa *nf)
+<a name='L49'><font color='red'>{</font>
+<a name='L50'>    <a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a> *st;
+<a name='L51'>
+<a name='L52'>    nf-&gt;nf_state = (<a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a> *)PyObject_REALLOC(nf-&gt;nf_state,
+<a name='L53'>                                <b>sizeof</b>(<a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a>) * (nf-&gt;nf_nstates + 1));
+<a name='L54'>    <b>if</b> (nf-&gt;nf_state == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L55'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("out of mem");
+<a name='L56'>    st = &amp;nf-&gt;nf_state[nf-&gt;nf_nstates++];
+<a name='L57'>    st-&gt;st_narcs = 0;
+<a name='L58'>    st-&gt;st_arc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L59'>    <b>return</b> st - nf-&gt;nf_state;
+<a name='L60'><font color='red'>}</font>
+<a name='L61'>
+<a name='L62'><b>static</b> <b>void</b>
+<a name='L63'><a href='../R/5936.html' title='Multiple refered from 10 places.'>addnfaarc</a>(nfa *nf, <b>int</b> from, <b>int</b> to, <b>int</b> lbl)
+<a name='L64'><font color='red'>{</font>
+<a name='L65'>    <a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a> *st;
+<a name='L66'>    <a href='../S/2846.html#L22' title='Defined at 22 in Parser/pgen.c.'>nfaarc</a> *ar;
+<a name='L67'>
+<a name='L68'>    st = &amp;nf-&gt;nf_state[from];
+<a name='L69'>    st-&gt;st_arc = (<a href='../S/2846.html#L22' title='Defined at 22 in Parser/pgen.c.'>nfaarc</a> *)PyObject_REALLOC(st-&gt;st_arc,
+<a name='L70'>                                  <b>sizeof</b>(<a href='../S/2846.html#L22' title='Defined at 22 in Parser/pgen.c.'>nfaarc</a>) * (st-&gt;st_narcs + 1));
+<a name='L71'>    <b>if</b> (st-&gt;st_arc == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L72'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("out of mem");
+<a name='L73'>    ar = &amp;st-&gt;st_arc[st-&gt;st_narcs++];
+<a name='L74'>    ar-&gt;ar_label = lbl;
+<a name='L75'>    ar-&gt;ar_arrow = to;
+<a name='L76'><font color='red'>}</font>
+<a name='L77'>
+<a name='L78'><b>static</b> <a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> *
+<a name='L79'><a href='../S/2846.html#L125' title='Refered from 125 in Parser/pgen.c.'>newnfa</a>(<b>char</b> *name)
+<a name='L80'><font color='red'>{</font>
+<a name='L81'>    <a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> *nf;
+<a name='L82'>    <b>static</b> <b>int</b> type = <a href='../S/582.html#L72' title='Defined at 72 in Include/token.h.'>NT_OFFSET</a>; <i><font color='green'>/* All types will be disjunct */</font></i>
+<a name='L83'>
+<a name='L84'>    nf = (<a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> *)PyObject_MALLOC(<b>sizeof</b>(<a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a>));
+<a name='L85'>    <b>if</b> (nf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L86'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem for new nfa");
+<a name='L87'>    nf-&gt;nf_type = type++;
+<a name='L88'>    nf-&gt;nf_name = name; <i><font color='green'>/* XXX strdup(name) ??? */</font></i>
+<a name='L89'>    nf-&gt;nf_nstates = 0;
+<a name='L90'>    nf-&gt;nf_state = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L91'>    nf-&gt;nf_start = nf-&gt;nf_finish = -1;
+<a name='L92'>    <b>return</b> nf;
+<a name='L93'><font color='red'>}</font>
+<a name='L94'>
+<a name='L95'><b>typedef</b> <b>struct</b> _nfagrammar <font color='red'>{</font>
+<a name='L96'>    <b>int</b>                 gr_nnfas;
+<a name='L97'>    <a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a>                 **gr_nfa;
+<a name='L98'>    <a href='../S/530.html#L26' title='Defined at 26 in Include/grammar.h.'>labellist</a>           gr_ll;
+<a name='L99'><font color='red'>}</font> <a href='../R/9233.html' title='Multiple refered from 6 places.'>nfagrammar</a>;
+<a name='L100'>
+<a name='L101'><i><font color='green'>/* Forward */</font></i>
+<a name='L102'><b>static</b> <b>void</b> <a href='../S/2846.html#L169' title='Defined at 169 in Parser/pgen.c.'>compile_rule</a>(nfagrammar *gr, node *n);
+<a name='L103'>
+<a name='L104'><b>static</b> <a href='../S/2846.html#L99' title='Defined at 99 in Parser/pgen.c.'>nfagrammar</a> *
+<a name='L105'><a href='../S/2846.html#L157' title='Refered from 157 in Parser/pgen.c.'>newnfagrammar</a>(<b>void</b>)
+<a name='L106'><font color='red'>{</font>
+<a name='L107'>    <a href='../S/2846.html#L99' title='Defined at 99 in Parser/pgen.c.'>nfagrammar</a> *gr;
+<a name='L108'>
+<a name='L109'>    gr = (<a href='../S/2846.html#L99' title='Defined at 99 in Parser/pgen.c.'>nfagrammar</a> *)PyObject_MALLOC(<b>sizeof</b>(<a href='../S/2846.html#L99' title='Defined at 99 in Parser/pgen.c.'>nfagrammar</a>));
+<a name='L110'>    <b>if</b> (gr == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L111'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem for new nfa grammar");
+<a name='L112'>    gr-&gt;gr_nnfas = 0;
+<a name='L113'>    gr-&gt;gr_nfa = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L114'>    gr-&gt;gr_ll.ll_nlabels = 0;
+<a name='L115'>    gr-&gt;gr_ll.ll_label = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L116'>    <a href='../S/2836.html#L88' title='Defined at 88 in Parser/grammar.c.'>addlabel</a>(&amp;gr-&gt;gr_ll, <a href='../S/582.html#L12' title='Defined at 12 in Include/token.h.'>ENDMARKER</a>, "EMPTY");
+<a name='L117'>    <b>return</b> gr;
+<a name='L118'><font color='red'>}</font>
+<a name='L119'>
+<a name='L120'><b>static</b> <a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> *
+<a name='L121'><a href='../S/2846.html#L177' title='Refered from 177 in Parser/pgen.c.'>addnfa</a>(nfagrammar *gr, <b>char</b> *name)
+<a name='L122'><font color='red'>{</font>
+<a name='L123'>    <a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> *nf;
+<a name='L124'>
+<a name='L125'>    nf = <a href='../S/2846.html#L79' title='Defined at 79 in Parser/pgen.c.'>newnfa</a>(name);
+<a name='L126'>    gr-&gt;gr_nfa = (<a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> **)PyObject_REALLOC(gr-&gt;gr_nfa,
+<a name='L127'>                                  <b>sizeof</b>(<a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a>*) * (gr-&gt;gr_nnfas + 1));
+<a name='L128'>    <b>if</b> (gr-&gt;gr_nfa == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L129'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("out of mem");
+<a name='L130'>    gr-&gt;gr_nfa[gr-&gt;gr_nnfas++] = nf;
+<a name='L131'>    <a href='../S/2836.html#L88' title='Defined at 88 in Parser/grammar.c.'>addlabel</a>(&amp;gr-&gt;gr_ll, <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>, nf-&gt;nf_name);
+<a name='L132'>    <b>return</b> nf;
+<a name='L133'><font color='red'>}</font>
+<a name='L134'>
+<a name='L135'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L136'>
+<a name='L137'><b>static</b> <b>char</b> REQNFMT[] = "metacompile: less than %d children\n";
+<a name='L138'>
+<a name='L139'><font color='darkred'>#define</font> <a href='../R/3944.html' title='Multiple refered from 9 places.'>REQN</a>(i, count) \
+<a name='L140'>    <b>if</b> (i &lt; count) <font color='red'>{</font> \
+<a name='L141'>        fprintf(stderr, REQNFMT, count); \
+<a name='L142'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("REQN"); \
+<a name='L143'>    <font color='red'>}</font> <b>else</b>
+<a name='L144'>
+<a name='L145'><font color='darkred'>#else</font>
+<a name='L146'><font color='darkred'>#define</font> <a href='../R/3944.html' title='Multiple refered from 9 places.'>REQN</a>(i, count)  <i><font color='green'>/* empty */</font></i>
+<a name='L147'><font color='darkred'>#endif</font>
+<a name='L148'>
+<a name='L149'><b>static</b> <a href='../S/2846.html#L99' title='Defined at 99 in Parser/pgen.c.'>nfagrammar</a> *
+<a name='L150'><a href='../S/2846.html#L666' title='Refered from 666 in Parser/pgen.c.'>metacompile</a>(node *n)
+<a name='L151'><font color='red'>{</font>
+<a name='L152'>    <a href='../S/2846.html#L99' title='Defined at 99 in Parser/pgen.c.'>nfagrammar</a> *gr;
+<a name='L153'>    <b>int</b> i;
+<a name='L154'>
+<a name='L155'>    <b>if</b> (Py_DebugFlag)
+<a name='L156'>        printf("Compiling (meta-) parse tree into NFA grammar\n");
+<a name='L157'>    gr = <a href='../S/2846.html#L105' title='Defined at 105 in Parser/pgen.c.'>newnfagrammar</a>();
+<a name='L158'>    REQ(n, <a href='../S/539.html#L8' title='Defined at 8 in Include/metagrammar.h.'>MSTART</a>);
+<a name='L159'>    i = n-&gt;n_nchildren - 1; <i><font color='green'>/* Last child is ENDMARKER */</font></i>
+<a name='L160'>    n = n-&gt;n_child;
+<a name='L161'>    <b>for</b> (; --i &gt;= 0; n++) <font color='red'>{</font>
+<a name='L162'>        <b>if</b> (n-&gt;n_type != <a href='../S/582.html#L16' title='Defined at 16 in Include/token.h.'>NEWLINE</a>)
+<a name='L163'>            <a href='../S/2846.html#L169' title='Defined at 169 in Parser/pgen.c.'>compile_rule</a>(gr, n);
+<a name='L164'>    <font color='red'>}</font>
+<a name='L165'>    <b>return</b> gr;
+<a name='L166'><font color='red'>}</font>
+<a name='L167'>
+<a name='L168'><b>static</b> <b>void</b>
+<a name='L169'><a href='../R/6837.html' title='Multiple refered from 2 places.'>compile_rule</a>(nfagrammar *gr, node *n)
+<a name='L170'><font color='red'>{</font>
+<a name='L171'>    <a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> *nf;
+<a name='L172'>
+<a name='L173'>    REQ(n, <a href='../S/539.html#L9' title='Defined at 9 in Include/metagrammar.h.'>RULE</a>);
+<a name='L174'>    <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(n-&gt;n_nchildren, 4);
+<a name='L175'>    n = n-&gt;n_child;
+<a name='L176'>    REQ(n, <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>);
+<a name='L177'>    nf = <a href='../S/2846.html#L121' title='Defined at 121 in Parser/pgen.c.'>addnfa</a>(gr, n-&gt;n_str);
+<a name='L178'>    n++;
+<a name='L179'>    REQ(n, <a href='../S/582.html#L23' title='Defined at 23 in Include/token.h.'>COLON</a>);
+<a name='L180'>    n++;
+<a name='L181'>    REQ(n, <a href='../S/539.html#L10' title='Defined at 10 in Include/metagrammar.h.'>RHS</a>);
+<a name='L182'>    <a href='../S/2846.html#L188' title='Defined at 188 in Parser/pgen.c.'>compile_rhs</a>(&amp;gr-&gt;gr_ll, nf, n, &amp;nf-&gt;nf_start, &amp;nf-&gt;nf_finish);
+<a name='L183'>    n++;
+<a name='L184'>    REQ(n, <a href='../S/582.html#L16' title='Defined at 16 in Include/token.h.'>NEWLINE</a>);
+<a name='L185'><font color='red'>}</font>
+<a name='L186'>
+<a name='L187'><b>static</b> <b>void</b>
+<a name='L188'><a href='../R/6836.html' title='Multiple refered from 4 places.'>compile_rhs</a>(labellist *ll, nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb)
+<a name='L189'><font color='red'>{</font>
+<a name='L190'>    <b>int</b> i;
+<a name='L191'>    <b>int</b> a, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L192'>
+<a name='L193'>    REQ(n, <a href='../S/539.html#L10' title='Defined at 10 in Include/metagrammar.h.'>RHS</a>);
+<a name='L194'>    i = n-&gt;n_nchildren;
+<a name='L195'>    <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 1);
+<a name='L196'>    n = n-&gt;n_child;
+<a name='L197'>    REQ(n, <a href='../S/539.html#L11' title='Defined at 11 in Include/metagrammar.h.'>ALT</a>);
+<a name='L198'>    <a href='../S/2846.html#L221' title='Defined at 221 in Parser/pgen.c.'>compile_alt</a>(ll, nf, n, pa, pb);
+<a name='L199'>    <b>if</b> (--i &lt;= 0)
+<a name='L200'>        <b>return</b>;
+<a name='L201'>    n++;
+<a name='L202'>    a = *pa;
+<a name='L203'>    <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a> = *pb;
+<a name='L204'>    *pa = <a href='../S/2846.html#L48' title='Defined at 48 in Parser/pgen.c.'>addnfastate</a>(nf);
+<a name='L205'>    *pb = <a href='../S/2846.html#L48' title='Defined at 48 in Parser/pgen.c.'>addnfastate</a>(nf);
+<a name='L206'>    <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, *pa, a, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L207'>    <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>, *pb, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L208'>    <b>for</b> (; --i &gt;= 0; n++) <font color='red'>{</font>
+<a name='L209'>        REQ(n, <a href='../S/582.html#L30' title='Defined at 30 in Include/token.h.'>VBAR</a>);
+<a name='L210'>        <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 1);
+<a name='L211'>        --i;
+<a name='L212'>        n++;
+<a name='L213'>        REQ(n, <a href='../S/539.html#L11' title='Defined at 11 in Include/metagrammar.h.'>ALT</a>);
+<a name='L214'>        <a href='../S/2846.html#L221' title='Defined at 221 in Parser/pgen.c.'>compile_alt</a>(ll, nf, n, &amp;a, &amp;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L215'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, *pa, a, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L216'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>, *pb, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L217'>    <font color='red'>}</font>
+<a name='L218'><font color='red'>}</font>
+<a name='L219'>
+<a name='L220'><b>static</b> <b>void</b>
+<a name='L221'><a href='../R/6832.html' title='Multiple refered from 3 places.'>compile_alt</a>(labellist *ll, nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb)
+<a name='L222'><font color='red'>{</font>
+<a name='L223'>    <b>int</b> i;
+<a name='L224'>    <b>int</b> a, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L225'>
+<a name='L226'>    REQ(n, <a href='../S/539.html#L11' title='Defined at 11 in Include/metagrammar.h.'>ALT</a>);
+<a name='L227'>    i = n-&gt;n_nchildren;
+<a name='L228'>    <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 1);
+<a name='L229'>    n = n-&gt;n_child;
+<a name='L230'>    REQ(n, <a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a>);
+<a name='L231'>    <a href='../S/2846.html#L243' title='Defined at 243 in Parser/pgen.c.'>compile_item</a>(ll, nf, n, pa, pb);
+<a name='L232'>    --i;
+<a name='L233'>    n++;
+<a name='L234'>    <b>for</b> (; --i &gt;= 0; n++) <font color='red'>{</font>
+<a name='L235'>        REQ(n, <a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a>);
+<a name='L236'>        <a href='../S/2846.html#L243' title='Defined at 243 in Parser/pgen.c.'>compile_item</a>(ll, nf, n, &amp;a, &amp;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L237'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, *pb, a, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L238'>        *pb = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L239'>    <font color='red'>}</font>
+<a name='L240'><font color='red'>}</font>
+<a name='L241'>
+<a name='L242'><b>static</b> <b>void</b>
+<a name='L243'><a href='../R/6835.html' title='Multiple refered from 3 places.'>compile_item</a>(labellist *ll, nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb)
+<a name='L244'><font color='red'>{</font>
+<a name='L245'>    <b>int</b> i;
+<a name='L246'>    <b>int</b> a, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>;
+<a name='L247'>
+<a name='L248'>    REQ(n, <a href='../D/1801.html' title='Multiple defined in 2 places.'>ITEM</a>);
+<a name='L249'>    i = n-&gt;n_nchildren;
+<a name='L250'>    <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 1);
+<a name='L251'>    n = n-&gt;n_child;
+<a name='L252'>    <b>if</b> (n-&gt;n_type == <a href='../S/582.html#L21' title='Defined at 21 in Include/token.h.'>LSQB</a>) <font color='red'>{</font>
+<a name='L253'>        <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 3);
+<a name='L254'>        n++;
+<a name='L255'>        REQ(n, <a href='../S/539.html#L10' title='Defined at 10 in Include/metagrammar.h.'>RHS</a>);
+<a name='L256'>        *pa = <a href='../S/2846.html#L48' title='Defined at 48 in Parser/pgen.c.'>addnfastate</a>(nf);
+<a name='L257'>        *pb = <a href='../S/2846.html#L48' title='Defined at 48 in Parser/pgen.c.'>addnfastate</a>(nf);
+<a name='L258'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, *pa, *pb, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L259'>        <a href='../S/2846.html#L188' title='Defined at 188 in Parser/pgen.c.'>compile_rhs</a>(ll, nf, n, &amp;a, &amp;<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L260'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, *pa, a, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L261'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>, *pb, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L262'>        <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 1);
+<a name='L263'>        n++;
+<a name='L264'>        REQ(n, <a href='../S/582.html#L22' title='Defined at 22 in Include/token.h.'>RSQB</a>);
+<a name='L265'>    <font color='red'>}</font>
+<a name='L266'>    <b>else</b> <font color='red'>{</font>
+<a name='L267'>        <a href='../S/2846.html#L280' title='Defined at 280 in Parser/pgen.c.'>compile_atom</a>(ll, nf, n, pa, pb);
+<a name='L268'>        <b>if</b> (--i &lt;= 0)
+<a name='L269'>            <b>return</b>;
+<a name='L270'>        n++;
+<a name='L271'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, *pb, *pa, <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>);
+<a name='L272'>        <b>if</b> (n-&gt;n_type == <a href='../S/582.html#L28' title='Defined at 28 in Include/token.h.'>STAR</a>)
+<a name='L273'>            *pb = *pa;
+<a name='L274'>        <b>else</b>
+<a name='L275'>            REQ(n, <a href='../S/582.html#L26' title='Defined at 26 in Include/token.h.'>PLUS</a>);
+<a name='L276'>    <font color='red'>}</font>
+<a name='L277'><font color='red'>}</font>
+<a name='L278'>
+<a name='L279'><b>static</b> <b>void</b>
+<a name='L280'><a href='../R/6833.html' title='Multiple refered from 2 places.'>compile_atom</a>(labellist *ll, nfa *nf, node *n, <b>int</b> *pa, <b>int</b> *pb)
+<a name='L281'><font color='red'>{</font>
+<a name='L282'>    <b>int</b> i;
+<a name='L283'>
+<a name='L284'>    REQ(n, <a href='../S/539.html#L13' title='Defined at 13 in Include/metagrammar.h.'>ATOM</a>);
+<a name='L285'>    i = n-&gt;n_nchildren;
+<a name='L286'>    <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 1);
+<a name='L287'>    n = n-&gt;n_child;
+<a name='L288'>    <b>if</b> (n-&gt;n_type == <a href='../S/582.html#L19' title='Defined at 19 in Include/token.h.'>LPAR</a>) <font color='red'>{</font>
+<a name='L289'>        <a href='../D/4474.html' title='Multiple defined in 2 places.'>REQN</a>(i, 3);
+<a name='L290'>        n++;
+<a name='L291'>        REQ(n, <a href='../S/539.html#L10' title='Defined at 10 in Include/metagrammar.h.'>RHS</a>);
+<a name='L292'>        <a href='../S/2846.html#L188' title='Defined at 188 in Parser/pgen.c.'>compile_rhs</a>(ll, nf, n, pa, pb);
+<a name='L293'>        n++;
+<a name='L294'>        REQ(n, <a href='../S/582.html#L20' title='Defined at 20 in Include/token.h.'>RPAR</a>);
+<a name='L295'>    <font color='red'>}</font>
+<a name='L296'>    <b>else</b> <b>if</b> (n-&gt;n_type == <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a> || n-&gt;n_type == <a href='../D/4973.html' title='Multiple defined in 2 places.'>STRING</a>) <font color='red'>{</font>
+<a name='L297'>        *pa = <a href='../S/2846.html#L48' title='Defined at 48 in Parser/pgen.c.'>addnfastate</a>(nf);
+<a name='L298'>        *pb = <a href='../S/2846.html#L48' title='Defined at 48 in Parser/pgen.c.'>addnfastate</a>(nf);
+<a name='L299'>        <a href='../S/2846.html#L63' title='Defined at 63 in Parser/pgen.c.'>addnfaarc</a>(nf, *pa, *pb, <a href='../S/2836.html#L88' title='Defined at 88 in Parser/grammar.c.'>addlabel</a>(ll, n-&gt;n_type, n-&gt;n_str));
+<a name='L300'>    <font color='red'>}</font>
+<a name='L301'>    <b>else</b>
+<a name='L302'>        REQ(n, <a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>);
+<a name='L303'><font color='red'>}</font>
+<a name='L304'>
+<a name='L305'><b>static</b> <b>void</b>
+<a name='L306'><a href='../S/2846.html#L336' title='Refered from 336 in Parser/pgen.c.'>dumpstate</a>(labellist *ll, nfa *nf, <b>int</b> istate)
+<a name='L307'><font color='red'>{</font>
+<a name='L308'>    <a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a> *st;
+<a name='L309'>    <b>int</b> i;
+<a name='L310'>    <a href='../S/2846.html#L22' title='Defined at 22 in Parser/pgen.c.'>nfaarc</a> *ar;
+<a name='L311'>
+<a name='L312'>    printf("%c%2d%c",
+<a name='L313'>        istate == nf-&gt;nf_start ? '*' : ' ',
+<a name='L314'>        istate,
+<a name='L315'>        istate == nf-&gt;nf_finish ? '.' : ' ');
+<a name='L316'>    st = &amp;nf-&gt;nf_state[istate];
+<a name='L317'>    ar = st-&gt;st_arc;
+<a name='L318'>    <b>for</b> (i = 0; i &lt; st-&gt;st_narcs; i++) <font color='red'>{</font>
+<a name='L319'>        <b>if</b> (i &gt; 0)
+<a name='L320'>            printf("\n    ");
+<a name='L321'>        printf("-&gt; %2d  %s", ar-&gt;ar_arrow,
+<a name='L322'>            <a href='../S/2837.html#L34' title='Defined at 34 in Parser/grammar1.c.'>PyGrammar_LabelRepr</a>(&amp;ll-&gt;ll_label[ar-&gt;ar_label]));
+<a name='L323'>        ar++;
+<a name='L324'>    <font color='red'>}</font>
+<a name='L325'>    printf("\n");
+<a name='L326'><font color='red'>}</font>
+<a name='L327'>
+<a name='L328'><b>static</b> <b>void</b>
+<a name='L329'><a href='../S/2846.html#L650' title='Refered from 650 in Parser/pgen.c.'>dumpnfa</a>(labellist *ll, nfa *nf)
+<a name='L330'><font color='red'>{</font>
+<a name='L331'>    <b>int</b> i;
+<a name='L332'>
+<a name='L333'>    printf("NFA '%s' has %d states; start %d, finish %d\n",
+<a name='L334'>        nf-&gt;nf_name, nf-&gt;nf_nstates, nf-&gt;nf_start, nf-&gt;nf_finish);
+<a name='L335'>    <b>for</b> (i = 0; i &lt; nf-&gt;nf_nstates; i++)
+<a name='L336'>        <a href='../S/2846.html#L306' title='Defined at 306 in Parser/pgen.c.'>dumpstate</a>(ll, nf, i);
+<a name='L337'><font color='red'>}</font>
+<a name='L338'>
+<a name='L339'>
+<a name='L340'><i><font color='green'>/* PART TWO -- CONSTRUCT DFA -- Algorithm 3.1 from [Aho&amp;Ullman 77] */</font></i>
+<a name='L341'>
+<a name='L342'><b>static</b> <b>void</b>
+<a name='L343'><a href='../R/5931.html' title='Multiple refered from 3 places.'>addclosure</a>(bitset ss, nfa *nf, <b>int</b> istate)
+<a name='L344'><font color='red'>{</font>
+<a name='L345'>    <b>if</b> (<a href='../S/2834.html#L29' title='Defined at 29 in Parser/bitset.c.'>addbit</a>(ss, istate)) <font color='red'>{</font>
+<a name='L346'>        <a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a> *st = &amp;nf-&gt;nf_state[istate];
+<a name='L347'>        <a href='../S/2846.html#L22' title='Defined at 22 in Parser/pgen.c.'>nfaarc</a> *ar = st-&gt;st_arc;
+<a name='L348'>        <b>int</b> i;
+<a name='L349'>
+<a name='L350'>        <b>for</b> (i = st-&gt;st_narcs; --i &gt;= 0; ) <font color='red'>{</font>
+<a name='L351'>            <b>if</b> (ar-&gt;ar_label == <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>)
+<a name='L352'>                <a href='../S/2846.html#L343' title='Defined at 343 in Parser/pgen.c.'>addclosure</a>(ss, nf, ar-&gt;ar_arrow);
+<a name='L353'>            ar++;
+<a name='L354'>        <font color='red'>}</font>
+<a name='L355'>    <font color='red'>}</font>
+<a name='L356'><font color='red'>}</font>
+<a name='L357'>
+<a name='L358'><b>typedef</b> <b>struct</b> <a href='../S/2846.html#L367' title='Refered from 367 in Parser/pgen.c.'>_ss_arc</a> <font color='red'>{</font>
+<a name='L359'>    <a href='../S/502.html#L12' title='Defined at 12 in Include/bitset.h.'>bitset</a>      sa_bitset;
+<a name='L360'>    <b>int</b>         sa_arrow;
+<a name='L361'>    <b>int</b>         sa_label;
+<a name='L362'><font color='red'>}</font> <a href='../R/10477.html' title='Multiple refered from 19 places.'>ss_arc</a>;
+<a name='L363'>
+<a name='L364'><b>typedef</b> <b>struct</b> _ss_state <font color='red'>{</font>
+<a name='L365'>    <a href='../S/502.html#L12' title='Defined at 12 in Include/bitset.h.'>bitset</a>      ss_ss;
+<a name='L366'>    <b>int</b>         ss_narcs;
+<a name='L367'>    <b>struct</b> <a href='../S/2846.html#L358' title='Defined at 358 in Parser/pgen.c.'>_ss_arc</a>      *<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>;
+<a name='L368'>    <b>int</b>         ss_deleted;
+<a name='L369'>    <b>int</b>         ss_finish;
+<a name='L370'>    <b>int</b>         ss_rename;
+<a name='L371'><font color='red'>}</font> <a href='../R/10478.html' title='Multiple refered from 7 places.'>ss_state</a>;
+<a name='L372'>
+<a name='L373'><b>typedef</b> <b>struct</b> _ss_dfa <font color='red'>{</font>
+<a name='L374'>    <b>int</b>         sd_nstates;
+<a name='L375'>    <a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a> *sd_state;
+<a name='L376'><font color='red'>}</font> ss_dfa;
+<a name='L377'>
+<a name='L378'><i><font color='green'>/* Forward */</font></i>
+<a name='L379'><b>static</b> <b>void</b> <a href='../S/2846.html#L494' title='Defined at 494 in Parser/pgen.c.'>printssdfa</a>(<b>int</b> xx_nstates, ss_state *xx_state, <b>int</b> nbits,
+<a name='L380'>                       labellist *ll, <b>char</b> *msg);
+<a name='L381'><b>static</b> <b>void</b> <a href='../S/2846.html#L568' title='Defined at 568 in Parser/pgen.c.'>simplify</a>(<b>int</b> xx_nstates, ss_state *xx_state);
+<a name='L382'><b>static</b> <b>void</b> <a href='../S/2846.html#L599' title='Defined at 599 in Parser/pgen.c.'>convert</a>(dfa *d, <b>int</b> xx_nstates, ss_state *xx_state);
+<a name='L383'>
+<a name='L384'><b>static</b> <b>void</b>
+<a name='L385'><a href='../S/2846.html#L654' title='Refered from 654 in Parser/pgen.c.'>makedfa</a>(nfagrammar *gr, nfa *nf, dfa *d)
+<a name='L386'><font color='red'>{</font>
+<a name='L387'>    <b>int</b> nbits = nf-&gt;nf_nstates;
+<a name='L388'>    <a href='../S/502.html#L12' title='Defined at 12 in Include/bitset.h.'>bitset</a> ss;
+<a name='L389'>    <b>int</b> xx_nstates;
+<a name='L390'>    <a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a> *xx_state, *yy;
+<a name='L391'>    <a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> *zz;
+<a name='L392'>    <b>int</b> istate, jstate, iarc, jarc, ibit;
+<a name='L393'>    <a href='../S/2846.html#L27' title='Defined at 27 in Parser/pgen.c.'>nfastate</a> *st;
+<a name='L394'>    <a href='../S/2846.html#L22' title='Defined at 22 in Parser/pgen.c.'>nfaarc</a> *ar;
+<a name='L395'>
+<a name='L396'>    ss = <a href='../S/2834.html#L8' title='Defined at 8 in Parser/bitset.c.'>newbitset</a>(nbits);
+<a name='L397'>    <a href='../S/2846.html#L343' title='Defined at 343 in Parser/pgen.c.'>addclosure</a>(ss, nf, nf-&gt;nf_start);
+<a name='L398'>    xx_state = (<a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a> *)PyObject_MALLOC(<b>sizeof</b>(<a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a>));
+<a name='L399'>    <b>if</b> (xx_state == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L400'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("no mem for xx_state in makedfa");
+<a name='L401'>    xx_nstates = 1;
+<a name='L402'>    yy = &amp;xx_state[0];
+<a name='L403'>    yy-&gt;ss_ss = ss;
+<a name='L404'>    yy-&gt;ss_narcs = 0;
+<a name='L405'>    yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L406'>    yy-&gt;ss_deleted = 0;
+<a name='L407'>    yy-&gt;ss_finish = <a href='../D/11704.html' title='Multiple defined in 2 places.'>testbit</a>(ss, nf-&gt;nf_finish);
+<a name='L408'>    <b>if</b> (yy-&gt;ss_finish)
+<a name='L409'>        printf("Error: nonterminal '%s' may produce empty.\n",
+<a name='L410'>            nf-&gt;nf_name);
+<a name='L411'>
+<a name='L412'>    <i><font color='green'>/* This algorithm is from a book written before</font></i>
+<a name='L413'><i><font color='green'>       the invention of structured programming... */</font></i>
+<a name='L414'>
+<a name='L415'>    <i><font color='green'>/* For each unmarked state... */</font></i>
+<a name='L416'>    <b>for</b> (istate = 0; istate &lt; xx_nstates; ++istate) <font color='red'>{</font>
+<a name='L417'>        <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size;
+<a name='L418'>        yy = &amp;xx_state[istate];
+<a name='L419'>        ss = yy-&gt;ss_ss;
+<a name='L420'>        <i><font color='green'>/* For all its states... */</font></i>
+<a name='L421'>        <b>for</b> (ibit = 0; ibit &lt; nf-&gt;nf_nstates; ++ibit) <font color='red'>{</font>
+<a name='L422'>            <b>if</b> (!<a href='../D/11704.html' title='Multiple defined in 2 places.'>testbit</a>(ss, ibit))
+<a name='L423'>                <b>continue</b>;
+<a name='L424'>            st = &amp;nf-&gt;nf_state[ibit];
+<a name='L425'>            <i><font color='green'>/* For all non-empty arcs from this state... */</font></i>
+<a name='L426'>            <b>for</b> (iarc = 0; iarc &lt; st-&gt;st_narcs; iarc++) <font color='red'>{</font>
+<a name='L427'>                ar = &amp;st-&gt;st_arc[iarc];
+<a name='L428'>                <b>if</b> (ar-&gt;ar_label == <a href='../D/906.html' title='Multiple defined in 2 places.'>EMPTY</a>)
+<a name='L429'>                    <b>continue</b>;
+<a name='L430'>                <i><font color='green'>/* Look up in list of arcs from this state */</font></i>
+<a name='L431'>                <b>for</b> (jarc = 0; jarc &lt; yy-&gt;ss_narcs; ++jarc) <font color='red'>{</font>
+<a name='L432'>                    zz = &amp;yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[jarc];
+<a name='L433'>                    <b>if</b> (ar-&gt;ar_label == zz-&gt;sa_label)
+<a name='L434'>                        <b>goto</b> found;
+<a name='L435'>                <font color='red'>}</font>
+<a name='L436'>                <i><font color='green'>/* Add new arc for this state */</font></i>
+<a name='L437'>                size = <b>sizeof</b>(<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>) * (yy-&gt;ss_narcs + 1);
+<a name='L438'>                yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> = (<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> *)PyObject_REALLOC(
+<a name='L439'>                                            yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>, size);
+<a name='L440'>                <b>if</b> (yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L441'>                    <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("out of mem");
+<a name='L442'>                zz = &amp;yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[yy-&gt;ss_narcs++];
+<a name='L443'>                zz-&gt;sa_label = ar-&gt;ar_label;
+<a name='L444'>                zz-&gt;sa_bitset = <a href='../S/2834.html#L8' title='Defined at 8 in Parser/bitset.c.'>newbitset</a>(nbits);
+<a name='L445'>                zz-&gt;sa_arrow = -1;
+<a name='L446'>             found:             ;
+<a name='L447'>                <i><font color='green'>/* Add destination */</font></i>
+<a name='L448'>                <a href='../S/2846.html#L343' title='Defined at 343 in Parser/pgen.c.'>addclosure</a>(zz-&gt;sa_bitset, nf, ar-&gt;ar_arrow);
+<a name='L449'>            <font color='red'>}</font>
+<a name='L450'>        <font color='red'>}</font>
+<a name='L451'>        <i><font color='green'>/* Now look up all the arrow states */</font></i>
+<a name='L452'>        <b>for</b> (jarc = 0; jarc &lt; xx_state[istate].ss_narcs; jarc++) <font color='red'>{</font>
+<a name='L453'>            zz = &amp;xx_state[istate].<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[jarc];
+<a name='L454'>            <b>for</b> (jstate = 0; jstate &lt; xx_nstates; jstate++) <font color='red'>{</font>
+<a name='L455'>                <b>if</b> (<a href='../S/2834.html#L49' title='Defined at 49 in Parser/bitset.c.'>samebitset</a>(zz-&gt;sa_bitset,
+<a name='L456'>                    xx_state[jstate].ss_ss, nbits)) <font color='red'>{</font>
+<a name='L457'>                    zz-&gt;sa_arrow = jstate;
+<a name='L458'>                    <b>goto</b> done;
+<a name='L459'>                <font color='red'>}</font>
+<a name='L460'>            <font color='red'>}</font>
+<a name='L461'>            size = <b>sizeof</b>(<a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a>) * (xx_nstates + 1);
+<a name='L462'>            xx_state = (<a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a> *)PyObject_REALLOC(xx_state,
+<a name='L463'>                                                        size);
+<a name='L464'>            <b>if</b> (xx_state == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L465'>                <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("out of mem");
+<a name='L466'>            zz-&gt;sa_arrow = xx_nstates;
+<a name='L467'>            yy = &amp;xx_state[xx_nstates++];
+<a name='L468'>            yy-&gt;ss_ss = zz-&gt;sa_bitset;
+<a name='L469'>            yy-&gt;ss_narcs = 0;
+<a name='L470'>            yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L471'>            yy-&gt;ss_deleted = 0;
+<a name='L472'>            yy-&gt;ss_finish = <a href='../D/11704.html' title='Multiple defined in 2 places.'>testbit</a>(yy-&gt;ss_ss, nf-&gt;nf_finish);
+<a name='L473'>         done:          ;
+<a name='L474'>        <font color='red'>}</font>
+<a name='L475'>    <font color='red'>}</font>
+<a name='L476'>
+<a name='L477'>    <b>if</b> (Py_DebugFlag)
+<a name='L478'>        <a href='../S/2846.html#L494' title='Defined at 494 in Parser/pgen.c.'>printssdfa</a>(xx_nstates, xx_state, nbits, &amp;gr-&gt;gr_ll,
+<a name='L479'>                                        "before minimizing");
+<a name='L480'>
+<a name='L481'>    <a href='../S/2846.html#L568' title='Defined at 568 in Parser/pgen.c.'>simplify</a>(xx_nstates, xx_state);
+<a name='L482'>
+<a name='L483'>    <b>if</b> (Py_DebugFlag)
+<a name='L484'>        <a href='../S/2846.html#L494' title='Defined at 494 in Parser/pgen.c.'>printssdfa</a>(xx_nstates, xx_state, nbits, &amp;gr-&gt;gr_ll,
+<a name='L485'>                                        "after minimizing");
+<a name='L486'>
+<a name='L487'>    <a href='../S/2846.html#L599' title='Defined at 599 in Parser/pgen.c.'>convert</a>(d, xx_nstates, xx_state);
+<a name='L488'>
+<a name='L489'>    <i><font color='green'>/* XXX cleanup */</font></i>
+<a name='L490'>    PyObject_FREE(xx_state);
+<a name='L491'><font color='red'>}</font>
+<a name='L492'>
+<a name='L493'><b>static</b> <b>void</b>
+<a name='L494'><a href='../R/9715.html' title='Multiple refered from 3 places.'>printssdfa</a>(<b>int</b> xx_nstates, ss_state *xx_state, <b>int</b> nbits,
+<a name='L495'>           labellist *ll, <b>char</b> *msg)
+<a name='L496'><font color='red'>{</font>
+<a name='L497'>    <b>int</b> i, ibit, iarc;
+<a name='L498'>    <a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a> *yy;
+<a name='L499'>    <a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> *zz;
+<a name='L500'>
+<a name='L501'>    printf("Subset DFA %s\n", msg);
+<a name='L502'>    <b>for</b> (i = 0; i &lt; xx_nstates; i++) <font color='red'>{</font>
+<a name='L503'>        yy = &amp;xx_state[i];
+<a name='L504'>        <b>if</b> (yy-&gt;ss_deleted)
+<a name='L505'>            <b>continue</b>;
+<a name='L506'>        printf(" Subset %d", i);
+<a name='L507'>        <b>if</b> (yy-&gt;ss_finish)
+<a name='L508'>            printf(" (finish)");
+<a name='L509'>        printf(" { ");
+<a name='L510'>        <b>for</b> (ibit = 0; ibit &lt; nbits; ibit++) <font color='red'>{</font>
+<a name='L511'>            <b>if</b> (<a href='../D/11704.html' title='Multiple defined in 2 places.'>testbit</a>(yy-&gt;ss_ss, ibit))
+<a name='L512'>                printf("%d ", ibit);
+<a name='L513'>        <font color='red'>}</font>
+<a name='L514'>        printf("}\n");
+<a name='L515'>        <b>for</b> (iarc = 0; iarc &lt; yy-&gt;ss_narcs; iarc++) <font color='red'>{</font>
+<a name='L516'>            zz = &amp;yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[iarc];
+<a name='L517'>            printf("  Arc to state %d, label %s\n",
+<a name='L518'>                zz-&gt;sa_arrow,
+<a name='L519'>                <a href='../S/2837.html#L34' title='Defined at 34 in Parser/grammar1.c.'>PyGrammar_LabelRepr</a>(
+<a name='L520'>                    &amp;ll-&gt;ll_label[zz-&gt;sa_label]));
+<a name='L521'>        <font color='red'>}</font>
+<a name='L522'>    <font color='red'>}</font>
+<a name='L523'><font color='red'>}</font>
+<a name='L524'>
+<a name='L525'>
+<a name='L526'><i><font color='green'>/* PART THREE -- SIMPLIFY DFA */</font></i>
+<a name='L527'>
+<a name='L528'><i><font color='green'>/* Simplify the DFA by repeatedly eliminating states that are</font></i>
+<a name='L529'><i><font color='green'>   equivalent to another oner.  This is NOT Algorithm 3.3 from</font></i>
+<a name='L530'><i><font color='green'>   [Aho&amp;Ullman 77].  It does not always finds the minimal DFA,</font></i>
+<a name='L531'><i><font color='green'>   but it does usually make a much smaller one...  (For an example</font></i>
+<a name='L532'><i><font color='green'>   of sub-optimal behavior, try S: x a b+ | y a b+.)</font></i>
+<a name='L533'><i><font color='green'>*/</font></i>
+<a name='L534'>
+<a name='L535'><b>static</b> <b>int</b>
+<a name='L536'><a href='../S/2846.html#L581' title='Refered from 581 in Parser/pgen.c.'>samestate</a>(ss_state *s1, ss_state *s2)
+<a name='L537'><font color='red'>{</font>
+<a name='L538'>    <b>int</b> i;
+<a name='L539'>
+<a name='L540'>    <b>if</b> (s1-&gt;ss_narcs != s2-&gt;ss_narcs || s1-&gt;ss_finish != s2-&gt;ss_finish)
+<a name='L541'>        <b>return</b> 0;
+<a name='L542'>    <b>for</b> (i = 0; i &lt; s1-&gt;ss_narcs; i++) <font color='red'>{</font>
+<a name='L543'>        <b>if</b> (s1-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[i].sa_arrow != s2-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[i].sa_arrow ||
+<a name='L544'>            s1-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[i].sa_label != s2-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[i].sa_label)
+<a name='L545'>            <b>return</b> 0;
+<a name='L546'>    <font color='red'>}</font>
+<a name='L547'>    <b>return</b> 1;
+<a name='L548'><font color='red'>}</font>
+<a name='L549'>
+<a name='L550'><b>static</b> <b>void</b>
+<a name='L551'><a href='../S/2846.html#L583' title='Refered from 583 in Parser/pgen.c.'>renamestates</a>(<b>int</b> xx_nstates, ss_state *xx_state, <b>int</b> from, <b>int</b> to)
+<a name='L552'><font color='red'>{</font>
+<a name='L553'>    <b>int</b> i, j;
+<a name='L554'>
+<a name='L555'>    <b>if</b> (Py_DebugFlag)
+<a name='L556'>        printf("Rename state %d to %d.\n", from, to);
+<a name='L557'>    <b>for</b> (i = 0; i &lt; xx_nstates; i++) <font color='red'>{</font>
+<a name='L558'>        <b>if</b> (xx_state[i].ss_deleted)
+<a name='L559'>            <b>continue</b>;
+<a name='L560'>        <b>for</b> (j = 0; j &lt; xx_state[i].ss_narcs; j++) <font color='red'>{</font>
+<a name='L561'>            <b>if</b> (xx_state[i].<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[j].sa_arrow == from)
+<a name='L562'>                xx_state[i].<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[j].sa_arrow = to;
+<a name='L563'>        <font color='red'>}</font>
+<a name='L564'>    <font color='red'>}</font>
+<a name='L565'><font color='red'>}</font>
+<a name='L566'>
+<a name='L567'><b>static</b> <b>void</b>
+<a name='L568'><a href='../R/10319.html' title='Multiple refered from 2 places.'>simplify</a>(<b>int</b> xx_nstates, ss_state *xx_state)
+<a name='L569'><font color='red'>{</font>
+<a name='L570'>    <b>int</b> changes;
+<a name='L571'>    <b>int</b> i, j;
+<a name='L572'>
+<a name='L573'>    <b>do</b> <font color='red'>{</font>
+<a name='L574'>        changes = 0;
+<a name='L575'>        <b>for</b> (i = 1; i &lt; xx_nstates; i++) <font color='red'>{</font>
+<a name='L576'>            <b>if</b> (xx_state[i].ss_deleted)
+<a name='L577'>                <b>continue</b>;
+<a name='L578'>            <b>for</b> (j = 0; j &lt; i; j++) <font color='red'>{</font>
+<a name='L579'>                <b>if</b> (xx_state[j].ss_deleted)
+<a name='L580'>                    <b>continue</b>;
+<a name='L581'>                <b>if</b> (<a href='../S/2846.html#L536' title='Defined at 536 in Parser/pgen.c.'>samestate</a>(&amp;xx_state[i], &amp;xx_state[j])) <font color='red'>{</font>
+<a name='L582'>                    xx_state[i].ss_deleted++;
+<a name='L583'>                    <a href='../S/2846.html#L551' title='Defined at 551 in Parser/pgen.c.'>renamestates</a>(xx_nstates, xx_state,
+<a name='L584'>                                 i, j);
+<a name='L585'>                    changes++;
+<a name='L586'>                    <b>break</b>;
+<a name='L587'>                <font color='red'>}</font>
+<a name='L588'>            <font color='red'>}</font>
+<a name='L589'>        <font color='red'>}</font>
+<a name='L590'>    <font color='red'>}</font> <b>while</b> (changes);
+<a name='L591'><font color='red'>}</font>
+<a name='L592'>
+<a name='L593'>
+<a name='L594'><i><font color='green'>/* PART FOUR -- GENERATE PARSING TABLES */</font></i>
+<a name='L595'>
+<a name='L596'><i><font color='green'>/* Convert the DFA into a grammar that can be used by our parser */</font></i>
+<a name='L597'>
+<a name='L598'><b>static</b> <b>void</b>
+<a name='L599'><a href='../R/6997.html' title='Multiple refered from 18 places.'>convert</a>(dfa *d, <b>int</b> xx_nstates, ss_state *xx_state)
+<a name='L600'><font color='red'>{</font>
+<a name='L601'>    <b>int</b> i, j;
+<a name='L602'>    <a href='../S/2846.html#L371' title='Defined at 371 in Parser/pgen.c.'>ss_state</a> *yy;
+<a name='L603'>    <a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a> *zz;
+<a name='L604'>
+<a name='L605'>    <b>for</b> (i = 0; i &lt; xx_nstates; i++) <font color='red'>{</font>
+<a name='L606'>        yy = &amp;xx_state[i];
+<a name='L607'>        <b>if</b> (yy-&gt;ss_deleted)
+<a name='L608'>            <b>continue</b>;
+<a name='L609'>        yy-&gt;ss_rename = <a href='../S/2836.html#L51' title='Defined at 51 in Parser/grammar.c.'>addstate</a>(d);
+<a name='L610'>    <font color='red'>}</font>
+<a name='L611'>
+<a name='L612'>    <b>for</b> (i = 0; i &lt; xx_nstates; i++) <font color='red'>{</font>
+<a name='L613'>        yy = &amp;xx_state[i];
+<a name='L614'>        <b>if</b> (yy-&gt;ss_deleted)
+<a name='L615'>            <b>continue</b>;
+<a name='L616'>        <b>for</b> (j = 0; j &lt; yy-&gt;ss_narcs; j++) <font color='red'>{</font>
+<a name='L617'>            zz = &amp;yy-&gt;<a href='../S/2846.html#L362' title='Defined at 362 in Parser/pgen.c.'>ss_arc</a>[j];
+<a name='L618'>            <a href='../S/2836.html#L70' title='Defined at 70 in Parser/grammar.c.'>addarc</a>(d, yy-&gt;ss_rename,
+<a name='L619'>                xx_state[zz-&gt;sa_arrow].ss_rename,
+<a name='L620'>                zz-&gt;sa_label);
+<a name='L621'>        <font color='red'>}</font>
+<a name='L622'>        <b>if</b> (yy-&gt;ss_finish)
+<a name='L623'>            <a href='../S/2836.html#L70' title='Defined at 70 in Parser/grammar.c.'>addarc</a>(d, yy-&gt;ss_rename, yy-&gt;ss_rename, 0);
+<a name='L624'>    <font color='red'>}</font>
+<a name='L625'>
+<a name='L626'>    d-&gt;d_initial = 0;
+<a name='L627'><font color='red'>}</font>
+<a name='L628'>
+<a name='L629'>
+<a name='L630'><i><font color='green'>/* PART FIVE -- GLUE IT ALL TOGETHER */</font></i>
+<a name='L631'>
+<a name='L632'><b>static</b> <a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *
+<a name='L633'><a href='../S/2846.html#L667' title='Refered from 667 in Parser/pgen.c.'>maketables</a>(nfagrammar *gr)
+<a name='L634'><font color='red'>{</font>
+<a name='L635'>    <b>int</b> i;
+<a name='L636'>    <a href='../S/2846.html#L35' title='Defined at 35 in Parser/pgen.c.'>nfa</a> *nf;
+<a name='L637'>    <a href='../S/530.html#L57' title='Defined at 57 in Include/grammar.h.'>dfa</a> *d;
+<a name='L638'>    <a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *g;
+<a name='L639'>
+<a name='L640'>    <b>if</b> (gr-&gt;gr_nnfas == 0)
+<a name='L641'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L642'>    g = <a href='../S/2836.html#L15' title='Defined at 15 in Parser/grammar.c.'>newgrammar</a>(gr-&gt;gr_nfa[0]-&gt;nf_type);
+<a name='L643'>                    <i><font color='green'>/* XXX first rule must be start rule */</font></i>
+<a name='L644'>    g-&gt;g_ll = gr-&gt;gr_ll;
+<a name='L645'>
+<a name='L646'>    <b>for</b> (i = 0; i &lt; gr-&gt;gr_nnfas; i++) <font color='red'>{</font>
+<a name='L647'>        nf = gr-&gt;gr_nfa[i];
+<a name='L648'>        <b>if</b> (Py_DebugFlag) <font color='red'>{</font>
+<a name='L649'>            printf("Dump of NFA for '%s' ...\n", nf-&gt;nf_name);
+<a name='L650'>            <a href='../S/2846.html#L329' title='Defined at 329 in Parser/pgen.c.'>dumpnfa</a>(&amp;gr-&gt;gr_ll, nf);
+<a name='L651'>            printf("Making DFA for '%s' ...\n", nf-&gt;nf_name);
+<a name='L652'>        <font color='red'>}</font>
+<a name='L653'>        d = <a href='../S/2836.html#L32' title='Defined at 32 in Parser/grammar.c.'>adddfa</a>(g, nf-&gt;nf_type, nf-&gt;nf_name);
+<a name='L654'>        <a href='../S/2846.html#L385' title='Defined at 385 in Parser/pgen.c.'>makedfa</a>(gr, gr-&gt;gr_nfa[i], d);
+<a name='L655'>    <font color='red'>}</font>
+<a name='L656'>
+<a name='L657'>    <b>return</b> g;
+<a name='L658'><font color='red'>}</font>
+<a name='L659'>
+<a name='L660'><a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *
+<a name='L661'><a href='../R/9523.html' title='Multiple refered from 3 places.'>pgen</a>(node *n)
+<a name='L662'><font color='red'>{</font>
+<a name='L663'>    <a href='../S/2846.html#L99' title='Defined at 99 in Parser/pgen.c.'>nfagrammar</a> *gr;
+<a name='L664'>    <a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *g;
+<a name='L665'>
+<a name='L666'>    gr = <a href='../S/2846.html#L150' title='Defined at 150 in Parser/pgen.c.'>metacompile</a>(n);
+<a name='L667'>    g = <a href='../S/2846.html#L633' title='Defined at 633 in Parser/pgen.c.'>maketables</a>(gr);
+<a name='L668'>    <a href='../S/2836.html#L132' title='Defined at 132 in Parser/grammar.c.'>translatelabels</a>(g);
+<a name='L669'>    <a href='../S/2835.html#L14' title='Defined at 14 in Parser/firstsets.c.'>addfirstsets</a>(g);
+<a name='L670'>    PyObject_FREE(gr);
+<a name='L671'>    <b>return</b> g;
+<a name='L672'><font color='red'>}</font>
+<a name='L673'>
+<a name='L674'><a href='../S/530.html#L67' title='Defined at 67 in Include/grammar.h.'>grammar</a> *
+<a name='L675'>Py_pgen(node *n)
+<a name='L676'><font color='red'>{</font>
+<a name='L677'>  <b>return</b> <a href='../S/2846.html#L661' title='Defined at 661 in Parser/pgen.c.'>pgen</a>(n);
+<a name='L678'><font color='red'>}</font>
+<a name='L679'>
+<a name='L680'><i><font color='green'>/*</font></i>
+<a name='L681'><i><font color='green'></font></i>
+<a name='L682'><i><font color='green'>Description</font></i>
+<a name='L683'><i><font color='green'>-----------</font></i>
+<a name='L684'><i><font color='green'></font></i>
+<a name='L685'><i><font color='green'>Input is a grammar in extended BNF (using * for repetition, + for</font></i>
+<a name='L686'><i><font color='green'>at-least-once repetition, [] for optional parts, | for alternatives and</font></i>
+<a name='L687'><i><font color='green'>() for grouping).  This has already been parsed and turned into a parse</font></i>
+<a name='L688'><i><font color='green'>tree.</font></i>
+<a name='L689'><i><font color='green'></font></i>
+<a name='L690'><i><font color='green'>Each rule is considered as a regular expression in its own right.</font></i>
+<a name='L691'><i><font color='green'>It is turned into a Non-deterministic Finite Automaton (NFA), which</font></i>
+<a name='L692'><i><font color='green'>is then turned into a Deterministic Finite Automaton (DFA), which is then</font></i>
+<a name='L693'><i><font color='green'>optimized to reduce the number of states.  See [Aho&amp;Ullman 77] chapter 3,</font></i>
+<a name='L694'><i><font color='green'>or similar compiler books (this technique is more often used for lexical</font></i>
+<a name='L695'><i><font color='green'>analyzers).</font></i>
+<a name='L696'><i><font color='green'></font></i>
+<a name='L697'><i><font color='green'>The DFA's are used by the parser as parsing tables in a special way</font></i>
+<a name='L698'><i><font color='green'>that's probably unique.  Before they are usable, the FIRST sets of all</font></i>
+<a name='L699'><i><font color='green'>non-terminals are computed.</font></i>
+<a name='L700'><i><font color='green'></font></i>
+<a name='L701'><i><font color='green'>Reference</font></i>
+<a name='L702'><i><font color='green'>---------</font></i>
+<a name='L703'><i><font color='green'></font></i>
+<a name='L704'><i><font color='green'>[Aho&amp;Ullman 77]</font></i>
+<a name='L705'><i><font color='green'>    Aho&amp;Ullman, Principles of Compiler Design, Addison-Wesley 1977</font></i>
+<a name='L706'><i><font color='green'>    (first edition)</font></i>
+<a name='L707'><i><font color='green'></font></i>
+<a name='L708'><i><font color='green'>*/</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L48'>[^]</a><a href='#L675'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

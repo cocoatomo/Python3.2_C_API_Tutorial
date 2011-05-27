@@ -1,0 +1,1084 @@
+<html>
+<head>
+<title>Objects/tupleobject.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3391.html'>Objects</a>/tupleobject.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L1012'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L36' title='Defined at 36.'>show_track</a>
+<li><a href='#L49' title='Defined at 49.'>PyTuple_New</a>
+<li><a href='#L112' title='Defined at 112.'>PyTuple_Size</a>
+<li><a href='#L123' title='Defined at 123.'>PyTuple_GetItem</a>
+<li><a href='#L137' title='Defined at 137.'>PyTuple_SetItem</a>
+<li><a href='#L160' title='Defined at 160.'>_PyTuple_MaybeUntrack</a>
+<li><a href='#L186' title='Defined at 186.'>PyTuple_Pack</a>
+<li><a href='#L212' title='Defined at 212.'>tupledealloc</a>
+<li><a href='#L240' title='Defined at 240.'>tuplerepr</a>
+<li><a href='#L316' title='Defined at 316.'>tuplehash</a>
+<li><a href='#L339' title='Defined at 339.'>tuplelength</a>
+<li><a href='#L345' title='Defined at 345.'>tuplecontains</a>
+<li><a href='#L357' title='Defined at 357.'>tupleitem</a>
+<li><a href='#L368' title='Defined at 368.'>tupleslice</a>
+<li><a href='#L400' title='Defined at 400.'>PyTuple_GetSlice</a>
+<li><a href='#L410' title='Defined at 410.'>tupleconcat</a>
+<li><a href='#L449' title='Defined at 449.'>tuplerepeat</a>
+<li><a href='#L486' title='Defined at 486.'>tupleindex</a>
+<li><a href='#L517' title='Defined at 517.'>tuplecount</a>
+<li><a href='#L533' title='Defined at 533.'>tupletraverse</a>
+<li><a href='#L543' title='Defined at 543.'>tuplerichcompare</a>
+<li><a href='#L619' title='Defined at 619.'>tuple_new</a>
+<li><a href='#L636' title='Defined at 636.'>tuple_subtype_new</a>
+<li><a href='#L676' title='Defined at 676.'>tuplesubscript</a>
+<li><a href='#L732' title='Defined at 732.'>tuple_getnewargs</a>
+<li><a href='#L739' title='Defined at 739.'>tuple_sizeof</a>
+<li><a href='#L823' title='Defined at 823.'>_PyTuple_Resize</a>
+<li><a href='#L878' title='Defined at 878.'>PyTuple_ClearFreeList</a>
+<li><a href='#L900' title='Defined at 900.'>PyTuple_Fini</a>
+<li><a href='#L924' title='Defined at 924.'>tupleiter_dealloc</a>
+<li><a href='#L932' title='Defined at 932.'>tupleiter_traverse</a>
+<li><a href='#L939' title='Defined at 939.'>tupleiter_next</a>
+<li><a href='#L963' title='Defined at 963.'>tupleiter_len</a>
+<li><a href='#L1012' title='Defined at 1012.'>tuple_iter</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Tuple object implementation */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'>
+<a name='L6'><i><font color='green'>/* Speed optimization to avoid frequent malloc/free of small tuples */</font></i>
+<a name='L7'><font color='darkred'>#ifndef</font> <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a>
+<a name='L8'><font color='darkred'>#define</font> <a href='../R/3495.html' title='Multiple refered from 12 places.'>PyTuple_MAXSAVESIZE</a>     20  <i><font color='green'>/* Largest tuple to save on free list */</font></i>
+<a name='L9'><font color='darkred'>#endif</font>
+<a name='L10'><font color='darkred'>#ifndef</font> <a href='../S/2823.html#L11' title='Defined at 11 in Objects/tupleobject.c.'>PyTuple_MAXFREELIST</a>
+<a name='L11'><font color='darkred'>#define</font> <a href='../R/3494.html' title='Multiple refered from 2 places.'>PyTuple_MAXFREELIST</a>  2000  <i><font color='green'>/* Maximum number of tuples of each size to save */</font></i>
+<a name='L12'><font color='darkred'>#endif</font>
+<a name='L13'>
+<a name='L14'><font color='darkred'>#if</font> <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &gt; 0
+<a name='L15'><i><font color='green'>/* Entries 1 up to PyTuple_MAXSAVESIZE are free lists, entry 0 is the empty</font></i>
+<a name='L16'><i><font color='green'>   tuple () of which at most one instance will be allocated.</font></i>
+<a name='L17'><i><font color='green'>*/</font></i>
+<a name='L18'><b>static</b> <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *free_list[<a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a>];
+<a name='L19'><b>static</b> <b>int</b> numfree[<a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a>];
+<a name='L20'><font color='darkred'>#endif</font>
+<a name='L21'><font color='darkred'>#ifdef</font> COUNT_ALLOCS
+<a name='L22'><a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> fast_tuple_allocs;
+<a name='L23'><a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> tuple_zero_allocs;
+<a name='L24'><font color='darkred'>#endif</font>
+<a name='L25'>
+<a name='L26'><i><font color='green'>/* Debug statistic to count GC tracking of tuples.</font></i>
+<a name='L27'><i><font color='green'>   Please note that tuples are only untracked when considered by the GC, and</font></i>
+<a name='L28'><i><font color='green'>   many of them will be dead before. Therefore, a tracking rate close to 100%</font></i>
+<a name='L29'><i><font color='green'>   does not necessarily prove that the heuristic is inefficient.</font></i>
+<a name='L30'><i><font color='green'>*/</font></i>
+<a name='L31'><font color='darkred'>#ifdef</font> SHOW_TRACK_COUNT
+<a name='L32'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count_untracked = 0;
+<a name='L33'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count_tracked = 0;
+<a name='L34'>
+<a name='L35'><b>static</b> <b>void</b>
+<a name='L36'><a href='../R/10303.html' title='Multiple refered from 2 places.'>show_track</a>(<b>void</b>)
+<a name='L37'><font color='red'>{</font>
+<a name='L38'>    fprintf(stderr, "Tuples created: %" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a> "d\n",
+<a name='L39'>        count_tracked + count_untracked);
+<a name='L40'>    fprintf(stderr, "Tuples tracked by the GC: %" <a href='../D/2597.html' title='Multiple defined in 4 places.'>PY_FORMAT_SIZE_T</a>
+<a name='L41'>        "d\n", count_tracked);
+<a name='L42'>    fprintf(stderr, "%.2f%% tuple tracking rate\n\n",
+<a name='L43'>        (100.0*count_tracked/(count_untracked+count_tracked)));
+<a name='L44'><font color='red'>}</font>
+<a name='L45'><font color='darkred'>#endif</font>
+<a name='L46'>
+<a name='L47'>
+<a name='L48'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L49'><a href='../R/3496.html' title='Multiple refered from 177 places.'>PyTuple_New</a>(<b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size)
+<a name='L50'><font color='red'>{</font>
+<a name='L51'>    <b>register</b> <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *op;
+<a name='L52'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L53'>    <b>if</b> (size &lt; 0) <font color='red'>{</font>
+<a name='L54'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L55'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L56'>    <font color='red'>}</font>
+<a name='L57'><font color='darkred'>#if</font> <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &gt; 0
+<a name='L58'>    <b>if</b> (size == 0 &amp;&amp; free_list[0]) <font color='red'>{</font>
+<a name='L59'>        op = free_list[0];
+<a name='L60'>        Py_INCREF(op);
+<a name='L61'><font color='darkred'>#ifdef</font> COUNT_ALLOCS
+<a name='L62'>        tuple_zero_allocs++;
+<a name='L63'><font color='darkred'>#endif</font>
+<a name='L64'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) op;
+<a name='L65'>    <font color='red'>}</font>
+<a name='L66'>    <b>if</b> (size &lt; <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &amp;&amp; (op = free_list[size]) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L67'>        free_list[size] = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *) op-&gt;ob_item[0];
+<a name='L68'>        numfree[size]--;
+<a name='L69'><font color='darkred'>#ifdef</font> COUNT_ALLOCS
+<a name='L70'>        fast_tuple_allocs++;
+<a name='L71'><font color='darkred'>#endif</font>
+<a name='L72'>        <i><font color='green'>/* Inline PyObject_InitVar */</font></i>
+<a name='L73'><font color='darkred'>#ifdef</font> <a href='../S/544.html#L56' title='Defined at 56 in Include/object.h.'>Py_TRACE_REFS</a>
+<a name='L74'>        <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(op) = size;
+<a name='L75'>        <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(op) = &amp;PyTuple_Type;
+<a name='L76'><font color='darkred'>#endif</font>
+<a name='L77'>        <a href='../S/2803.html#L1650' title='Defined at 1650 in Objects/object.c.'>_Py_NewReference</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)op);
+<a name='L78'>    <font color='red'>}</font>
+<a name='L79'>    <b>else</b>
+<a name='L80'><font color='darkred'>#endif</font>
+<a name='L81'>    <font color='red'>{</font>
+<a name='L82'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> nbytes = size * <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *);
+<a name='L83'>        <i><font color='green'>/* Check for overflow */</font></i>
+<a name='L84'>        <b>if</b> (nbytes / <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) != (<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)size ||
+<a name='L85'>            (nbytes &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a> - <b>sizeof</b>(<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a>) - <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)))
+<a name='L86'>        <font color='red'>{</font>
+<a name='L87'>            <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L88'>        <font color='red'>}</font>
+<a name='L89'>        nbytes += <b>sizeof</b>(<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a>) - <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *);
+<a name='L90'>
+<a name='L91'>        op = PyObject_GC_NewVar(<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a>, &amp;PyTuple_Type, size);
+<a name='L92'>        <b>if</b> (op == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L93'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L94'>    <font color='red'>}</font>
+<a name='L95'>    <b>for</b> (i=0; i &lt; size; i++)
+<a name='L96'>        op-&gt;ob_item[i] = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L97'><font color='darkred'>#if</font> <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &gt; 0
+<a name='L98'>    <b>if</b> (size == 0) <font color='red'>{</font>
+<a name='L99'>        free_list[0] = op;
+<a name='L100'>        ++numfree[0];
+<a name='L101'>        Py_INCREF(op);          <i><font color='green'>/* extra INCREF so that this is never freed */</font></i>
+<a name='L102'>    <font color='red'>}</font>
+<a name='L103'><font color='darkred'>#endif</font>
+<a name='L104'><font color='darkred'>#ifdef</font> SHOW_TRACK_COUNT
+<a name='L105'>    count_tracked++;
+<a name='L106'><font color='darkred'>#endif</font>
+<a name='L107'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(op);
+<a name='L108'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) op;
+<a name='L109'><font color='red'>}</font>
+<a name='L110'>
+<a name='L111'><a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L112'><a href='../R/3499.html' title='Multiple refered from 93 places.'>PyTuple_Size</a>(<b>register</b> PyObject *op)
+<a name='L113'><font color='red'>{</font>
+<a name='L114'>    <b>if</b> (!PyTuple_Check(op)) <font color='red'>{</font>
+<a name='L115'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L116'>        <b>return</b> -1;
+<a name='L117'>    <font color='red'>}</font>
+<a name='L118'>    <b>else</b>
+<a name='L119'>        <b>return</b> <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(op);
+<a name='L120'><font color='red'>}</font>
+<a name='L121'>
+<a name='L122'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L123'><a href='../R/3492.html' title='Multiple refered from 42 places.'>PyTuple_GetItem</a>(<b>register</b> PyObject *op, <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i)
+<a name='L124'><font color='red'>{</font>
+<a name='L125'>    <b>if</b> (!PyTuple_Check(op)) <font color='red'>{</font>
+<a name='L126'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L127'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L128'>    <font color='red'>}</font>
+<a name='L129'>    <b>if</b> (i &lt; 0 || i &gt;= <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(op)) <font color='red'>{</font>
+<a name='L130'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError, "tuple index out of range");
+<a name='L131'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L132'>    <font color='red'>}</font>
+<a name='L133'>    <b>return</b> ((<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)op) -&gt; ob_item[i];
+<a name='L134'><font color='red'>}</font>
+<a name='L135'>
+<a name='L136'><b>int</b>
+<a name='L137'><a href='../R/3498.html' title='Multiple refered from 29 places.'>PyTuple_SetItem</a>(<b>register</b> PyObject *op, <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, PyObject *newitem)
+<a name='L138'><font color='red'>{</font>
+<a name='L139'>    <b>register</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *olditem;
+<a name='L140'>    <b>register</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **p;
+<a name='L141'>    <b>if</b> (!PyTuple_Check(op) || op-&gt;ob_refcnt != 1) <font color='red'>{</font>
+<a name='L142'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(newitem);
+<a name='L143'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L144'>        <b>return</b> -1;
+<a name='L145'>    <font color='red'>}</font>
+<a name='L146'>    <b>if</b> (i &lt; 0 || i &gt;= <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(op)) <font color='red'>{</font>
+<a name='L147'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(newitem);
+<a name='L148'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError,
+<a name='L149'>                        "tuple assignment index out of range");
+<a name='L150'>        <b>return</b> -1;
+<a name='L151'>    <font color='red'>}</font>
+<a name='L152'>    p = ((<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)op) -&gt; ob_item + i;
+<a name='L153'>    olditem = *p;
+<a name='L154'>    *p = newitem;
+<a name='L155'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(olditem);
+<a name='L156'>    <b>return</b> 0;
+<a name='L157'><font color='red'>}</font>
+<a name='L158'>
+<a name='L159'><b>void</b>
+<a name='L160'><a href='../S/2676.html#L438' title='Refered from 438 in Modules/gcmodule.c.'>_PyTuple_MaybeUntrack</a>(PyObject *op)
+<a name='L161'><font color='red'>{</font>
+<a name='L162'>    <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *t;
+<a name='L163'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, n;
+<a name='L164'>
+<a name='L165'>    <b>if</b> (!PyTuple_CheckExact(op) || !<a href='../S/545.html#L291' title='Defined at 291 in Include/objimpl.h.'>_PyObject_GC_IS_TRACKED</a>(op))
+<a name='L166'>        <b>return</b>;
+<a name='L167'>    t = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *) op;
+<a name='L168'>    n = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(t);
+<a name='L169'>    <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L170'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *elt = PyTuple_GET_ITEM(t, i);
+<a name='L171'>        <i><font color='green'>/* Tuple with NULL elements aren't</font></i>
+<a name='L172'><i><font color='green'>           fully constructed, don't untrack</font></i>
+<a name='L173'><i><font color='green'>           them yet. */</font></i>
+<a name='L174'>        <b>if</b> (!elt ||
+<a name='L175'>            <a href='../S/545.html#L296' title='Defined at 296 in Include/objimpl.h.'>_PyObject_GC_MAY_BE_TRACKED</a>(elt))
+<a name='L176'>            <b>return</b>;
+<a name='L177'>    <font color='red'>}</font>
+<a name='L178'><font color='darkred'>#ifdef</font> SHOW_TRACK_COUNT
+<a name='L179'>    count_tracked--;
+<a name='L180'>    count_untracked++;
+<a name='L181'><font color='darkred'>#endif</font>
+<a name='L182'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(op);
+<a name='L183'><font color='red'>}</font>
+<a name='L184'>
+<a name='L185'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L186'><a href='../R/3497.html' title='Multiple refered from 80 places.'>PyTuple_Pack</a>(<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n, ...)
+<a name='L187'><font color='red'>{</font>
+<a name='L188'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L189'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o;
+<a name='L190'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L191'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **items;
+<a name='L192'>    va_list vargs;
+<a name='L193'>
+<a name='L194'>    va_start(vargs, n);
+<a name='L195'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(n);
+<a name='L196'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L197'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L198'>    items = ((<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)-&gt;ob_item;
+<a name='L199'>    <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L200'>        o = va_arg(vargs, <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *);
+<a name='L201'>        Py_INCREF(o);
+<a name='L202'>        items[i] = o;
+<a name='L203'>    <font color='red'>}</font>
+<a name='L204'>    va_end(vargs);
+<a name='L205'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L206'><font color='red'>}</font>
+<a name='L207'>
+<a name='L208'>
+<a name='L209'><i><font color='green'>/* Methods */</font></i>
+<a name='L210'>
+<a name='L211'><b>static</b> <b>void</b>
+<a name='L212'><a href='../S/2823.html#L777' title='Refered from 777 in Objects/tupleobject.c.'>tupledealloc</a>(<b>register</b> PyTupleObject *op)
+<a name='L213'><font color='red'>{</font>
+<a name='L214'>    <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L215'>    <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len =  <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(op);
+<a name='L216'>    <a href='../D/3619.html' title='Multiple defined in 2 places.'>PyObject_GC_UnTrack</a>(op);
+<a name='L217'>    Py_TRASHCAN_SAFE_BEGIN(op)
+<a name='L218'>    <b>if</b> (len &gt; 0) <font color='red'>{</font>
+<a name='L219'>        i = len;
+<a name='L220'>        <b>while</b> (--i &gt;= 0)
+<a name='L221'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(op-&gt;ob_item[i]);
+<a name='L222'><font color='darkred'>#if</font> <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &gt; 0
+<a name='L223'>        <b>if</b> (len &lt; <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &amp;&amp;
+<a name='L224'>            numfree[len] &lt; <a href='../S/2823.html#L11' title='Defined at 11 in Objects/tupleobject.c.'>PyTuple_MAXFREELIST</a> &amp;&amp;
+<a name='L225'>            <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(op) == &amp;PyTuple_Type)
+<a name='L226'>        <font color='red'>{</font>
+<a name='L227'>            op-&gt;ob_item[0] = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) free_list[len];
+<a name='L228'>            numfree[len]++;
+<a name='L229'>            free_list[len] = op;
+<a name='L230'>            <b>goto</b> done; <i><font color='green'>/* return */</font></i>
+<a name='L231'>        <font color='red'>}</font>
+<a name='L232'><font color='darkred'>#endif</font>
+<a name='L233'>    <font color='red'>}</font>
+<a name='L234'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(op)-&gt;tp_free((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)op);
+<a name='L235'>done:
+<a name='L236'>    <a href='../S/544.html#L914' title='Defined at 914 in Include/object.h.'>Py_TRASHCAN_SAFE_END</a>(op)
+<a name='L237'><font color='red'>}</font>
+<a name='L238'>
+<a name='L239'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L240'><a href='../S/2823.html#L782' title='Refered from 782 in Objects/tupleobject.c.'>tuplerepr</a>(PyTupleObject *v)
+<a name='L241'><font color='red'>{</font>
+<a name='L242'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, n;
+<a name='L243'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *s, *temp;
+<a name='L244'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *pieces, *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L245'>
+<a name='L246'>    n = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(v);
+<a name='L247'>    <b>if</b> (n == 0)
+<a name='L248'>        <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("()");
+<a name='L249'>
+<a name='L250'>    <i><font color='green'>/* While not mutable, it is still possible to end up with a cycle in a</font></i>
+<a name='L251'><i><font color='green'>       tuple through an object that stores itself within a tuple (and thus</font></i>
+<a name='L252'><i><font color='green'>       infinitely asks for the repr of itself). This should only be</font></i>
+<a name='L253'><i><font color='green'>       possible within a type. */</font></i>
+<a name='L254'>    i = <a href='../S/2803.html#L1802' title='Defined at 1802 in Objects/object.c.'>Py_ReprEnter</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)v);
+<a name='L255'>    <b>if</b> (i != 0) <font color='red'>{</font>
+<a name='L256'>        <b>return</b> i &gt; 0 ? <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("(...)") : <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L257'>    <font color='red'>}</font>
+<a name='L258'>
+<a name='L259'>    pieces = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(n);
+<a name='L260'>    <b>if</b> (pieces == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L261'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L262'>
+<a name='L263'>    <i><font color='green'>/* Do repr() on each element. */</font></i>
+<a name='L264'>    <b>for</b> (i = 0; i &lt; n; ++i) <font color='red'>{</font>
+<a name='L265'>        <b>if</b> (Py_EnterRecursiveCall(" while getting the repr of a tuple"))
+<a name='L266'>            <b>goto</b> Done;
+<a name='L267'>        s = <a href='../S/2803.html#L368' title='Defined at 368 in Objects/object.c.'>PyObject_Repr</a>(v-&gt;ob_item[i]);
+<a name='L268'>        Py_LeaveRecursiveCall();
+<a name='L269'>        <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L270'>            <b>goto</b> Done;
+<a name='L271'>        PyTuple_SET_ITEM(pieces, i, s);
+<a name='L272'>    <font color='red'>}</font>
+<a name='L273'>
+<a name='L274'>    <i><font color='green'>/* Add "()" decorations to the first and last items. */</font></i>
+<a name='L275'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(n &gt; 0);
+<a name='L276'>    s = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("(");
+<a name='L277'>    <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L278'>        <b>goto</b> Done;
+<a name='L279'>    temp = PyTuple_GET_ITEM(pieces, 0);
+<a name='L280'>    <a href='../D/3946.html' title='Multiple defined in 3 places.'>PyUnicode_AppendAndDel</a>(&amp;s, temp);
+<a name='L281'>    PyTuple_SET_ITEM(pieces, 0, s);
+<a name='L282'>    <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L283'>        <b>goto</b> Done;
+<a name='L284'>
+<a name='L285'>    s = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(n == 1 ? ",)" : ")");
+<a name='L286'>    <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L287'>        <b>goto</b> Done;
+<a name='L288'>    temp = PyTuple_GET_ITEM(pieces, n-1);
+<a name='L289'>    <a href='../D/3946.html' title='Multiple defined in 3 places.'>PyUnicode_AppendAndDel</a>(&amp;temp, s);
+<a name='L290'>    PyTuple_SET_ITEM(pieces, n-1, temp);
+<a name='L291'>    <b>if</b> (temp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L292'>        <b>goto</b> Done;
+<a name='L293'>
+<a name='L294'>    <i><font color='green'>/* Paste them all together with ", " between. */</font></i>
+<a name='L295'>    s = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(", ");
+<a name='L296'>    <b>if</b> (s == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L297'>        <b>goto</b> Done;
+<a name='L298'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../D/4025.html' title='Multiple defined in 3 places.'>PyUnicode_Join</a>(s, pieces);
+<a name='L299'>    Py_DECREF(s);
+<a name='L300'>
+<a name='L301'>Done:
+<a name='L302'>    Py_DECREF(pieces);
+<a name='L303'>    <a href='../S/2803.html#L1830' title='Defined at 1830 in Objects/object.c.'>Py_ReprLeave</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)v);
+<a name='L304'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L305'><font color='red'>}</font>
+<a name='L306'>
+<a name='L307'><i><font color='green'>/* The addend 82520, was selected from the range(0, 1000000) for</font></i>
+<a name='L308'><i><font color='green'>   generating the greatest number of prime multipliers for tuples</font></i>
+<a name='L309'><i><font color='green'>   upto length eight:</font></i>
+<a name='L310'><i><font color='green'></font></i>
+<a name='L311'><i><font color='green'>     1082527, 1165049, 1082531, 1165057, 1247581, 1330103, 1082533,</font></i>
+<a name='L312'><i><font color='green'>     1330111, 1412633, 1165069, 1247599, 1495177, 1577699</font></i>
+<a name='L313'><i><font color='green'>*/</font></i>
+<a name='L314'>
+<a name='L315'><b>static</b> <a href='../S/565.html#L186' title='Defined at 186 in Include/pyport.h.'>Py_hash_t</a>
+<a name='L316'><a href='../S/2823.html#L786' title='Refered from 786 in Objects/tupleobject.c.'>tuplehash</a>(PyTupleObject *v)
+<a name='L317'><font color='red'>{</font>
+<a name='L318'>    <b>register</b> <a href='../S/565.html#L186' title='Defined at 186 in Include/pyport.h.'>Py_hash_t</a> x, y;
+<a name='L319'>    <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(v);
+<a name='L320'>    <b>register</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **p;
+<a name='L321'>    <a href='../S/565.html#L186' title='Defined at 186 in Include/pyport.h.'>Py_hash_t</a> <a href='../S/3095.html#L612' title='Defined at 612 in Python/dtoa.c.'>mult</a> = 1000003L;
+<a name='L322'>    x = 0x345678L;
+<a name='L323'>    p = v-&gt;ob_item;
+<a name='L324'>    <b>while</b> (--len &gt;= 0) <font color='red'>{</font>
+<a name='L325'>        y = <a href='../S/2803.html#L758' title='Defined at 758 in Objects/object.c.'>PyObject_Hash</a>(*p++);
+<a name='L326'>        <b>if</b> (y == -1)
+<a name='L327'>            <b>return</b> -1;
+<a name='L328'>        x = (x ^ y) * <a href='../S/3095.html#L612' title='Defined at 612 in Python/dtoa.c.'>mult</a>;
+<a name='L329'>        <i><font color='green'>/* the cast might truncate len; that doesn't change hash stability */</font></i>
+<a name='L330'>        <a href='../S/3095.html#L612' title='Defined at 612 in Python/dtoa.c.'>mult</a> += (<a href='../S/565.html#L186' title='Defined at 186 in Include/pyport.h.'>Py_hash_t</a>)(82520L + len + len);
+<a name='L331'>    <font color='red'>}</font>
+<a name='L332'>    x += 97531L;
+<a name='L333'>    <b>if</b> (x == -1)
+<a name='L334'>        x = -2;
+<a name='L335'>    <b>return</b> x;
+<a name='L336'><font color='red'>}</font>
+<a name='L337'>
+<a name='L338'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L339'><a href='../R/10989.html' title='Multiple refered from 2 places.'>tuplelength</a>(PyTupleObject *a)
+<a name='L340'><font color='red'>{</font>
+<a name='L341'>    <b>return</b> <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a);
+<a name='L342'><font color='red'>}</font>
+<a name='L343'>
+<a name='L344'><b>static</b> <b>int</b>
+<a name='L345'><a href='../S/2823.html#L672' title='Refered from 672 in Objects/tupleobject.c.'>tuplecontains</a>(PyTupleObject *a, PyObject *el)
+<a name='L346'><font color='red'>{</font>
+<a name='L347'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L348'>    <b>int</b> <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a>;
+<a name='L349'>
+<a name='L350'>    <b>for</b> (i = 0, <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = 0 ; <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> == 0 &amp;&amp; i &lt; <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a); ++i)
+<a name='L351'>        <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(el, PyTuple_GET_ITEM(a, i),
+<a name='L352'>                                           <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L353'>    <b>return</b> <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a>;
+<a name='L354'><font color='red'>}</font>
+<a name='L355'>
+<a name='L356'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L357'><a href='../R/10983.html' title='Multiple refered from 2 places.'>tupleitem</a>(<b>register</b> PyTupleObject *a, <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i)
+<a name='L358'><font color='red'>{</font>
+<a name='L359'>    <b>if</b> (i &lt; 0 || i &gt;= <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a)) <font color='red'>{</font>
+<a name='L360'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IndexError, "tuple index out of range");
+<a name='L361'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L362'>    <font color='red'>}</font>
+<a name='L363'>    Py_INCREF(a-&gt;ob_item[i]);
+<a name='L364'>    <b>return</b> a-&gt;ob_item[i];
+<a name='L365'><font color='red'>}</font>
+<a name='L366'>
+<a name='L367'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L368'><a href='../R/10993.html' title='Multiple refered from 2 places.'>tupleslice</a>(<b>register</b> PyTupleObject *a, <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> ilow,
+<a name='L369'>           <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> ihigh)
+<a name='L370'><font color='red'>{</font>
+<a name='L371'>    <b>register</b> <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *np;
+<a name='L372'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **src, **dest;
+<a name='L373'>    <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L374'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L375'>    <b>if</b> (ilow &lt; 0)
+<a name='L376'>        ilow = 0;
+<a name='L377'>    <b>if</b> (ihigh &gt; <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a))
+<a name='L378'>        ihigh = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a);
+<a name='L379'>    <b>if</b> (ihigh &lt; ilow)
+<a name='L380'>        ihigh = ilow;
+<a name='L381'>    <b>if</b> (ilow == 0 &amp;&amp; ihigh == <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a) &amp;&amp; PyTuple_CheckExact(a)) <font color='red'>{</font>
+<a name='L382'>        Py_INCREF(a);
+<a name='L383'>        <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)a;
+<a name='L384'>    <font color='red'>}</font>
+<a name='L385'>    len = ihigh - ilow;
+<a name='L386'>    np = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)<a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(len);
+<a name='L387'>    <b>if</b> (np == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L388'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L389'>    src = a-&gt;ob_item + ilow;
+<a name='L390'>    dest = np-&gt;ob_item;
+<a name='L391'>    <b>for</b> (i = 0; i &lt; len; i++) <font color='red'>{</font>
+<a name='L392'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = src[i];
+<a name='L393'>        Py_INCREF(v);
+<a name='L394'>        dest[i] = v;
+<a name='L395'>    <font color='red'>}</font>
+<a name='L396'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)np;
+<a name='L397'><font color='red'>}</font>
+<a name='L398'>
+<a name='L399'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L400'><a href='../R/3493.html' title='Multiple refered from 16 places.'>PyTuple_GetSlice</a>(PyObject *op, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> j)
+<a name='L401'><font color='red'>{</font>
+<a name='L402'>    <b>if</b> (op == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || !PyTuple_Check(op)) <font color='red'>{</font>
+<a name='L403'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L404'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L405'>    <font color='red'>}</font>
+<a name='L406'>    <b>return</b> <a href='../S/2823.html#L368' title='Defined at 368 in Objects/tupleobject.c.'>tupleslice</a>((<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)op, i, j);
+<a name='L407'><font color='red'>}</font>
+<a name='L408'>
+<a name='L409'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L410'><a href='../S/2823.html#L666' title='Refered from 666 in Objects/tupleobject.c.'>tupleconcat</a>(<b>register</b> PyTupleObject *a, <b>register</b> PyObject *bb)
+<a name='L411'><font color='red'>{</font>
+<a name='L412'>    <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size;
+<a name='L413'>    <b>register</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L414'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **src, **dest;
+<a name='L415'>    <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *np;
+<a name='L416'>    <b>if</b> (!PyTuple_Check(bb)) <font color='red'>{</font>
+<a name='L417'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L418'>             "can only concatenate tuple (not \"%.200s\") to tuple",
+<a name='L419'>                 <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(bb)-&gt;tp_name);
+<a name='L420'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L421'>    <font color='red'>}</font>
+<a name='L422'><font color='darkred'>#define</font> <a href='../R/6195.html' title='Multiple refered from 1402 places.'>b</a> ((<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)bb)
+<a name='L423'>    size = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a) + <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>);
+<a name='L424'>    <b>if</b> (size &lt; 0)
+<a name='L425'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L426'>    np = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *) <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(size);
+<a name='L427'>    <b>if</b> (np == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L428'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L429'>    <font color='red'>}</font>
+<a name='L430'>    src = a-&gt;ob_item;
+<a name='L431'>    dest = np-&gt;ob_item;
+<a name='L432'>    <b>for</b> (i = 0; i &lt; <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a); i++) <font color='red'>{</font>
+<a name='L433'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = src[i];
+<a name='L434'>        Py_INCREF(v);
+<a name='L435'>        dest[i] = v;
+<a name='L436'>    <font color='red'>}</font>
+<a name='L437'>    src = <a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>-&gt;ob_item;
+<a name='L438'>    dest = np-&gt;ob_item + <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a);
+<a name='L439'>    <b>for</b> (i = 0; i &lt; <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(<a href='../D/6949.html' title='Multiple defined in 12 places.'>b</a>); i++) <font color='red'>{</font>
+<a name='L440'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = src[i];
+<a name='L441'>        Py_INCREF(v);
+<a name='L442'>        dest[i] = v;
+<a name='L443'>    <font color='red'>}</font>
+<a name='L444'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)np;
+<a name='L445'><font color='darkred'>#undef</font> <a href='../R/6195.html' title='Multiple refered from 1402 places.'>b</a>
+<a name='L446'><font color='red'>}</font>
+<a name='L447'>
+<a name='L448'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L449'><a href='../S/2823.html#L667' title='Refered from 667 in Objects/tupleobject.c.'>tuplerepeat</a>(PyTupleObject *a, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n)
+<a name='L450'><font color='red'>{</font>
+<a name='L451'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, j;
+<a name='L452'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size;
+<a name='L453'>    <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *np;
+<a name='L454'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **p, **items;
+<a name='L455'>    <b>if</b> (n &lt; 0)
+<a name='L456'>        n = 0;
+<a name='L457'>    <b>if</b> (<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a) == 0 || n == 1) <font color='red'>{</font>
+<a name='L458'>        <b>if</b> (PyTuple_CheckExact(a)) <font color='red'>{</font>
+<a name='L459'>            <i><font color='green'>/* Since tuples are immutable, we can return a shared</font></i>
+<a name='L460'><i><font color='green'>               copy in this case */</font></i>
+<a name='L461'>            Py_INCREF(a);
+<a name='L462'>            <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)a;
+<a name='L463'>        <font color='red'>}</font>
+<a name='L464'>        <b>if</b> (<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a) == 0)
+<a name='L465'>            <b>return</b> <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L466'>    <font color='red'>}</font>
+<a name='L467'>    size = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a) * n;
+<a name='L468'>    <b>if</b> (size/<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a) != n)
+<a name='L469'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L470'>    np = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *) <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(size);
+<a name='L471'>    <b>if</b> (np == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L472'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L473'>    p = np-&gt;ob_item;
+<a name='L474'>    items = a-&gt;ob_item;
+<a name='L475'>    <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L476'>        <b>for</b> (j = 0; j &lt; <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(a); j++) <font color='red'>{</font>
+<a name='L477'>            *p = items[j];
+<a name='L478'>            Py_INCREF(*p);
+<a name='L479'>            p++;
+<a name='L480'>        <font color='red'>}</font>
+<a name='L481'>    <font color='red'>}</font>
+<a name='L482'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) np;
+<a name='L483'><font color='red'>}</font>
+<a name='L484'>
+<a name='L485'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L486'><a href='../S/2823.html#L759' title='Refered from 759 in Objects/tupleobject.c.'>tupleindex</a>(PyTupleObject *self, PyObject *args)
+<a name='L487'><font color='red'>{</font>
+<a name='L488'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, start=0, stop=<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(self);
+<a name='L489'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L490'>
+<a name='L491'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "O|O&amp;O&amp;:index", &amp;v,
+<a name='L492'>                                <a href='../S/3091.html#L4209' title='Defined at 4209 in Python/ceval.c.'>_PyEval_SliceIndex</a>, &amp;start,
+<a name='L493'>                                <a href='../S/3091.html#L4209' title='Defined at 4209 in Python/ceval.c.'>_PyEval_SliceIndex</a>, &amp;stop))
+<a name='L494'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L495'>    <b>if</b> (start &lt; 0) <font color='red'>{</font>
+<a name='L496'>        start += <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(self);
+<a name='L497'>        <b>if</b> (start &lt; 0)
+<a name='L498'>            start = 0;
+<a name='L499'>    <font color='red'>}</font>
+<a name='L500'>    <b>if</b> (stop &lt; 0) <font color='red'>{</font>
+<a name='L501'>        stop += <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(self);
+<a name='L502'>        <b>if</b> (stop &lt; 0)
+<a name='L503'>            stop = 0;
+<a name='L504'>    <font color='red'>}</font>
+<a name='L505'>    <b>for</b> (i = start; i &lt; stop &amp;&amp; i &lt; <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(self); i++) <font color='red'>{</font>
+<a name='L506'>        <b>int</b> <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(self-&gt;ob_item[i], v, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L507'>        <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &gt; 0)
+<a name='L508'>            <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(i);
+<a name='L509'>        <b>else</b> <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &lt; 0)
+<a name='L510'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L511'>    <font color='red'>}</font>
+<a name='L512'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "tuple.index(x): x not in tuple");
+<a name='L513'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L514'><font color='red'>}</font>
+<a name='L515'>
+<a name='L516'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L517'><a href='../S/2823.html#L760' title='Refered from 760 in Objects/tupleobject.c.'>tuplecount</a>(PyTupleObject *self, PyObject *v)
+<a name='L518'><font color='red'>{</font>
+<a name='L519'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> count = 0;
+<a name='L520'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L521'>
+<a name='L522'>    <b>for</b> (i = 0; i &lt; <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(self); i++) <font color='red'>{</font>
+<a name='L523'>        <b>int</b> <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(self-&gt;ob_item[i], v, <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L524'>        <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &gt; 0)
+<a name='L525'>            count++;
+<a name='L526'>        <b>else</b> <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> &lt; 0)
+<a name='L527'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L528'>    <font color='red'>}</font>
+<a name='L529'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(count);
+<a name='L530'><font color='red'>}</font>
+<a name='L531'>
+<a name='L532'><b>static</b> <b>int</b>
+<a name='L533'><a href='../S/2823.html#L795' title='Refered from 795 in Objects/tupleobject.c.'>tupletraverse</a>(PyTupleObject *o, visitproc visit, <b>void</b> *arg)
+<a name='L534'><font color='red'>{</font>
+<a name='L535'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L536'>
+<a name='L537'>    <b>for</b> (i = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(o); --i &gt;= 0; )
+<a name='L538'>        Py_VISIT(o-&gt;ob_item[i]);
+<a name='L539'>    <b>return</b> 0;
+<a name='L540'><font color='red'>}</font>
+<a name='L541'>
+<a name='L542'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L543'><a href='../S/2823.html#L797' title='Refered from 797 in Objects/tupleobject.c.'>tuplerichcompare</a>(PyObject *v, PyObject *w, <b>int</b> op)
+<a name='L544'><font color='red'>{</font>
+<a name='L545'>    <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *vt, *wt;
+<a name='L546'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L547'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> vlen, wlen;
+<a name='L548'>
+<a name='L549'>    <b>if</b> (!PyTuple_Check(v) || !PyTuple_Check(w)) <font color='red'>{</font>
+<a name='L550'>        Py_INCREF(Py_NotImplemented);
+<a name='L551'>        <b>return</b> Py_NotImplemented;
+<a name='L552'>    <font color='red'>}</font>
+<a name='L553'>
+<a name='L554'>    vt = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)v;
+<a name='L555'>    wt = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)w;
+<a name='L556'>
+<a name='L557'>    vlen = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(vt);
+<a name='L558'>    wlen = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(wt);
+<a name='L559'>
+<a name='L560'>    <i><font color='green'>/* Note:  the corresponding code for lists has an "early out" test</font></i>
+<a name='L561'><i><font color='green'>     * here when op is EQ or NE and the lengths differ.  That pays there,</font></i>
+<a name='L562'><i><font color='green'>     * but Tim was unable to find any real code where EQ/NE tuple</font></i>
+<a name='L563'><i><font color='green'>     * compares don't have the same length, so testing for it here would</font></i>
+<a name='L564'><i><font color='green'>     * have cost without benefit.</font></i>
+<a name='L565'><i><font color='green'>     */</font></i>
+<a name='L566'>
+<a name='L567'>    <i><font color='green'>/* Search for the first index where items are different.</font></i>
+<a name='L568'><i><font color='green'>     * Note that because tuples are immutable, it's safe to reuse</font></i>
+<a name='L569'><i><font color='green'>     * vlen and wlen across the comparison calls.</font></i>
+<a name='L570'><i><font color='green'>     */</font></i>
+<a name='L571'>    <b>for</b> (i = 0; i &lt; vlen &amp;&amp; i &lt; wlen; i++) <font color='red'>{</font>
+<a name='L572'>        <b>int</b> k = <a href='../S/2803.html#L607' title='Defined at 607 in Objects/object.c.'>PyObject_RichCompareBool</a>(vt-&gt;ob_item[i],
+<a name='L573'>                                         wt-&gt;ob_item[i], <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>);
+<a name='L574'>        <b>if</b> (k &lt; 0)
+<a name='L575'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L576'>        <b>if</b> (!k)
+<a name='L577'>            <b>break</b>;
+<a name='L578'>    <font color='red'>}</font>
+<a name='L579'>
+<a name='L580'>    <b>if</b> (i &gt;= vlen || i &gt;= wlen) <font color='red'>{</font>
+<a name='L581'>        <i><font color='green'>/* No more items to compare -- compare sizes */</font></i>
+<a name='L582'>        <b>int</b> <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a>;
+<a name='L583'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L584'>        <b>switch</b> (op) <font color='red'>{</font>
+<a name='L585'>        <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LT</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = vlen &lt;  wlen; <b>break</b>;
+<a name='L586'>        <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_LE</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = vlen &lt;= wlen; <b>break</b>;
+<a name='L587'>        <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = vlen == wlen; <b>break</b>;
+<a name='L588'>        <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = vlen != wlen; <b>break</b>;
+<a name='L589'>        <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GT</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = vlen &gt;  wlen; <b>break</b>;
+<a name='L590'>        <b>case</b> <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_GE</a>: <a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a> = vlen &gt;= wlen; <b>break</b>;
+<a name='L591'>        <b>default</b>: <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <i><font color='green'>/* cannot happen */</font></i>
+<a name='L592'>        <font color='red'>}</font>
+<a name='L593'>        <b>if</b> (<a href='../S/3095.html#L873' title='Defined at 873 in Python/dtoa.c.'>cmp</a>)
+<a name='L594'>            res = Py_True;
+<a name='L595'>        <b>else</b>
+<a name='L596'>            res = Py_False;
+<a name='L597'>        Py_INCREF(res);
+<a name='L598'>        <b>return</b> res;
+<a name='L599'>    <font color='red'>}</font>
+<a name='L600'>
+<a name='L601'>    <i><font color='green'>/* We have an item that differs -- shortcuts for EQ/NE */</font></i>
+<a name='L602'>    <b>if</b> (op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_EQ</a>) <font color='red'>{</font>
+<a name='L603'>        Py_INCREF(Py_False);
+<a name='L604'>        <b>return</b> Py_False;
+<a name='L605'>    <font color='red'>}</font>
+<a name='L606'>    <b>if</b> (op == <a href='../S/546.html#L151' title='Defined at 151 in Include/opcode.h.'>Py_NE</a>) <font color='red'>{</font>
+<a name='L607'>        Py_INCREF(Py_True);
+<a name='L608'>        <b>return</b> Py_True;
+<a name='L609'>    <font color='red'>}</font>
+<a name='L610'>
+<a name='L611'>    <i><font color='green'>/* Compare the final item again using the proper operator */</font></i>
+<a name='L612'>    <b>return</b> <a href='../S/2803.html#L587' title='Defined at 587 in Objects/object.c.'>PyObject_RichCompare</a>(vt-&gt;ob_item[i], wt-&gt;ob_item[i], op);
+<a name='L613'><font color='red'>}</font>
+<a name='L614'>
+<a name='L615'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L616'><a href='../S/2823.html#L636' title='Defined at 636 in Objects/tupleobject.c.'>tuple_subtype_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds);
+<a name='L617'>
+<a name='L618'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L619'><a href='../R/10973.html' title='Multiple refered from 2 places.'>tuple_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds)
+<a name='L620'><font color='red'>{</font>
+<a name='L621'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L622'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"sequence", 0<font color='red'>}</font>;
+<a name='L623'>
+<a name='L624'>    <b>if</b> (type != &amp;PyTuple_Type)
+<a name='L625'>        <b>return</b> <a href='../S/2823.html#L636' title='Defined at 636 in Objects/tupleobject.c.'>tuple_subtype_new</a>(type, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds);
+<a name='L626'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "|O:tuple", kwlist, &amp;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>))
+<a name='L627'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L628'>
+<a name='L629'>    <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L630'>        <b>return</b> <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L631'>    <b>else</b>
+<a name='L632'>        <b>return</b> <a href='../S/2775.html#L1732' title='Defined at 1732 in Objects/abstract.c.'>PySequence_Tuple</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L633'><font color='red'>}</font>
+<a name='L634'>
+<a name='L635'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L636'><a href='../R/10976.html' title='Multiple refered from 2 places.'>tuple_subtype_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds)
+<a name='L637'><font color='red'>{</font>
+<a name='L638'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp, *newobj, *item;
+<a name='L639'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i, n;
+<a name='L640'>
+<a name='L641'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2824.html#L1082' title='Defined at 1082 in Objects/typeobject.c.'>PyType_IsSubtype</a>(type, &amp;PyTuple_Type));
+<a name='L642'>    tmp = <a href='../S/2823.html#L619' title='Defined at 619 in Objects/tupleobject.c.'>tuple_new</a>(&amp;PyTuple_Type, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds);
+<a name='L643'>    <b>if</b> (tmp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L644'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L645'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyTuple_Check(tmp));
+<a name='L646'>    newobj = type-&gt;tp_alloc(type, n = PyTuple_GET_SIZE(tmp));
+<a name='L647'>    <b>if</b> (newobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L648'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L649'>    <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L650'>        item = PyTuple_GET_ITEM(tmp, i);
+<a name='L651'>        Py_INCREF(item);
+<a name='L652'>        PyTuple_SET_ITEM(newobj, i, item);
+<a name='L653'>    <font color='red'>}</font>
+<a name='L654'>    Py_DECREF(tmp);
+<a name='L655'>    <b>return</b> newobj;
+<a name='L656'><font color='red'>}</font>
+<a name='L657'>
+<a name='L658'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(tuple_doc,
+<a name='L659'>"tuple() -&gt; empty tuple\n\
+<a name='L660'>tuple(iterable) -&gt; tuple initialized from iterable's items\n\
+<a name='L661'>\n\
+<a name='L662'>If the argument is a tuple, the return value is the same object.");
+<a name='L663'>
+<a name='L664'><b>static</b> <a href='../S/544.html#L261' title='Defined at 261 in Include/object.h.'>PySequenceMethods</a> tuple_as_sequence = <font color='red'>{</font>
+<a name='L665'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2823.html#L339' title='Defined at 339 in Objects/tupleobject.c.'>tuplelength</a>,                       <i><font color='green'>/* sq_length */</font></i>
+<a name='L666'>    (binaryfunc)<a href='../S/2823.html#L410' title='Defined at 410 in Objects/tupleobject.c.'>tupleconcat</a>,                    <i><font color='green'>/* sq_concat */</font></i>
+<a name='L667'>    (ssizeargfunc)<a href='../S/2823.html#L449' title='Defined at 449 in Objects/tupleobject.c.'>tuplerepeat</a>,                  <i><font color='green'>/* sq_repeat */</font></i>
+<a name='L668'>    (ssizeargfunc)<a href='../S/2823.html#L357' title='Defined at 357 in Objects/tupleobject.c.'>tupleitem</a>,                    <i><font color='green'>/* sq_item */</font></i>
+<a name='L669'>    0,                                          <i><font color='green'>/* sq_slice */</font></i>
+<a name='L670'>    0,                                          <i><font color='green'>/* sq_ass_item */</font></i>
+<a name='L671'>    0,                                          <i><font color='green'>/* sq_ass_slice */</font></i>
+<a name='L672'>    (objobjproc)<a href='../S/2823.html#L345' title='Defined at 345 in Objects/tupleobject.c.'>tuplecontains</a>,                  <i><font color='green'>/* sq_contains */</font></i>
+<a name='L673'><font color='red'>}</font>;
+<a name='L674'>
+<a name='L675'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L676'><a href='../S/2823.html#L766' title='Refered from 766 in Objects/tupleobject.c.'>tuplesubscript</a>(PyTupleObject* self, PyObject* item)
+<a name='L677'><font color='red'>{</font>
+<a name='L678'>    <b>if</b> (PyIndex_Check(item)) <font color='red'>{</font>
+<a name='L679'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(item, PyExc_IndexError);
+<a name='L680'>        <b>if</b> (i == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L681'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L682'>        <b>if</b> (i &lt; 0)
+<a name='L683'>            i += PyTuple_GET_SIZE(self);
+<a name='L684'>        <b>return</b> <a href='../S/2823.html#L357' title='Defined at 357 in Objects/tupleobject.c.'>tupleitem</a>(self, i);
+<a name='L685'>    <font color='red'>}</font>
+<a name='L686'>    <b>else</b> <b>if</b> (PySlice_Check(item)) <font color='red'>{</font>
+<a name='L687'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> start, stop, step, slicelength, cur, i;
+<a name='L688'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L689'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* it;
+<a name='L690'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> **src, **dest;
+<a name='L691'>
+<a name='L692'>        <b>if</b> (<a href='../S/2807.html#L134' title='Defined at 134 in Objects/sliceobject.c.'>PySlice_GetIndicesEx</a>(item,
+<a name='L693'>                         PyTuple_GET_SIZE(self),
+<a name='L694'>                         &amp;start, &amp;stop, &amp;step, &amp;slicelength) &lt; 0) <font color='red'>{</font>
+<a name='L695'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L696'>        <font color='red'>}</font>
+<a name='L697'>
+<a name='L698'>        <b>if</b> (slicelength &lt;= 0) <font color='red'>{</font>
+<a name='L699'>            <b>return</b> <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(0);
+<a name='L700'>        <font color='red'>}</font>
+<a name='L701'>        <b>else</b> <b>if</b> (start == 0 &amp;&amp; step == 1 &amp;&amp;
+<a name='L702'>                 slicelength == PyTuple_GET_SIZE(self) &amp;&amp;
+<a name='L703'>                 PyTuple_CheckExact(self)) <font color='red'>{</font>
+<a name='L704'>            Py_INCREF(self);
+<a name='L705'>            <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L706'>        <font color='red'>}</font>
+<a name='L707'>        <b>else</b> <font color='red'>{</font>
+<a name='L708'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(slicelength);
+<a name='L709'>            <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L710'>
+<a name='L711'>            src = self-&gt;ob_item;
+<a name='L712'>            dest = ((<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)-&gt;ob_item;
+<a name='L713'>            <b>for</b> (cur = start, i = 0; i &lt; slicelength;
+<a name='L714'>                 cur += step, i++) <font color='red'>{</font>
+<a name='L715'>                it = src[cur];
+<a name='L716'>                Py_INCREF(it);
+<a name='L717'>                dest[i] = it;
+<a name='L718'>            <font color='red'>}</font>
+<a name='L719'>
+<a name='L720'>            <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L721'>        <font color='red'>}</font>
+<a name='L722'>    <font color='red'>}</font>
+<a name='L723'>    <b>else</b> <font color='red'>{</font>
+<a name='L724'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L725'>                     "tuple indices must be integers, not %.200s",
+<a name='L726'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(item)-&gt;tp_name);
+<a name='L727'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L728'>    <font color='red'>}</font>
+<a name='L729'><font color='red'>}</font>
+<a name='L730'>
+<a name='L731'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L732'><a href='../S/2823.html#L757' title='Refered from 757 in Objects/tupleobject.c.'>tuple_getnewargs</a>(PyTupleObject *v)
+<a name='L733'><font color='red'>{</font>
+<a name='L734'>    <b>return</b> <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("(N)", <a href='../S/2823.html#L368' title='Defined at 368 in Objects/tupleobject.c.'>tupleslice</a>(v, 0, <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(v)));
+<a name='L735'>
+<a name='L736'><font color='red'>}</font>
+<a name='L737'>
+<a name='L738'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L739'><a href='../S/2823.html#L758' title='Refered from 758 in Objects/tupleobject.c.'>tuple_sizeof</a>(PyTupleObject *self)
+<a name='L740'><font color='red'>{</font>
+<a name='L741'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> res;
+<a name='L742'>
+<a name='L743'>    res = PyTuple_Type.tp_basicsize + <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(self) * <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *);
+<a name='L744'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(res);
+<a name='L745'><font color='red'>}</font>
+<a name='L746'>
+<a name='L747'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(index_doc,
+<a name='L748'>"T.index(value, [start, [stop]]) -&gt; integer -- return first index of value.\n"
+<a name='L749'>"Raises ValueError if the value is not present."
+<a name='L750'>);
+<a name='L751'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(count_doc,
+<a name='L752'>"T.count(value) -&gt; integer -- return number of occurrences of value");
+<a name='L753'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(sizeof_doc,
+<a name='L754'>"T.__sizeof__() -- size of T in memory, in bytes");
+<a name='L755'>
+<a name='L756'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> tuple_methods[] = <font color='red'>{</font>
+<a name='L757'>    <font color='red'>{</font>"__getnewargs__",          (PyCFunction)<a href='../S/2823.html#L732' title='Defined at 732 in Objects/tupleobject.c.'>tuple_getnewargs</a>,  <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L758'>    <font color='red'>{</font>"__sizeof__",      (PyCFunction)<a href='../S/2823.html#L739' title='Defined at 739 in Objects/tupleobject.c.'>tuple_sizeof</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, sizeof_doc<font color='red'>}</font>,
+<a name='L759'>    <font color='red'>{</font>"index",           (PyCFunction)<a href='../S/2823.html#L486' title='Defined at 486 in Objects/tupleobject.c.'>tupleindex</a>,  <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, index_doc<font color='red'>}</font>,
+<a name='L760'>    <font color='red'>{</font>"count",           (PyCFunction)<a href='../S/2823.html#L517' title='Defined at 517 in Objects/tupleobject.c.'>tuplecount</a>,  METH_O, count_doc<font color='red'>}</font>,
+<a name='L761'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L762'><font color='red'>}</font>;
+<a name='L763'>
+<a name='L764'><b>static</b> <a href='../S/544.html#L267' title='Defined at 267 in Include/object.h.'>PyMappingMethods</a> tuple_as_mapping = <font color='red'>{</font>
+<a name='L765'>    (<a href='../S/2562.html#L105' title='Defined at 105 in Modules/_elementtree.c.'>lenfunc</a>)<a href='../S/2823.html#L339' title='Defined at 339 in Objects/tupleobject.c.'>tuplelength</a>,
+<a name='L766'>    (binaryfunc)<a href='../S/2823.html#L676' title='Defined at 676 in Objects/tupleobject.c.'>tuplesubscript</a>,
+<a name='L767'>    0
+<a name='L768'><font color='red'>}</font>;
+<a name='L769'>
+<a name='L770'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2823.html#L1012' title='Defined at 1012 in Objects/tupleobject.c.'>tuple_iter</a>(PyObject *seq);
+<a name='L771'>
+<a name='L772'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyTuple_Type = <font color='red'>{</font>
+<a name='L773'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L774'>    "tuple",
+<a name='L775'>    <b>sizeof</b>(<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a>) - <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *),
+<a name='L776'>    <b>sizeof</b>(<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *),
+<a name='L777'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2823.html#L212' title='Defined at 212 in Objects/tupleobject.c.'>tupledealloc</a>,                   <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L778'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L779'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L780'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L781'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L782'>    (reprfunc)<a href='../S/2823.html#L240' title='Defined at 240 in Objects/tupleobject.c.'>tuplerepr</a>,                        <i><font color='green'>/* tp_repr */</font></i>
+<a name='L783'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L784'>    &amp;tuple_as_sequence,                         <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L785'>    &amp;tuple_as_mapping,                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L786'>    (hashfunc)<a href='../S/2823.html#L316' title='Defined at 316 in Objects/tupleobject.c.'>tuplehash</a>,                        <i><font color='green'>/* tp_hash */</font></i>
+<a name='L787'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L788'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L789'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L790'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L791'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L792'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC |
+<a name='L793'>        Py_TPFLAGS_BASETYPE | Py_TPFLAGS_TUPLE_SUBCLASS, <i><font color='green'>/* tp_flags */</font></i>
+<a name='L794'>    tuple_doc,                                  <i><font color='green'>/* tp_doc */</font></i>
+<a name='L795'>    (traverseproc)<a href='../S/2823.html#L533' title='Defined at 533 in Objects/tupleobject.c.'>tupletraverse</a>,                <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L796'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L797'>    <a href='../S/2823.html#L543' title='Defined at 543 in Objects/tupleobject.c.'>tuplerichcompare</a>,                           <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L798'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L799'>    <a href='../S/2823.html#L1012' title='Defined at 1012 in Objects/tupleobject.c.'>tuple_iter</a>,                                 <i><font color='green'>/* tp_iter */</font></i>
+<a name='L800'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L801'>    tuple_methods,                              <i><font color='green'>/* tp_methods */</font></i>
+<a name='L802'>    0,                                          <i><font color='green'>/* tp_members */</font></i>
+<a name='L803'>    0,                                          <i><font color='green'>/* tp_getset */</font></i>
+<a name='L804'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L805'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L806'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L807'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L808'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L809'>    0,                                          <i><font color='green'>/* tp_init */</font></i>
+<a name='L810'>    0,                                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L811'>    <a href='../S/2823.html#L619' title='Defined at 619 in Objects/tupleobject.c.'>tuple_new</a>,                                  <i><font color='green'>/* tp_new */</font></i>
+<a name='L812'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>,                            <i><font color='green'>/* tp_free */</font></i>
+<a name='L813'><font color='red'>}</font>;
+<a name='L814'>
+<a name='L815'><i><font color='green'>/* The following function breaks the notion that tuples are immutable:</font></i>
+<a name='L816'><i><font color='green'>   it changes the size of a tuple.  We get away with this only if there</font></i>
+<a name='L817'><i><font color='green'>   is only one module referencing the object.  You can also think of it</font></i>
+<a name='L818'><i><font color='green'>   as creating a new tuple object and destroying the old one, only more</font></i>
+<a name='L819'><i><font color='green'>   efficiently.  In any case, don't use this if the tuple may already be</font></i>
+<a name='L820'><i><font color='green'>   known to some other part of the code. */</font></i>
+<a name='L821'>
+<a name='L822'><b>int</b>
+<a name='L823'><a href='../R/5503.html' title='Multiple refered from 4 places.'>_PyTuple_Resize</a>(PyObject **pv, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> newsize)
+<a name='L824'><font color='red'>{</font>
+<a name='L825'>    <b>register</b> <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *v;
+<a name='L826'>    <b>register</b> <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *sv;
+<a name='L827'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> i;
+<a name='L828'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> oldsize;
+<a name='L829'>
+<a name='L830'>    v = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *) *pv;
+<a name='L831'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(v) != &amp;PyTuple_Type ||
+<a name='L832'>        (<a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(v) != 0 &amp;&amp; <a href='../D/4223.html' title='Multiple defined in 2 places.'>Py_REFCNT</a>(v) != 1)) <font color='red'>{</font>
+<a name='L833'>        *pv = 0;
+<a name='L834'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(v);
+<a name='L835'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L836'>        <b>return</b> -1;
+<a name='L837'>    <font color='red'>}</font>
+<a name='L838'>    oldsize = <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(v);
+<a name='L839'>    <b>if</b> (oldsize == newsize)
+<a name='L840'>        <b>return</b> 0;
+<a name='L841'>
+<a name='L842'>    <b>if</b> (oldsize == 0) <font color='red'>{</font>
+<a name='L843'>        <i><font color='green'>/* Empty tuples are often shared, so we should never</font></i>
+<a name='L844'><i><font color='green'>           resize them in-place even if we do own the only</font></i>
+<a name='L845'><i><font color='green'>           (current) reference */</font></i>
+<a name='L846'>        Py_DECREF(v);
+<a name='L847'>        *pv = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(newsize);
+<a name='L848'>        <b>return</b> *pv == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> ? -1 : 0;
+<a name='L849'>    <font color='red'>}</font>
+<a name='L850'>
+<a name='L851'>    <i><font color='green'>/* XXX UNREF/NEWREF interface should be more symmetrical */</font></i>
+<a name='L852'>    <a href='../S/544.html#L661' title='Defined at 661 in Include/object.h.'>_Py_DEC_REFTOTAL</a>;
+<a name='L853'>    <b>if</b> (<a href='../S/545.html#L291' title='Defined at 291 in Include/objimpl.h.'>_PyObject_GC_IS_TRACKED</a>(v))
+<a name='L854'>        <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(v);
+<a name='L855'>    <a href='../D/6292.html' title='Multiple defined in 2 places.'>_Py_ForgetReference</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) v);
+<a name='L856'>    <i><font color='green'>/* DECREF items deleted by shrinkage */</font></i>
+<a name='L857'>    <b>for</b> (i = newsize; i &lt; oldsize; i++) <font color='red'>{</font>
+<a name='L858'>        <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(v-&gt;ob_item[i]);
+<a name='L859'>        v-&gt;ob_item[i] = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L860'>    <font color='red'>}</font>
+<a name='L861'>    sv = PyObject_GC_Resize(<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a>, v, newsize);
+<a name='L862'>    <b>if</b> (sv == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L863'>        *pv = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L864'>        <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(v);
+<a name='L865'>        <b>return</b> -1;
+<a name='L866'>    <font color='red'>}</font>
+<a name='L867'>    <a href='../S/2803.html#L1650' title='Defined at 1650 in Objects/object.c.'>_Py_NewReference</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) sv);
+<a name='L868'>    <i><font color='green'>/* Zero out items added by growing */</font></i>
+<a name='L869'>    <b>if</b> (newsize &gt; oldsize)
+<a name='L870'>        memset(&amp;sv-&gt;ob_item[oldsize], 0,
+<a name='L871'>               <b>sizeof</b>(*sv-&gt;ob_item) * (newsize - oldsize));
+<a name='L872'>    *pv = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) sv;
+<a name='L873'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(sv);
+<a name='L874'>    <b>return</b> 0;
+<a name='L875'><font color='red'>}</font>
+<a name='L876'>
+<a name='L877'><b>int</b>
+<a name='L878'><a href='../R/3490.html' title='Multiple refered from 2 places.'>PyTuple_ClearFreeList</a>(<b>void</b>)
+<a name='L879'><font color='red'>{</font>
+<a name='L880'>    <b>int</b> freelist_size = 0;
+<a name='L881'><font color='darkred'>#if</font> <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &gt; 0
+<a name='L882'>    <b>int</b> i;
+<a name='L883'>    <b>for</b> (i = 1; i &lt; <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a>; i++) <font color='red'>{</font>
+<a name='L884'>        <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *p, *q;
+<a name='L885'>        p = free_list[i];
+<a name='L886'>        freelist_size += numfree[i];
+<a name='L887'>        free_list[i] = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L888'>        numfree[i] = 0;
+<a name='L889'>        <b>while</b> (p) <font color='red'>{</font>
+<a name='L890'>            q = p;
+<a name='L891'>            p = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)(p-&gt;ob_item[0]);
+<a name='L892'>            <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(q);
+<a name='L893'>        <font color='red'>}</font>
+<a name='L894'>    <font color='red'>}</font>
+<a name='L895'><font color='darkred'>#endif</font>
+<a name='L896'>    <b>return</b> freelist_size;
+<a name='L897'><font color='red'>}</font>
+<a name='L898'>
+<a name='L899'><b>void</b>
+<a name='L900'><a href='../S/3138.html#L498' title='Refered from 498 in Python/pythonrun.c.'>PyTuple_Fini</a>(<b>void</b>)
+<a name='L901'><font color='red'>{</font>
+<a name='L902'><font color='darkred'>#if</font> <a href='../S/2823.html#L8' title='Defined at 8 in Objects/tupleobject.c.'>PyTuple_MAXSAVESIZE</a> &gt; 0
+<a name='L903'>    <i><font color='green'>/* empty tuples are used all over the place and applications may</font></i>
+<a name='L904'><i><font color='green'>     * rely on the fact that an empty tuple is a singleton. */</font></i>
+<a name='L905'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(free_list[0]);
+<a name='L906'>    free_list[0] = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L907'>
+<a name='L908'>    (<b>void</b>)<a href='../S/2823.html#L878' title='Defined at 878 in Objects/tupleobject.c.'>PyTuple_ClearFreeList</a>();
+<a name='L909'><font color='darkred'>#endif</font>
+<a name='L910'><font color='darkred'>#ifdef</font> SHOW_TRACK_COUNT
+<a name='L911'>    <a href='../D/11163.html' title='Multiple defined in 2 places.'>show_track</a>();
+<a name='L912'><font color='darkred'>#endif</font>
+<a name='L913'><font color='red'>}</font>
+<a name='L914'>
+<a name='L915'><i><font color='green'>/*********************** Tuple Iterator **************************/</font></i>
+<a name='L916'>
+<a name='L917'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L918'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L919'>    <b>long</b> it_index;
+<a name='L920'>    <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *it_seq; <i><font color='green'>/* Set to NULL when iterator is exhausted */</font></i>
+<a name='L921'><font color='red'>}</font> <a href='../R/10988.html' title='Multiple refered from 3 places.'>tupleiterobject</a>;
+<a name='L922'>
+<a name='L923'><b>static</b> <b>void</b>
+<a name='L924'><a href='../S/2823.html#L984' title='Refered from 984 in Objects/tupleobject.c.'>tupleiter_dealloc</a>(tupleiterobject *it)
+<a name='L925'><font color='red'>{</font>
+<a name='L926'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(it);
+<a name='L927'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(it-&gt;it_seq);
+<a name='L928'>    <a href='../D/3617.html' title='Multiple defined in 2 places.'>PyObject_GC_Del</a>(it);
+<a name='L929'><font color='red'>}</font>
+<a name='L930'>
+<a name='L931'><b>static</b> <b>int</b>
+<a name='L932'><a href='../S/2823.html#L1001' title='Refered from 1001 in Objects/tupleobject.c.'>tupleiter_traverse</a>(tupleiterobject *it, visitproc visit, <b>void</b> *arg)
+<a name='L933'><font color='red'>{</font>
+<a name='L934'>    Py_VISIT(it-&gt;it_seq);
+<a name='L935'>    <b>return</b> 0;
+<a name='L936'><font color='red'>}</font>
+<a name='L937'>
+<a name='L938'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L939'><a href='../S/2823.html#L1006' title='Refered from 1006 in Objects/tupleobject.c.'>tupleiter_next</a>(tupleiterobject *it)
+<a name='L940'><font color='red'>{</font>
+<a name='L941'>    <a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *seq;
+<a name='L942'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *item;
+<a name='L943'>
+<a name='L944'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(it != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L945'>    seq = it-&gt;it_seq;
+<a name='L946'>    <b>if</b> (seq == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L947'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L948'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyTuple_Check(seq));
+<a name='L949'>
+<a name='L950'>    <b>if</b> (it-&gt;it_index &lt; PyTuple_GET_SIZE(seq)) <font color='red'>{</font>
+<a name='L951'>        item = PyTuple_GET_ITEM(seq, it-&gt;it_index);
+<a name='L952'>        ++it-&gt;it_index;
+<a name='L953'>        Py_INCREF(item);
+<a name='L954'>        <b>return</b> item;
+<a name='L955'>    <font color='red'>}</font>
+<a name='L956'>
+<a name='L957'>    Py_DECREF(seq);
+<a name='L958'>    it-&gt;it_seq = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L959'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L960'><font color='red'>}</font>
+<a name='L961'>
+<a name='L962'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L963'><a href='../S/2823.html#L974' title='Refered from 974 in Objects/tupleobject.c.'>tupleiter_len</a>(tupleiterobject *it)
+<a name='L964'><font color='red'>{</font>
+<a name='L965'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len = 0;
+<a name='L966'>    <b>if</b> (it-&gt;it_seq)
+<a name='L967'>        len = PyTuple_GET_SIZE(it-&gt;it_seq) - it-&gt;it_index;
+<a name='L968'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(len);
+<a name='L969'><font color='red'>}</font>
+<a name='L970'>
+<a name='L971'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(length_hint_doc, "Private method returning an estimate of len(list(it)).");
+<a name='L972'>
+<a name='L973'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> tupleiter_methods[] = <font color='red'>{</font>
+<a name='L974'>    <font color='red'>{</font>"__length_hint__", (PyCFunction)<a href='../S/2823.html#L963' title='Defined at 963 in Objects/tupleobject.c.'>tupleiter_len</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>, length_hint_doc<font color='red'>}</font>,
+<a name='L975'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,              <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>           <i><font color='green'>/* sentinel */</font></i>
+<a name='L976'><font color='red'>}</font>;
+<a name='L977'>
+<a name='L978'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyTupleIter_Type = <font color='red'>{</font>
+<a name='L979'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L980'>    "tuple_iterator",                           <i><font color='green'>/* tp_name */</font></i>
+<a name='L981'>    <b>sizeof</b>(<a href='../S/2823.html#L921' title='Defined at 921 in Objects/tupleobject.c.'>tupleiterobject</a>),                    <i><font color='green'>/* tp_basicsize */</font></i>
+<a name='L982'>    0,                                          <i><font color='green'>/* tp_itemsize */</font></i>
+<a name='L983'>    <i><font color='green'>/* methods */</font></i>
+<a name='L984'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2823.html#L924' title='Defined at 924 in Objects/tupleobject.c.'>tupleiter_dealloc</a>,              <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L985'>    0,                                          <i><font color='green'>/* tp_print */</font></i>
+<a name='L986'>    0,                                          <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L987'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L988'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L989'>    0,                                          <i><font color='green'>/* tp_repr */</font></i>
+<a name='L990'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L991'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L992'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L993'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L994'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L995'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L996'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L997'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L998'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L999'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,<i><font color='green'>/* tp_flags */</font></i>
+<a name='L1000'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L1001'>    (traverseproc)<a href='../S/2823.html#L932' title='Defined at 932 in Objects/tupleobject.c.'>tupleiter_traverse</a>,           <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L1002'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L1003'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L1004'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L1005'>    <a href='../S/2803.html#L933' title='Defined at 933 in Objects/object.c.'>PyObject_SelfIter</a>,                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L1006'>    (iternextfunc)<a href='../S/2823.html#L939' title='Defined at 939 in Objects/tupleobject.c.'>tupleiter_next</a>,               <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L1007'>    tupleiter_methods,                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L1008'>    0,
+<a name='L1009'><font color='red'>}</font>;
+<a name='L1010'>
+<a name='L1011'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L1012'><a href='../R/10972.html' title='Multiple refered from 2 places.'>tuple_iter</a>(PyObject *seq)
+<a name='L1013'><font color='red'>{</font>
+<a name='L1014'>    <a href='../S/2823.html#L921' title='Defined at 921 in Objects/tupleobject.c.'>tupleiterobject</a> *it;
+<a name='L1015'>
+<a name='L1016'>    <b>if</b> (!PyTuple_Check(seq)) <font color='red'>{</font>
+<a name='L1017'>        <a href='../D/3142.html' title='Multiple defined in 3 places.'>PyErr_BadInternalCall</a>();
+<a name='L1018'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1019'>    <font color='red'>}</font>
+<a name='L1020'>    it = PyObject_GC_New(<a href='../S/2823.html#L921' title='Defined at 921 in Objects/tupleobject.c.'>tupleiterobject</a>, &amp;PyTupleIter_Type);
+<a name='L1021'>    <b>if</b> (it == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1022'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L1023'>    it-&gt;it_index = 0;
+<a name='L1024'>    Py_INCREF(seq);
+<a name='L1025'>    it-&gt;it_seq = (<a href='../S/584.html#L33' title='Defined at 33 in Include/tupleobject.h.'>PyTupleObject</a> *)seq;
+<a name='L1026'>    <a href='../S/545.html#L266' title='Defined at 266 in Include/objimpl.h.'>_PyObject_GC_TRACK</a>(it);
+<a name='L1027'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)it;
+<a name='L1028'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L36'>[^]</a><a href='#L1012'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

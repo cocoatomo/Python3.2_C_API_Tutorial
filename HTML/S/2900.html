@@ -1,0 +1,516 @@
+<html>
+<head>
+<title>PC/os2vacpp/getpathp.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3393.html'>PC</a>/<a href='../files/3399.html'>os2vacpp</a>/getpathp.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L58'>[^]</a><a href='#L476'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L58' title='Defined at 58.'>is_sep</a>
+<li><a href='#L69' title='Defined at 69.'>reduce</a>
+<li><a href='#L79' title='Defined at 79.'>exists</a>
+<li><a href='#L96' title='Defined at 96.'>join</a>
+<li><a href='#L117' title='Defined at 117.'>search_for_prefix</a>
+<li><a href='#L148' title='Defined at 148.'>getpythonregpath</a>
+<li><a href='#L245' title='Defined at 245.'>get_progpath</a>
+<li><a href='#L297' title='Defined at 297.'>calculate_path</a>
+<li><a href='#L449' title='Defined at 449.'>Py_GetPath</a>
+<li><a href='#L458' title='Defined at 458.'>Py_GetPrefix</a>
+<li><a href='#L467' title='Defined at 467.'>Py_GetExecPrefix</a>
+<li><a href='#L476' title='Defined at 476.'>Py_GetProgramFullPath</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Return the initial module search path. */</font></i>
+<a name='L3'><i><font color='green'>/* Used by DOS, OS/2, Windows 3.1.  Works on NT too. */</font></i>
+<a name='L4'>
+<a name='L5'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L6'><font color='darkred'>#include</font> "<a href='547.html'>osdefs.h</a>"
+<a name='L7'>
+<a name='L8'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L9'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L10'><b>extern</b> <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> PyWin_IsWin32s(<b>void</b>);
+<a name='L11'><font color='darkred'>#endif</font>
+<a name='L12'>
+<a name='L13'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L14'><font color='darkred'>#include</font> &lt;sys/stat.h&gt;
+<a name='L15'><font color='darkred'>#include</font> &lt;string.h&gt;
+<a name='L16'>
+<a name='L17'><font color='darkred'>#if</font> <a href='../D/1601.html' title='Multiple defined in 3 places.'>HAVE_UNISTD_H</a>
+<a name='L18'><font color='darkred'>#include</font> &lt;unistd.h&gt;
+<a name='L19'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_UNISTD_H */</font></i>
+<a name='L20'>
+<a name='L21'><i><font color='green'>/* Search in some common locations for the associated Python libraries.</font></i>
+<a name='L22'><i><font color='green'> *</font></i>
+<a name='L23'><i><font color='green'> * Two directories must be found, the platform independent directory</font></i>
+<a name='L24'><i><font color='green'> * (prefix), containing the common .py and .pyc files, and the platform</font></i>
+<a name='L25'><i><font color='green'> * dependent directory (exec_prefix), containing the shared library</font></i>
+<a name='L26'><i><font color='green'> * modules.  Note that prefix and exec_prefix can be the same directory,</font></i>
+<a name='L27'><i><font color='green'> * but for some installations, they are different.</font></i>
+<a name='L28'><i><font color='green'> *</font></i>
+<a name='L29'><i><font color='green'> * Py_GetPath() tries to return a sensible Python module search path.</font></i>
+<a name='L30'><i><font color='green'> *</font></i>
+<a name='L31'><i><font color='green'> * First, we look to see if the executable is in a subdirectory of</font></i>
+<a name='L32'><i><font color='green'> * the Python build directory.  We calculate the full path of the</font></i>
+<a name='L33'><i><font color='green'> * directory containing the executable as progpath.  We work backwards</font></i>
+<a name='L34'><i><font color='green'> * along progpath and look for $dir/Modules/Setup.in, a distinctive</font></i>
+<a name='L35'><i><font color='green'> * landmark.  If found, we use $dir/Lib as $root.  The returned</font></i>
+<a name='L36'><i><font color='green'> * Python path is the compiled #define PYTHONPATH with all the initial</font></i>
+<a name='L37'><i><font color='green'> * "./lib" replaced by $root.</font></i>
+<a name='L38'><i><font color='green'> *</font></i>
+<a name='L39'><i><font color='green'> * Otherwise, if there is a PYTHONPATH environment variable, we return that.</font></i>
+<a name='L40'><i><font color='green'> *</font></i>
+<a name='L41'><i><font color='green'> * Otherwise we try to find $progpath/lib/os.py, and if found, then</font></i>
+<a name='L42'><i><font color='green'> * root is $progpath/lib, and we return Python path as compiled PYTHONPATH</font></i>
+<a name='L43'><i><font color='green'> * with all "./lib" replaced by $root (as above).</font></i>
+<a name='L44'><i><font color='green'> *</font></i>
+<a name='L45'><i><font color='green'> */</font></i>
+<a name='L46'>
+<a name='L47'><font color='darkred'>#ifndef</font> <a href='../D/1885.html' title='Multiple defined in 5 places.'>LANDMARK</a>
+<a name='L48'><font color='darkred'>#define</font> <a href='../R/1692.html' title='Multiple refered from 13 places.'>LANDMARK</a> "lib\\os.py"
+<a name='L49'><font color='darkred'>#endif</font>
+<a name='L50'>
+<a name='L51'><b>static</b> <b>char</b> <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>+1];
+<a name='L52'><b>static</b> <b>char</b> exec_prefix[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>+1];
+<a name='L53'><b>static</b> <b>char</b> progpath[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>+1];
+<a name='L54'><b>static</b> <b>char</b> *module_search_path = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L55'>
+<a name='L56'>
+<a name='L57'><b>static</b> <b>int</b>
+<a name='L58'><a href='../R/8515.html' title='Multiple refered from 12 places.'>is_sep</a>(<b>char</b> ch) <i><font color='green'>/* determine if "ch" is a separator character */</font></i>
+<a name='L59'><font color='red'>{</font>
+<a name='L60'><font color='darkred'>#ifdef</font> <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>
+<a name='L61'>    <b>return</b> ch == <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a> || ch == <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>;
+<a name='L62'><font color='darkred'>#else</font>
+<a name='L63'>    <b>return</b> ch == <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L64'><font color='darkred'>#endif</font>
+<a name='L65'><font color='red'>}</font>
+<a name='L66'>
+<a name='L67'>
+<a name='L68'><b>static</b> <b>void</b>
+<a name='L69'><a href='../R/9993.html' title='Multiple refered from 28 places.'>reduce</a>(<b>char</b> *dir)
+<a name='L70'><font color='red'>{</font>
+<a name='L71'>    <b>int</b> i = strlen(dir);
+<a name='L72'>    <b>while</b> (i &gt; 0 &amp;&amp; !<a href='../D/9326.html' title='Multiple defined in 3 places.'>is_sep</a>(dir[i]))
+<a name='L73'>        --i;
+<a name='L74'>    dir[i] = '\0';
+<a name='L75'><font color='red'>}</font>
+<a name='L76'>
+<a name='L77'>
+<a name='L78'><b>static</b> <b>int</b>
+<a name='L79'><a href='../R/7618.html' title='Multiple refered from 8 places.'>exists</a>(<b>char</b> *filename)
+<a name='L80'><font color='red'>{</font>
+<a name='L81'>    <b>struct</b> stat buf;
+<a name='L82'>    <b>return</b> stat(filename, &amp;buf) == 0;
+<a name='L83'><font color='red'>}</font>
+<a name='L84'>
+<a name='L85'>
+<a name='L86'><i><font color='green'>/* Add a path component, by appending stuff to buffer.</font></i>
+<a name='L87'><i><font color='green'>   buffer must have at least MAXPATHLEN + 1 bytes allocated, and contain a</font></i>
+<a name='L88'><i><font color='green'>   NUL-terminated string with no more than MAXPATHLEN characters (not counting</font></i>
+<a name='L89'><i><font color='green'>   the trailing NUL).  It's a fatal error if it contains a string longer than</font></i>
+<a name='L90'><i><font color='green'>   that (callers must be careful!).  If these requirements are met, it's</font></i>
+<a name='L91'><i><font color='green'>   guaranteed that buffer will still be a NUL-terminated string with no more</font></i>
+<a name='L92'><i><font color='green'>   than MAXPATHLEN characters at exit.  If stuff is too long, only as much of</font></i>
+<a name='L93'><i><font color='green'>   stuff as fits will be appended.</font></i>
+<a name='L94'><i><font color='green'>*/</font></i>
+<a name='L95'><b>static</b> <b>void</b>
+<a name='L96'><a href='../R/8569.html' title='Multiple refered from 6 places.'>join</a>(<b>char</b> *buffer, <b>char</b> *stuff)
+<a name='L97'><font color='red'>{</font>
+<a name='L98'>    <b>int</b> n, k;
+<a name='L99'>    <b>if</b> (<a href='../D/9326.html' title='Multiple defined in 3 places.'>is_sep</a>(stuff[0]))
+<a name='L100'>        n = 0;
+<a name='L101'>    <b>else</b> <font color='red'>{</font>
+<a name='L102'>        n = strlen(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L103'>        <b>if</b> (n &gt; 0 &amp;&amp; !<a href='../D/9326.html' title='Multiple defined in 3 places.'>is_sep</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>[n-1]) &amp;&amp; n &lt; <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>)
+<a name='L104'>            <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>[n++] = <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>;
+<a name='L105'>    <font color='red'>}</font>
+<a name='L106'>    <b>if</b> (n &gt; <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>)
+<a name='L107'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("buffer overflow in getpathp.c's joinpath()");
+<a name='L108'>    k = strlen(stuff);
+<a name='L109'>    <b>if</b> (n + k &gt; <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>)
+<a name='L110'>        k = <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a> - n;
+<a name='L111'>    strncpy(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>+n, stuff, k);
+<a name='L112'>    <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>[n+k] = '\0';
+<a name='L113'><font color='red'>}</font>
+<a name='L114'>
+<a name='L115'>
+<a name='L116'><b>static</b> <b>int</b>
+<a name='L117'><a href='../R/10134.html' title='Multiple refered from 5 places.'>search_for_prefix</a>(<b>char</b> *argv0_path, <b>char</b> *landmark)
+<a name='L118'><font color='red'>{</font>
+<a name='L119'>    <b>int</b> n;
+<a name='L120'>
+<a name='L121'>    <i><font color='green'>/* Search from argv0_path, until root is found */</font></i>
+<a name='L122'>    strcpy(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, argv0_path);
+<a name='L123'>    <b>do</b> <font color='red'>{</font>
+<a name='L124'>        n = strlen(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L125'>        <a href='../D/9381.html' title='Multiple defined in 3 places.'>join</a>(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, landmark);
+<a name='L126'>        <b>if</b> (<a href='../D/8406.html' title='Multiple defined in 3 places.'>exists</a>(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>)) <font color='red'>{</font>
+<a name='L127'>            <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>[n] = '\0';
+<a name='L128'>            <b>return</b> 1;
+<a name='L129'>        <font color='red'>}</font>
+<a name='L130'>        <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>[n] = '\0';
+<a name='L131'>        <a href='../D/10841.html' title='Multiple defined in 4 places.'>reduce</a>(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>);
+<a name='L132'>    <font color='red'>}</font> <b>while</b> (<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>[0]);
+<a name='L133'>    <b>return</b> 0;
+<a name='L134'><font color='red'>}</font>
+<a name='L135'>
+<a name='L136'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L137'><font color='darkred'>#include</font> "malloc.h" <i><font color='green'>// for alloca - see comments below!</font></i>
+<a name='L138'><b>extern</b> <b>const</b> <b>char</b> *PyWin_DLLVersionString; <i><font color='green'>// a string loaded from the DLL at startup.</font></i>
+<a name='L139'>
+<a name='L140'>
+<a name='L141'><i><font color='green'>/* Load a PYTHONPATH value from the registry.</font></i>
+<a name='L142'><i><font color='green'>   Load from either HKEY_LOCAL_MACHINE or HKEY_CURRENT_USER.</font></i>
+<a name='L143'><i><font color='green'></font></i>
+<a name='L144'><i><font color='green'>   Returns NULL, or a pointer that should be freed.</font></i>
+<a name='L145'><i><font color='green'>*/</font></i>
+<a name='L146'>
+<a name='L147'><b>static</b> <b>char</b> *
+<a name='L148'><a href='../R/8159.html' title='Multiple refered from 5 places.'>getpythonregpath</a>(HKEY keyBase, <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> bWin32s)
+<a name='L149'><font color='red'>{</font>
+<a name='L150'>    HKEY newKey = 0;
+<a name='L151'>    DWORD nameSize = 0;
+<a name='L152'>    DWORD dataSize = 0;
+<a name='L153'>    DWORD numEntries = 0;
+<a name='L154'>    <a href='../S/2588.html#L25' title='Defined at 25 in Modules/_pickle.c.'>LONG</a> rc;
+<a name='L155'>    <b>char</b> *retval = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L156'>    <b>char</b> *<a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>;
+<a name='L157'>    <b>const</b> <b>char</b> keyPrefix[] = "Software\\Python\\PythonCore\\";
+<a name='L158'>    <b>const</b> <b>char</b> keySuffix[] = "\\PythonPath";
+<a name='L159'>    <b>int</b> versionLen;
+<a name='L160'>    <b>char</b> *keyBuf;
+<a name='L161'>
+<a name='L162'>    <i><font color='green'>// Tried to use sysget("winver") but here is too early :-(</font></i>
+<a name='L163'>    versionLen = strlen(PyWin_DLLVersionString);
+<a name='L164'>    <i><font color='green'>// alloca == no free required, but memory only local to fn.</font></i>
+<a name='L165'>    <i><font color='green'>// also no heap fragmentation!  Am I being silly?</font></i>
+<a name='L166'>    keyBuf = <a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a>(<b>sizeof</b>(keyPrefix)-1 + versionLen + <b>sizeof</b>(keySuffix)); <i><font color='green'>// chars only, plus 1 NULL.</font></i>
+<a name='L167'>    <i><font color='green'>// lots of constants here for the compiler to optimize away :-)</font></i>
+<a name='L168'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(keyBuf, keyPrefix, <b>sizeof</b>(keyPrefix)-1);
+<a name='L169'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(keyBuf+<b>sizeof</b>(keyPrefix)-1, PyWin_DLLVersionString, versionLen);
+<a name='L170'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(keyBuf+<b>sizeof</b>(keyPrefix)-1+versionLen, keySuffix, <b>sizeof</b>(keySuffix)); <i><font color='green'>// NULL comes with this one!</font></i>
+<a name='L171'>
+<a name='L172'>    rc=RegOpenKey(keyBase,
+<a name='L173'>                  keyBuf,
+<a name='L174'>                  &amp;newKey);
+<a name='L175'>    <b>if</b> (rc==ERROR_SUCCESS) <font color='red'>{</font>
+<a name='L176'>        RegQueryInfoKey(newKey, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L177'>                        &amp;numEntries, &amp;nameSize, &amp;dataSize, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L178'>    <font color='red'>}</font>
+<a name='L179'>    <b>if</b> (bWin32s &amp;&amp; numEntries==0 &amp;&amp; dataSize==0) <font color='red'>{</font>
+<a name='L180'>        <i><font color='green'>/* must hardcode for Win32s */</font></i>
+<a name='L181'>        numEntries = 1;
+<a name='L182'>        dataSize = 511;
+<a name='L183'>    <font color='red'>}</font>
+<a name='L184'>    <b>if</b> (numEntries) <font color='red'>{</font>
+<a name='L185'>        <i><font color='green'>/* Loop over all subkeys. */</font></i>
+<a name='L186'>        <i><font color='green'>/* Win32s doesnt know how many subkeys, so we do</font></i>
+<a name='L187'><i><font color='green'>           it twice */</font></i>
+<a name='L188'>        <b>char</b> keyBuf[<a href='../S/2696.html#L2498' title='Defined at 2498 in Modules/posixmodule.c.'>MAX_PATH</a>+1];
+<a name='L189'>        <b>int</b> index = 0;
+<a name='L190'>        <b>int</b> off = 0;
+<a name='L191'>        <b>for</b>(index=0;;index++) <font color='red'>{</font>
+<a name='L192'>            <b>long</b> reqdSize = 0;
+<a name='L193'>            DWORD rc = RegEnumKey(newKey,
+<a name='L194'>                                  index, keyBuf, <a href='../S/2696.html#L2498' title='Defined at 2498 in Modules/posixmodule.c.'>MAX_PATH</a>+1);
+<a name='L195'>            <b>if</b> (rc) <b>break</b>;
+<a name='L196'>            rc = RegQueryValue(newKey, keyBuf, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, &amp;reqdSize);
+<a name='L197'>            <b>if</b> (rc) <b>break</b>;
+<a name='L198'>            <b>if</b> (bWin32s &amp;&amp; reqdSize==0) reqdSize = 512;
+<a name='L199'>            dataSize += reqdSize + 1; <i><font color='green'>/* 1 for the ";" */</font></i>
+<a name='L200'>        <font color='red'>}</font>
+<a name='L201'>        <a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a> = malloc(dataSize+1);
+<a name='L202'>        <b>if</b> (<a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>==<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L203'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <i><font color='green'>/* pretty serious?  Raise error? */</font></i>
+<a name='L204'>        <i><font color='green'>/* Now loop over, grabbing the paths.</font></i>
+<a name='L205'><i><font color='green'>           Subkeys before main library */</font></i>
+<a name='L206'>        <b>for</b>(index=0;;index++) <font color='red'>{</font>
+<a name='L207'>            <b>int</b> adjust;
+<a name='L208'>            <b>long</b> reqdSize = dataSize;
+<a name='L209'>            DWORD rc = RegEnumKey(newKey,
+<a name='L210'>                                  index, keyBuf,<a href='../S/2696.html#L2498' title='Defined at 2498 in Modules/posixmodule.c.'>MAX_PATH</a>+1);
+<a name='L211'>            <b>if</b> (rc) <b>break</b>;
+<a name='L212'>            rc = RegQueryValue(newKey,
+<a name='L213'>                               keyBuf, <a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>+off, &amp;reqdSize);
+<a name='L214'>            <b>if</b> (rc) <b>break</b>;
+<a name='L215'>            <b>if</b> (reqdSize&gt;1) <font color='red'>{</font>
+<a name='L216'>                <i><font color='green'>/* If Nothing, or only '\0' copied. */</font></i>
+<a name='L217'>                adjust = strlen(<a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>+off);
+<a name='L218'>                dataSize -= adjust;
+<a name='L219'>                off += adjust;
+<a name='L220'>                <a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>[off++] = ';';
+<a name='L221'>                <a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>[off] = '\0';
+<a name='L222'>                dataSize--;
+<a name='L223'>            <font color='red'>}</font>
+<a name='L224'>        <font color='red'>}</font>
+<a name='L225'>        <i><font color='green'>/* Additionally, win32s doesnt work as expected, so</font></i>
+<a name='L226'><i><font color='green'>           the specific strlen() is required for 3.1. */</font></i>
+<a name='L227'>        rc = RegQueryValue(newKey, "", <a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>+off, &amp;dataSize);
+<a name='L228'>        <b>if</b> (rc==ERROR_SUCCESS) <font color='red'>{</font>
+<a name='L229'>            <b>if</b> (strlen(<a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>)==0)
+<a name='L230'>                free(<a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>);
+<a name='L231'>            <b>else</b>
+<a name='L232'>                retval = <a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>; <i><font color='green'>/* caller will free */</font></i>
+<a name='L233'>        <font color='red'>}</font>
+<a name='L234'>        <b>else</b>
+<a name='L235'>            free(<a href='../S/2664.html#L613' title='Defined at 613 in Modules/expat/xmlparse.c.'>dataBuf</a>);
+<a name='L236'>    <font color='red'>}</font>
+<a name='L237'>
+<a name='L238'>    <b>if</b> (newKey)
+<a name='L239'>        RegCloseKey(newKey);
+<a name='L240'>    <b>return</b> retval;
+<a name='L241'><font color='red'>}</font>
+<a name='L242'><font color='darkred'>#endif</font> <i><font color='green'>/* MS_WIN32 */</font></i>
+<a name='L243'>
+<a name='L244'><b>static</b> <b>void</b>
+<a name='L245'><a href='../R/8085.html' title='Multiple refered from 3 places.'>get_progpath</a>(<b>void</b>)
+<a name='L246'><font color='red'>{</font>
+<a name='L247'>    <b>extern</b> <b>char</b> *<a href='../S/3138.html#L674' title='Defined at 674 in Python/pythonrun.c.'>Py_GetProgramName</a>(<b>void</b>);
+<a name='L248'>    <b>char</b> *path = <a href='../S/2906.html#L99' title='Defined at 99 in PC/pyconfig.h.'>getenv</a>("PATH");
+<a name='L249'>    <b>char</b> *prog = <a href='../S/3138.html#L674' title='Defined at 674 in Python/pythonrun.c.'>Py_GetProgramName</a>();
+<a name='L250'>
+<a name='L251'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L252'>    <b>if</b> (GetModuleFileName(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, progpath, <a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>))
+<a name='L253'>        <b>return</b>;
+<a name='L254'><font color='darkred'>#endif</font>
+<a name='L255'>    <b>if</b> (prog == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || *prog == '\0')
+<a name='L256'>        prog = "python";
+<a name='L257'>
+<a name='L258'>    <i><font color='green'>/* If there is no slash in the argv0 path, then we have to</font></i>
+<a name='L259'><i><font color='green'>     * assume python is on the user's $PATH, since there's no</font></i>
+<a name='L260'><i><font color='green'>     * other way to find a directory to start the search from.  If</font></i>
+<a name='L261'><i><font color='green'>     * $PATH isn't exported, you lose.</font></i>
+<a name='L262'><i><font color='green'>     */</font></i>
+<a name='L263'><font color='darkred'>#ifdef</font> <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>
+<a name='L264'>    <b>if</b> (strchr(prog, <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>) || strchr(prog, <a href='../D/64.html' title='Multiple defined in 2 places.'>ALTSEP</a>))
+<a name='L265'><font color='darkred'>#else</font>
+<a name='L266'>    <b>if</b> (strchr(prog, <a href='../D/4596.html' title='Multiple defined in 3 places.'>SEP</a>))
+<a name='L267'><font color='darkred'>#endif</font>
+<a name='L268'>        strcpy(progpath, prog);
+<a name='L269'>    <b>else</b> <b>if</b> (path) <font color='red'>{</font>
+<a name='L270'>        <b>while</b> (1) <font color='red'>{</font>
+<a name='L271'>            <b>char</b> *delim = strchr(path, <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>);
+<a name='L272'>
+<a name='L273'>            <b>if</b> (delim) <font color='red'>{</font>
+<a name='L274'>                <b>int</b> len = delim - path;
+<a name='L275'>                strncpy(progpath, path, len);
+<a name='L276'>                *(progpath + len) = '\0';
+<a name='L277'>            <font color='red'>}</font>
+<a name='L278'>            <b>else</b>
+<a name='L279'>                strcpy(progpath, path);
+<a name='L280'>
+<a name='L281'>            <a href='../D/9381.html' title='Multiple defined in 3 places.'>join</a>(progpath, prog);
+<a name='L282'>            <b>if</b> (<a href='../D/8406.html' title='Multiple defined in 3 places.'>exists</a>(progpath))
+<a name='L283'>                <b>break</b>;
+<a name='L284'>
+<a name='L285'>            <b>if</b> (!delim) <font color='red'>{</font>
+<a name='L286'>                progpath[0] = '\0';
+<a name='L287'>                <b>break</b>;
+<a name='L288'>            <font color='red'>}</font>
+<a name='L289'>            path = delim + 1;
+<a name='L290'>        <font color='red'>}</font>
+<a name='L291'>    <font color='red'>}</font>
+<a name='L292'>    <b>else</b>
+<a name='L293'>        progpath[0] = '\0';
+<a name='L294'><font color='red'>}</font>
+<a name='L295'>
+<a name='L296'><b>static</b> <b>void</b>
+<a name='L297'><a href='../R/6545.html' title='Multiple refered from 14 places.'>calculate_path</a>(<b>void</b>)
+<a name='L298'><font color='red'>{</font>
+<a name='L299'>    <b>char</b> argv0_path[<a href='../D/2043.html' title='Multiple defined in 8 places.'>MAXPATHLEN</a>+1];
+<a name='L300'>    <b>char</b> *buf;
+<a name='L301'>    <b>int</b> bufsz;
+<a name='L302'>    <b>char</b> *pythonhome = <a href='../S/3138.html#L689' title='Defined at 689 in Python/pythonrun.c.'>Py_GetPythonHome</a>();
+<a name='L303'>    <b>char</b> *envpath = Py_GETENV("PYTHONPATH");
+<a name='L304'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L305'>    <b>char</b> *machinepath, *userpath;
+<a name='L306'>
+<a name='L307'>    <i><font color='green'>/* Are we running under Windows 3.1(1) Win32s? */</font></i>
+<a name='L308'>    <b>if</b> (PyWin_IsWin32s()) <font color='red'>{</font>
+<a name='L309'>        <i><font color='green'>/* Only CLASSES_ROOT is supported */</font></i>
+<a name='L310'>        machinepath = <a href='../D/8961.html' title='Multiple defined in 2 places.'>getpythonregpath</a>(HKEY_CLASSES_ROOT, <a href='../D/5177.html' title='Multiple defined in 3 places.'>TRUE</a>);
+<a name='L311'>        userpath = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L312'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L313'>        machinepath = <a href='../D/8961.html' title='Multiple defined in 2 places.'>getpythonregpath</a>(HKEY_LOCAL_MACHINE, <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L314'>        userpath = <a href='../D/8961.html' title='Multiple defined in 2 places.'>getpythonregpath</a>(HKEY_CURRENT_USER, <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>);
+<a name='L315'>    <font color='red'>}</font>
+<a name='L316'><font color='darkred'>#endif</font>
+<a name='L317'>
+<a name='L318'>    <a href='../D/8887.html' title='Multiple defined in 3 places.'>get_progpath</a>();
+<a name='L319'>    strcpy(argv0_path, progpath);
+<a name='L320'>    <a href='../D/10841.html' title='Multiple defined in 4 places.'>reduce</a>(argv0_path);
+<a name='L321'>    <b>if</b> (pythonhome == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || *pythonhome == '\0') <font color='red'>{</font>
+<a name='L322'>        <b>if</b> (<a href='../D/10994.html' title='Multiple defined in 4 places.'>search_for_prefix</a>(argv0_path, <a href='../D/1885.html' title='Multiple defined in 5 places.'>LANDMARK</a>))
+<a name='L323'>            pythonhome = <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>;
+<a name='L324'>        <b>else</b>
+<a name='L325'>            pythonhome = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L326'>    <font color='red'>}</font>
+<a name='L327'>    <b>else</b> <font color='red'>{</font>
+<a name='L328'>    <b>char</b> *delim;
+<a name='L329'>
+<a name='L330'>        strcpy(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, pythonhome);
+<a name='L331'>
+<a name='L332'>    <i><font color='green'>/* Extract Any Optional Trailing EXEC_PREFIX */</font></i>
+<a name='L333'>    <i><font color='green'>/* e.g. PYTHONHOME=&lt;prefix&gt;:&lt;exec_prefix&gt;   */</font></i>
+<a name='L334'>    delim = strchr(<a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>, <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>);
+<a name='L335'>    <b>if</b> (delim) <font color='red'>{</font>
+<a name='L336'>        *delim = '\0';
+<a name='L337'>        strcpy(exec_prefix, delim+1);
+<a name='L338'>    <font color='red'>}</font> <b>else</b>
+<a name='L339'>        strcpy(exec_prefix, <a href='../D/993.html' title='Multiple defined in 3 places.'>EXEC_PREFIX</a>);
+<a name='L340'>    <font color='red'>}</font>
+<a name='L341'>
+<a name='L342'>    <b>if</b> (envpath &amp;&amp; *envpath == '\0')
+<a name='L343'>        envpath = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L344'>
+<a name='L345'>    <i><font color='green'>/* We need to construct a path from the following parts:</font></i>
+<a name='L346'><i><font color='green'>       (1) the PYTHONPATH environment variable, if set;</font></i>
+<a name='L347'><i><font color='green'>       (2) for Win32, the machinepath and userpath, if set;</font></i>
+<a name='L348'><i><font color='green'>       (3) the PYTHONPATH config macro, with the leading "."</font></i>
+<a name='L349'><i><font color='green'>           of each component replaced with pythonhome, if set;</font></i>
+<a name='L350'><i><font color='green'>       (4) the directory containing the executable (argv0_path).</font></i>
+<a name='L351'><i><font color='green'>       The length calculation calculates #3 first.</font></i>
+<a name='L352'><i><font color='green'>    */</font></i>
+<a name='L353'>
+<a name='L354'>    <i><font color='green'>/* Calculate size of return buffer */</font></i>
+<a name='L355'>    <b>if</b> (pythonhome != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L356'>        <b>char</b> *p;
+<a name='L357'>        bufsz = 1;
+<a name='L358'>        <b>for</b> (p = <a href='../D/2581.html' title='Multiple defined in 4 places.'>PYTHONPATH</a>; *p; p++) <font color='red'>{</font>
+<a name='L359'>            <b>if</b> (*p == <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>)
+<a name='L360'>                bufsz++; <i><font color='green'>/* number of DELIM plus one */</font></i>
+<a name='L361'>        <font color='red'>}</font>
+<a name='L362'>        bufsz *= strlen(pythonhome);
+<a name='L363'>    <font color='red'>}</font>
+<a name='L364'>    <b>else</b>
+<a name='L365'>        bufsz = 0;
+<a name='L366'>    bufsz += strlen(<a href='../D/2581.html' title='Multiple defined in 4 places.'>PYTHONPATH</a>) + 1;
+<a name='L367'>    <b>if</b> (envpath != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L368'>        bufsz += strlen(envpath) + 1;
+<a name='L369'>    bufsz += strlen(argv0_path) + 1;
+<a name='L370'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L371'>    <b>if</b> (machinepath)
+<a name='L372'>        bufsz += strlen(machinepath) + 1;
+<a name='L373'>    <b>if</b> (userpath)
+<a name='L374'>        bufsz += strlen(userpath) + 1;
+<a name='L375'><font color='darkred'>#endif</font>
+<a name='L376'>
+<a name='L377'>    module_search_path = buf = malloc(bufsz);
+<a name='L378'>    <b>if</b> (buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L379'>        <i><font color='green'>/* We can't exit, so print a warning and limp along */</font></i>
+<a name='L380'>        fprintf(stderr, "Can't malloc dynamic PYTHONPATH.\n");
+<a name='L381'>        <b>if</b> (envpath) <font color='red'>{</font>
+<a name='L382'>            fprintf(stderr, "Using default static $PYTHONPATH.\n");
+<a name='L383'>            module_search_path = envpath;
+<a name='L384'>        <font color='red'>}</font>
+<a name='L385'>        <b>else</b> <font color='red'>{</font>
+<a name='L386'>            fprintf(stderr, "Using environment $PYTHONPATH.\n");
+<a name='L387'>            module_search_path = <a href='../D/2581.html' title='Multiple defined in 4 places.'>PYTHONPATH</a>;
+<a name='L388'>        <font color='red'>}</font>
+<a name='L389'>        <b>return</b>;
+<a name='L390'>    <font color='red'>}</font>
+<a name='L391'>
+<a name='L392'>    <b>if</b> (envpath) <font color='red'>{</font>
+<a name='L393'>        strcpy(buf, envpath);
+<a name='L394'>        buf = strchr(buf, '\0');
+<a name='L395'>        *buf++ = <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>;
+<a name='L396'>    <font color='red'>}</font>
+<a name='L397'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L80' title='Defined at 80 in PC/pyconfig.h.'>MS_WIN32</a>
+<a name='L398'>    <b>if</b> (machinepath) <font color='red'>{</font>
+<a name='L399'>        strcpy(buf, machinepath);
+<a name='L400'>        buf = strchr(buf, '\0');
+<a name='L401'>        *buf++ = <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>;
+<a name='L402'>    <font color='red'>}</font>
+<a name='L403'>    <b>if</b> (userpath) <font color='red'>{</font>
+<a name='L404'>        strcpy(buf, userpath);
+<a name='L405'>        buf = strchr(buf, '\0');
+<a name='L406'>        *buf++ = <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>;
+<a name='L407'>    <font color='red'>}</font>
+<a name='L408'><font color='darkred'>#endif</font>
+<a name='L409'>    <b>if</b> (pythonhome == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L410'>        strcpy(buf, <a href='../D/2581.html' title='Multiple defined in 4 places.'>PYTHONPATH</a>);
+<a name='L411'>        buf = strchr(buf, '\0');
+<a name='L412'>    <font color='red'>}</font>
+<a name='L413'>    <b>else</b> <font color='red'>{</font>
+<a name='L414'>        <b>char</b> *p = <a href='../D/2581.html' title='Multiple defined in 4 places.'>PYTHONPATH</a>;
+<a name='L415'>        <b>char</b> *q;
+<a name='L416'>        <b>int</b> n;
+<a name='L417'>        <b>for</b> (;;) <font color='red'>{</font>
+<a name='L418'>            q = strchr(p, <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>);
+<a name='L419'>            <b>if</b> (q == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L420'>                n = strlen(p);
+<a name='L421'>            <b>else</b>
+<a name='L422'>                n = q-p;
+<a name='L423'>            <b>if</b> (p[0] == '.' &amp;&amp; <a href='../D/9326.html' title='Multiple defined in 3 places.'>is_sep</a>(p[1])) <font color='red'>{</font>
+<a name='L424'>                strcpy(buf, pythonhome);
+<a name='L425'>                buf = strchr(buf, '\0');
+<a name='L426'>                p++;
+<a name='L427'>                n--;
+<a name='L428'>            <font color='red'>}</font>
+<a name='L429'>            strncpy(buf, p, n);
+<a name='L430'>            buf += n;
+<a name='L431'>            <b>if</b> (q == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L432'>                <b>break</b>;
+<a name='L433'>            *buf++ = <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>;
+<a name='L434'>            p = q+1;
+<a name='L435'>        <font color='red'>}</font>
+<a name='L436'>    <font color='red'>}</font>
+<a name='L437'>    <b>if</b> (argv0_path) <font color='red'>{</font>
+<a name='L438'>        *buf++ = <a href='../D/776.html' title='Multiple defined in 2 places.'>DELIM</a>;
+<a name='L439'>        strcpy(buf, argv0_path);
+<a name='L440'>        buf = strchr(buf, '\0');
+<a name='L441'>    <font color='red'>}</font>
+<a name='L442'>    *buf = '\0';
+<a name='L443'><font color='red'>}</font>
+<a name='L444'>
+<a name='L445'>
+<a name='L446'><i><font color='green'>/* External interface */</font></i>
+<a name='L447'>
+<a name='L448'><b>char</b> *
+<a name='L449'><a href='../R/3706.html' title='Multiple refered from 6 places.'>Py_GetPath</a>(<b>void</b>)
+<a name='L450'><font color='red'>{</font>
+<a name='L451'>    <b>if</b> (!module_search_path)
+<a name='L452'>        <a href='../D/7316.html' title='Multiple defined in 4 places.'>calculate_path</a>();
+<a name='L453'>
+<a name='L454'>    <b>return</b> module_search_path;
+<a name='L455'><font color='red'>}</font>
+<a name='L456'>
+<a name='L457'><b>char</b> *
+<a name='L458'><a href='../R/3708.html' title='Multiple refered from 7 places.'>Py_GetPrefix</a>(<b>void</b>)
+<a name='L459'><font color='red'>{</font>
+<a name='L460'>    <b>if</b> (!module_search_path)
+<a name='L461'>        <a href='../D/7316.html' title='Multiple defined in 4 places.'>calculate_path</a>();
+<a name='L462'>
+<a name='L463'>    <b>return</b> <a href='../S/2664.html#L148' title='Defined at 148 in Modules/expat/xmlparse.c.'>prefix</a>;
+<a name='L464'><font color='red'>}</font>
+<a name='L465'>
+<a name='L466'><b>char</b> *
+<a name='L467'><a href='../S/3144.html#L1617' title='Refered from 1617 in Python/sysmodule.c.'>Py_GetExecPrefix</a>(<b>void</b>)
+<a name='L468'><font color='red'>{</font>
+<a name='L469'>    <b>if</b> (!module_search_path)
+<a name='L470'>        <a href='../D/7316.html' title='Multiple defined in 4 places.'>calculate_path</a>();
+<a name='L471'>
+<a name='L472'>    <b>return</b> exec_prefix;
+<a name='L473'><font color='red'>}</font>
+<a name='L474'>
+<a name='L475'><b>char</b> *
+<a name='L476'><a href='../S/3144.html#L1613' title='Refered from 1613 in Python/sysmodule.c.'>Py_GetProgramFullPath</a>(<b>void</b>)
+<a name='L477'><font color='red'>{</font>
+<a name='L478'>    <b>if</b> (!module_search_path)
+<a name='L479'>        <a href='../D/7316.html' title='Multiple defined in 4 places.'>calculate_path</a>();
+<a name='L480'>
+<a name='L481'>    <b>return</b> progpath;
+<a name='L482'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L58'>[^]</a><a href='#L476'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

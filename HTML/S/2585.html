@@ -1,0 +1,662 @@
+<html>
+<head>
+<title>Modules/_multiprocessing/semaphore.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3386.html'>_multiprocessing</a>/semaphore.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L41'>[^]</a><a href='#L534'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L41' title='Defined at 41.'>_GetSemaphoreValue</a>
+<li><a href='#L60' title='Defined at 60.'>semlock_acquire</a>
+<li><a href='#L157' title='Defined at 157.'>semlock_release</a>
+<li><a href='#L208' title='Defined at 208.'>sem_timedwait_save</a>
+<li><a href='#L268' title='Defined at 268.'>semlock_acquire</a>
+<li><a href='#L336' title='Defined at 336.'>semlock_release</a>
+<li><a href='#L402' title='Defined at 402.'>newsemlockobject</a>
+<li><a href='#L418' title='Defined at 418.'>semlock_new</a>
+<li><a href='#L461' title='Defined at 461.'>semlock_rebuild</a>
+<li><a href='#L474' title='Defined at 474.'>semlock_dealloc</a>
+<li><a href='#L482' title='Defined at 482.'>semlock_count</a>
+<li><a href='#L488' title='Defined at 488.'>semlock_ismine</a>
+<li><a href='#L495' title='Defined at 495.'>semlock_getvalue</a>
+<li><a href='#L513' title='Defined at 513.'>semlock_iszero</a>
+<li><a href='#L534' title='Defined at 534.'>semlock_afterfork</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'> * A type which wraps a semaphore</font></i>
+<a name='L3'><i><font color='green'> *</font></i>
+<a name='L4'><i><font color='green'> * semaphore.c</font></i>
+<a name='L5'><i><font color='green'> *</font></i>
+<a name='L6'><i><font color='green'> * Copyright (c) 2006-2008, R Oudkerk --- see COPYING.txt</font></i>
+<a name='L7'><i><font color='green'> */</font></i>
+<a name='L8'>
+<a name='L9'><font color='darkred'>#include</font> "<a href='2583.html'>multiprocessing.h</a>"
+<a name='L10'>
+<a name='L11'><b>enum</b> <font color='red'>{</font> <a href='../R/3914.html' title='Multiple refered from 5 places.'>RECURSIVE_MUTEX</a>, <a href='../S/2585.html#L431' title='Refered from 431 in Modules/_multiprocessing/semaphore.c.'>SEMAPHORE</a> <font color='red'>}</font>;
+<a name='L12'>
+<a name='L13'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L14'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L15'>    <a href='../D/4593.html' title='Multiple defined in 2 places.'>SEM_HANDLE</a> handle;
+<a name='L16'>    <b>long</b> last_tid;
+<a name='L17'>    <b>int</b> count;
+<a name='L18'>    <b>int</b> maxvalue;
+<a name='L19'>    <b>int</b> kind;
+<a name='L20'><font color='red'>}</font> <a href='../R/4461.html' title='Multiple refered from 6 places.'>SemLockObject</a>;
+<a name='L21'>
+<a name='L22'><font color='darkred'>#define</font> <a href='../R/1580.html' title='Multiple refered from 5 places.'>ISMINE</a>(o) (o-&gt;count &gt; 0 &amp;&amp; <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>() == o-&gt;last_tid)
+<a name='L23'>
+<a name='L24'>
+<a name='L25'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L81' title='Defined at 81 in PC/pyconfig.h.'>MS_WINDOWS</a>
+<a name='L26'>
+<a name='L27'><i><font color='green'>/*</font></i>
+<a name='L28'><i><font color='green'> * Windows definitions</font></i>
+<a name='L29'><i><font color='green'> */</font></i>
+<a name='L30'>
+<a name='L31'><font color='darkred'>#define</font> <a href='../R/4048.html' title='Multiple refered from 4 places.'>SEM_FAILED</a> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>
+<a name='L32'>
+<a name='L33'><font color='darkred'>#define</font> <a href='../S/2585.html#L438' title='Refered from 438 in Modules/_multiprocessing/semaphore.c.'>SEM_CLEAR_ERROR</a>() SetLastError(0)
+<a name='L34'><font color='darkred'>#define</font> <a href='../S/2585.html#L441' title='Refered from 441 in Modules/_multiprocessing/semaphore.c.'>SEM_GET_LAST_ERROR</a>() GetLastError()
+<a name='L35'><font color='darkred'>#define</font> <a href='../S/2585.html#L439' title='Refered from 439 in Modules/_multiprocessing/semaphore.c.'>SEM_CREATE</a>(name, val, <a href='../S/2252.html#L6' title='Defined at 6 in Modules/_ctypes/ctypes.h.'>max</a>) CreateSemaphore(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, val, max, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L36'><font color='darkred'>#define</font> <a href='../R/4046.html' title='Multiple refered from 2 places.'>SEM_CLOSE</a>(sem) (CloseHandle(sem) ? 0 : -1)
+<a name='L37'><font color='darkred'>#define</font> <a href='../R/4049.html' title='Multiple refered from 2 places.'>SEM_GETVALUE</a>(sem, pval) <a href='../S/2585.html#L41' title='Defined at 41 in Modules/_multiprocessing/semaphore.c.'>_GetSemaphoreValue</a>(sem, pval)
+<a name='L38'><font color='darkred'>#define</font> <a href='../S/2585.html#L444' title='Refered from 444 in Modules/_multiprocessing/semaphore.c.'>SEM_UNLINK</a>(name) 0
+<a name='L39'>
+<a name='L40'><b>static</b> <b>int</b>
+<a name='L41'><a href='../S/2585.html#L37' title='Refered from 37 in Modules/_multiprocessing/semaphore.c.'>_GetSemaphoreValue</a>(<a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> handle, <b>long</b> *value)
+<a name='L42'><font color='red'>{</font>
+<a name='L43'>    <b>long</b> previous;
+<a name='L44'>
+<a name='L45'>    <b>switch</b> (WaitForSingleObject(handle, 0)) <font color='red'>{</font>
+<a name='L46'>    <b>case</b> WAIT_OBJECT_0:
+<a name='L47'>        <b>if</b> (!ReleaseSemaphore(handle, 1, &amp;previous))
+<a name='L48'>            <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L49'>        *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = previous + 1;
+<a name='L50'>        <b>return</b> 0;
+<a name='L51'>    <b>case</b> WAIT_TIMEOUT:
+<a name='L52'>        *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = 0;
+<a name='L53'>        <b>return</b> 0;
+<a name='L54'>    <b>default</b>:
+<a name='L55'>        <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L56'>    <font color='red'>}</font>
+<a name='L57'><font color='red'>}</font>
+<a name='L58'>
+<a name='L59'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L60'><a href='../R/10146.html' title='Multiple refered from 2 places.'>semlock_acquire</a>(SemLockObject *self, PyObject *args, PyObject *kwds)
+<a name='L61'><font color='red'>{</font>
+<a name='L62'>    <b>int</b> blocking = 1;
+<a name='L63'>    <b>double</b> timeout;
+<a name='L64'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *timeout_obj = Py_None;
+<a name='L65'>    DWORD res, full_msecs, msecs, start, ticks;
+<a name='L66'>
+<a name='L67'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"block", "timeout", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L68'>
+<a name='L69'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "|iO", kwlist,
+<a name='L70'>                                     &amp;blocking, &amp;timeout_obj))
+<a name='L71'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L72'>
+<a name='L73'>    <i><font color='green'>/* calculate timeout */</font></i>
+<a name='L74'>    <b>if</b> (!blocking) <font color='red'>{</font>
+<a name='L75'>        full_msecs = 0;
+<a name='L76'>    <font color='red'>}</font> <b>else</b> <b>if</b> (timeout_obj == Py_None) <font color='red'>{</font>
+<a name='L77'>        full_msecs = INFINITE;
+<a name='L78'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L79'>        timeout = <a href='../S/2791.html#L244' title='Defined at 244 in Objects/floatobject.c.'>PyFloat_AsDouble</a>(timeout_obj);
+<a name='L80'>        <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L81'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L82'>        timeout *= 1000.0;      <i><font color='green'>/* convert to millisecs */</font></i>
+<a name='L83'>        <b>if</b> (timeout &lt; 0.0) <font color='red'>{</font>
+<a name='L84'>            timeout = 0.0;
+<a name='L85'>        <font color='red'>}</font> <b>else</b> <b>if</b> (timeout &gt;= 0.5 * INFINITE) <font color='red'>{</font> <i><font color='green'>/* 25 days */</font></i>
+<a name='L86'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L87'>                            "timeout is too large");
+<a name='L88'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L89'>        <font color='red'>}</font>
+<a name='L90'>        full_msecs = (DWORD)(timeout + 0.5);
+<a name='L91'>    <font color='red'>}</font>
+<a name='L92'>
+<a name='L93'>    <i><font color='green'>/* check whether we already own the lock */</font></i>
+<a name='L94'>    <b>if</b> (self-&gt;kind == <a href='../S/2585.html#L11' title='Defined at 11 in Modules/_multiprocessing/semaphore.c.'>RECURSIVE_MUTEX</a> &amp;&amp; <a href='../S/2585.html#L22' title='Defined at 22 in Modules/_multiprocessing/semaphore.c.'>ISMINE</a>(self)) <font color='red'>{</font>
+<a name='L95'>        ++self-&gt;count;
+<a name='L96'>        Py_RETURN_TRUE;
+<a name='L97'>    <font color='red'>}</font>
+<a name='L98'>
+<a name='L99'>    <i><font color='green'>/* check whether we can acquire without blocking */</font></i>
+<a name='L100'>    <b>if</b> (WaitForSingleObject(self-&gt;handle, 0) == WAIT_OBJECT_0) <font color='red'>{</font>
+<a name='L101'>        self-&gt;last_tid = GetCurrentThreadId();
+<a name='L102'>        ++self-&gt;count;
+<a name='L103'>        Py_RETURN_TRUE;
+<a name='L104'>    <font color='red'>}</font>
+<a name='L105'>
+<a name='L106'>    msecs = full_msecs;
+<a name='L107'>    start = GetTickCount();
+<a name='L108'>
+<a name='L109'>    <b>for</b> ( ; ; ) <font color='red'>{</font>
+<a name='L110'>        <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> handles[2] = <font color='red'>{</font>self-&gt;handle, sigint_event<font color='red'>}</font>;
+<a name='L111'>
+<a name='L112'>        <i><font color='green'>/* do the wait */</font></i>
+<a name='L113'>        <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L114'>        ResetEvent(sigint_event);
+<a name='L115'>        res = WaitForMultipleObjects(2, handles, <a href='../D/1087.html' title='Multiple defined in 3 places.'>FALSE</a>, msecs);
+<a name='L116'>        <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L117'>
+<a name='L118'>        <i><font color='green'>/* handle result */</font></i>
+<a name='L119'>        <b>if</b> (res != WAIT_OBJECT_0 + 1)
+<a name='L120'>            <b>break</b>;
+<a name='L121'>
+<a name='L122'>        <i><font color='green'>/* got SIGINT so give signal handler a chance to run */</font></i>
+<a name='L123'>        <a href='../S/2618.html#L307' title='Defined at 307 in Modules/_tkinter.c.'>Sleep</a>(1);
+<a name='L124'>
+<a name='L125'>        <i><font color='green'>/* if this is main thread let KeyboardInterrupt be raised */</font></i>
+<a name='L126'>        <b>if</b> (<a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>())
+<a name='L127'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L128'>
+<a name='L129'>        <i><font color='green'>/* recalculate timeout */</font></i>
+<a name='L130'>        <b>if</b> (msecs != INFINITE) <font color='red'>{</font>
+<a name='L131'>            ticks = GetTickCount();
+<a name='L132'>            <b>if</b> ((DWORD)(ticks - start) &gt;= full_msecs)
+<a name='L133'>                Py_RETURN_FALSE;
+<a name='L134'>            msecs = full_msecs - (ticks - start);
+<a name='L135'>        <font color='red'>}</font>
+<a name='L136'>    <font color='red'>}</font>
+<a name='L137'>
+<a name='L138'>    <i><font color='green'>/* handle result */</font></i>
+<a name='L139'>    <b>switch</b> (res) <font color='red'>{</font>
+<a name='L140'>    <b>case</b> WAIT_TIMEOUT:
+<a name='L141'>        Py_RETURN_FALSE;
+<a name='L142'>    <b>case</b> WAIT_OBJECT_0:
+<a name='L143'>        self-&gt;last_tid = GetCurrentThreadId();
+<a name='L144'>        ++self-&gt;count;
+<a name='L145'>        Py_RETURN_TRUE;
+<a name='L146'>    <b>case</b> WAIT_FAILED:
+<a name='L147'>        <b>return</b> <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(0);
+<a name='L148'>    <b>default</b>:
+<a name='L149'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_RuntimeError, "WaitForSingleObject() or "
+<a name='L150'>                     "WaitForMultipleObjects() gave unrecognized "
+<a name='L151'>                     "value %d", res);
+<a name='L152'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L153'>    <font color='red'>}</font>
+<a name='L154'><font color='red'>}</font>
+<a name='L155'>
+<a name='L156'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L157'><a href='../R/10155.html' title='Multiple refered from 2 places.'>semlock_release</a>(SemLockObject *self, PyObject *args)
+<a name='L158'><font color='red'>{</font>
+<a name='L159'>    <b>if</b> (self-&gt;kind == <a href='../S/2585.html#L11' title='Defined at 11 in Modules/_multiprocessing/semaphore.c.'>RECURSIVE_MUTEX</a>) <font color='red'>{</font>
+<a name='L160'>        <b>if</b> (!<a href='../S/2585.html#L22' title='Defined at 22 in Modules/_multiprocessing/semaphore.c.'>ISMINE</a>(self)) <font color='red'>{</font>
+<a name='L161'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_AssertionError, "attempt to "
+<a name='L162'>                            "release recursive lock not owned "
+<a name='L163'>                            "by thread");
+<a name='L164'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L165'>        <font color='red'>}</font>
+<a name='L166'>        <b>if</b> (self-&gt;count &gt; 1) <font color='red'>{</font>
+<a name='L167'>            --self-&gt;count;
+<a name='L168'>            <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L169'>        <font color='red'>}</font>
+<a name='L170'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;count == 1);
+<a name='L171'>    <font color='red'>}</font>
+<a name='L172'>
+<a name='L173'>    <b>if</b> (!ReleaseSemaphore(self-&gt;handle, 1, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)) <font color='red'>{</font>
+<a name='L174'>        <b>if</b> (GetLastError() == ERROR_TOO_MANY_POSTS) <font color='red'>{</font>
+<a name='L175'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "semaphore or lock "
+<a name='L176'>                            "released too many times");
+<a name='L177'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L178'>        <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L179'>            <b>return</b> <a href='../S/3106.html#L546' title='Defined at 546 in Python/errors.c.'>PyErr_SetFromWindowsErr</a>(0);
+<a name='L180'>        <font color='red'>}</font>
+<a name='L181'>    <font color='red'>}</font>
+<a name='L182'>
+<a name='L183'>    --self-&gt;count;
+<a name='L184'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L185'><font color='red'>}</font>
+<a name='L186'>
+<a name='L187'><font color='darkred'>#else</font> <i><font color='green'>/* !MS_WINDOWS */</font></i>
+<a name='L188'>
+<a name='L189'><i><font color='green'>/*</font></i>
+<a name='L190'><i><font color='green'> * Unix definitions</font></i>
+<a name='L191'><i><font color='green'> */</font></i>
+<a name='L192'>
+<a name='L193'><font color='darkred'>#define</font> <a href='../S/2585.html#L438' title='Refered from 438 in Modules/_multiprocessing/semaphore.c.'>SEM_CLEAR_ERROR</a>()
+<a name='L194'><font color='darkred'>#define</font> <a href='../S/2585.html#L441' title='Refered from 441 in Modules/_multiprocessing/semaphore.c.'>SEM_GET_LAST_ERROR</a>() 0
+<a name='L195'><font color='darkred'>#define</font> <a href='../S/2585.html#L439' title='Refered from 439 in Modules/_multiprocessing/semaphore.c.'>SEM_CREATE</a>(name, val, max) sem_open(name, O_CREAT | O_EXCL, 0600, val)
+<a name='L196'><font color='darkred'>#define</font> <a href='../R/4046.html' title='Multiple refered from 2 places.'>SEM_CLOSE</a>(sem) sem_close(sem)
+<a name='L197'><font color='darkred'>#define</font> <a href='../R/4049.html' title='Multiple refered from 2 places.'>SEM_GETVALUE</a>(sem, pval) sem_getvalue(sem, pval)
+<a name='L198'><font color='darkred'>#define</font> <a href='../S/2585.html#L444' title='Refered from 444 in Modules/_multiprocessing/semaphore.c.'>SEM_UNLINK</a>(name) <a href='../S/2585.html#L201' title='Defined at 201 in Modules/_multiprocessing/semaphore.c.'>sem_unlink</a>(name)
+<a name='L199'>
+<a name='L200'><font color='darkred'>#ifndef</font> HAVE_SEM_UNLINK
+<a name='L201'><font color='darkred'>#  define</font> <a href='../S/2585.html#L198' title='Refered from 198 in Modules/_multiprocessing/semaphore.c.'>sem_unlink</a>(name) 0
+<a name='L202'><font color='darkred'>#endif</font>
+<a name='L203'>
+<a name='L204'><font color='darkred'>#ifndef</font> HAVE_SEM_TIMEDWAIT
+<a name='L205'><font color='darkred'>#  define</font> <a href='../R/10143.html' title='Multiple refered from 2 places.'>sem_timedwait</a>(sem,deadline) <a href='../S/2585.html#L208' title='Defined at 208 in Modules/_multiprocessing/semaphore.c.'>sem_timedwait_save</a>(sem,deadline,_save)
+<a name='L206'>
+<a name='L207'><b>int</b>
+<a name='L208'><a href='../S/2585.html#L205' title='Refered from 205 in Modules/_multiprocessing/semaphore.c.'>sem_timedwait_save</a>(sem_t *sem, <b>struct</b> timespec *deadline, PyThreadState *_save)
+<a name='L209'><font color='red'>{</font>
+<a name='L210'>    <b>int</b> res;
+<a name='L211'>    <b>unsigned</b> <b>long</b> delay, difference;
+<a name='L212'>    <b>struct</b> timeval now, tvdeadline, tvdelay;
+<a name='L213'>
+<a name='L214'>    errno = 0;
+<a name='L215'>    tvdeadline.tv_sec = deadline-&gt;tv_sec;
+<a name='L216'>    tvdeadline.tv_usec = deadline-&gt;tv_nsec / 1000;
+<a name='L217'>
+<a name='L218'>    <b>for</b> (delay = 0 ; ; delay += 1000) <font color='red'>{</font>
+<a name='L219'>        <i><font color='green'>/* poll */</font></i>
+<a name='L220'>        <b>if</b> (sem_trywait(sem) == 0)
+<a name='L221'>            <b>return</b> 0;
+<a name='L222'>        <b>else</b> <b>if</b> (errno != EAGAIN)
+<a name='L223'>            <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L224'>
+<a name='L225'>        <i><font color='green'>/* get current time */</font></i>
+<a name='L226'>        <b>if</b> (gettimeofday(&amp;now, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) &lt; 0)
+<a name='L227'>            <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L228'>
+<a name='L229'>        <i><font color='green'>/* check for timeout */</font></i>
+<a name='L230'>        <b>if</b> (tvdeadline.tv_sec &lt; now.tv_sec ||
+<a name='L231'>            (tvdeadline.tv_sec == now.tv_sec &amp;&amp;
+<a name='L232'>             tvdeadline.tv_usec &lt;= now.tv_usec)) <font color='red'>{</font>
+<a name='L233'>            errno = ETIMEDOUT;
+<a name='L234'>            <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L235'>        <font color='red'>}</font>
+<a name='L236'>
+<a name='L237'>        <i><font color='green'>/* calculate how much time is left */</font></i>
+<a name='L238'>        difference = (tvdeadline.tv_sec - now.tv_sec) * 1000000 +
+<a name='L239'>            (tvdeadline.tv_usec - now.tv_usec);
+<a name='L240'>
+<a name='L241'>        <i><font color='green'>/* check delay not too long -- maximum is 20 msecs */</font></i>
+<a name='L242'>        <b>if</b> (delay &gt; 20000)
+<a name='L243'>            delay = 20000;
+<a name='L244'>        <b>if</b> (delay &gt; difference)
+<a name='L245'>            delay = difference;
+<a name='L246'>
+<a name='L247'>        <i><font color='green'>/* sleep */</font></i>
+<a name='L248'>        tvdelay.tv_sec = delay / 1000000;
+<a name='L249'>        tvdelay.tv_usec = delay % 1000000;
+<a name='L250'>        <b>if</b> (select(0, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, &amp;tvdelay) &lt; 0)
+<a name='L251'>            <b>return</b> <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>;
+<a name='L252'>
+<a name='L253'>        <i><font color='green'>/* check for signals */</font></i>
+<a name='L254'>        <a href='../D/4082.html' title='Multiple defined in 2 places.'>Py_BLOCK_THREADS</a>
+<a name='L255'>        res = <a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>();
+<a name='L256'>        <a href='../D/4264.html' title='Multiple defined in 2 places.'>Py_UNBLOCK_THREADS</a>
+<a name='L257'>
+<a name='L258'>        <b>if</b> (res) <font color='red'>{</font>
+<a name='L259'>            errno = EINTR;
+<a name='L260'>            <b>return</b> <a href='../S/2583.html#L125' title='Defined at 125 in Modules/_multiprocessing/multiprocessing.h.'>MP_EXCEPTION_HAS_BEEN_SET</a>;
+<a name='L261'>        <font color='red'>}</font>
+<a name='L262'>    <font color='red'>}</font>
+<a name='L263'><font color='red'>}</font>
+<a name='L264'>
+<a name='L265'><font color='darkred'>#endif</font> <i><font color='green'>/* !HAVE_SEM_TIMEDWAIT */</font></i>
+<a name='L266'>
+<a name='L267'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L268'><a href='../R/10146.html' title='Multiple refered from 2 places.'>semlock_acquire</a>(SemLockObject *self, PyObject *args, PyObject *kwds)
+<a name='L269'><font color='red'>{</font>
+<a name='L270'>    <b>int</b> blocking = 1, res;
+<a name='L271'>    <b>double</b> timeout;
+<a name='L272'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *timeout_obj = Py_None;
+<a name='L273'>    <b>struct</b> timespec deadline = <font color='red'>{</font>0<font color='red'>}</font>;
+<a name='L274'>    <b>struct</b> timeval now;
+<a name='L275'>    <b>long</b> sec, nsec;
+<a name='L276'>
+<a name='L277'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"block", "timeout", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L278'>
+<a name='L279'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "|iO", kwlist,
+<a name='L280'>                                     &amp;blocking, &amp;timeout_obj))
+<a name='L281'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L282'>
+<a name='L283'>    <b>if</b> (self-&gt;kind == <a href='../S/2585.html#L11' title='Defined at 11 in Modules/_multiprocessing/semaphore.c.'>RECURSIVE_MUTEX</a> &amp;&amp; <a href='../S/2585.html#L22' title='Defined at 22 in Modules/_multiprocessing/semaphore.c.'>ISMINE</a>(self)) <font color='red'>{</font>
+<a name='L284'>        ++self-&gt;count;
+<a name='L285'>        Py_RETURN_TRUE;
+<a name='L286'>    <font color='red'>}</font>
+<a name='L287'>
+<a name='L288'>    <b>if</b> (timeout_obj != Py_None) <font color='red'>{</font>
+<a name='L289'>        timeout = <a href='../S/2791.html#L244' title='Defined at 244 in Objects/floatobject.c.'>PyFloat_AsDouble</a>(timeout_obj);
+<a name='L290'>        <b>if</b> (<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L291'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L292'>        <b>if</b> (timeout &lt; 0.0)
+<a name='L293'>            timeout = 0.0;
+<a name='L294'>
+<a name='L295'>        <b>if</b> (gettimeofday(&amp;now, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) &lt; 0) <font color='red'>{</font>
+<a name='L296'>            <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L297'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L298'>        <font color='red'>}</font>
+<a name='L299'>        sec = (<b>long</b>) timeout;
+<a name='L300'>        nsec = (<b>long</b>) (1e9 * (timeout - sec) + 0.5);
+<a name='L301'>        deadline.tv_sec = now.tv_sec + sec;
+<a name='L302'>        deadline.tv_nsec = now.tv_usec * 1000 + nsec;
+<a name='L303'>        deadline.tv_sec += (deadline.tv_nsec / 1000000000);
+<a name='L304'>        deadline.tv_nsec %= 1000000000;
+<a name='L305'>    <font color='red'>}</font>
+<a name='L306'>
+<a name='L307'>    <b>do</b> <font color='red'>{</font>
+<a name='L308'>        <a href='../D/4080.html' title='Multiple defined in 2 places.'>Py_BEGIN_ALLOW_THREADS</a>
+<a name='L309'>        <b>if</b> (blocking &amp;&amp; timeout_obj == Py_None)
+<a name='L310'>            res = sem_wait(self-&gt;handle);
+<a name='L311'>        <b>else</b> <b>if</b> (!blocking)
+<a name='L312'>            res = sem_trywait(self-&gt;handle);
+<a name='L313'>        <b>else</b>
+<a name='L314'>            res = <a href='../S/2585.html#L205' title='Defined at 205 in Modules/_multiprocessing/semaphore.c.'>sem_timedwait</a>(self-&gt;handle, &amp;deadline);
+<a name='L315'>        <a href='../D/4114.html' title='Multiple defined in 2 places.'>Py_END_ALLOW_THREADS</a>
+<a name='L316'>        <b>if</b> (res == <a href='../S/2583.html#L125' title='Defined at 125 in Modules/_multiprocessing/multiprocessing.h.'>MP_EXCEPTION_HAS_BEEN_SET</a>)
+<a name='L317'>            <b>break</b>;
+<a name='L318'>    <font color='red'>}</font> <b>while</b> (res &lt; 0 &amp;&amp; errno == EINTR &amp;&amp; !<a href='../D/3143.html' title='Multiple defined in 2 places.'>PyErr_CheckSignals</a>());
+<a name='L319'>
+<a name='L320'>    <b>if</b> (res &lt; 0) <font color='red'>{</font>
+<a name='L321'>        <b>if</b> (errno == EAGAIN || errno == ETIMEDOUT)
+<a name='L322'>            Py_RETURN_FALSE;
+<a name='L323'>        <b>else</b> <b>if</b> (errno == EINTR)
+<a name='L324'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L325'>        <b>else</b>
+<a name='L326'>            <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L327'>    <font color='red'>}</font>
+<a name='L328'>
+<a name='L329'>    ++self-&gt;count;
+<a name='L330'>    self-&gt;last_tid = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L331'>
+<a name='L332'>    Py_RETURN_TRUE;
+<a name='L333'><font color='red'>}</font>
+<a name='L334'>
+<a name='L335'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L336'><a href='../R/10155.html' title='Multiple refered from 2 places.'>semlock_release</a>(SemLockObject *self, PyObject *args)
+<a name='L337'><font color='red'>{</font>
+<a name='L338'>    <b>if</b> (self-&gt;kind == <a href='../S/2585.html#L11' title='Defined at 11 in Modules/_multiprocessing/semaphore.c.'>RECURSIVE_MUTEX</a>) <font color='red'>{</font>
+<a name='L339'>        <b>if</b> (!<a href='../S/2585.html#L22' title='Defined at 22 in Modules/_multiprocessing/semaphore.c.'>ISMINE</a>(self)) <font color='red'>{</font>
+<a name='L340'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_AssertionError, "attempt to "
+<a name='L341'>                            "release recursive lock not owned "
+<a name='L342'>                            "by thread");
+<a name='L343'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L344'>        <font color='red'>}</font>
+<a name='L345'>        <b>if</b> (self-&gt;count &gt; 1) <font color='red'>{</font>
+<a name='L346'>            --self-&gt;count;
+<a name='L347'>            <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L348'>        <font color='red'>}</font>
+<a name='L349'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;count == 1);
+<a name='L350'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L351'><font color='darkred'>#ifdef</font> HAVE_BROKEN_SEM_GETVALUE
+<a name='L352'>        <i><font color='green'>/* We will only check properly the maxvalue == 1 case */</font></i>
+<a name='L353'>        <b>if</b> (self-&gt;maxvalue == 1) <font color='red'>{</font>
+<a name='L354'>            <i><font color='green'>/* make sure that already locked */</font></i>
+<a name='L355'>            <b>if</b> (sem_trywait(self-&gt;handle) &lt; 0) <font color='red'>{</font>
+<a name='L356'>                <b>if</b> (errno != EAGAIN) <font color='red'>{</font>
+<a name='L357'>                    <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L358'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L359'>                <font color='red'>}</font>
+<a name='L360'>                <i><font color='green'>/* it is already locked as expected */</font></i>
+<a name='L361'>            <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L362'>                <i><font color='green'>/* it was not locked so undo wait and raise  */</font></i>
+<a name='L363'>                <b>if</b> (sem_post(self-&gt;handle) &lt; 0) <font color='red'>{</font>
+<a name='L364'>                    <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L365'>                    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L366'>                <font color='red'>}</font>
+<a name='L367'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "semaphore "
+<a name='L368'>                                "or lock released too many "
+<a name='L369'>                                "times");
+<a name='L370'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L371'>            <font color='red'>}</font>
+<a name='L372'>        <font color='red'>}</font>
+<a name='L373'><font color='darkred'>#else</font>
+<a name='L374'>        <b>int</b> sval;
+<a name='L375'>
+<a name='L376'>        <i><font color='green'>/* This check is not an absolute guarantee that the semaphore</font></i>
+<a name='L377'><i><font color='green'>           does not rise above maxvalue. */</font></i>
+<a name='L378'>        <b>if</b> (sem_getvalue(self-&gt;handle, &amp;sval) &lt; 0) <font color='red'>{</font>
+<a name='L379'>            <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L380'>        <font color='red'>}</font> <b>else</b> <b>if</b> (sval &gt;= self-&gt;maxvalue) <font color='red'>{</font>
+<a name='L381'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "semaphore or lock "
+<a name='L382'>                            "released too many times");
+<a name='L383'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L384'>        <font color='red'>}</font>
+<a name='L385'><font color='darkred'>#endif</font>
+<a name='L386'>    <font color='red'>}</font>
+<a name='L387'>
+<a name='L388'>    <b>if</b> (sem_post(self-&gt;handle) &lt; 0)
+<a name='L389'>        <b>return</b> <a href='../S/3106.html#L452' title='Defined at 452 in Python/errors.c.'>PyErr_SetFromErrno</a>(PyExc_OSError);
+<a name='L390'>
+<a name='L391'>    --self-&gt;count;
+<a name='L392'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L393'><font color='red'>}</font>
+<a name='L394'>
+<a name='L395'><font color='darkred'>#endif</font> <i><font color='green'>/* !MS_WINDOWS */</font></i>
+<a name='L396'>
+<a name='L397'><i><font color='green'>/*</font></i>
+<a name='L398'><i><font color='green'> * All platforms</font></i>
+<a name='L399'><i><font color='green'> */</font></i>
+<a name='L400'>
+<a name='L401'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L402'><a href='../R/9225.html' title='Multiple refered from 2 places.'>newsemlockobject</a>(PyTypeObject *type, <a href='../D/4593.html' title='Multiple defined in 2 places.'>SEM_HANDLE</a> handle, <b>int</b> kind, <b>int</b> maxvalue)
+<a name='L403'><font color='red'>{</font>
+<a name='L404'>    <a href='../S/2585.html#L20' title='Defined at 20 in Modules/_multiprocessing/semaphore.c.'>SemLockObject</a> *self;
+<a name='L405'>
+<a name='L406'>    self = PyObject_New(<a href='../S/2585.html#L20' title='Defined at 20 in Modules/_multiprocessing/semaphore.c.'>SemLockObject</a>, type);
+<a name='L407'>    <b>if</b> (!self)
+<a name='L408'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L409'>    self-&gt;handle = handle;
+<a name='L410'>    self-&gt;kind = kind;
+<a name='L411'>    self-&gt;count = 0;
+<a name='L412'>    self-&gt;last_tid = 0;
+<a name='L413'>    self-&gt;maxvalue = maxvalue;
+<a name='L414'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*)self;
+<a name='L415'><font color='red'>}</font>
+<a name='L416'>
+<a name='L417'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L418'><a href='../S/2585.html#L624' title='Refered from 624 in Modules/_multiprocessing/semaphore.c.'>semlock_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds)
+<a name='L419'><font color='red'>{</font>
+<a name='L420'>    <b>char</b> <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>[256];
+<a name='L421'>    <a href='../D/4593.html' title='Multiple defined in 2 places.'>SEM_HANDLE</a> handle = <a href='../S/2585.html#L31' title='Defined at 31 in Modules/_multiprocessing/semaphore.c.'>SEM_FAILED</a>;
+<a name='L422'>    <b>int</b> kind, maxvalue, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L423'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L424'>    <b>static</b> <b>char</b> *kwlist[] = <font color='red'>{</font>"kind", "value", "maxvalue", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L425'>    <b>static</b> <b>int</b> counter = 0;
+<a name='L426'>
+<a name='L427'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "iii", kwlist,
+<a name='L428'>                                     &amp;kind, &amp;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, &amp;maxvalue))
+<a name='L429'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L430'>
+<a name='L431'>    <b>if</b> (kind != <a href='../S/2585.html#L11' title='Defined at 11 in Modules/_multiprocessing/semaphore.c.'>RECURSIVE_MUTEX</a> &amp;&amp; kind != <a href='../S/2585.html#L11' title='Defined at 11 in Modules/_multiprocessing/semaphore.c.'>SEMAPHORE</a>) <font color='red'>{</font>
+<a name='L432'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, "unrecognized kind");
+<a name='L433'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L434'>    <font color='red'>}</font>
+<a name='L435'>
+<a name='L436'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <b>sizeof</b>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>), "/mp%ld-%d", (<b>long</b>)getpid(), counter++);
+<a name='L437'>
+<a name='L438'>    <a href='../D/4587.html' title='Multiple defined in 2 places.'>SEM_CLEAR_ERROR</a>();
+<a name='L439'>    handle = <a href='../D/4589.html' title='Multiple defined in 2 places.'>SEM_CREATE</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, maxvalue);
+<a name='L440'>    <i><font color='green'>/* On Windows we should fail if GetLastError()==ERROR_ALREADY_EXISTS */</font></i>
+<a name='L441'>    <b>if</b> (handle == <a href='../S/2585.html#L31' title='Defined at 31 in Modules/_multiprocessing/semaphore.c.'>SEM_FAILED</a> || <a href='../D/4592.html' title='Multiple defined in 2 places.'>SEM_GET_LAST_ERROR</a>() != 0)
+<a name='L442'>        <b>goto</b> failure;
+<a name='L443'>
+<a name='L444'>    <b>if</b> (<a href='../D/4594.html' title='Multiple defined in 2 places.'>SEM_UNLINK</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>) &lt; 0)
+<a name='L445'>        <b>goto</b> failure;
+<a name='L446'>
+<a name='L447'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2585.html#L402' title='Defined at 402 in Modules/_multiprocessing/semaphore.c.'>newsemlockobject</a>(type, handle, kind, maxvalue);
+<a name='L448'>    <b>if</b> (!<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>)
+<a name='L449'>        <b>goto</b> failure;
+<a name='L450'>
+<a name='L451'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L452'>
+<a name='L453'>  failure:
+<a name='L454'>    <b>if</b> (handle != <a href='../S/2585.html#L31' title='Defined at 31 in Modules/_multiprocessing/semaphore.c.'>SEM_FAILED</a>)
+<a name='L455'>        <a href='../D/4588.html' title='Multiple defined in 2 places.'>SEM_CLOSE</a>(handle);
+<a name='L456'>    <a href='../S/2582.html#L27' title='Defined at 27 in Modules/_multiprocessing/multiprocessing.c.'>mp_SetError</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>);
+<a name='L457'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L458'><font color='red'>}</font>
+<a name='L459'>
+<a name='L460'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L461'><a href='../S/2585.html#L561' title='Refered from 561 in Modules/_multiprocessing/semaphore.c.'>semlock_rebuild</a>(PyTypeObject *type, PyObject *args)
+<a name='L462'><font color='red'>{</font>
+<a name='L463'>    <a href='../D/4593.html' title='Multiple defined in 2 places.'>SEM_HANDLE</a> handle;
+<a name='L464'>    <b>int</b> kind, maxvalue;
+<a name='L465'>
+<a name='L466'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, <a href='../D/1338.html' title='Multiple defined in 2 places.'>F_SEM_HANDLE</a> "ii",
+<a name='L467'>                          &amp;handle, &amp;kind, &amp;maxvalue))
+<a name='L468'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L469'>
+<a name='L470'>    <b>return</b> <a href='../S/2585.html#L402' title='Defined at 402 in Modules/_multiprocessing/semaphore.c.'>newsemlockobject</a>(type, handle, kind, maxvalue);
+<a name='L471'><font color='red'>}</font>
+<a name='L472'>
+<a name='L473'><b>static</b> <b>void</b>
+<a name='L474'><a href='../S/2585.html#L591' title='Refered from 591 in Modules/_multiprocessing/semaphore.c.'>semlock_dealloc</a>(SemLockObject* self)
+<a name='L475'><font color='red'>{</font>
+<a name='L476'>    <b>if</b> (self-&gt;handle != <a href='../S/2585.html#L31' title='Defined at 31 in Modules/_multiprocessing/semaphore.c.'>SEM_FAILED</a>)
+<a name='L477'>        <a href='../D/4588.html' title='Multiple defined in 2 places.'>SEM_CLOSE</a>(self-&gt;handle);
+<a name='L478'>    PyObject_Del(self);
+<a name='L479'><font color='red'>}</font>
+<a name='L480'>
+<a name='L481'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L482'><a href='../S/2585.html#L553' title='Refered from 553 in Modules/_multiprocessing/semaphore.c.'>semlock_count</a>(SemLockObject *self)
+<a name='L483'><font color='red'>{</font>
+<a name='L484'>    <b>return</b> <a href='../S/2583.html#L149' title='Defined at 149 in Modules/_multiprocessing/multiprocessing.h.'>PyInt_FromLong</a>((<b>long</b>)self-&gt;count);
+<a name='L485'><font color='red'>}</font>
+<a name='L486'>
+<a name='L487'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L488'><a href='../S/2585.html#L555' title='Refered from 555 in Modules/_multiprocessing/semaphore.c.'>semlock_ismine</a>(SemLockObject *self)
+<a name='L489'><font color='red'>{</font>
+<a name='L490'>    <i><font color='green'>/* only makes sense for a lock */</font></i>
+<a name='L491'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(<a href='../S/2585.html#L22' title='Defined at 22 in Modules/_multiprocessing/semaphore.c.'>ISMINE</a>(self));
+<a name='L492'><font color='red'>}</font>
+<a name='L493'>
+<a name='L494'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L495'><a href='../S/2585.html#L557' title='Refered from 557 in Modules/_multiprocessing/semaphore.c.'>semlock_getvalue</a>(SemLockObject *self)
+<a name='L496'><font color='red'>{</font>
+<a name='L497'><font color='darkred'>#ifdef</font> HAVE_BROKEN_SEM_GETVALUE
+<a name='L498'>    <a href='../S/3106.html#L116' title='Defined at 116 in Python/errors.c.'>PyErr_SetNone</a>(PyExc_NotImplementedError);
+<a name='L499'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L500'><font color='darkred'>#else</font>
+<a name='L501'>    <b>int</b> sval;
+<a name='L502'>    <b>if</b> (<a href='../D/4591.html' title='Multiple defined in 2 places.'>SEM_GETVALUE</a>(self-&gt;handle, &amp;sval) &lt; 0)
+<a name='L503'>        <b>return</b> <a href='../S/2582.html#L27' title='Defined at 27 in Modules/_multiprocessing/multiprocessing.c.'>mp_SetError</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>);
+<a name='L504'>    <i><font color='green'>/* some posix implementations use negative numbers to indicate</font></i>
+<a name='L505'><i><font color='green'>       the number of waiting threads */</font></i>
+<a name='L506'>    <b>if</b> (sval &lt; 0)
+<a name='L507'>        sval = 0;
+<a name='L508'>    <b>return</b> <a href='../S/2583.html#L149' title='Defined at 149 in Modules/_multiprocessing/multiprocessing.h.'>PyInt_FromLong</a>((<b>long</b>)sval);
+<a name='L509'><font color='darkred'>#endif</font>
+<a name='L510'><font color='red'>}</font>
+<a name='L511'>
+<a name='L512'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L513'><a href='../S/2585.html#L559' title='Refered from 559 in Modules/_multiprocessing/semaphore.c.'>semlock_iszero</a>(SemLockObject *self)
+<a name='L514'><font color='red'>{</font>
+<a name='L515'><font color='darkred'>#ifdef</font> HAVE_BROKEN_SEM_GETVALUE
+<a name='L516'>    <b>if</b> (sem_trywait(self-&gt;handle) &lt; 0) <font color='red'>{</font>
+<a name='L517'>        <b>if</b> (errno == EAGAIN)
+<a name='L518'>            Py_RETURN_TRUE;
+<a name='L519'>        <b>return</b> <a href='../S/2582.html#L27' title='Defined at 27 in Modules/_multiprocessing/multiprocessing.c.'>mp_SetError</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>);
+<a name='L520'>    <font color='red'>}</font> <b>else</b> <font color='red'>{</font>
+<a name='L521'>        <b>if</b> (sem_post(self-&gt;handle) &lt; 0)
+<a name='L522'>            <b>return</b> <a href='../S/2582.html#L27' title='Defined at 27 in Modules/_multiprocessing/multiprocessing.c.'>mp_SetError</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>);
+<a name='L523'>        Py_RETURN_FALSE;
+<a name='L524'>    <font color='red'>}</font>
+<a name='L525'><font color='darkred'>#else</font>
+<a name='L526'>    <b>int</b> sval;
+<a name='L527'>    <b>if</b> (<a href='../D/4591.html' title='Multiple defined in 2 places.'>SEM_GETVALUE</a>(self-&gt;handle, &amp;sval) &lt; 0)
+<a name='L528'>        <b>return</b> <a href='../S/2582.html#L27' title='Defined at 27 in Modules/_multiprocessing/multiprocessing.c.'>mp_SetError</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2583.html#L119' title='Defined at 119 in Modules/_multiprocessing/multiprocessing.h.'>MP_STANDARD_ERROR</a>);
+<a name='L529'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>((<b>long</b>)sval == 0);
+<a name='L530'><font color='darkred'>#endif</font>
+<a name='L531'><font color='red'>}</font>
+<a name='L532'>
+<a name='L533'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L534'><a href='../S/2585.html#L563' title='Refered from 563 in Modules/_multiprocessing/semaphore.c.'>semlock_afterfork</a>(SemLockObject *self)
+<a name='L535'><font color='red'>{</font>
+<a name='L536'>    self-&gt;count = 0;
+<a name='L537'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L538'><font color='red'>}</font>
+<a name='L539'>
+<a name='L540'><i><font color='green'>/*</font></i>
+<a name='L541'><i><font color='green'> * Semaphore methods</font></i>
+<a name='L542'><i><font color='green'> */</font></i>
+<a name='L543'>
+<a name='L544'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> semlock_methods[] = <font color='red'>{</font>
+<a name='L545'>    <font color='red'>{</font>"acquire", (PyCFunction)<a href='../D/11006.html' title='Multiple defined in 2 places.'>semlock_acquire</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS,
+<a name='L546'>     "acquire the semaphore/lock"<font color='red'>}</font>,
+<a name='L547'>    <font color='red'>{</font>"release", (PyCFunction)<a href='../D/11015.html' title='Multiple defined in 2 places.'>semlock_release</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L548'>     "release the semaphore/lock"<font color='red'>}</font>,
+<a name='L549'>    <font color='red'>{</font>"__enter__", (PyCFunction)<a href='../D/11006.html' title='Multiple defined in 2 places.'>semlock_acquire</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_KEYWORDS,
+<a name='L550'>     "enter the semaphore/lock"<font color='red'>}</font>,
+<a name='L551'>    <font color='red'>{</font>"__exit__", (PyCFunction)<a href='../D/11015.html' title='Multiple defined in 2 places.'>semlock_release</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>,
+<a name='L552'>     "exit the semaphore/lock"<font color='red'>}</font>,
+<a name='L553'>    <font color='red'>{</font>"_count", (PyCFunction)<a href='../S/2585.html#L482' title='Defined at 482 in Modules/_multiprocessing/semaphore.c.'>semlock_count</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L554'>     "num of `acquire()`s minus num of `release()`s for this process"<font color='red'>}</font>,
+<a name='L555'>    <font color='red'>{</font>"_is_mine", (PyCFunction)<a href='../S/2585.html#L488' title='Defined at 488 in Modules/_multiprocessing/semaphore.c.'>semlock_ismine</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L556'>     "whether the lock is owned by this thread"<font color='red'>}</font>,
+<a name='L557'>    <font color='red'>{</font>"_get_value", (PyCFunction)<a href='../S/2585.html#L495' title='Defined at 495 in Modules/_multiprocessing/semaphore.c.'>semlock_getvalue</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L558'>     "get the value of the semaphore"<font color='red'>}</font>,
+<a name='L559'>    <font color='red'>{</font>"_is_zero", (PyCFunction)<a href='../S/2585.html#L513' title='Defined at 513 in Modules/_multiprocessing/semaphore.c.'>semlock_iszero</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L560'>     "returns whether semaphore has value zero"<font color='red'>}</font>,
+<a name='L561'>    <font color='red'>{</font>"_rebuild", (PyCFunction)<a href='../S/2585.html#L461' title='Defined at 461 in Modules/_multiprocessing/semaphore.c.'>semlock_rebuild</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a> | METH_CLASS,
+<a name='L562'>     ""<font color='red'>}</font>,
+<a name='L563'>    <font color='red'>{</font>"_after_fork", (PyCFunction)<a href='../S/2585.html#L534' title='Defined at 534 in Modules/_multiprocessing/semaphore.c.'>semlock_afterfork</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,
+<a name='L564'>     "rezero the net acquisition count after fork()"<font color='red'>}</font>,
+<a name='L565'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L566'><font color='red'>}</font>;
+<a name='L567'>
+<a name='L568'><i><font color='green'>/*</font></i>
+<a name='L569'><i><font color='green'> * Member table</font></i>
+<a name='L570'><i><font color='green'> */</font></i>
+<a name='L571'>
+<a name='L572'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> semlock_members[] = <font color='red'>{</font>
+<a name='L573'>    <font color='red'>{</font>"handle", <a href='../D/5236.html' title='Multiple defined in 2 places.'>T_SEM_HANDLE</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2585.html#L20' title='Defined at 20 in Modules/_multiprocessing/semaphore.c.'>SemLockObject</a>, handle), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>,
+<a name='L574'>     ""<font color='red'>}</font>,
+<a name='L575'>    <font color='red'>{</font>"kind", <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2585.html#L20' title='Defined at 20 in Modules/_multiprocessing/semaphore.c.'>SemLockObject</a>, kind), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>,
+<a name='L576'>     ""<font color='red'>}</font>,
+<a name='L577'>    <font color='red'>{</font>"maxvalue", <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2585.html#L20' title='Defined at 20 in Modules/_multiprocessing/semaphore.c.'>SemLockObject</a>, maxvalue), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a>,
+<a name='L578'>     ""<font color='red'>}</font>,
+<a name='L579'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L580'><font color='red'>}</font>;
+<a name='L581'>
+<a name='L582'><i><font color='green'>/*</font></i>
+<a name='L583'><i><font color='green'> * Semaphore type</font></i>
+<a name='L584'><i><font color='green'> */</font></i>
+<a name='L585'>
+<a name='L586'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> SemLockType = <font color='red'>{</font>
+<a name='L587'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L588'>    <i><font color='green'>/* tp_name           */</font></i> "_multiprocessing.SemLock",
+<a name='L589'>    <i><font color='green'>/* tp_basicsize      */</font></i> <b>sizeof</b>(<a href='../S/2585.html#L20' title='Defined at 20 in Modules/_multiprocessing/semaphore.c.'>SemLockObject</a>),
+<a name='L590'>    <i><font color='green'>/* tp_itemsize       */</font></i> 0,
+<a name='L591'>    <i><font color='green'>/* tp_dealloc        */</font></i> (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2585.html#L474' title='Defined at 474 in Modules/_multiprocessing/semaphore.c.'>semlock_dealloc</a>,
+<a name='L592'>    <i><font color='green'>/* tp_print          */</font></i> 0,
+<a name='L593'>    <i><font color='green'>/* tp_getattr        */</font></i> 0,
+<a name='L594'>    <i><font color='green'>/* tp_setattr        */</font></i> 0,
+<a name='L595'>    <i><font color='green'>/* tp_reserved       */</font></i> 0,
+<a name='L596'>    <i><font color='green'>/* tp_repr           */</font></i> 0,
+<a name='L597'>    <i><font color='green'>/* tp_as_number      */</font></i> 0,
+<a name='L598'>    <i><font color='green'>/* tp_as_sequence    */</font></i> 0,
+<a name='L599'>    <i><font color='green'>/* tp_as_mapping     */</font></i> 0,
+<a name='L600'>    <i><font color='green'>/* tp_hash           */</font></i> 0,
+<a name='L601'>    <i><font color='green'>/* tp_call           */</font></i> 0,
+<a name='L602'>    <i><font color='green'>/* tp_str            */</font></i> 0,
+<a name='L603'>    <i><font color='green'>/* tp_getattro       */</font></i> 0,
+<a name='L604'>    <i><font color='green'>/* tp_setattro       */</font></i> 0,
+<a name='L605'>    <i><font color='green'>/* tp_as_buffer      */</font></i> 0,
+<a name='L606'>    <i><font color='green'>/* tp_flags          */</font></i> Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+<a name='L607'>    <i><font color='green'>/* tp_doc            */</font></i> "Semaphore/Mutex type",
+<a name='L608'>    <i><font color='green'>/* tp_traverse       */</font></i> 0,
+<a name='L609'>    <i><font color='green'>/* tp_clear          */</font></i> 0,
+<a name='L610'>    <i><font color='green'>/* tp_richcompare    */</font></i> 0,
+<a name='L611'>    <i><font color='green'>/* tp_weaklistoffset */</font></i> 0,
+<a name='L612'>    <i><font color='green'>/* tp_iter           */</font></i> 0,
+<a name='L613'>    <i><font color='green'>/* tp_iternext       */</font></i> 0,
+<a name='L614'>    <i><font color='green'>/* tp_methods        */</font></i> semlock_methods,
+<a name='L615'>    <i><font color='green'>/* tp_members        */</font></i> semlock_members,
+<a name='L616'>    <i><font color='green'>/* tp_getset         */</font></i> 0,
+<a name='L617'>    <i><font color='green'>/* tp_base           */</font></i> 0,
+<a name='L618'>    <i><font color='green'>/* tp_dict           */</font></i> 0,
+<a name='L619'>    <i><font color='green'>/* tp_descr_get      */</font></i> 0,
+<a name='L620'>    <i><font color='green'>/* tp_descr_set      */</font></i> 0,
+<a name='L621'>    <i><font color='green'>/* tp_dictoffset     */</font></i> 0,
+<a name='L622'>    <i><font color='green'>/* tp_init           */</font></i> 0,
+<a name='L623'>    <i><font color='green'>/* tp_alloc          */</font></i> 0,
+<a name='L624'>    <i><font color='green'>/* tp_new            */</font></i> <a href='../S/2585.html#L418' title='Defined at 418 in Modules/_multiprocessing/semaphore.c.'>semlock_new</a>,
+<a name='L625'><font color='red'>}</font>;
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L41'>[^]</a><a href='#L534'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

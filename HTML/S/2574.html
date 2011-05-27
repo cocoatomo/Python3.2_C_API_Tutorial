@@ -1,0 +1,947 @@
+<html>
+<head>
+<title>Modules/_io/stringio.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3385.html'>_io</a>/stringio.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L54'>[^]</a><a href='#L819'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L54' title='Defined at 54.'>resize_buffer</a>
+<li><a href='#L109' title='Defined at 109.'>write_str</a>
+<li><a href='#L189' title='Defined at 189.'>stringio_getvalue</a>
+<li><a href='#L200' title='Defined at 200.'>stringio_tell</a>
+<li><a href='#L214' title='Defined at 214.'>stringio_read</a>
+<li><a href='#L255' title='Defined at 255.'>_stringio_readline</a>
+<li><a href='#L289' title='Defined at 289.'>stringio_readline</a>
+<li><a href='#L313' title='Defined at 313.'>stringio_iternext</a>
+<li><a href='#L357' title='Defined at 357.'>stringio_truncate</a>
+<li><a href='#L407' title='Defined at 407.'>stringio_seek</a>
+<li><a href='#L455' title='Defined at 455.'>stringio_write</a>
+<li><a href='#L481' title='Defined at 481.'>stringio_close</a>
+<li><a href='#L494' title='Defined at 494.'>stringio_traverse</a>
+<li><a href='#L501' title='Defined at 501.'>stringio_clear</a>
+<li><a href='#L508' title='Defined at 508.'>stringio_dealloc</a>
+<li><a href='#L526' title='Defined at 526.'>stringio_new</a>
+<li><a href='#L548' title='Defined at 548.'>stringio_init</a>
+<li><a href='#L654' title='Defined at 654.'>stringio_seekable</a>
+<li><a href='#L661' title='Defined at 661.'>stringio_readable</a>
+<li><a href='#L668' title='Defined at 668.'>stringio_writable</a>
+<li><a href='#L687' title='Defined at 687.'>stringio_getstate</a>
+<li><a href='#L713' title='Defined at 713.'>stringio_setstate</a>
+<li><a href='#L804' title='Defined at 804.'>stringio_closed</a>
+<li><a href='#L811' title='Defined at 811.'>stringio_line_buffering</a>
+<li><a href='#L819' title='Defined at 819.'>stringio_newlines</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#define</font> <a href='../R/2388.html' title='Multiple refered from 2 places.'>PY_SSIZE_T_CLEAN</a>
+<a name='L2'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L3'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L4'><font color='darkred'>#include</font> "<a href='2569.html'>_iomodule.h</a>"
+<a name='L5'>
+<a name='L6'><i><font color='green'>/* Implementation note: the buffer is always at least one character longer</font></i>
+<a name='L7'><i><font color='green'>   than the enclosed string, for proper functioning of _PyIO_find_line_ending.</font></i>
+<a name='L8'><i><font color='green'>*/</font></i>
+<a name='L9'>
+<a name='L10'><b>typedef</b> <b>struct</b> <font color='red'>{</font>
+<a name='L11'>    <a href='../S/544.html#L82' title='Defined at 82 in Include/object.h.'>PyObject_HEAD</a>
+<a name='L12'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *buf;
+<a name='L13'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos;
+<a name='L14'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> string_size;
+<a name='L15'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> buf_size;
+<a name='L16'>
+<a name='L17'>    <b>char</b> ok; <i><font color='green'>/* initialized? */</font></i>
+<a name='L18'>    <b>char</b> closed;
+<a name='L19'>    <b>char</b> readuniversal;
+<a name='L20'>    <b>char</b> readtranslate;
+<a name='L21'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *decoder;
+<a name='L22'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *readnl;
+<a name='L23'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *writenl;
+<a name='L24'>    
+<a name='L25'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict;
+<a name='L26'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *weakreflist;
+<a name='L27'><font color='red'>}</font> <a href='../R/10544.html' title='Multiple refered from 5 places.'>stringio</a>;
+<a name='L28'>
+<a name='L29'><font color='darkred'>#define</font> <a href='../R/492.html' title='Multiple refered from 57 places.'>CHECK_INITIALIZED</a>(self) \
+<a name='L30'>    <b>if</b> (self-&gt;ok &lt;= 0) <font color='red'>{</font> \
+<a name='L31'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, \
+<a name='L32'>            "I/O operation on uninitialized object"); \
+<a name='L33'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; \
+<a name='L34'>    <font color='red'>}</font>
+<a name='L35'>
+<a name='L36'><font color='darkred'>#define</font> <a href='../R/487.html' title='Multiple refered from 35 places.'>CHECK_CLOSED</a>(self) \
+<a name='L37'>    <b>if</b> (self-&gt;closed) <font color='red'>{</font> \
+<a name='L38'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError, \
+<a name='L39'>            "I/O operation on closed file"); \
+<a name='L40'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; \
+<a name='L41'>    <font color='red'>}</font>
+<a name='L42'>
+<a name='L43'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_doc,
+<a name='L44'>    "Text I/O implementation using an in-memory buffer.\n"
+<a name='L45'>    "\n"
+<a name='L46'>    "The initial_value argument sets the value of object.  The newline\n"
+<a name='L47'>    "argument is like the one of TextIOWrapper's constructor.");
+<a name='L48'>
+<a name='L49'>
+<a name='L50'><i><font color='green'>/* Internal routine for changing the size, in terms of characters, of the</font></i>
+<a name='L51'><i><font color='green'>   buffer of StringIO objects.  The caller should ensure that the 'size'</font></i>
+<a name='L52'><i><font color='green'>   argument is non-negative.  Returns 0 on success, -1 otherwise. */</font></i>
+<a name='L53'><b>static</b> <b>int</b>
+<a name='L54'><a href='../R/10024.html' title='Multiple refered from 8 places.'>resize_buffer</a>(stringio *self, <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size)
+<a name='L55'><font color='red'>{</font>
+<a name='L56'>    <i><font color='green'>/* Here, unsigned types are used to avoid dealing with signed integer</font></i>
+<a name='L57'><i><font color='green'>       overflow, which is undefined in C. */</font></i>
+<a name='L58'>    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> alloc = self-&gt;buf_size;
+<a name='L59'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *new_buf = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L60'>
+<a name='L61'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;buf != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L62'>
+<a name='L63'>    <i><font color='green'>/* Reserve one more char for line ending detection. */</font></i>
+<a name='L64'>    size = size + 1;
+<a name='L65'>    <i><font color='green'>/* For simplicity, stay in the range of the signed type. Anyway, Python</font></i>
+<a name='L66'><i><font color='green'>       doesn't allow strings to be longer than this. */</font></i>
+<a name='L67'>    <b>if</b> (size &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a>)
+<a name='L68'>        <b>goto</b> <a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a>;
+<a name='L69'>
+<a name='L70'>    <b>if</b> (size &lt; alloc / 2) <font color='red'>{</font>
+<a name='L71'>        <i><font color='green'>/* Major downsize; resize down to exact size. */</font></i>
+<a name='L72'>        alloc = size + 1;
+<a name='L73'>    <font color='red'>}</font>
+<a name='L74'>    <b>else</b> <b>if</b> (size &lt; alloc) <font color='red'>{</font>
+<a name='L75'>        <i><font color='green'>/* Within allocated size; quick exit */</font></i>
+<a name='L76'>        <b>return</b> 0;
+<a name='L77'>    <font color='red'>}</font>
+<a name='L78'>    <b>else</b> <b>if</b> (size &lt;= alloc * 1.125) <font color='red'>{</font>
+<a name='L79'>        <i><font color='green'>/* Moderate upsize; overallocate similar to list_resize() */</font></i>
+<a name='L80'>        alloc = size + (size &gt;&gt; 3) + (size &lt; 9 ? 3 : 6);
+<a name='L81'>    <font color='red'>}</font>
+<a name='L82'>    <b>else</b> <font color='red'>{</font>
+<a name='L83'>        <i><font color='green'>/* Major upsize; resize up to exact size */</font></i>
+<a name='L84'>        alloc = size + 1;
+<a name='L85'>    <font color='red'>}</font>
+<a name='L86'>
+<a name='L87'>    <b>if</b> (alloc &gt; ((<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>)-1) / <b>sizeof</b>(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>))
+<a name='L88'>        <b>goto</b> <a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a>;
+<a name='L89'>    new_buf = (<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *)<a href='../S/2803.html#L1775' title='Defined at 1775 in Objects/object.c.'>PyMem_Realloc</a>(self-&gt;buf,
+<a name='L90'>                                          alloc * <b>sizeof</b>(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>));
+<a name='L91'>    <b>if</b> (new_buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L92'>        <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L93'>        <b>return</b> -1;
+<a name='L94'>    <font color='red'>}</font>
+<a name='L95'>    self-&gt;buf_size = alloc;
+<a name='L96'>    self-&gt;buf = new_buf;
+<a name='L97'>
+<a name='L98'>    <b>return</b> 0;
+<a name='L99'>
+<a name='L100'>  <a href='../S/2674.html#L167' title='Defined at 167 in Modules/fpetestmodule.c.'>overflow</a>:
+<a name='L101'>    <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L102'>                    "new buffer size too large");
+<a name='L103'>    <b>return</b> -1;
+<a name='L104'><font color='red'>}</font>
+<a name='L105'>
+<a name='L106'><i><font color='green'>/* Internal routine for writing a whole PyUnicode object to the buffer of a</font></i>
+<a name='L107'><i><font color='green'>   StringIO object. Returns 0 on success, or -1 on error. */</font></i>
+<a name='L108'><b>static</b> <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>
+<a name='L109'><a href='../R/11479.html' title='Multiple refered from 2 places.'>write_str</a>(stringio *self, PyObject *obj)
+<a name='L110'><font color='red'>{</font>
+<a name='L111'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *str;
+<a name='L112'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len;
+<a name='L113'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *decoded = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L114'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;buf != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L115'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(self-&gt;pos &gt;= 0);
+<a name='L116'>
+<a name='L117'>    <b>if</b> (self-&gt;decoder != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L118'>        decoded = <a href='../S/2575.html#L245' title='Defined at 245 in Modules/_io/textio.c.'>_PyIncrementalNewlineDecoder_decode</a>(
+<a name='L119'>            self-&gt;decoder, obj, 1 <i><font color='green'>/* always final */</font></i>);
+<a name='L120'>    <font color='red'>}</font>
+<a name='L121'>    <b>else</b> <font color='red'>{</font>
+<a name='L122'>        decoded = obj;
+<a name='L123'>        Py_INCREF(decoded);
+<a name='L124'>    <font color='red'>}</font>
+<a name='L125'>    <b>if</b> (self-&gt;writenl) <font color='red'>{</font>
+<a name='L126'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *translated = <a href='../D/4030.html' title='Multiple defined in 3 places.'>PyUnicode_Replace</a>(
+<a name='L127'>            decoded, _PyIO_str_nl, self-&gt;writenl, -1);
+<a name='L128'>        Py_DECREF(decoded);
+<a name='L129'>        decoded = translated;
+<a name='L130'>    <font color='red'>}</font>
+<a name='L131'>    <b>if</b> (decoded == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L132'>        <b>return</b> -1;
+<a name='L133'>
+<a name='L134'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyUnicode_Check(decoded));
+<a name='L135'>    str = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(decoded);
+<a name='L136'>    len = <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(decoded);
+<a name='L137'>
+<a name='L138'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(len &gt;= 0);
+<a name='L139'>
+<a name='L140'>    <i><font color='green'>/* This overflow check is not strictly necessary. However, it avoids us to</font></i>
+<a name='L141'><i><font color='green'>       deal with funky things like comparing an unsigned and a signed</font></i>
+<a name='L142'><i><font color='green'>       integer. */</font></i>
+<a name='L143'>    <b>if</b> (self-&gt;pos &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a> - len) <font color='red'>{</font>
+<a name='L144'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L145'>                        "new position too large");
+<a name='L146'>        <b>goto</b> fail;
+<a name='L147'>    <font color='red'>}</font>
+<a name='L148'>    <b>if</b> (self-&gt;pos + len &gt; self-&gt;string_size) <font color='red'>{</font>
+<a name='L149'>        <b>if</b> (<a href='../D/10872.html' title='Multiple defined in 2 places.'>resize_buffer</a>(self, self-&gt;pos + len) &lt; 0)
+<a name='L150'>            <b>goto</b> fail;
+<a name='L151'>    <font color='red'>}</font>
+<a name='L152'>
+<a name='L153'>    <b>if</b> (self-&gt;pos &gt; self-&gt;string_size) <font color='red'>{</font>
+<a name='L154'>        <i><font color='green'>/* In case of overseek, pad with null bytes the buffer region between</font></i>
+<a name='L155'><i><font color='green'>           the end of stream and the current position.</font></i>
+<a name='L156'><i><font color='green'></font></i>
+<a name='L157'><i><font color='green'>          0   lo      string_size                           hi</font></i>
+<a name='L158'><i><font color='green'>          |   |&lt;---used---&gt;|&lt;----------available-----------&gt;|</font></i>
+<a name='L159'><i><font color='green'>          |   |            &lt;--to pad--&gt;|&lt;---to write---&gt;    |</font></i>
+<a name='L160'><i><font color='green'>          0   buf                   positon</font></i>
+<a name='L161'><i><font color='green'></font></i>
+<a name='L162'><i><font color='green'>        */</font></i>
+<a name='L163'>        memset(self-&gt;buf + self-&gt;string_size, '\0',
+<a name='L164'>               (self-&gt;pos - self-&gt;string_size) * <b>sizeof</b>(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>));
+<a name='L165'>    <font color='red'>}</font>
+<a name='L166'>
+<a name='L167'>    <i><font color='green'>/* Copy the data to the internal buffer, overwriting some of the</font></i>
+<a name='L168'><i><font color='green'>       existing data if self-&gt;pos &lt; self-&gt;string_size. */</font></i>
+<a name='L169'>    <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(self-&gt;buf + self-&gt;pos, str, len * <b>sizeof</b>(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>));
+<a name='L170'>    self-&gt;pos += len;
+<a name='L171'>
+<a name='L172'>    <i><font color='green'>/* Set the new length of the internal string if it has changed. */</font></i>
+<a name='L173'>    <b>if</b> (self-&gt;string_size &lt; self-&gt;pos) <font color='red'>{</font>
+<a name='L174'>        self-&gt;string_size = self-&gt;pos;
+<a name='L175'>    <font color='red'>}</font>
+<a name='L176'>
+<a name='L177'>    Py_DECREF(decoded);
+<a name='L178'>    <b>return</b> 0;
+<a name='L179'>
+<a name='L180'>fail:
+<a name='L181'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(decoded);
+<a name='L182'>    <b>return</b> -1;
+<a name='L183'><font color='red'>}</font>
+<a name='L184'>
+<a name='L185'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_getvalue_doc,
+<a name='L186'>    "Retrieve the entire contents of the object.");
+<a name='L187'>
+<a name='L188'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L189'><a href='../R/10550.html' title='Multiple refered from 2 places.'>stringio_getvalue</a>(stringio *self)
+<a name='L190'><font color='red'>{</font>
+<a name='L191'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L192'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L193'>    <b>return</b> <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(self-&gt;buf, self-&gt;string_size);
+<a name='L194'><font color='red'>}</font>
+<a name='L195'>
+<a name='L196'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_tell_doc,
+<a name='L197'>    "Tell the current file position.");
+<a name='L198'>
+<a name='L199'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L200'><a href='../S/2574.html#L833' title='Refered from 833 in Modules/_io/stringio.c.'>stringio_tell</a>(stringio *self)
+<a name='L201'><font color='red'>{</font>
+<a name='L202'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L203'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L204'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(self-&gt;pos);
+<a name='L205'><font color='red'>}</font>
+<a name='L206'>
+<a name='L207'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_read_doc,
+<a name='L208'>    "Read at most n characters, returned as a string.\n"
+<a name='L209'>    "\n"
+<a name='L210'>    "If the argument is negative or omitted, read until EOF\n"
+<a name='L211'>    "is reached. Return an empty string at EOF.\n");
+<a name='L212'>
+<a name='L213'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L214'><a href='../S/2574.html#L831' title='Refered from 831 in Modules/_io/stringio.c.'>stringio_read</a>(stringio *self, PyObject *args)
+<a name='L215'><font color='red'>{</font>
+<a name='L216'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size, n;
+<a name='L217'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *output;
+<a name='L218'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = Py_None;
+<a name='L219'>
+<a name='L220'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L221'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|O:read", &amp;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>))
+<a name='L222'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L223'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L224'>
+<a name='L225'>    <b>if</b> (<a href='../S/2775.html#L736' title='Defined at 736 in Objects/abstract.c.'>PyNumber_Check</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)) <font color='red'>{</font>
+<a name='L226'>        size = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, PyExc_OverflowError);
+<a name='L227'>        <b>if</b> (size == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L228'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L229'>    <font color='red'>}</font>
+<a name='L230'>    <b>else</b> <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> == Py_None) <font color='red'>{</font>
+<a name='L231'>        <i><font color='green'>/* Read until EOF is reached, by default. */</font></i>
+<a name='L232'>        size = -1;
+<a name='L233'>    <font color='red'>}</font>
+<a name='L234'>    <b>else</b> <font color='red'>{</font>
+<a name='L235'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError, "integer argument expected, got '%s'",
+<a name='L236'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)-&gt;tp_name);
+<a name='L237'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L238'>    <font color='red'>}</font>
+<a name='L239'>
+<a name='L240'>    <i><font color='green'>/* adjust invalid sizes */</font></i>
+<a name='L241'>    n = self-&gt;string_size - self-&gt;pos;
+<a name='L242'>    <b>if</b> (size &lt; 0 || size &gt; n) <font color='red'>{</font>
+<a name='L243'>        size = n;
+<a name='L244'>        <b>if</b> (size &lt; 0)
+<a name='L245'>            size = 0;
+<a name='L246'>    <font color='red'>}</font>
+<a name='L247'>
+<a name='L248'>    output = self-&gt;buf + self-&gt;pos;
+<a name='L249'>    self-&gt;pos += size;
+<a name='L250'>    <b>return</b> <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(output, size);
+<a name='L251'><font color='red'>}</font>
+<a name='L252'>
+<a name='L253'><i><font color='green'>/* Internal helper, used by stringio_readline and stringio_iternext */</font></i>
+<a name='L254'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L255'><a href='../R/5860.html' title='Multiple refered from 2 places.'>_stringio_readline</a>(stringio *self, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> limit)
+<a name='L256'><font color='red'>{</font>
+<a name='L257'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *start, *end, old_char;
+<a name='L258'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len, consumed;
+<a name='L259'>
+<a name='L260'>    <i><font color='green'>/* In case of overseek, return the empty string */</font></i>
+<a name='L261'>    <b>if</b> (self-&gt;pos &gt;= self-&gt;string_size)
+<a name='L262'>        <b>return</b> <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>("");
+<a name='L263'>
+<a name='L264'>    start = self-&gt;buf + self-&gt;pos;
+<a name='L265'>    <b>if</b> (limit &lt; 0 || limit &gt; self-&gt;string_size - self-&gt;pos)
+<a name='L266'>        limit = self-&gt;string_size - self-&gt;pos;
+<a name='L267'>
+<a name='L268'>    end = start + limit;
+<a name='L269'>    old_char = *end;
+<a name='L270'>    *end = '\0';
+<a name='L271'>    len = <a href='../S/2575.html#L1590' title='Defined at 1590 in Modules/_io/textio.c.'>_PyIO_find_line_ending</a>(
+<a name='L272'>        self-&gt;readtranslate, self-&gt;readuniversal, self-&gt;readnl,
+<a name='L273'>        start, end, &amp;consumed);
+<a name='L274'>    *end = old_char;
+<a name='L275'>    <i><font color='green'>/* If we haven't found any line ending, we just return everything</font></i>
+<a name='L276'><i><font color='green'>       (`consumed` is ignored). */</font></i>
+<a name='L277'>    <b>if</b> (len &lt; 0)
+<a name='L278'>        len = limit;
+<a name='L279'>    self-&gt;pos += len;
+<a name='L280'>    <b>return</b> <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(start, len);
+<a name='L281'><font color='red'>}</font>
+<a name='L282'>
+<a name='L283'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_readline_doc,
+<a name='L284'>    "Read until newline or EOF.\n"
+<a name='L285'>    "\n"
+<a name='L286'>    "Returns an empty string if EOF is hit immediately.\n");
+<a name='L287'>
+<a name='L288'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L289'><a href='../S/2574.html#L832' title='Refered from 832 in Modules/_io/stringio.c.'>stringio_readline</a>(stringio *self, PyObject *args)
+<a name='L290'><font color='red'>{</font>
+<a name='L291'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = Py_None;
+<a name='L292'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> limit = -1;
+<a name='L293'>
+<a name='L294'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L295'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|O:readline", &amp;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>))
+<a name='L296'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L297'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L298'>
+<a name='L299'>    <b>if</b> (<a href='../S/2775.html#L736' title='Defined at 736 in Objects/abstract.c.'>PyNumber_Check</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)) <font color='red'>{</font>
+<a name='L300'>        limit = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, PyExc_OverflowError);
+<a name='L301'>        <b>if</b> (limit == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L302'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L303'>    <font color='red'>}</font>
+<a name='L304'>    <b>else</b> <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> != Py_None) <font color='red'>{</font>
+<a name='L305'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError, "integer argument expected, got '%s'",
+<a name='L306'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)-&gt;tp_name);
+<a name='L307'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L308'>    <font color='red'>}</font>
+<a name='L309'>    <b>return</b> <a href='../S/2574.html#L255' title='Defined at 255 in Modules/_io/stringio.c.'>_stringio_readline</a>(self, limit);
+<a name='L310'><font color='red'>}</font>
+<a name='L311'>
+<a name='L312'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L313'><a href='../S/2574.html#L888' title='Refered from 888 in Modules/_io/stringio.c.'>stringio_iternext</a>(stringio *self)
+<a name='L314'><font color='red'>{</font>
+<a name='L315'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *line;
+<a name='L316'>
+<a name='L317'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L318'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L319'>
+<a name='L320'>    <b>if</b> (<a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self) == &amp;PyStringIO_Type) <font color='red'>{</font>
+<a name='L321'>        <i><font color='green'>/* Skip method call overhead for speed */</font></i>
+<a name='L322'>        line = <a href='../S/2574.html#L255' title='Defined at 255 in Modules/_io/stringio.c.'>_stringio_readline</a>(self, -1);
+<a name='L323'>    <font color='red'>}</font>
+<a name='L324'>    <b>else</b> <font color='red'>{</font>
+<a name='L325'>        <i><font color='green'>/* XXX is subclassing StringIO really supported? */</font></i>
+<a name='L326'>        line = <a href='../S/2775.html#L2330' title='Defined at 2330 in Objects/abstract.c.'>PyObject_CallMethodObjArgs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self,
+<a name='L327'>                                           _PyIO_str_readline, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L328'>        <b>if</b> (line &amp;&amp; !PyUnicode_Check(line)) <font color='red'>{</font>
+<a name='L329'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_IOError,
+<a name='L330'>                         "readline() should have returned an str object, "
+<a name='L331'>                         "not '%.200s'", <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(line)-&gt;tp_name);
+<a name='L332'>            Py_DECREF(line);
+<a name='L333'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L334'>        <font color='red'>}</font>
+<a name='L335'>    <font color='red'>}</font>
+<a name='L336'>
+<a name='L337'>    <b>if</b> (line == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L338'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L339'>
+<a name='L340'>    <b>if</b> (<a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(line) == 0) <font color='red'>{</font>
+<a name='L341'>        <i><font color='green'>/* Reached EOF */</font></i>
+<a name='L342'>        Py_DECREF(line);
+<a name='L343'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L344'>    <font color='red'>}</font>
+<a name='L345'>
+<a name='L346'>    <b>return</b> line;
+<a name='L347'><font color='red'>}</font>
+<a name='L348'>
+<a name='L349'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_truncate_doc,
+<a name='L350'>    "Truncate size to pos.\n"
+<a name='L351'>    "\n"
+<a name='L352'>    "The pos argument defaults to the current file position, as\n"
+<a name='L353'>    "returned by tell().  The current file position is unchanged.\n"
+<a name='L354'>    "Returns the new absolute position.\n");
+<a name='L355'>
+<a name='L356'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L357'><a href='../S/2574.html#L834' title='Refered from 834 in Modules/_io/stringio.c.'>stringio_truncate</a>(stringio *self, PyObject *args)
+<a name='L358'><font color='red'>{</font>
+<a name='L359'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size;
+<a name='L360'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = Py_None;
+<a name='L361'>
+<a name='L362'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L363'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "|O:truncate", &amp;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>))
+<a name='L364'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L365'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L366'>
+<a name='L367'>    <b>if</b> (<a href='../S/2775.html#L736' title='Defined at 736 in Objects/abstract.c.'>PyNumber_Check</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)) <font color='red'>{</font>
+<a name='L368'>        size = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, PyExc_OverflowError);
+<a name='L369'>        <b>if</b> (size == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L370'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L371'>    <font color='red'>}</font>
+<a name='L372'>    <b>else</b> <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> == Py_None) <font color='red'>{</font>
+<a name='L373'>        <i><font color='green'>/* Truncate to current position if no argument is passed. */</font></i>
+<a name='L374'>        size = self-&gt;pos;
+<a name='L375'>    <font color='red'>}</font>
+<a name='L376'>    <b>else</b> <font color='red'>{</font>
+<a name='L377'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError, "integer argument expected, got '%s'",
+<a name='L378'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)-&gt;tp_name);
+<a name='L379'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L380'>    <font color='red'>}</font>
+<a name='L381'>
+<a name='L382'>    <b>if</b> (size &lt; 0) <font color='red'>{</font>
+<a name='L383'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L384'>                     "Negative size value %zd", size);
+<a name='L385'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L386'>    <font color='red'>}</font>
+<a name='L387'>
+<a name='L388'>    <b>if</b> (size &lt; self-&gt;string_size) <font color='red'>{</font>
+<a name='L389'>        <b>if</b> (<a href='../D/10872.html' title='Multiple defined in 2 places.'>resize_buffer</a>(self, size) &lt; 0)
+<a name='L390'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L391'>        self-&gt;string_size = size;
+<a name='L392'>    <font color='red'>}</font>
+<a name='L393'>
+<a name='L394'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(size);
+<a name='L395'><font color='red'>}</font>
+<a name='L396'>
+<a name='L397'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_seek_doc,
+<a name='L398'>    "Change stream position.\n"
+<a name='L399'>    "\n"
+<a name='L400'>    "Seek to character offset pos relative to position indicated by whence:\n"
+<a name='L401'>    "    0  Start of stream (the default).  pos should be &gt;= 0;\n"
+<a name='L402'>    "    1  Current position - pos must be 0;\n"
+<a name='L403'>    "    2  End of stream - pos must be 0.\n"
+<a name='L404'>    "Returns the new absolute position.\n");
+<a name='L405'>
+<a name='L406'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L407'><a href='../S/2574.html#L835' title='Refered from 835 in Modules/_io/stringio.c.'>stringio_seek</a>(stringio *self, PyObject *args)
+<a name='L408'><font color='red'>{</font>
+<a name='L409'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos;
+<a name='L410'>    <b>int</b> mode = 0;
+<a name='L411'>
+<a name='L412'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L413'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "n|i:seek", &amp;pos, &amp;mode))
+<a name='L414'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L415'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L416'>
+<a name='L417'>    <b>if</b> (mode != 0 &amp;&amp; mode != 1 &amp;&amp; mode != 2) <font color='red'>{</font>
+<a name='L418'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L419'>                     "Invalid whence (%i, should be 0, 1 or 2)", mode);
+<a name='L420'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L421'>    <font color='red'>}</font>
+<a name='L422'>    <b>else</b> <b>if</b> (pos &lt; 0 &amp;&amp; mode == 0) <font color='red'>{</font>
+<a name='L423'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L424'>                     "Negative seek position %zd", pos);
+<a name='L425'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L426'>    <font color='red'>}</font>
+<a name='L427'>    <b>else</b> <b>if</b> (mode != 0 &amp;&amp; pos != 0) <font color='red'>{</font>
+<a name='L428'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_IOError,
+<a name='L429'>                        "Can't do nonzero cur-relative seeks");
+<a name='L430'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L431'>    <font color='red'>}</font>
+<a name='L432'>
+<a name='L433'>    <i><font color='green'>/* mode 0: offset relative to beginning of the string.</font></i>
+<a name='L434'><i><font color='green'>       mode 1: no change to current position.</font></i>
+<a name='L435'><i><font color='green'>       mode 2: change position to end of file. */</font></i>
+<a name='L436'>    <b>if</b> (mode == 1) <font color='red'>{</font>
+<a name='L437'>        pos = self-&gt;pos;
+<a name='L438'>    <font color='red'>}</font>
+<a name='L439'>    <b>else</b> <b>if</b> (mode == 2) <font color='red'>{</font>
+<a name='L440'>        pos = self-&gt;string_size;
+<a name='L441'>    <font color='red'>}</font>
+<a name='L442'>
+<a name='L443'>    self-&gt;pos = pos;
+<a name='L444'>
+<a name='L445'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(self-&gt;pos);
+<a name='L446'><font color='red'>}</font>
+<a name='L447'>
+<a name='L448'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_write_doc,
+<a name='L449'>    "Write string to file.\n"
+<a name='L450'>    "\n"
+<a name='L451'>    "Returns the number of characters written, which is always equal to\n"
+<a name='L452'>    "the length of the string.\n");
+<a name='L453'>
+<a name='L454'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L455'><a href='../S/2574.html#L836' title='Refered from 836 in Modules/_io/stringio.c.'>stringio_write</a>(stringio *self, PyObject *obj)
+<a name='L456'><font color='red'>{</font>
+<a name='L457'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> size;
+<a name='L458'>
+<a name='L459'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L460'>    <b>if</b> (!PyUnicode_Check(obj)) <font color='red'>{</font>
+<a name='L461'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError, "string argument expected, got '%s'",
+<a name='L462'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(obj)-&gt;tp_name);
+<a name='L463'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L464'>    <font color='red'>}</font>
+<a name='L465'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L466'>    size = <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(obj);
+<a name='L467'>
+<a name='L468'>    <b>if</b> (size &gt; 0 &amp;&amp; <a href='../S/2574.html#L109' title='Defined at 109 in Modules/_io/stringio.c.'>write_str</a>(self, obj) &lt; 0)
+<a name='L469'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L470'>
+<a name='L471'>    <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(size);
+<a name='L472'><font color='red'>}</font>
+<a name='L473'>
+<a name='L474'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(stringio_close_doc,
+<a name='L475'>    "Close the IO object. Attempting any further operation after the\n"
+<a name='L476'>    "object is closed will raise a ValueError.\n"
+<a name='L477'>    "\n"
+<a name='L478'>    "This method has no effect if the file is already closed.\n");
+<a name='L479'>
+<a name='L480'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L481'><a href='../S/2574.html#L829' title='Refered from 829 in Modules/_io/stringio.c.'>stringio_close</a>(stringio *self)
+<a name='L482'><font color='red'>{</font>
+<a name='L483'>    self-&gt;closed = 1;
+<a name='L484'>    <i><font color='green'>/* Free up some memory */</font></i>
+<a name='L485'>    <b>if</b> (<a href='../D/10872.html' title='Multiple defined in 2 places.'>resize_buffer</a>(self, 0) &lt; 0)
+<a name='L486'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L487'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;readnl);
+<a name='L488'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;writenl);
+<a name='L489'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;decoder);
+<a name='L490'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L491'><font color='red'>}</font>
+<a name='L492'>
+<a name='L493'><b>static</b> <b>int</b>
+<a name='L494'><a href='../S/2574.html#L883' title='Refered from 883 in Modules/_io/stringio.c.'>stringio_traverse</a>(stringio *self, visitproc visit, <b>void</b> *arg)
+<a name='L495'><font color='red'>{</font>
+<a name='L496'>    Py_VISIT(self-&gt;dict);
+<a name='L497'>    <b>return</b> 0;
+<a name='L498'><font color='red'>}</font>
+<a name='L499'>
+<a name='L500'><b>static</b> <b>int</b>
+<a name='L501'><a href='../S/2574.html#L884' title='Refered from 884 in Modules/_io/stringio.c.'>stringio_clear</a>(stringio *self)
+<a name='L502'><font color='red'>{</font>
+<a name='L503'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;dict);
+<a name='L504'>    <b>return</b> 0;
+<a name='L505'><font color='red'>}</font>
+<a name='L506'>
+<a name='L507'><b>static</b> <b>void</b>
+<a name='L508'><a href='../S/2574.html#L865' title='Refered from 865 in Modules/_io/stringio.c.'>stringio_dealloc</a>(stringio *self)
+<a name='L509'><font color='red'>{</font>
+<a name='L510'>    <a href='../S/545.html#L281' title='Defined at 281 in Include/objimpl.h.'>_PyObject_GC_UNTRACK</a>(self);
+<a name='L511'>    self-&gt;ok = 0;
+<a name='L512'>    <b>if</b> (self-&gt;buf) <font color='red'>{</font>
+<a name='L513'>        <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>(self-&gt;buf);
+<a name='L514'>        self-&gt;buf = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L515'>    <font color='red'>}</font>
+<a name='L516'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;readnl);
+<a name='L517'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;writenl);
+<a name='L518'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;decoder);
+<a name='L519'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;dict);
+<a name='L520'>    <b>if</b> (self-&gt;weakreflist != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L521'>        <a href='../S/2830.html#L872' title='Defined at 872 in Objects/weakrefobject.c.'>PyObject_ClearWeakRefs</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *) self);
+<a name='L522'>    <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_free(self);
+<a name='L523'><font color='red'>}</font>
+<a name='L524'>
+<a name='L525'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L526'><a href='../S/2574.html#L899' title='Refered from 899 in Modules/_io/stringio.c.'>stringio_new</a>(PyTypeObject *type, PyObject *args, PyObject *kwds)
+<a name='L527'><font color='red'>{</font>
+<a name='L528'>    <a href='../S/2574.html#L27' title='Defined at 27 in Modules/_io/stringio.c.'>stringio</a> *self;
+<a name='L529'>
+<a name='L530'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(type != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; type-&gt;tp_alloc != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L531'>    self = (<a href='../S/2574.html#L27' title='Defined at 27 in Modules/_io/stringio.c.'>stringio</a> *)type-&gt;tp_alloc(type, 0);
+<a name='L532'>    <b>if</b> (self == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L533'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L534'>
+<a name='L535'>    <i><font color='green'>/* tp_alloc initializes all the fields to zero. So we don't have to</font></i>
+<a name='L536'><i><font color='green'>       initialize them here. */</font></i>
+<a name='L537'>
+<a name='L538'>    self-&gt;buf = (<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(0);
+<a name='L539'>    <b>if</b> (self-&gt;buf == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L540'>        Py_DECREF(self);
+<a name='L541'>        <b>return</b> <a href='../S/3106.html#L334' title='Defined at 334 in Python/errors.c.'>PyErr_NoMemory</a>();
+<a name='L542'>    <font color='red'>}</font>
+<a name='L543'>
+<a name='L544'>    <b>return</b> (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self;
+<a name='L545'><font color='red'>}</font>
+<a name='L546'>
+<a name='L547'><b>static</b> <b>int</b>
+<a name='L548'><a href='../R/10551.html' title='Multiple refered from 2 places.'>stringio_init</a>(stringio *self, PyObject *args, PyObject *kwds)
+<a name='L549'><font color='red'>{</font>
+<a name='L550'>    <b>char</b> *kwlist[] = <font color='red'>{</font>"initial_value", "newline", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L551'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L552'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newline_obj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L553'>    <b>char</b> *newline = "\n";
+<a name='L554'>
+<a name='L555'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "|OO:__init__", kwlist,
+<a name='L556'>                                     &amp;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, &amp;newline_obj))
+<a name='L557'>        <b>return</b> -1;
+<a name='L558'>
+<a name='L559'>    <i><font color='green'>/* Parse the newline argument. This used to be done with the 'z'</font></i>
+<a name='L560'><i><font color='green'>       specifier, however this allowed any object with the buffer interface to</font></i>
+<a name='L561'><i><font color='green'>       be converted. Thus we have to parse it manually since we only want to</font></i>
+<a name='L562'><i><font color='green'>       allow unicode objects or None. */</font></i>
+<a name='L563'>    <b>if</b> (newline_obj == Py_None) <font color='red'>{</font>
+<a name='L564'>        newline = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L565'>    <font color='red'>}</font>
+<a name='L566'>    <b>else</b> <b>if</b> (newline_obj) <font color='red'>{</font>
+<a name='L567'>        <b>if</b> (!PyUnicode_Check(newline_obj)) <font color='red'>{</font>
+<a name='L568'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L569'>                         "newline must be str or None, not %.200s",
+<a name='L570'>                         <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(newline_obj)-&gt;tp_name);
+<a name='L571'>            <b>return</b> -1;
+<a name='L572'>        <font color='red'>}</font>
+<a name='L573'>        newline = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(newline_obj);
+<a name='L574'>        <b>if</b> (newline == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L575'>            <b>return</b> -1;
+<a name='L576'>    <font color='red'>}</font>
+<a name='L577'>
+<a name='L578'>    <b>if</b> (newline &amp;&amp; newline[0] != '\0'
+<a name='L579'>        &amp;&amp; !(newline[0] == '\n' &amp;&amp; newline[1] == '\0')
+<a name='L580'>        &amp;&amp; !(newline[0] == '\r' &amp;&amp; newline[1] == '\0')
+<a name='L581'>        &amp;&amp; !(newline[0] == '\r' &amp;&amp; newline[1] == '\n' &amp;&amp; newline[2] == '\0')) <font color='red'>{</font>
+<a name='L582'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L583'>                     "illegal newline value: %R", newline_obj);
+<a name='L584'>        <b>return</b> -1;
+<a name='L585'>    <font color='red'>}</font>
+<a name='L586'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &amp;&amp; <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> != Py_None &amp;&amp; !PyUnicode_Check(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)) <font color='red'>{</font>
+<a name='L587'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L588'>                     "initial_value must be str or None, not %.200s",
+<a name='L589'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)-&gt;tp_name);
+<a name='L590'>        <b>return</b> -1;
+<a name='L591'>    <font color='red'>}</font>
+<a name='L592'>
+<a name='L593'>    self-&gt;ok = 0;
+<a name='L594'>
+<a name='L595'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;readnl);
+<a name='L596'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;writenl);
+<a name='L597'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(self-&gt;decoder);
+<a name='L598'>
+<a name='L599'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>((newline != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; newline_obj != Py_None) ||
+<a name='L600'>           (newline == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; newline_obj == Py_None));
+<a name='L601'>
+<a name='L602'>    <b>if</b> (newline) <font color='red'>{</font>
+<a name='L603'>        self-&gt;readnl = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(newline);
+<a name='L604'>        <b>if</b> (self-&gt;readnl == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L605'>            <b>return</b> -1;
+<a name='L606'>    <font color='red'>}</font>
+<a name='L607'>    self-&gt;readuniversal = (newline == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> || newline[0] == '\0');
+<a name='L608'>    self-&gt;readtranslate = (newline == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L609'>    <i><font color='green'>/* If newline == "", we don't translate anything.</font></i>
+<a name='L610'><i><font color='green'>       If newline == "\n" or newline == None, we translate to "\n", which is</font></i>
+<a name='L611'><i><font color='green'>       a no-op.</font></i>
+<a name='L612'><i><font color='green'>       (for newline == None, TextIOWrapper translates to os.sepline, but it</font></i>
+<a name='L613'><i><font color='green'>       is pointless for StringIO)</font></i>
+<a name='L614'><i><font color='green'>    */</font></i>
+<a name='L615'>    <b>if</b> (newline != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; newline[0] == '\r') <font color='red'>{</font>
+<a name='L616'>        self-&gt;writenl = self-&gt;readnl;
+<a name='L617'>        Py_INCREF(self-&gt;writenl);
+<a name='L618'>    <font color='red'>}</font>
+<a name='L619'>
+<a name='L620'>    <b>if</b> (self-&gt;readuniversal) <font color='red'>{</font>
+<a name='L621'>        self-&gt;decoder = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(
+<a name='L622'>            (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyIncrementalNewlineDecoder_Type,
+<a name='L623'>            "Oi", Py_None, (<b>int</b>) self-&gt;readtranslate);
+<a name='L624'>        <b>if</b> (self-&gt;decoder == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L625'>            <b>return</b> -1;
+<a name='L626'>    <font color='red'>}</font>
+<a name='L627'>
+<a name='L628'>    <i><font color='green'>/* Now everything is set up, resize buffer to size of initial value,</font></i>
+<a name='L629'><i><font color='green'>       and copy it */</font></i>
+<a name='L630'>    self-&gt;string_size = 0;
+<a name='L631'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> &amp;&amp; <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> != Py_None) <font color='red'>{</font>
+<a name='L632'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> len = <a href='../D/4020.html' title='Multiple defined in 3 places.'>PyUnicode_GetSize</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L633'>        <i><font color='green'>/* This is a heuristic, for newline translation might change</font></i>
+<a name='L634'><i><font color='green'>           the string length. */</font></i>
+<a name='L635'>        <b>if</b> (<a href='../D/10872.html' title='Multiple defined in 2 places.'>resize_buffer</a>(self, len) &lt; 0)
+<a name='L636'>            <b>return</b> -1;
+<a name='L637'>        self-&gt;pos = 0;
+<a name='L638'>        <b>if</b> (<a href='../S/2574.html#L109' title='Defined at 109 in Modules/_io/stringio.c.'>write_str</a>(self, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) &lt; 0)
+<a name='L639'>            <b>return</b> -1;
+<a name='L640'>    <font color='red'>}</font>
+<a name='L641'>    <b>else</b> <font color='red'>{</font>
+<a name='L642'>        <b>if</b> (<a href='../D/10872.html' title='Multiple defined in 2 places.'>resize_buffer</a>(self, 0) &lt; 0)
+<a name='L643'>            <b>return</b> -1;
+<a name='L644'>    <font color='red'>}</font>
+<a name='L645'>    self-&gt;pos = 0;
+<a name='L646'>
+<a name='L647'>    self-&gt;closed = 0;
+<a name='L648'>    self-&gt;ok = 1;
+<a name='L649'>    <b>return</b> 0;
+<a name='L650'><font color='red'>}</font>
+<a name='L651'>
+<a name='L652'><i><font color='green'>/* Properties and pseudo-properties */</font></i>
+<a name='L653'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L654'><a href='../S/2574.html#L838' title='Refered from 838 in Modules/_io/stringio.c.'>stringio_seekable</a>(stringio *self, PyObject *args)
+<a name='L655'><font color='red'>{</font>
+<a name='L656'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L657'>    Py_RETURN_TRUE;
+<a name='L658'><font color='red'>}</font>
+<a name='L659'>
+<a name='L660'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L661'><a href='../S/2574.html#L839' title='Refered from 839 in Modules/_io/stringio.c.'>stringio_readable</a>(stringio *self, PyObject *args)
+<a name='L662'><font color='red'>{</font>
+<a name='L663'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L664'>    Py_RETURN_TRUE;
+<a name='L665'><font color='red'>}</font>
+<a name='L666'>
+<a name='L667'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L668'><a href='../S/2574.html#L840' title='Refered from 840 in Modules/_io/stringio.c.'>stringio_writable</a>(stringio *self, PyObject *args)
+<a name='L669'><font color='red'>{</font>
+<a name='L670'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L671'>    Py_RETURN_TRUE;
+<a name='L672'><font color='red'>}</font>
+<a name='L673'>
+<a name='L674'><i><font color='green'>/* Pickling support.</font></i>
+<a name='L675'><i><font color='green'></font></i>
+<a name='L676'><i><font color='green'>   The implementation of __getstate__ is similar to the one for BytesIO,</font></i>
+<a name='L677'><i><font color='green'>   except that we also save the newline parameter. For __setstate__ and unlike</font></i>
+<a name='L678'><i><font color='green'>   BytesIO, we call __init__ to restore the object's state. Doing so allows us</font></i>
+<a name='L679'><i><font color='green'>   to avoid decoding the complex newline state while keeping the object</font></i>
+<a name='L680'><i><font color='green'>   representation compact.</font></i>
+<a name='L681'><i><font color='green'></font></i>
+<a name='L682'><i><font color='green'>   See comment in bytesio.c regarding why only pickle protocols and onward are</font></i>
+<a name='L683'><i><font color='green'>   supported.</font></i>
+<a name='L684'><i><font color='green'>*/</font></i>
+<a name='L685'>
+<a name='L686'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L687'><a href='../S/2574.html#L842' title='Refered from 842 in Modules/_io/stringio.c.'>stringio_getstate</a>(stringio *self)
+<a name='L688'><font color='red'>{</font>
+<a name='L689'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *initvalue = <a href='../S/2574.html#L189' title='Defined at 189 in Modules/_io/stringio.c.'>stringio_getvalue</a>(self);
+<a name='L690'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict;
+<a name='L691'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L692'>
+<a name='L693'>    <b>if</b> (initvalue == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L694'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L695'>    <b>if</b> (self-&gt;dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L696'>        Py_INCREF(Py_None);
+<a name='L697'>        dict = Py_None;
+<a name='L698'>    <font color='red'>}</font>
+<a name='L699'>    <b>else</b> <font color='red'>{</font>
+<a name='L700'>        dict = <a href='../S/2787.html#L1602' title='Defined at 1602 in Objects/dictobject.c.'>PyDict_Copy</a>(self-&gt;dict);
+<a name='L701'>        <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L702'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L703'>    <font color='red'>}</font>
+<a name='L704'>
+<a name='L705'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../D/4089.html' title='Multiple defined in 2 places.'>Py_BuildValue</a>("(OOnN)", initvalue,
+<a name='L706'>                          self-&gt;readnl ? self-&gt;readnl : Py_None,
+<a name='L707'>                          self-&gt;pos, dict);
+<a name='L708'>    Py_DECREF(initvalue);
+<a name='L709'>    <b>return</b> <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>;
+<a name='L710'><font color='red'>}</font>
+<a name='L711'>
+<a name='L712'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L713'><a href='../S/2574.html#L843' title='Refered from 843 in Modules/_io/stringio.c.'>stringio_setstate</a>(stringio *self, PyObject *state)
+<a name='L714'><font color='red'>{</font>
+<a name='L715'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *initarg;
+<a name='L716'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *position_obj;
+<a name='L717'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict;
+<a name='L718'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos;
+<a name='L719'>
+<a name='L720'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L721'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L722'>
+<a name='L723'>    <i><font color='green'>/* We allow the state tuple to be longer than 4, because we may need</font></i>
+<a name='L724'><i><font color='green'>       someday to extend the object's state without breaking</font></i>
+<a name='L725'><i><font color='green'>       backward-compatibility. */</font></i>
+<a name='L726'>    <b>if</b> (!PyTuple_Check(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>) || <a href='../S/544.html#L118' title='Defined at 118 in Include/object.h.'>Py_SIZE</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>) &lt; 4) <font color='red'>{</font>
+<a name='L727'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L728'>                     "%.200s.__setstate__ argument should be 4-tuple, got %.200s",
+<a name='L729'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(self)-&gt;tp_name, <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>)-&gt;tp_name);
+<a name='L730'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L731'>    <font color='red'>}</font>
+<a name='L732'>
+<a name='L733'>    <i><font color='green'>/* Initialize the object's state. */</font></i>
+<a name='L734'>    initarg = <a href='../S/2823.html#L400' title='Defined at 400 in Objects/tupleobject.c.'>PyTuple_GetSlice</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>, 0, 2);
+<a name='L735'>    <b>if</b> (initarg == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L736'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L737'>    <b>if</b> (<a href='../S/2574.html#L548' title='Defined at 548 in Modules/_io/stringio.c.'>stringio_init</a>(self, initarg, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) &lt; 0) <font color='red'>{</font>
+<a name='L738'>        Py_DECREF(initarg);
+<a name='L739'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L740'>    <font color='red'>}</font>
+<a name='L741'>    Py_DECREF(initarg);
+<a name='L742'>
+<a name='L743'>    <i><font color='green'>/* Restore the buffer state. Even if __init__ did initialize the buffer,</font></i>
+<a name='L744'><i><font color='green'>       we have to initialize it again since __init__ may translates the</font></i>
+<a name='L745'><i><font color='green'>       newlines in the inital_value string. We clearly do not want that</font></i>
+<a name='L746'><i><font color='green'>       because the string value in the state tuple has already been translated</font></i>
+<a name='L747'><i><font color='green'>       once by __init__. So we do not take any chance and replace object's</font></i>
+<a name='L748'><i><font color='green'>       buffer completely. */</font></i>
+<a name='L749'>    <font color='red'>{</font>
+<a name='L750'>        <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *buf = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(PyTuple_GET_ITEM(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>, 0));
+<a name='L751'>        <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> bufsize = <a href='../S/587.html#L404' title='Defined at 404 in Include/unicodeobject.h.'>PyUnicode_GET_SIZE</a>(PyTuple_GET_ITEM(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>, 0));
+<a name='L752'>        <b>if</b> (<a href='../D/10872.html' title='Multiple defined in 2 places.'>resize_buffer</a>(self, bufsize) &lt; 0)
+<a name='L753'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L754'>        <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a>(self-&gt;buf, buf, bufsize * <b>sizeof</b>(<a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a>));
+<a name='L755'>        self-&gt;string_size = bufsize;
+<a name='L756'>    <font color='red'>}</font>
+<a name='L757'>
+<a name='L758'>    <i><font color='green'>/* Set carefully the position value. Alternatively, we could use the seek</font></i>
+<a name='L759'><i><font color='green'>       method instead of modifying self-&gt;pos directly to better protect the</font></i>
+<a name='L760'><i><font color='green'>       object internal state against errneous (or malicious) inputs. */</font></i>
+<a name='L761'>    position_obj = PyTuple_GET_ITEM(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>, 2);
+<a name='L762'>    <b>if</b> (!PyLong_Check(position_obj)) <font color='red'>{</font>
+<a name='L763'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L764'>                     "third item of state must be an integer, got %.200s",
+<a name='L765'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(position_obj)-&gt;tp_name);
+<a name='L766'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L767'>    <font color='red'>}</font>
+<a name='L768'>    pos = <a href='../S/2799.html#L433' title='Defined at 433 in Objects/longobject.c.'>PyLong_AsSsize_t</a>(position_obj);
+<a name='L769'>    <b>if</b> (pos == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L770'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L771'>    <b>if</b> (pos &lt; 0) <font color='red'>{</font>
+<a name='L772'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L773'>                        "position value cannot be negative");
+<a name='L774'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L775'>    <font color='red'>}</font>
+<a name='L776'>    self-&gt;pos = pos;
+<a name='L777'>
+<a name='L778'>    <i><font color='green'>/* Set the dictionary of the instance variables. */</font></i>
+<a name='L779'>    dict = PyTuple_GET_ITEM(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>, 3);
+<a name='L780'>    <b>if</b> (dict != Py_None) <font color='red'>{</font>
+<a name='L781'>        <b>if</b> (!PyDict_Check(dict)) <font color='red'>{</font>
+<a name='L782'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L783'>                         "fourth item of state should be a dict, got a %.200s",
+<a name='L784'>                         <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(dict)-&gt;tp_name);
+<a name='L785'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L786'>        <font color='red'>}</font>
+<a name='L787'>        <b>if</b> (self-&gt;dict) <font color='red'>{</font>
+<a name='L788'>            <i><font color='green'>/* Alternatively, we could replace the internal dictionary</font></i>
+<a name='L789'><i><font color='green'>               completely. However, it seems more practical to just update it. */</font></i>
+<a name='L790'>            <b>if</b> (<a href='../S/2787.html#L1493' title='Defined at 1493 in Objects/dictobject.c.'>PyDict_Update</a>(self-&gt;dict, dict) &lt; 0)
+<a name='L791'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L792'>        <font color='red'>}</font>
+<a name='L793'>        <b>else</b> <font color='red'>{</font>
+<a name='L794'>            Py_INCREF(dict);
+<a name='L795'>            self-&gt;dict = dict;
+<a name='L796'>        <font color='red'>}</font>
+<a name='L797'>    <font color='red'>}</font>
+<a name='L798'>
+<a name='L799'>    <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L800'><font color='red'>}</font>
+<a name='L801'>
+<a name='L802'>
+<a name='L803'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L804'><a href='../S/2574.html#L848' title='Refered from 848 in Modules/_io/stringio.c.'>stringio_closed</a>(stringio *self, <b>void</b> *context)
+<a name='L805'><font color='red'>{</font>
+<a name='L806'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L807'>    <b>return</b> <a href='../D/2761.html' title='Multiple defined in 2 places.'>PyBool_FromLong</a>(self-&gt;closed);
+<a name='L808'><font color='red'>}</font>
+<a name='L809'>
+<a name='L810'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L811'><a href='../S/2574.html#L856' title='Refered from 856 in Modules/_io/stringio.c.'>stringio_line_buffering</a>(stringio *self, <b>void</b> *context)
+<a name='L812'><font color='red'>{</font>
+<a name='L813'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L814'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L815'>    Py_RETURN_FALSE;
+<a name='L816'><font color='red'>}</font>
+<a name='L817'>
+<a name='L818'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L819'><a href='../S/2574.html#L849' title='Refered from 849 in Modules/_io/stringio.c.'>stringio_newlines</a>(stringio *self, <b>void</b> *context)
+<a name='L820'><font color='red'>{</font>
+<a name='L821'>    <a href='../D/526.html' title='Multiple defined in 3 places.'>CHECK_INITIALIZED</a>(self);
+<a name='L822'>    <a href='../D/521.html' title='Multiple defined in 4 places.'>CHECK_CLOSED</a>(self);
+<a name='L823'>    <b>if</b> (self-&gt;decoder == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L824'>        <a href='../S/2562.html#L112' title='Defined at 112 in Modules/_elementtree.c.'>Py_RETURN_NONE</a>;
+<a name='L825'>    <b>return</b> <a href='../S/2803.html#L822' title='Defined at 822 in Objects/object.c.'>PyObject_GetAttr</a>(self-&gt;decoder, _PyIO_str_newlines);
+<a name='L826'><font color='red'>}</font>
+<a name='L827'>
+<a name='L828'><b>static</b> <b>struct</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> stringio_methods[] = <font color='red'>{</font>
+<a name='L829'>    <font color='red'>{</font>"close",    (PyCFunction)<a href='../S/2574.html#L481' title='Defined at 481 in Modules/_io/stringio.c.'>stringio_close</a>,    <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,  stringio_close_doc<font color='red'>}</font>,
+<a name='L830'>    <font color='red'>{</font>"getvalue", (PyCFunction)<a href='../S/2574.html#L189' title='Defined at 189 in Modules/_io/stringio.c.'>stringio_getvalue</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,  stringio_getvalue_doc<font color='red'>}</font>,
+<a name='L831'>    <font color='red'>{</font>"read",     (PyCFunction)<a href='../S/2574.html#L214' title='Defined at 214 in Modules/_io/stringio.c.'>stringio_read</a>,     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, stringio_read_doc<font color='red'>}</font>,
+<a name='L832'>    <font color='red'>{</font>"readline", (PyCFunction)<a href='../S/2574.html#L289' title='Defined at 289 in Modules/_io/stringio.c.'>stringio_readline</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, stringio_readline_doc<font color='red'>}</font>,
+<a name='L833'>    <font color='red'>{</font>"tell",     (PyCFunction)<a href='../S/2574.html#L200' title='Defined at 200 in Modules/_io/stringio.c.'>stringio_tell</a>,     <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a>,  stringio_tell_doc<font color='red'>}</font>,
+<a name='L834'>    <font color='red'>{</font>"truncate", (PyCFunction)<a href='../S/2574.html#L357' title='Defined at 357 in Modules/_io/stringio.c.'>stringio_truncate</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, stringio_truncate_doc<font color='red'>}</font>,
+<a name='L835'>    <font color='red'>{</font>"seek",     (PyCFunction)<a href='../S/2574.html#L407' title='Defined at 407 in Modules/_io/stringio.c.'>stringio_seek</a>,     <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>, stringio_seek_doc<font color='red'>}</font>,
+<a name='L836'>    <font color='red'>{</font>"write",    (PyCFunction)<a href='../S/2574.html#L455' title='Defined at 455 in Modules/_io/stringio.c.'>stringio_write</a>,    METH_O,       stringio_write_doc<font color='red'>}</font>,
+<a name='L837'>
+<a name='L838'>    <font color='red'>{</font>"seekable", (PyCFunction)<a href='../S/2574.html#L654' title='Defined at 654 in Modules/_io/stringio.c.'>stringio_seekable</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L839'>    <font color='red'>{</font>"readable", (PyCFunction)<a href='../S/2574.html#L661' title='Defined at 661 in Modules/_io/stringio.c.'>stringio_readable</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L840'>    <font color='red'>{</font>"writable", (PyCFunction)<a href='../S/2574.html#L668' title='Defined at 668 in Modules/_io/stringio.c.'>stringio_writable</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L841'>
+<a name='L842'>    <font color='red'>{</font>"__getstate__", (PyCFunction)<a href='../S/2574.html#L687' title='Defined at 687 in Modules/_io/stringio.c.'>stringio_getstate</a>, <a href='../S/2858.html#L634' title='Defined at 634 in PC/bdist_wininst/install.c.'>METH_NOARGS</a><font color='red'>}</font>,
+<a name='L843'>    <font color='red'>{</font>"__setstate__", (PyCFunction)<a href='../S/2574.html#L713' title='Defined at 713 in Modules/_io/stringio.c.'>stringio_setstate</a>, METH_O<font color='red'>}</font>,
+<a name='L844'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>        <i><font color='green'>/* sentinel */</font></i>
+<a name='L845'><font color='red'>}</font>;
+<a name='L846'>
+<a name='L847'><b>static</b> <a href='../D/3272.html' title='Multiple defined in 2 places.'>PyGetSetDef</a> stringio_getset[] = <font color='red'>{</font>
+<a name='L848'>    <font color='red'>{</font>"closed",         (getter)<a href='../S/2574.html#L804' title='Defined at 804 in Modules/_io/stringio.c.'>stringio_closed</a>,         <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L849'>    <font color='red'>{</font>"newlines",       (getter)<a href='../S/2574.html#L819' title='Defined at 819 in Modules/_io/stringio.c.'>stringio_newlines</a>,       <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L850'>    <i><font color='green'>/*  (following comments straight off of the original Python wrapper:)</font></i>
+<a name='L851'><i><font color='green'>        XXX Cruft to support the TextIOWrapper API. This would only</font></i>
+<a name='L852'><i><font color='green'>        be meaningful if StringIO supported the buffer attribute.</font></i>
+<a name='L853'><i><font color='green'>        Hopefully, a better solution, than adding these pseudo-attributes,</font></i>
+<a name='L854'><i><font color='green'>        will be found.</font></i>
+<a name='L855'><i><font color='green'>    */</font></i>
+<a name='L856'>    <font color='red'>{</font>"line_buffering", (getter)<a href='../S/2574.html#L811' title='Defined at 811 in Modules/_io/stringio.c.'>stringio_line_buffering</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>,
+<a name='L857'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L858'><font color='red'>}</font>;
+<a name='L859'>
+<a name='L860'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PyStringIO_Type = <font color='red'>{</font>
+<a name='L861'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L862'>    "_io.StringIO",                            <i><font color='green'>/*tp_name*/</font></i>
+<a name='L863'>    <b>sizeof</b>(<a href='../S/2574.html#L27' title='Defined at 27 in Modules/_io/stringio.c.'>stringio</a>),                    <i><font color='green'>/*tp_basicsize*/</font></i>
+<a name='L864'>    0,                                         <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L865'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/2574.html#L508' title='Defined at 508 in Modules/_io/stringio.c.'>stringio_dealloc</a>,              <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L866'>    0,                                         <i><font color='green'>/*tp_print*/</font></i>
+<a name='L867'>    0,                                         <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L868'>    0,                                         <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L869'>    0,                                         <i><font color='green'>/*tp_reserved*/</font></i>
+<a name='L870'>    0,                                         <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L871'>    0,                                         <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L872'>    0,                                         <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L873'>    0,                                         <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L874'>    0,                                         <i><font color='green'>/*tp_hash*/</font></i>
+<a name='L875'>    0,                                         <i><font color='green'>/*tp_call*/</font></i>
+<a name='L876'>    0,                                         <i><font color='green'>/*tp_str*/</font></i>
+<a name='L877'>    0,                                         <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L878'>    0,                                         <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L879'>    0,                                         <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L880'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE
+<a name='L881'>                       | Py_TPFLAGS_HAVE_GC,   <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L882'>    stringio_doc,                              <i><font color='green'>/*tp_doc*/</font></i>
+<a name='L883'>    (traverseproc)<a href='../S/2574.html#L494' title='Defined at 494 in Modules/_io/stringio.c.'>stringio_traverse</a>,           <i><font color='green'>/*tp_traverse*/</font></i>
+<a name='L884'>    (inquiry)<a href='../S/2574.html#L501' title='Defined at 501 in Modules/_io/stringio.c.'>stringio_clear</a>,                   <i><font color='green'>/*tp_clear*/</font></i>
+<a name='L885'>    0,                                         <i><font color='green'>/*tp_richcompare*/</font></i>
+<a name='L886'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2574.html#L27' title='Defined at 27 in Modules/_io/stringio.c.'>stringio</a>, weakreflist),            <i><font color='green'>/*tp_weaklistoffset*/</font></i>
+<a name='L887'>    0,                                         <i><font color='green'>/*tp_iter*/</font></i>
+<a name='L888'>    (iternextfunc)<a href='../S/2574.html#L313' title='Defined at 313 in Modules/_io/stringio.c.'>stringio_iternext</a>,           <i><font color='green'>/*tp_iternext*/</font></i>
+<a name='L889'>    stringio_methods,                          <i><font color='green'>/*tp_methods*/</font></i>
+<a name='L890'>    0,                                         <i><font color='green'>/*tp_members*/</font></i>
+<a name='L891'>    stringio_getset,                           <i><font color='green'>/*tp_getset*/</font></i>
+<a name='L892'>    0,                                         <i><font color='green'>/*tp_base*/</font></i>
+<a name='L893'>    0,                                         <i><font color='green'>/*tp_dict*/</font></i>
+<a name='L894'>    0,                                         <i><font color='green'>/*tp_descr_get*/</font></i>
+<a name='L895'>    0,                                         <i><font color='green'>/*tp_descr_set*/</font></i>
+<a name='L896'>    <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2574.html#L27' title='Defined at 27 in Modules/_io/stringio.c.'>stringio</a>, dict),                  <i><font color='green'>/*tp_dictoffset*/</font></i>
+<a name='L897'>    (initproc)<a href='../S/2574.html#L548' title='Defined at 548 in Modules/_io/stringio.c.'>stringio_init</a>,                   <i><font color='green'>/*tp_init*/</font></i>
+<a name='L898'>    0,                                         <i><font color='green'>/*tp_alloc*/</font></i>
+<a name='L899'>    <a href='../S/2574.html#L526' title='Defined at 526 in Modules/_io/stringio.c.'>stringio_new</a>,                              <i><font color='green'>/*tp_new*/</font></i>
+<a name='L900'><font color='red'>}</font>;
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L54'>[^]</a><a href='#L819'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

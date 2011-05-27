@@ -1,0 +1,764 @@
+<html>
+<head>
+<title>Python/pystate.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/pystate.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L61'>[^]</a><a href='#L668'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L61' title='Defined at 61.'>PyInterpreterState_New</a>
+<li><a href='#L104' title='Defined at 104.'>PyInterpreterState_Clear</a>
+<li><a href='#L123' title='Defined at 123.'>zapthreads</a>
+<li><a href='#L135' title='Defined at 135.'>PyInterpreterState_Delete</a>
+<li><a href='#L157' title='Defined at 157.'>threadstate_getframe</a>
+<li><a href='#L163' title='Defined at 163.'>new_threadstate</a>
+<li><a href='#L216' title='Defined at 216.'>PyThreadState_New</a>
+<li><a href='#L222' title='Defined at 222.'>_PyThreadState_Prealloc</a>
+<li><a href='#L228' title='Defined at 228.'>_PyThreadState_Init</a>
+<li><a href='#L236' title='Defined at 236.'>PyState_FindModule</a>
+<li><a href='#L252' title='Defined at 252.'>_PyState_AddModule</a>
+<li><a href='#L271' title='Defined at 271.'>PyThreadState_Clear</a>
+<li><a href='#L299' title='Defined at 299.'>tstate_delete_common</a>
+<li><a href='#L337' title='Defined at 337.'>PyThreadState_Delete</a>
+<li><a href='#L351' title='Defined at 351.'>PyThreadState_DeleteCurrent</a>
+<li><a href='#L368' title='Defined at 368.'>PyThreadState_Get</a>
+<li><a href='#L380' title='Defined at 380.'>PyThreadState_Swap</a>
+<li><a href='#L412' title='Defined at 412.'>PyThreadState_GetDict</a>
+<li><a href='#L438' title='Defined at 438.'>PyThreadState_SetAsyncExc</a>
+<li><a href='#L477' title='Defined at 477.'>PyInterpreterState_Head</a>
+<li><a href='#L483' title='Defined at 483.'>PyInterpreterState_Next</a>
+<li><a href='#L488' title='Defined at 488.'>PyInterpreterState_ThreadHead</a>
+<li><a href='#L493' title='Defined at 493.'>PyThreadState_Next</a>
+<li><a href='#L503' title='Defined at 503.'>_PyThread_CurrentFrames</a>
+<li><a href='#L557' title='Defined at 557.'>PyThreadState_IsCurrent</a>
+<li><a href='#L568' title='Defined at 568.'>_PyGILState_Init</a>
+<li><a href='#L582' title='Defined at 582.'>_PyGILState_Fini</a>
+<li><a href='#L594' title='Defined at 594.'>_PyGILState_NoteThreadState</a>
+<li><a href='#L625' title='Defined at 625.'>PyGILState_GetThisThreadState</a>
+<li><a href='#L633' title='Defined at 633.'>PyGILState_Ensure</a>
+<li><a href='#L668' title='Defined at 668.'>PyGILState_Release</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Thread and interpreter state structures and their interfaces */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'>
+<a name='L6'><i><font color='green'>/* --------------------------------------------------------------------------</font></i>
+<a name='L7'><i><font color='green'>CAUTION</font></i>
+<a name='L8'><i><font color='green'></font></i>
+<a name='L9'><i><font color='green'>Always use malloc() and free() directly in this file.  A number of these</font></i>
+<a name='L10'><i><font color='green'>functions are advertised as safe to call when the GIL isn't held, and in</font></i>
+<a name='L11'><i><font color='green'>a debug build Python redirects (e.g.) PyMem_NEW (etc) to Python's debugging</font></i>
+<a name='L12'><i><font color='green'>obmalloc functions.  Those aren't thread-safe (they rely on the GIL to avoid</font></i>
+<a name='L13'><i><font color='green'>the expense of doing their own locking).</font></i>
+<a name='L14'><i><font color='green'>-------------------------------------------------------------------------- */</font></i>
+<a name='L15'>
+<a name='L16'><font color='darkred'>#ifdef</font> HAVE_DLOPEN
+<a name='L17'><font color='darkred'>#ifdef</font> <a href='../S/2649.html#L14' title='Defined at 14 in Modules/expat/amigaconfig.h.'>HAVE_DLFCN_H</a>
+<a name='L18'><font color='darkred'>#include</font> &lt;<a href='../I/117.html'>dlfcn.h</a>&gt;
+<a name='L19'><font color='darkred'>#endif</font>
+<a name='L20'><font color='darkred'>#ifndef</font> <a href='../D/4522.html' title='Multiple defined in 2 places.'>RTLD_LAZY</a>
+<a name='L21'><font color='darkred'>#define</font> <a href='../R/3989.html' title='Multiple refered from 3 places.'>RTLD_LAZY</a> 1
+<a name='L22'><font color='darkred'>#endif</font>
+<a name='L23'><font color='darkred'>#endif</font>
+<a name='L24'>
+<a name='L25'>
+<a name='L26'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L27'><font color='darkred'>#include</font> "<a href='572.html'>pythread.h</a>"
+<a name='L28'><b>static</b> <a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a> head_mutex = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; <i><font color='green'>/* Protects interp-&gt;tstate_head */</font></i>
+<a name='L29'><font color='darkred'>#define</font> <a href='../S/3134.html#L67' title='Refered from 67 in Python/pystate.c.'>HEAD_INIT</a>() (<b>void</b>)(head_mutex || (head_mutex = <a href='../D/3848.html' title='Multiple defined in 11 places.'>PyThread_allocate_lock</a>()))
+<a name='L30'><font color='darkred'>#define</font> <a href='../R/1454.html' title='Multiple refered from 7 places.'>HEAD_LOCK</a>() <a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(head_mutex, WAIT_LOCK)
+<a name='L31'><font color='darkred'>#define</font> <a href='../R/1455.html' title='Multiple refered from 9 places.'>HEAD_UNLOCK</a>() <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(head_mutex)
+<a name='L32'>
+<a name='L33'><font color='darkred'>#ifdef</font> __cplusplus
+<a name='L34'><b>extern</b> "C" <font color='red'>{</font>
+<a name='L35'><font color='darkred'>#endif</font>
+<a name='L36'>
+<a name='L37'><i><font color='green'>/* The single PyInterpreterState used by this process'</font></i>
+<a name='L38'><i><font color='green'>   GILState implementation</font></i>
+<a name='L39'><i><font color='green'>*/</font></i>
+<a name='L40'><b>static</b> <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *autoInterpreterState = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L41'><b>static</b> <b>int</b> autoTLSkey = 0;
+<a name='L42'><font color='darkred'>#else</font>
+<a name='L43'><font color='darkred'>#define</font> <a href='../S/3134.html#L67' title='Refered from 67 in Python/pystate.c.'>HEAD_INIT</a>() <i><font color='green'>/* Nothing */</font></i>
+<a name='L44'><font color='darkred'>#define</font> <a href='../R/1454.html' title='Multiple refered from 7 places.'>HEAD_LOCK</a>() <i><font color='green'>/* Nothing */</font></i>
+<a name='L45'><font color='darkred'>#define</font> <a href='../R/1455.html' title='Multiple refered from 9 places.'>HEAD_UNLOCK</a>() <i><font color='green'>/* Nothing */</font></i>
+<a name='L46'><font color='darkred'>#endif</font>
+<a name='L47'>
+<a name='L48'><b>static</b> <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *interp_head = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L49'>
+<a name='L50'><i><font color='green'>/* Assuming the current thread holds the GIL, this is the</font></i>
+<a name='L51'><i><font color='green'>   PyThreadState for the current thread. */</font></i>
+<a name='L52'><a href='../D/6326.html' title='Multiple defined in 2 places.'>_Py_atomic_address</a> _PyThreadState_Current = <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L53'>PyThreadFrameGetter _PyThreadState_GetFrame = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L54'>
+<a name='L55'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L56'><b>static</b> <b>void</b> <a href='../S/3134.html#L594' title='Defined at 594 in Python/pystate.c.'>_PyGILState_NoteThreadState</a>(PyThreadState* tstate);
+<a name='L57'><font color='darkred'>#endif</font>
+<a name='L58'>
+<a name='L59'>
+<a name='L60'><a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *
+<a name='L61'><a href='../R/3076.html' title='Multiple refered from 2 places.'>PyInterpreterState_New</a>(<b>void</b>)
+<a name='L62'><font color='red'>{</font>
+<a name='L63'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *interp = (<a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *)
+<a name='L64'>                                 malloc(<b>sizeof</b>(<a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a>));
+<a name='L65'>
+<a name='L66'>    <b>if</b> (interp != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L67'>        <a href='../D/1618.html' title='Multiple defined in 2 places.'>HEAD_INIT</a>();
+<a name='L68'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L69'>        <b>if</b> (head_mutex == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L70'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("Can't initialize threads for interpreter");
+<a name='L71'><font color='darkred'>#endif</font>
+<a name='L72'>        interp-&gt;modules = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L73'>        interp-&gt;modules_reloading = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L74'>        interp-&gt;modules_by_index = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L75'>        interp-&gt;sysdict = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L76'>        interp-&gt;builtins = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L77'>        interp-&gt;tstate_head = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L78'>        interp-&gt;codec_search_path = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L79'>        interp-&gt;codec_search_cache = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L80'>        interp-&gt;codec_error_registry = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L81'>        interp-&gt;codecs_initialized = 0;
+<a name='L82'><font color='darkred'>#ifdef</font> HAVE_DLOPEN
+<a name='L83'><font color='darkred'>#ifdef</font> <a href='../S/2254.html#L70' title='Defined at 70 in Modules/_ctypes/darwin/dlfcn.h.'>RTLD_NOW</a>
+<a name='L84'>        interp-&gt;dlopenflags = <a href='../S/2254.html#L70' title='Defined at 70 in Modules/_ctypes/darwin/dlfcn.h.'>RTLD_NOW</a>;
+<a name='L85'><font color='darkred'>#else</font>
+<a name='L86'>        interp-&gt;dlopenflags = <a href='../D/4522.html' title='Multiple defined in 2 places.'>RTLD_LAZY</a>;
+<a name='L87'><font color='darkred'>#endif</font>
+<a name='L88'><font color='darkred'>#endif</font>
+<a name='L89'><font color='darkred'>#ifdef</font> WITH_TSC
+<a name='L90'>        interp-&gt;tscdump = 0;
+<a name='L91'><font color='darkred'>#endif</font>
+<a name='L92'>
+<a name='L93'>        <a href='../D/1619.html' title='Multiple defined in 2 places.'>HEAD_LOCK</a>();
+<a name='L94'>        interp-&gt;next = interp_head;
+<a name='L95'>        interp_head = interp;
+<a name='L96'>        <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L97'>    <font color='red'>}</font>
+<a name='L98'>
+<a name='L99'>    <b>return</b> interp;
+<a name='L100'><font color='red'>}</font>
+<a name='L101'>
+<a name='L102'>
+<a name='L103'><b>void</b>
+<a name='L104'><a href='../R/3074.html' title='Multiple refered from 2 places.'>PyInterpreterState_Clear</a>(PyInterpreterState *interp)
+<a name='L105'><font color='red'>{</font>
+<a name='L106'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *p;
+<a name='L107'>    <a href='../D/1619.html' title='Multiple defined in 2 places.'>HEAD_LOCK</a>();
+<a name='L108'>    <b>for</b> (p = interp-&gt;tstate_head; p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; p = p-&gt;next)
+<a name='L109'>        <a href='../S/3134.html#L271' title='Defined at 271 in Python/pystate.c.'>PyThreadState_Clear</a>(p);
+<a name='L110'>    <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L111'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;codec_search_path);
+<a name='L112'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;codec_search_cache);
+<a name='L113'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;codec_error_registry);
+<a name='L114'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;modules);
+<a name='L115'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;modules_by_index);
+<a name='L116'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;modules_reloading);
+<a name='L117'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;sysdict);
+<a name='L118'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(interp-&gt;builtins);
+<a name='L119'><font color='red'>}</font>
+<a name='L120'>
+<a name='L121'>
+<a name='L122'><b>static</b> <b>void</b>
+<a name='L123'><a href='../S/3134.html#L138' title='Refered from 138 in Python/pystate.c.'>zapthreads</a>(PyInterpreterState *interp)
+<a name='L124'><font color='red'>{</font>
+<a name='L125'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *p;
+<a name='L126'>    <i><font color='green'>/* No need to lock the mutex here because this should only happen</font></i>
+<a name='L127'><i><font color='green'>       when the threads are all really dead (XXX famous last words). */</font></i>
+<a name='L128'>    <b>while</b> ((p = interp-&gt;tstate_head) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L129'>        <a href='../S/3134.html#L337' title='Defined at 337 in Python/pystate.c.'>PyThreadState_Delete</a>(p);
+<a name='L130'>    <font color='red'>}</font>
+<a name='L131'><font color='red'>}</font>
+<a name='L132'>
+<a name='L133'>
+<a name='L134'><b>void</b>
+<a name='L135'><a href='../R/3075.html' title='Multiple refered from 4 places.'>PyInterpreterState_Delete</a>(PyInterpreterState *interp)
+<a name='L136'><font color='red'>{</font>
+<a name='L137'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> **p;
+<a name='L138'>    <a href='../S/3134.html#L123' title='Defined at 123 in Python/pystate.c.'>zapthreads</a>(interp);
+<a name='L139'>    <a href='../D/1619.html' title='Multiple defined in 2 places.'>HEAD_LOCK</a>();
+<a name='L140'>    <b>for</b> (p = &amp;interp_head; ; p = &amp;(*p)-&gt;next) <font color='red'>{</font>
+<a name='L141'>        <b>if</b> (*p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L142'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>(
+<a name='L143'>                "PyInterpreterState_Delete: invalid interp");
+<a name='L144'>        <b>if</b> (*p == interp)
+<a name='L145'>            <b>break</b>;
+<a name='L146'>    <font color='red'>}</font>
+<a name='L147'>    <b>if</b> (interp-&gt;tstate_head != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L148'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("PyInterpreterState_Delete: remaining threads");
+<a name='L149'>    *p = interp-&gt;next;
+<a name='L150'>    <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L151'>    free(interp);
+<a name='L152'><font color='red'>}</font>
+<a name='L153'>
+<a name='L154'>
+<a name='L155'><i><font color='green'>/* Default implementation for _PyThreadState_GetFrame */</font></i>
+<a name='L156'><b>static</b> <b>struct</b> <a href='../S/526.html#L17' title='Defined at 17 in Include/frameobject.h.'>_frame</a> *
+<a name='L157'><a href='../S/3134.html#L168' title='Refered from 168 in Python/pystate.c.'>threadstate_getframe</a>(PyThreadState *self)
+<a name='L158'><font color='red'>{</font>
+<a name='L159'>    <b>return</b> self-&gt;frame;
+<a name='L160'><font color='red'>}</font>
+<a name='L161'>
+<a name='L162'><b>static</b> <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L163'><a href='../R/9209.html' title='Multiple refered from 2 places.'>new_threadstate</a>(PyInterpreterState *interp, <b>int</b> init)
+<a name='L164'><font color='red'>{</font>
+<a name='L165'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate = (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *)malloc(<b>sizeof</b>(<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a>));
+<a name='L166'>
+<a name='L167'>    <b>if</b> (_PyThreadState_GetFrame == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L168'>        _PyThreadState_GetFrame = <a href='../S/3134.html#L157' title='Defined at 157 in Python/pystate.c.'>threadstate_getframe</a>;
+<a name='L169'>
+<a name='L170'>    <b>if</b> (tstate != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L171'>        tstate-&gt;interp = interp;
+<a name='L172'>
+<a name='L173'>        tstate-&gt;frame = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L174'>        tstate-&gt;recursion_depth = 0;
+<a name='L175'>        tstate-&gt;overflowed = 0;
+<a name='L176'>        tstate-&gt;recursion_critical = 0;
+<a name='L177'>        tstate-&gt;tracing = 0;
+<a name='L178'>        tstate-&gt;use_tracing = 0;
+<a name='L179'>        tstate-&gt;tick_counter = 0;
+<a name='L180'>        tstate-&gt;gilstate_counter = 0;
+<a name='L181'>        tstate-&gt;async_exc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L182'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L183'>        tstate-&gt;thread_id = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L184'><font color='darkred'>#else</font>
+<a name='L185'>        tstate-&gt;thread_id = 0;
+<a name='L186'><font color='darkred'>#endif</font>
+<a name='L187'>
+<a name='L188'>        tstate-&gt;dict = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L189'>
+<a name='L190'>        tstate-&gt;curexc_type = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L191'>        tstate-&gt;curexc_value = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L192'>        tstate-&gt;curexc_traceback = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L193'>
+<a name='L194'>        tstate-&gt;exc_type = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L195'>        tstate-&gt;exc_value = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L196'>        tstate-&gt;exc_traceback = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L197'>
+<a name='L198'>        tstate-&gt;c_profilefunc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L199'>        tstate-&gt;c_tracefunc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L200'>        tstate-&gt;c_profileobj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L201'>        tstate-&gt;c_traceobj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L202'>
+<a name='L203'>        <b>if</b> (init)
+<a name='L204'>            <a href='../S/3134.html#L228' title='Defined at 228 in Python/pystate.c.'>_PyThreadState_Init</a>(tstate);
+<a name='L205'>
+<a name='L206'>        <a href='../D/1619.html' title='Multiple defined in 2 places.'>HEAD_LOCK</a>();
+<a name='L207'>        tstate-&gt;next = interp-&gt;tstate_head;
+<a name='L208'>        interp-&gt;tstate_head = tstate;
+<a name='L209'>        <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L210'>    <font color='red'>}</font>
+<a name='L211'>
+<a name='L212'>    <b>return</b> tstate;
+<a name='L213'><font color='red'>}</font>
+<a name='L214'>
+<a name='L215'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L216'><a href='../R/3445.html' title='Multiple refered from 3 places.'>PyThreadState_New</a>(PyInterpreterState *interp)
+<a name='L217'><font color='red'>{</font>
+<a name='L218'>    <b>return</b> <a href='../S/3134.html#L163' title='Defined at 163 in Python/pystate.c.'>new_threadstate</a>(interp, 1);
+<a name='L219'><font color='red'>}</font>
+<a name='L220'>
+<a name='L221'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L222'><a href='../S/2615.html#L1052' title='Refered from 1052 in Modules/_threadmodule.c.'>_PyThreadState_Prealloc</a>(PyInterpreterState *interp)
+<a name='L223'><font color='red'>{</font>
+<a name='L224'>    <b>return</b> <a href='../S/3134.html#L163' title='Defined at 163 in Python/pystate.c.'>new_threadstate</a>(interp, 0);
+<a name='L225'><font color='red'>}</font>
+<a name='L226'>
+<a name='L227'><b>void</b>
+<a name='L228'><a href='../R/5492.html' title='Multiple refered from 2 places.'>_PyThreadState_Init</a>(PyThreadState *tstate)
+<a name='L229'><font color='red'>{</font>
+<a name='L230'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L231'>    <a href='../S/3134.html#L594' title='Defined at 594 in Python/pystate.c.'>_PyGILState_NoteThreadState</a>(tstate);
+<a name='L232'><font color='darkred'>#endif</font>
+<a name='L233'><font color='red'>}</font>
+<a name='L234'>
+<a name='L235'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>*
+<a name='L236'><a href='../R/3402.html' title='Multiple refered from 2 places.'>PyState_FindModule</a>(<b>struct</b> PyModuleDef* m)
+<a name='L237'><font color='red'>{</font>
+<a name='L238'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> index = m-&gt;m_base.m_index;
+<a name='L239'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>()-&gt;interp;
+<a name='L240'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L241'>    <b>if</b> (index == 0)
+<a name='L242'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L243'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L244'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L245'>    <b>if</b> (index &gt; <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index))
+<a name='L246'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L247'>    res = PyList_GET_ITEM(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index, index);
+<a name='L248'>    <b>return</b> res==Py_None ? <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> : res;
+<a name='L249'><font color='red'>}</font>
+<a name='L250'>
+<a name='L251'><b>int</b>
+<a name='L252'><a href='../R/5489.html' title='Multiple refered from 2 places.'>_PyState_AddModule</a>(PyObject* module, <b>struct</b> PyModuleDef* def)
+<a name='L253'><font color='red'>{</font>
+<a name='L254'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>()-&gt;interp;
+<a name='L255'>    <b>if</b> (!def)
+<a name='L256'>        <b>return</b> -1;
+<a name='L257'>    <b>if</b> (!<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index) <font color='red'>{</font>
+<a name='L258'>        <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L259'>        <b>if</b> (!<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index)
+<a name='L260'>            <b>return</b> -1;
+<a name='L261'>    <font color='red'>}</font>
+<a name='L262'>    <b>while</b>(<a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index) &lt;= def-&gt;m_base.m_index)
+<a name='L263'>        <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index, Py_None) &lt; 0)
+<a name='L264'>            <b>return</b> -1;
+<a name='L265'>    Py_INCREF(module);
+<a name='L266'>    <b>return</b> <a href='../S/2796.html#L199' title='Defined at 199 in Objects/listobject.c.'>PyList_SetItem</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;modules_by_index,
+<a name='L267'>                          def-&gt;m_base.m_index, module);
+<a name='L268'><font color='red'>}</font>
+<a name='L269'>
+<a name='L270'><b>void</b>
+<a name='L271'><a href='../R/3438.html' title='Multiple refered from 5 places.'>PyThreadState_Clear</a>(PyThreadState *tstate)
+<a name='L272'><font color='red'>{</font>
+<a name='L273'>    <b>if</b> (Py_VerboseFlag &amp;&amp; tstate-&gt;frame != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L274'>        fprintf(stderr,
+<a name='L275'>          "PyThreadState_Clear: warning: thread still has a frame\n");
+<a name='L276'>
+<a name='L277'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;frame);
+<a name='L278'>
+<a name='L279'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;dict);
+<a name='L280'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;async_exc);
+<a name='L281'>
+<a name='L282'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;curexc_type);
+<a name='L283'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;curexc_value);
+<a name='L284'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;curexc_traceback);
+<a name='L285'>
+<a name='L286'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;exc_type);
+<a name='L287'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;exc_value);
+<a name='L288'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;exc_traceback);
+<a name='L289'>
+<a name='L290'>    tstate-&gt;c_profilefunc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L291'>    tstate-&gt;c_tracefunc = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L292'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;c_profileobj);
+<a name='L293'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(tstate-&gt;c_traceobj);
+<a name='L294'><font color='red'>}</font>
+<a name='L295'>
+<a name='L296'>
+<a name='L297'><i><font color='green'>/* Common code for PyThreadState_Delete() and PyThreadState_DeleteCurrent() */</font></i>
+<a name='L298'><b>static</b> <b>void</b>
+<a name='L299'><a href='../R/10970.html' title='Multiple refered from 2 places.'>tstate_delete_common</a>(PyThreadState *tstate)
+<a name='L300'><font color='red'>{</font>
+<a name='L301'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *interp;
+<a name='L302'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> **p;
+<a name='L303'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *prev_p = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L304'>    <b>if</b> (tstate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L305'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("PyThreadState_Delete: NULL tstate");
+<a name='L306'>    interp = tstate-&gt;interp;
+<a name='L307'>    <b>if</b> (interp == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L308'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("PyThreadState_Delete: NULL interp");
+<a name='L309'>    <a href='../D/1619.html' title='Multiple defined in 2 places.'>HEAD_LOCK</a>();
+<a name='L310'>    <b>for</b> (p = &amp;interp-&gt;tstate_head; ; p = &amp;(*p)-&gt;next) <font color='red'>{</font>
+<a name='L311'>        <b>if</b> (*p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L312'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>(
+<a name='L313'>                "PyThreadState_Delete: invalid tstate");
+<a name='L314'>        <b>if</b> (*p == tstate)
+<a name='L315'>            <b>break</b>;
+<a name='L316'>        <i><font color='green'>/* Sanity check.  These states should never happen but if</font></i>
+<a name='L317'><i><font color='green'>         * they do we must abort.  Otherwise we'll end up spinning in</font></i>
+<a name='L318'><i><font color='green'>         * in a tight loop with the lock held.  A similar check is done</font></i>
+<a name='L319'><i><font color='green'>         * in thread.c find_key().  */</font></i>
+<a name='L320'>        <b>if</b> (*p == prev_p)
+<a name='L321'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>(
+<a name='L322'>                "PyThreadState_Delete: small circular list(!)"
+<a name='L323'>                " and tstate not found.");
+<a name='L324'>        prev_p = *p;
+<a name='L325'>        <b>if</b> ((*p)-&gt;next == interp-&gt;tstate_head)
+<a name='L326'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>(
+<a name='L327'>                "PyThreadState_Delete: circular list(!) and"
+<a name='L328'>                " tstate not found.");
+<a name='L329'>    <font color='red'>}</font>
+<a name='L330'>    *p = tstate-&gt;next;
+<a name='L331'>    <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L332'>    free(tstate);
+<a name='L333'><font color='red'>}</font>
+<a name='L334'>
+<a name='L335'>
+<a name='L336'><b>void</b>
+<a name='L337'><a href='../R/3439.html' title='Multiple refered from 2 places.'>PyThreadState_Delete</a>(PyThreadState *tstate)
+<a name='L338'><font color='red'>{</font>
+<a name='L339'>    <b>if</b> (tstate == <a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;_PyThreadState_Current))
+<a name='L340'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("PyThreadState_Delete: tstate is still current");
+<a name='L341'>    <a href='../S/3134.html#L299' title='Defined at 299 in Python/pystate.c.'>tstate_delete_common</a>(tstate);
+<a name='L342'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L343'>    <b>if</b> (autoInterpreterState &amp;&amp; <a href='../D/3854.html' title='Multiple defined in 3 places.'>PyThread_get_key_value</a>(autoTLSkey) == tstate)
+<a name='L344'>        <a href='../D/3851.html' title='Multiple defined in 3 places.'>PyThread_delete_key_value</a>(autoTLSkey);
+<a name='L345'><font color='darkred'>#endif</font> <i><font color='green'>/* WITH_THREAD */</font></i>
+<a name='L346'><font color='red'>}</font>
+<a name='L347'>
+<a name='L348'>
+<a name='L349'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L350'><b>void</b>
+<a name='L351'><a href='../R/3440.html' title='Multiple refered from 2 places.'>PyThreadState_DeleteCurrent</a>()
+<a name='L352'><font color='red'>{</font>
+<a name='L353'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate = (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a>*)<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(
+<a name='L354'>        &amp;_PyThreadState_Current);
+<a name='L355'>    <b>if</b> (tstate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L356'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>(
+<a name='L357'>            "PyThreadState_DeleteCurrent: no current tstate");
+<a name='L358'>    <a href='../S/554.html#L171' title='Defined at 171 in Include/pyatomic.h.'>_Py_atomic_store_relaxed</a>(&amp;_PyThreadState_Current, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L359'>    <a href='../S/3134.html#L299' title='Defined at 299 in Python/pystate.c.'>tstate_delete_common</a>(tstate);
+<a name='L360'>    <b>if</b> (autoInterpreterState &amp;&amp; <a href='../D/3854.html' title='Multiple defined in 3 places.'>PyThread_get_key_value</a>(autoTLSkey) == tstate)
+<a name='L361'>        <a href='../D/3851.html' title='Multiple defined in 3 places.'>PyThread_delete_key_value</a>(autoTLSkey);
+<a name='L362'>    <a href='../S/3091.html#L334' title='Defined at 334 in Python/ceval.c.'>PyEval_ReleaseLock</a>();
+<a name='L363'><font color='red'>}</font>
+<a name='L364'><font color='darkred'>#endif</font> <i><font color='green'>/* WITH_THREAD */</font></i>
+<a name='L365'>
+<a name='L366'>
+<a name='L367'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L368'><a href='../R/3442.html' title='Multiple refered from 12 places.'>PyThreadState_Get</a>(<b>void</b>)
+<a name='L369'><font color='red'>{</font>
+<a name='L370'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate = (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a>*)<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(
+<a name='L371'>        &amp;_PyThreadState_Current);
+<a name='L372'>    <b>if</b> (tstate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L373'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("PyThreadState_Get: no current thread");
+<a name='L374'>
+<a name='L375'>    <b>return</b> tstate;
+<a name='L376'><font color='red'>}</font>
+<a name='L377'>
+<a name='L378'>
+<a name='L379'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L380'><a href='../R/3447.html' title='Multiple refered from 11 places.'>PyThreadState_Swap</a>(PyThreadState *newts)
+<a name='L381'><font color='red'>{</font>
+<a name='L382'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *oldts = (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a>*)<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(
+<a name='L383'>        &amp;_PyThreadState_Current);
+<a name='L384'>
+<a name='L385'>    <a href='../S/554.html#L171' title='Defined at 171 in Include/pyatomic.h.'>_Py_atomic_store_relaxed</a>(&amp;_PyThreadState_Current, newts);
+<a name='L386'>    <i><font color='green'>/* It should not be possible for more than one thread state</font></i>
+<a name='L387'><i><font color='green'>       to be used for a thread.  Check this the best we can in debug</font></i>
+<a name='L388'><i><font color='green'>       builds.</font></i>
+<a name='L389'><i><font color='green'>    */</font></i>
+<a name='L390'><font color='darkred'>#if</font> <b>defined</b>(<a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>) &amp;&amp; <b>defined</b>(<a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>)
+<a name='L391'>    <b>if</b> (newts) <font color='red'>{</font>
+<a name='L392'>        <i><font color='green'>/* This can be called from PyEval_RestoreThread(). Similar</font></i>
+<a name='L393'><i><font color='green'>           to it, we need to ensure errno doesn't change.</font></i>
+<a name='L394'><i><font color='green'>        */</font></i>
+<a name='L395'>        <b>int</b> err = errno;
+<a name='L396'>        <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *check = <a href='../S/3134.html#L625' title='Defined at 625 in Python/pystate.c.'>PyGILState_GetThisThreadState</a>();
+<a name='L397'>        <b>if</b> (check &amp;&amp; check-&gt;interp == newts-&gt;interp &amp;&amp; check != newts)
+<a name='L398'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("Invalid thread state for this thread");
+<a name='L399'>        errno = err;
+<a name='L400'>    <font color='red'>}</font>
+<a name='L401'><font color='darkred'>#endif</font>
+<a name='L402'>    <b>return</b> oldts;
+<a name='L403'><font color='red'>}</font>
+<a name='L404'>
+<a name='L405'><i><font color='green'>/* An extension mechanism to store arbitrary additional per-thread state.</font></i>
+<a name='L406'><i><font color='green'>   PyThreadState_GetDict() returns a dictionary that can be used to hold such</font></i>
+<a name='L407'><i><font color='green'>   state; the caller should pick a unique key and store its state there.  If</font></i>
+<a name='L408'><i><font color='green'>   PyThreadState_GetDict() returns NULL, an exception has *not* been raised</font></i>
+<a name='L409'><i><font color='green'>   and the caller should assume no per-thread state is available. */</font></i>
+<a name='L410'>
+<a name='L411'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L412'><a href='../R/3443.html' title='Multiple refered from 5 places.'>PyThreadState_GetDict</a>(<b>void</b>)
+<a name='L413'><font color='red'>{</font>
+<a name='L414'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate = (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a>*)<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(
+<a name='L415'>        &amp;_PyThreadState_Current);
+<a name='L416'>    <b>if</b> (tstate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L417'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L418'>
+<a name='L419'>    <b>if</b> (tstate-&gt;dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L420'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d;
+<a name='L421'>        tstate-&gt;dict = d = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L422'>        <b>if</b> (d == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L423'>            <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L424'>    <font color='red'>}</font>
+<a name='L425'>    <b>return</b> tstate-&gt;dict;
+<a name='L426'><font color='red'>}</font>
+<a name='L427'>
+<a name='L428'>
+<a name='L429'><i><font color='green'>/* Asynchronously raise an exception in a thread.</font></i>
+<a name='L430'><i><font color='green'>   Requested by Just van Rossum and Alex Martelli.</font></i>
+<a name='L431'><i><font color='green'>   To prevent naive misuse, you must write your own extension</font></i>
+<a name='L432'><i><font color='green'>   to call this, or use ctypes.  Must be called with the GIL held.</font></i>
+<a name='L433'><i><font color='green'>   Returns the number of tstates modified (normally 1, but 0 if `id` didn't</font></i>
+<a name='L434'><i><font color='green'>   match any known thread id).  Can be called with exc=NULL to clear an</font></i>
+<a name='L435'><i><font color='green'>   existing async exception.  This raises no exceptions. */</font></i>
+<a name='L436'>
+<a name='L437'><b>int</b>
+<a name='L438'>PyThreadState_SetAsyncExc(<b>long</b> id, PyObject *exc) <font color='red'>{</font>
+<a name='L439'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tstate = <a href='../S/509.html#L90' title='Defined at 90 in Include/ceval.h.'>PyThreadState_GET</a>();
+<a name='L440'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *interp = tstate-&gt;interp;
+<a name='L441'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *p;
+<a name='L442'>
+<a name='L443'>    <i><font color='green'>/* Although the GIL is held, a few C API functions can be called</font></i>
+<a name='L444'><i><font color='green'>     * without the GIL held, and in particular some that create and</font></i>
+<a name='L445'><i><font color='green'>     * destroy thread and interpreter states.  Those can mutate the</font></i>
+<a name='L446'><i><font color='green'>     * list of thread states we're traversing, so to prevent that we lock</font></i>
+<a name='L447'><i><font color='green'>     * head_mutex for the duration.</font></i>
+<a name='L448'><i><font color='green'>     */</font></i>
+<a name='L449'>    <a href='../D/1619.html' title='Multiple defined in 2 places.'>HEAD_LOCK</a>();
+<a name='L450'>    <b>for</b> (p = interp-&gt;tstate_head; p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; p = p-&gt;next) <font color='red'>{</font>
+<a name='L451'>        <b>if</b> (p-&gt;thread_id == id) <font color='red'>{</font>
+<a name='L452'>            <i><font color='green'>/* Tricky:  we need to decref the current value</font></i>
+<a name='L453'><i><font color='green'>             * (if any) in p-&gt;async_exc, but that can in turn</font></i>
+<a name='L454'><i><font color='green'>             * allow arbitrary Python code to run, including</font></i>
+<a name='L455'><i><font color='green'>             * perhaps calls to this function.  To prevent</font></i>
+<a name='L456'><i><font color='green'>             * deadlock, we need to release head_mutex before</font></i>
+<a name='L457'><i><font color='green'>             * the decref.</font></i>
+<a name='L458'><i><font color='green'>             */</font></i>
+<a name='L459'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *old_exc = p-&gt;async_exc;
+<a name='L460'>            <a href='../S/544.html#L766' title='Defined at 766 in Include/object.h.'>Py_XINCREF</a>(exc);
+<a name='L461'>            p-&gt;async_exc = exc;
+<a name='L462'>            <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L463'>            <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(old_exc);
+<a name='L464'>            <a href='../S/3091.html#L412' title='Defined at 412 in Python/ceval.c.'>_PyEval_SignalAsyncExc</a>();
+<a name='L465'>            <b>return</b> 1;
+<a name='L466'>        <font color='red'>}</font>
+<a name='L467'>    <font color='red'>}</font>
+<a name='L468'>    <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L469'>    <b>return</b> 0;
+<a name='L470'><font color='red'>}</font>
+<a name='L471'>
+<a name='L472'>
+<a name='L473'><i><font color='green'>/* Routines for advanced debuggers, requested by David Beazley.</font></i>
+<a name='L474'><i><font color='green'>   Don't use unless you know what you are doing! */</font></i>
+<a name='L475'>
+<a name='L476'><a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *
+<a name='L477'>PyInterpreterState_Head(<b>void</b>)
+<a name='L478'><font color='red'>{</font>
+<a name='L479'>    <b>return</b> interp_head;
+<a name='L480'><font color='red'>}</font>
+<a name='L481'>
+<a name='L482'><a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *
+<a name='L483'>PyInterpreterState_Next(PyInterpreterState *interp) <font color='red'>{</font>
+<a name='L484'>    <b>return</b> interp-&gt;next;
+<a name='L485'><font color='red'>}</font>
+<a name='L486'>
+<a name='L487'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L488'><a href='../S/2615.html#L777' title='Refered from 777 in Modules/_threadmodule.c.'>PyInterpreterState_ThreadHead</a>(PyInterpreterState *interp) <font color='red'>{</font>
+<a name='L489'>    <b>return</b> interp-&gt;tstate_head;
+<a name='L490'><font color='red'>}</font>
+<a name='L491'>
+<a name='L492'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L493'><a href='../S/2615.html#L779' title='Refered from 779 in Modules/_threadmodule.c.'>PyThreadState_Next</a>(PyThreadState *tstate) <font color='red'>{</font>
+<a name='L494'>    <b>return</b> tstate-&gt;next;
+<a name='L495'><font color='red'>}</font>
+<a name='L496'>
+<a name='L497'><i><font color='green'>/* The implementation of sys._current_frames().  This is intended to be</font></i>
+<a name='L498'><i><font color='green'>   called with the GIL held, as it will be when called via</font></i>
+<a name='L499'><i><font color='green'>   sys._current_frames().  It's possible it would work fine even without</font></i>
+<a name='L500'><i><font color='green'>   the GIL held, but haven't thought enough about that.</font></i>
+<a name='L501'><i><font color='green'>*/</font></i>
+<a name='L502'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L503'><a href='../S/3144.html#L949' title='Refered from 949 in Python/sysmodule.c.'>_PyThread_CurrentFrames</a>(<b>void</b>)
+<a name='L504'><font color='red'>{</font>
+<a name='L505'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L506'>    <a href='../D/3410.html' title='Multiple defined in 2 places.'>PyInterpreterState</a> *i;
+<a name='L507'>
+<a name='L508'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L509'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L510'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L511'>
+<a name='L512'>    <i><font color='green'>/* for i in all interpreters:</font></i>
+<a name='L513'><i><font color='green'>     *     for t in all of i's thread states:</font></i>
+<a name='L514'><i><font color='green'>     *          if t's frame isn't NULL, map t's id to its frame</font></i>
+<a name='L515'><i><font color='green'>     * Because these lists can mutute even when the GIL is held, we</font></i>
+<a name='L516'><i><font color='green'>     * need to grab head_mutex for the duration.</font></i>
+<a name='L517'><i><font color='green'>     */</font></i>
+<a name='L518'>    <a href='../D/1619.html' title='Multiple defined in 2 places.'>HEAD_LOCK</a>();
+<a name='L519'>    <b>for</b> (i = interp_head; i != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; i = i-&gt;next) <font color='red'>{</font>
+<a name='L520'>        <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *t;
+<a name='L521'>        <b>for</b> (t = i-&gt;tstate_head; t != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; t = t-&gt;next) <font color='red'>{</font>
+<a name='L522'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *id;
+<a name='L523'>            <b>int</b> stat;
+<a name='L524'>            <b>struct</b> <a href='../S/526.html#L17' title='Defined at 17 in Include/frameobject.h.'>_frame</a> *frame = t-&gt;frame;
+<a name='L525'>            <b>if</b> (frame == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L526'>                <b>continue</b>;
+<a name='L527'>            id = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(t-&gt;thread_id);
+<a name='L528'>            <b>if</b> (id == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L529'>                <b>goto</b> Fail;
+<a name='L530'>            stat = <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>, id, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)frame);
+<a name='L531'>            Py_DECREF(id);
+<a name='L532'>            <b>if</b> (stat &lt; 0)
+<a name='L533'>                <b>goto</b> Fail;
+<a name='L534'>        <font color='red'>}</font>
+<a name='L535'>    <font color='red'>}</font>
+<a name='L536'>    <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L537'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L538'>
+<a name='L539'> Fail:
+<a name='L540'>    <a href='../D/1620.html' title='Multiple defined in 2 places.'>HEAD_UNLOCK</a>();
+<a name='L541'>    Py_DECREF(<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>);
+<a name='L542'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L543'><font color='red'>}</font>
+<a name='L544'>
+<a name='L545'><i><font color='green'>/* Python "auto thread state" API. */</font></i>
+<a name='L546'><font color='darkred'>#ifdef</font> <a href='../D/5537.html' title='Multiple defined in 3 places.'>WITH_THREAD</a>
+<a name='L547'>
+<a name='L548'><i><font color='green'>/* Keep this as a static, as it is not reliable!  It can only</font></i>
+<a name='L549'><i><font color='green'>   ever be compared to the state for the *current* thread.</font></i>
+<a name='L550'><i><font color='green'>   * If not equal, then it doesn't matter that the actual</font></i>
+<a name='L551'><i><font color='green'>     value may change immediately after comparison, as it can't</font></i>
+<a name='L552'><i><font color='green'>     possibly change to the current thread's state.</font></i>
+<a name='L553'><i><font color='green'>   * If equal, then the current thread holds the lock, so the value can't</font></i>
+<a name='L554'><i><font color='green'>     change until we yield the lock.</font></i>
+<a name='L555'><i><font color='green'>*/</font></i>
+<a name='L556'><b>static</b> <b>int</b>
+<a name='L557'><a href='../R/3444.html' title='Multiple refered from 3 places.'>PyThreadState_IsCurrent</a>(PyThreadState *tstate)
+<a name='L558'><font color='red'>{</font>
+<a name='L559'>    <i><font color='green'>/* Must be the tstate for this thread */</font></i>
+<a name='L560'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/3134.html#L625' title='Defined at 625 in Python/pystate.c.'>PyGILState_GetThisThreadState</a>()==tstate);
+<a name='L561'>    <b>return</b> tstate == <a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;_PyThreadState_Current);
+<a name='L562'><font color='red'>}</font>
+<a name='L563'>
+<a name='L564'><i><font color='green'>/* Internal initialization/finalization functions called by</font></i>
+<a name='L565'><i><font color='green'>   Py_Initialize/Py_Finalize</font></i>
+<a name='L566'><i><font color='green'>*/</font></i>
+<a name='L567'><b>void</b>
+<a name='L568'><a href='../R/5407.html' title='Multiple refered from 2 places.'>_PyGILState_Init</a>(PyInterpreterState *i, PyThreadState *t)
+<a name='L569'><font color='red'>{</font>
+<a name='L570'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(i &amp;&amp; t); <i><font color='green'>/* must init with valid states */</font></i>
+<a name='L571'>    autoTLSkey = <a href='../D/3849.html' title='Multiple defined in 3 places.'>PyThread_create_key</a>();
+<a name='L572'>    <b>if</b> (autoTLSkey == -1)
+<a name='L573'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("Could not allocate TLS entry");
+<a name='L574'>    autoInterpreterState = i;
+<a name='L575'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/3854.html' title='Multiple defined in 3 places.'>PyThread_get_key_value</a>(autoTLSkey) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L576'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(t-&gt;gilstate_counter == 0);
+<a name='L577'>
+<a name='L578'>    <a href='../S/3134.html#L594' title='Defined at 594 in Python/pystate.c.'>_PyGILState_NoteThreadState</a>(t);
+<a name='L579'><font color='red'>}</font>
+<a name='L580'>
+<a name='L581'><b>void</b>
+<a name='L582'><a href='../R/5406.html' title='Multiple refered from 2 places.'>_PyGILState_Fini</a>(<b>void</b>)
+<a name='L583'><font color='red'>{</font>
+<a name='L584'>    <a href='../D/3850.html' title='Multiple defined in 3 places.'>PyThread_delete_key</a>(autoTLSkey);
+<a name='L585'>    autoInterpreterState = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L586'><font color='red'>}</font>
+<a name='L587'>
+<a name='L588'><i><font color='green'>/* When a thread state is created for a thread by some mechanism other than</font></i>
+<a name='L589'><i><font color='green'>   PyGILState_Ensure, it's important that the GILState machinery knows about</font></i>
+<a name='L590'><i><font color='green'>   it so it doesn't try to create another thread state for the thread (this is</font></i>
+<a name='L591'><i><font color='green'>   a better fix for SF bug #1010677 than the first one attempted).</font></i>
+<a name='L592'><i><font color='green'>*/</font></i>
+<a name='L593'><b>static</b> <b>void</b>
+<a name='L594'><a href='../R/5408.html' title='Multiple refered from 3 places.'>_PyGILState_NoteThreadState</a>(PyThreadState* tstate)
+<a name='L595'><font color='red'>{</font>
+<a name='L596'>    <i><font color='green'>/* If autoTLSkey isn't initialized, this must be the very first</font></i>
+<a name='L597'><i><font color='green'>       threadstate created in Py_Initialize().  Don't do anything for now</font></i>
+<a name='L598'><i><font color='green'>       (we'll be back here when _PyGILState_Init is called). */</font></i>
+<a name='L599'>    <b>if</b> (!autoInterpreterState)
+<a name='L600'>        <b>return</b>;
+<a name='L601'>
+<a name='L602'>    <i><font color='green'>/* Stick the thread state for this thread in thread local storage.</font></i>
+<a name='L603'><i><font color='green'></font></i>
+<a name='L604'><i><font color='green'>       The only situation where you can legitimately have more than one</font></i>
+<a name='L605'><i><font color='green'>       thread state for an OS level thread is when there are multiple</font></i>
+<a name='L606'><i><font color='green'>       interpreters, when:</font></i>
+<a name='L607'><i><font color='green'></font></i>
+<a name='L608'><i><font color='green'>           a) You shouldn't really be using the PyGILState_ APIs anyway,</font></i>
+<a name='L609'><i><font color='green'>          and:</font></i>
+<a name='L610'><i><font color='green'></font></i>
+<a name='L611'><i><font color='green'>           b) The slightly odd way PyThread_set_key_value works (see</font></i>
+<a name='L612'><i><font color='green'>          comments by its implementation) means that the first thread</font></i>
+<a name='L613'><i><font color='green'>          state created for that given OS level thread will "win",</font></i>
+<a name='L614'><i><font color='green'>          which seems reasonable behaviour.</font></i>
+<a name='L615'><i><font color='green'>    */</font></i>
+<a name='L616'>    <b>if</b> (<a href='../D/3859.html' title='Multiple defined in 3 places.'>PyThread_set_key_value</a>(autoTLSkey, (<b>void</b> *)tstate) &lt; 0)
+<a name='L617'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("Couldn't create autoTLSkey mapping");
+<a name='L618'>
+<a name='L619'>    <i><font color='green'>/* PyGILState_Release must not try to delete this thread state. */</font></i>
+<a name='L620'>    tstate-&gt;gilstate_counter = 1;
+<a name='L621'><font color='red'>}</font>
+<a name='L622'>
+<a name='L623'><i><font color='green'>/* The public functions */</font></i>
+<a name='L624'><a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *
+<a name='L625'><a href='../R/2977.html' title='Multiple refered from 2 places.'>PyGILState_GetThisThreadState</a>(<b>void</b>)
+<a name='L626'><font color='red'>{</font>
+<a name='L627'>    <b>if</b> (autoInterpreterState == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L628'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L629'>    <b>return</b> (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *)<a href='../D/3854.html' title='Multiple defined in 3 places.'>PyThread_get_key_value</a>(autoTLSkey);
+<a name='L630'><font color='red'>}</font>
+<a name='L631'>
+<a name='L632'>PyGILState_STATE
+<a name='L633'><a href='../R/2976.html' title='Multiple refered from 14 places.'>PyGILState_Ensure</a>(<b>void</b>)
+<a name='L634'><font color='red'>{</font>
+<a name='L635'>    <b>int</b> current;
+<a name='L636'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tcur;
+<a name='L637'>    <i><font color='green'>/* Note that we do not auto-init Python here - apart from</font></i>
+<a name='L638'><i><font color='green'>       potential races with 2 threads auto-initializing, pep-311</font></i>
+<a name='L639'><i><font color='green'>       spells out other issues.  Embedders are expected to have</font></i>
+<a name='L640'><i><font color='green'>       called Py_Initialize() and usually PyEval_InitThreads().</font></i>
+<a name='L641'><i><font color='green'>    */</font></i>
+<a name='L642'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(autoInterpreterState); <i><font color='green'>/* Py_Initialize() hasn't been called! */</font></i>
+<a name='L643'>    tcur = (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *)<a href='../D/3854.html' title='Multiple defined in 3 places.'>PyThread_get_key_value</a>(autoTLSkey);
+<a name='L644'>    <b>if</b> (tcur == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L645'>        <i><font color='green'>/* Create a new thread state for this thread */</font></i>
+<a name='L646'>        tcur = <a href='../S/3134.html#L216' title='Defined at 216 in Python/pystate.c.'>PyThreadState_New</a>(autoInterpreterState);
+<a name='L647'>        <b>if</b> (tcur == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L648'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("Couldn't create thread-state for new thread");
+<a name='L649'>        <i><font color='green'>/* This is our thread state!  We'll need to delete it in the</font></i>
+<a name='L650'><i><font color='green'>           matching call to PyGILState_Release(). */</font></i>
+<a name='L651'>        tcur-&gt;gilstate_counter = 0;
+<a name='L652'>        current = 0; <i><font color='green'>/* new thread state is never current */</font></i>
+<a name='L653'>    <font color='red'>}</font>
+<a name='L654'>    <b>else</b>
+<a name='L655'>        current = <a href='../S/3134.html#L557' title='Defined at 557 in Python/pystate.c.'>PyThreadState_IsCurrent</a>(tcur);
+<a name='L656'>    <b>if</b> (current == 0)
+<a name='L657'>        <a href='../S/3091.html#L435' title='Defined at 435 in Python/ceval.c.'>PyEval_RestoreThread</a>(tcur);
+<a name='L658'>    <i><font color='green'>/* Update our counter in the thread-state - no need for locks:</font></i>
+<a name='L659'><i><font color='green'>       - tcur will remain valid as we hold the GIL.</font></i>
+<a name='L660'><i><font color='green'>       - the counter is safe as we are the only thread "allowed"</font></i>
+<a name='L661'><i><font color='green'>         to modify this value</font></i>
+<a name='L662'><i><font color='green'>    */</font></i>
+<a name='L663'>    ++tcur-&gt;gilstate_counter;
+<a name='L664'>    <b>return</b> current ? PyGILState_LOCKED : PyGILState_UNLOCKED;
+<a name='L665'><font color='red'>}</font>
+<a name='L666'>
+<a name='L667'><b>void</b>
+<a name='L668'><a href='../R/2978.html' title='Multiple refered from 14 places.'>PyGILState_Release</a>(PyGILState_STATE oldstate)
+<a name='L669'><font color='red'>{</font>
+<a name='L670'>    <a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *tcur = (<a href='../D/3832.html' title='Multiple defined in 2 places.'>PyThreadState</a> *)<a href='../D/3854.html' title='Multiple defined in 3 places.'>PyThread_get_key_value</a>(
+<a name='L671'>                                                            autoTLSkey);
+<a name='L672'>    <b>if</b> (tcur == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L673'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("auto-releasing thread-state, "
+<a name='L674'>                      "but no thread-state for this thread");
+<a name='L675'>    <i><font color='green'>/* We must hold the GIL and have our thread state current */</font></i>
+<a name='L676'>    <i><font color='green'>/* XXX - remove the check - the assert should be fine,</font></i>
+<a name='L677'><i><font color='green'>       but while this is very new (April 2003), the extra check</font></i>
+<a name='L678'><i><font color='green'>       by release-only users can't hurt.</font></i>
+<a name='L679'><i><font color='green'>    */</font></i>
+<a name='L680'>    <b>if</b> (! <a href='../S/3134.html#L557' title='Defined at 557 in Python/pystate.c.'>PyThreadState_IsCurrent</a>(tcur))
+<a name='L681'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("This thread state must be current when releasing");
+<a name='L682'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/3134.html#L557' title='Defined at 557 in Python/pystate.c.'>PyThreadState_IsCurrent</a>(tcur));
+<a name='L683'>    --tcur-&gt;gilstate_counter;
+<a name='L684'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(tcur-&gt;gilstate_counter &gt;= 0); <i><font color='green'>/* illegal counter value */</font></i>
+<a name='L685'>
+<a name='L686'>    <i><font color='green'>/* If we're going to destroy this thread-state, we must</font></i>
+<a name='L687'><i><font color='green'>     * clear it while the GIL is held, as destructors may run.</font></i>
+<a name='L688'><i><font color='green'>     */</font></i>
+<a name='L689'>    <b>if</b> (tcur-&gt;gilstate_counter == 0) <font color='red'>{</font>
+<a name='L690'>        <i><font color='green'>/* can't have been locked when we created it */</font></i>
+<a name='L691'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(oldstate == PyGILState_UNLOCKED);
+<a name='L692'>        <a href='../S/3134.html#L271' title='Defined at 271 in Python/pystate.c.'>PyThreadState_Clear</a>(tcur);
+<a name='L693'>        <i><font color='green'>/* Delete the thread-state.  Note this releases the GIL too!</font></i>
+<a name='L694'><i><font color='green'>         * It's vital that the GIL be held here, to avoid shutdown</font></i>
+<a name='L695'><i><font color='green'>         * races; see bugs 225673 and 1061968 (that nasty bug has a</font></i>
+<a name='L696'><i><font color='green'>         * habit of coming back).</font></i>
+<a name='L697'><i><font color='green'>         */</font></i>
+<a name='L698'>        <a href='../S/3134.html#L351' title='Defined at 351 in Python/pystate.c.'>PyThreadState_DeleteCurrent</a>();
+<a name='L699'>    <font color='red'>}</font>
+<a name='L700'>    <i><font color='green'>/* Release the lock if necessary */</font></i>
+<a name='L701'>    <b>else</b> <b>if</b> (oldstate == PyGILState_UNLOCKED)
+<a name='L702'>        <a href='../S/3091.html#L422' title='Defined at 422 in Python/ceval.c.'>PyEval_SaveThread</a>();
+<a name='L703'><font color='red'>}</font>
+<a name='L704'>
+<a name='L705'><font color='darkred'>#ifdef</font> __cplusplus
+<a name='L706'><font color='red'>}</font>
+<a name='L707'><font color='darkred'>#endif</font>
+<a name='L708'>
+<a name='L709'><font color='darkred'>#endif</font> <i><font color='green'>/* WITH_THREAD */</font></i>
+<a name='L710'>
+<a name='L711'>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L61'>[^]</a><a href='#L668'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

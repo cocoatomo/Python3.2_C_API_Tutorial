@@ -1,0 +1,475 @@
+<html>
+<head>
+<title>Modules/zlib/crc32.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3390.html'>zlib</a>/crc32.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L108'>[^]</a><a href='#L436'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L108' title='Defined at 108.'>make_crc_table</a>
+<li><a href='#L185' title='Defined at 185.'>write_table</a>
+<li><a href='#L207' title='Defined at 207.'>get_crc_table</a>
+<li><a href='#L221' title='Defined at 221.'>crc32</a>
+<li><a href='#L264' title='Defined at 264.'>crc32_little</a>
+<li><a href='#L304' title='Defined at 304.'>crc32_big</a>
+<li><a href='#L344' title='Defined at 344.'>gf2_matrix_times</a>
+<li><a href='#L361' title='Defined at 361.'>gf2_matrix_square</a>
+<li><a href='#L372' title='Defined at 372.'>crc32_combine_</a>
+<li><a href='#L428' title='Defined at 428.'>crc32_combine</a>
+<li><a href='#L436' title='Defined at 436.'>crc32_combine64</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* crc32.c -- compute the CRC-32 of a data stream</font></i>
+<a name='L2'><i><font color='green'> * Copyright (C) 1995-2006, 2010 Mark Adler</font></i>
+<a name='L3'><i><font color='green'> * For conditions of distribution and use, see copyright notice in zlib.h</font></i>
+<a name='L4'><i><font color='green'> *</font></i>
+<a name='L5'><i><font color='green'> * Thanks to Rodney Brown &lt;rbrown64@csc.com.au&gt; for his contribution of faster</font></i>
+<a name='L6'><i><font color='green'> * CRC methods: exclusive-oring 32 bits of data at a time, and pre-computing</font></i>
+<a name='L7'><i><font color='green'> * tables for updating the shift register in one step with three exclusive-ors</font></i>
+<a name='L8'><i><font color='green'> * instead of four steps with four exclusive-ors.  This results in about a</font></i>
+<a name='L9'><i><font color='green'> * factor of two increase in speed on a Power PC G4 (PPC7455) using gcc -O3.</font></i>
+<a name='L10'><i><font color='green'> */</font></i>
+<a name='L11'>
+<a name='L12'><i><font color='green'>/* @(#) $Id$ */</font></i>
+<a name='L13'>
+<a name='L14'><i><font color='green'>/*</font></i>
+<a name='L15'><i><font color='green'>  Note on the use of DYNAMIC_CRC_TABLE: there is no mutex or semaphore</font></i>
+<a name='L16'><i><font color='green'>  protection on the static variables used to control the first-use generation</font></i>
+<a name='L17'><i><font color='green'>  of the crc tables.  Therefore, if you #define DYNAMIC_CRC_TABLE, you should</font></i>
+<a name='L18'><i><font color='green'>  first call get_crc_table() to initialize the tables before allowing more than</font></i>
+<a name='L19'><i><font color='green'>  one thread to use crc32().</font></i>
+<a name='L20'><i><font color='green'> */</font></i>
+<a name='L21'>
+<a name='L22'><font color='darkred'>#ifdef</font> MAKECRCH
+<a name='L23'><font color='darkred'>#  include</font> &lt;stdio.h&gt;
+<a name='L24'><font color='darkred'>#  ifndef</font> <a href='../S/2735.html#L25' title='Defined at 25 in Modules/zlib/crc32.c.'>DYNAMIC_CRC_TABLE</a>
+<a name='L25'><font color='darkred'>#    define</font> <a href='../R/778.html' title='Multiple refered from 5 places.'>DYNAMIC_CRC_TABLE</a>
+<a name='L26'><font color='darkred'>#  endif</font> <i><font color='green'>/* !DYNAMIC_CRC_TABLE */</font></i>
+<a name='L27'><font color='darkred'>#endif</font> <i><font color='green'>/* MAKECRCH */</font></i>
+<a name='L28'>
+<a name='L29'><font color='darkred'>#include</font> "<a href='2773.html'>zutil.h</a>"      <i><font color='green'>/* for STDC and FAR definitions */</font></i>
+<a name='L30'>
+<a name='L31'><font color='darkred'>#define</font> <a href='../R/8737.html' title='Multiple refered from 182 places.'>local</a> <b>static</b>
+<a name='L32'>
+<a name='L33'><i><font color='green'>/* Find a four-byte integer type for crc32_little() and crc32_big(). */</font></i>
+<a name='L34'><font color='darkred'>#ifndef</font> NOBYFOUR
+<a name='L35'><font color='darkred'>#  ifdef</font> <a href='../D/4951.html' title='Multiple defined in 12 places.'>STDC</a>           <i><font color='green'>/* need ANSI C limits.h to determine sizes */</font></i>
+<a name='L36'><font color='darkred'>#    include</font> &lt;limits.h&gt;
+<a name='L37'><font color='darkred'>#    define</font> <a href='../R/338.html' title='Multiple refered from 6 places.'>BYFOUR</a>
+<a name='L38'><font color='darkred'>#    if</font> (UINT_MAX == 0xffffffffUL)
+<a name='L39'>       <b>typedef</b> <b>unsigned</b> <b>int</b> <a href='../R/11035.html' title='Multiple refered from 10 places.'>u4</a>;
+<a name='L40'><font color='darkred'>#    else</font>
+<a name='L41'><font color='darkred'>#      if</font> (ULONG_MAX == 0xffffffffUL)
+<a name='L42'>         <b>typedef</b> <b>unsigned</b> <b>long</b> <a href='../R/11035.html' title='Multiple refered from 10 places.'>u4</a>;
+<a name='L43'><font color='darkred'>#      else</font>
+<a name='L44'><font color='darkred'>#        if</font> (USHRT_MAX == 0xffffffffUL)
+<a name='L45'>           <b>typedef</b> <b>unsigned</b> <b>short</b> <a href='../R/11035.html' title='Multiple refered from 10 places.'>u4</a>;
+<a name='L46'><font color='darkred'>#        else</font>
+<a name='L47'><font color='darkred'>#          undef</font> <a href='../R/338.html' title='Multiple refered from 6 places.'>BYFOUR</a>     <i><font color='green'>/* can't find a four-byte integer type! */</font></i>
+<a name='L48'><font color='darkred'>#        endif</font>
+<a name='L49'><font color='darkred'>#      endif</font>
+<a name='L50'><font color='darkred'>#    endif</font>
+<a name='L51'><font color='darkred'>#  endif</font> <i><font color='green'>/* STDC */</font></i>
+<a name='L52'><font color='darkred'>#endif</font> <i><font color='green'>/* !NOBYFOUR */</font></i>
+<a name='L53'>
+<a name='L54'><i><font color='green'>/* Definitions for doing the crc four data bytes at a time. */</font></i>
+<a name='L55'><font color='darkred'>#ifdef</font> <a href='../D/363.html' title='Multiple defined in 2 places.'>BYFOUR</a>
+<a name='L56'><font color='darkred'>#  define</font> <a href='../R/3965.html' title='Multiple refered from 4 places.'>REV</a>(w) ((((w)&gt;&gt;24)&amp;0xff)+(((w)&gt;&gt;8)&amp;0xff00)+ \
+<a name='L57'>                (((w)&amp;0xff00)&lt;&lt;8)+(((w)&amp;0xff)&lt;&lt;24))
+<a name='L58'>   <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <b>long</b> <a href='../S/2735.html#L264' title='Defined at 264 in Modules/zlib/crc32.c.'>crc32_little</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>unsigned</b> <b>long</b>,
+<a name='L59'>                        <b>const</b> <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *, <b>unsigned</b>));
+<a name='L60'>   <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <b>long</b> <a href='../S/2735.html#L304' title='Defined at 304 in Modules/zlib/crc32.c.'>crc32_big</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>unsigned</b> <b>long</b>,
+<a name='L61'>                        <b>const</b> <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *, <b>unsigned</b>));
+<a name='L62'><font color='darkred'>#  define</font> <a href='../R/4524.html' title='Multiple refered from 2 places.'>TBLS</a> 8
+<a name='L63'><font color='darkred'>#else</font>
+<a name='L64'><font color='darkred'>#  define</font> <a href='../R/4524.html' title='Multiple refered from 2 places.'>TBLS</a> 1
+<a name='L65'><font color='darkred'>#endif</font> <i><font color='green'>/* BYFOUR */</font></i>
+<a name='L66'>
+<a name='L67'><i><font color='green'>/* Local functions for crc concatenation */</font></i>
+<a name='L68'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <b>long</b> <a href='../S/2735.html#L344' title='Defined at 344 in Modules/zlib/crc32.c.'>gf2_matrix_times</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>unsigned</b> <b>long</b> *mat,
+<a name='L69'>                                         <b>unsigned</b> <b>long</b> vec));
+<a name='L70'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2735.html#L361' title='Defined at 361 in Modules/zlib/crc32.c.'>gf2_matrix_square</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>unsigned</b> <b>long</b> *square, <b>unsigned</b> <b>long</b> *mat));
+<a name='L71'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../D/11920.html' title='Multiple defined in 4 places.'>uLong</a> <a href='../S/2735.html#L372' title='Defined at 372 in Modules/zlib/crc32.c.'>crc32_combine_</a>(uLong crc1, uLong crc2, <a href='../D/12436.html' title='Multiple defined in 2 places.'>z_off64_t</a> len2);
+<a name='L72'>
+<a name='L73'>
+<a name='L74'><font color='darkred'>#ifdef</font> <a href='../S/2735.html#L25' title='Defined at 25 in Modules/zlib/crc32.c.'>DYNAMIC_CRC_TABLE</a>
+<a name='L75'>
+<a name='L76'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>volatile</b> <b>int</b> crc_table_empty = 1;
+<a name='L77'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <b>long</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> crc_table[<a href='../D/5131.html' title='Multiple defined in 2 places.'>TBLS</a>][256];
+<a name='L78'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2735.html#L108' title='Defined at 108 in Modules/zlib/crc32.c.'>make_crc_table</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((<b>void</b>));
+<a name='L79'><font color='darkred'>#ifdef</font> MAKECRCH
+<a name='L80'>   <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../S/2735.html#L185' title='Defined at 185 in Modules/zlib/crc32.c.'>write_table</a> <a href='../D/2401.html' title='Multiple defined in 9 places.'>OF</a>((FILE *, <b>const</b> <b>unsigned</b> <b>long</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *));
+<a name='L81'><font color='darkred'>#endif</font> <i><font color='green'>/* MAKECRCH */</font></i>
+<a name='L82'><i><font color='green'>/*</font></i>
+<a name='L83'><i><font color='green'>  Generate tables for a byte-wise 32-bit CRC calculation on the polynomial:</font></i>
+<a name='L84'><i><font color='green'>  x^32+x^26+x^23+x^22+x^16+x^12+x^11+x^10+x^8+x^7+x^5+x^4+x^2+x+1.</font></i>
+<a name='L85'><i><font color='green'></font></i>
+<a name='L86'><i><font color='green'>  Polynomials over GF(2) are represented in binary, one bit per coefficient,</font></i>
+<a name='L87'><i><font color='green'>  with the lowest powers in the most significant bit.  Then adding polynomials</font></i>
+<a name='L88'><i><font color='green'>  is just exclusive-or, and multiplying a polynomial by x is a right shift by</font></i>
+<a name='L89'><i><font color='green'>  one.  If we call the above polynomial p, and represent a byte as the</font></i>
+<a name='L90'><i><font color='green'>  polynomial q, also with the lowest power in the most significant bit (so the</font></i>
+<a name='L91'><i><font color='green'>  byte 0xb1 is the polynomial x^7+x^3+x+1), then the CRC is (q*x^32) mod p,</font></i>
+<a name='L92'><i><font color='green'>  where a mod b means the remainder after dividing a by b.</font></i>
+<a name='L93'><i><font color='green'></font></i>
+<a name='L94'><i><font color='green'>  This calculation is done using the shift-register method of multiplying and</font></i>
+<a name='L95'><i><font color='green'>  taking the remainder.  The register is initialized to zero, and for each</font></i>
+<a name='L96'><i><font color='green'>  incoming bit, x^32 is added mod p to the register if the bit is a one (where</font></i>
+<a name='L97'><i><font color='green'>  x^32 mod p is p+x^32 = x^26+...+1), and the register is multiplied mod p by</font></i>
+<a name='L98'><i><font color='green'>  x (which is shifting right by one and adding x^32 mod p if the bit shifted</font></i>
+<a name='L99'><i><font color='green'>  out is a one).  We start with the highest power (least significant bit) of</font></i>
+<a name='L100'><i><font color='green'>  q and repeat for all eight bits of q.</font></i>
+<a name='L101'><i><font color='green'></font></i>
+<a name='L102'><i><font color='green'>  The first table is simply the CRC of all possible eight bit values.  This is</font></i>
+<a name='L103'><i><font color='green'>  all the information needed to generate CRCs on data a byte at a time for all</font></i>
+<a name='L104'><i><font color='green'>  combinations of CRC register values and incoming bytes.  The remaining tables</font></i>
+<a name='L105'><i><font color='green'>  allow for word-at-a-time CRC calculation for both big-endian and little-</font></i>
+<a name='L106'><i><font color='green'>  endian machines, where a word is four bytes.</font></i>
+<a name='L107'><i><font color='green'>*/</font></i>
+<a name='L108'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/8835.html' title='Multiple refered from 3 places.'>make_crc_table</a>()
+<a name='L109'><font color='red'>{</font>
+<a name='L110'>    <b>unsigned</b> <b>long</b> c;
+<a name='L111'>    <b>int</b> n, k;
+<a name='L112'>    <b>unsigned</b> <b>long</b> poly;                 <i><font color='green'>/* polynomial exclusive-or pattern */</font></i>
+<a name='L113'>    <i><font color='green'>/* terms of polynomial defining this crc (except x^32): */</font></i>
+<a name='L114'>    <b>static</b> <b>volatile</b> <b>int</b> first = 1;      <i><font color='green'>/* flag to limit concurrent making */</font></i>
+<a name='L115'>    <b>static</b> <b>const</b> <b>unsigned</b> <b>char</b> p[] = <font color='red'>{</font>0,1,2,4,5,7,8,10,11,12,16,22,23,26<font color='red'>}</font>;
+<a name='L116'>
+<a name='L117'>    <i><font color='green'>/* See if another task is already doing this (not thread-safe, but better</font></i>
+<a name='L118'><i><font color='green'>       than nothing -- significantly reduces duration of vulnerability in</font></i>
+<a name='L119'><i><font color='green'>       case the advice about DYNAMIC_CRC_TABLE is ignored) */</font></i>
+<a name='L120'>    <b>if</b> (first) <font color='red'>{</font>
+<a name='L121'>        first = 0;
+<a name='L122'>
+<a name='L123'>        <i><font color='green'>/* make exclusive-or pattern from polynomial (0xedb88320UL) */</font></i>
+<a name='L124'>        poly = 0UL;
+<a name='L125'>        <b>for</b> (n = 0; n &lt; <b>sizeof</b>(p)/<b>sizeof</b>(<b>unsigned</b> <b>char</b>); n++)
+<a name='L126'>            poly |= 1UL &lt;&lt; (31 - p[n]);
+<a name='L127'>
+<a name='L128'>        <i><font color='green'>/* generate a crc for every 8-bit value */</font></i>
+<a name='L129'>        <b>for</b> (n = 0; n &lt; 256; n++) <font color='red'>{</font>
+<a name='L130'>            c = (<b>unsigned</b> <b>long</b>)n;
+<a name='L131'>            <b>for</b> (k = 0; k &lt; 8; k++)
+<a name='L132'>                c = c &amp; 1 ? poly ^ (c &gt;&gt; 1) : c &gt;&gt; 1;
+<a name='L133'>            crc_table[0][n] = c;
+<a name='L134'>        <font color='red'>}</font>
+<a name='L135'>
+<a name='L136'><font color='darkred'>#ifdef</font> <a href='../D/363.html' title='Multiple defined in 2 places.'>BYFOUR</a>
+<a name='L137'>        <i><font color='green'>/* generate crc for each value followed by one, two, and three zeros,</font></i>
+<a name='L138'><i><font color='green'>           and then the byte reversal of those as well as the first table */</font></i>
+<a name='L139'>        <b>for</b> (n = 0; n &lt; 256; n++) <font color='red'>{</font>
+<a name='L140'>            c = crc_table[0][n];
+<a name='L141'>            crc_table[4][n] = <a href='../S/2735.html#L56' title='Defined at 56 in Modules/zlib/crc32.c.'>REV</a>(c);
+<a name='L142'>            <b>for</b> (k = 1; k &lt; 4; k++) <font color='red'>{</font>
+<a name='L143'>                c = crc_table[0][c &amp; 0xff] ^ (c &gt;&gt; 8);
+<a name='L144'>                crc_table[k][n] = c;
+<a name='L145'>                crc_table[k + 4][n] = <a href='../S/2735.html#L56' title='Defined at 56 in Modules/zlib/crc32.c.'>REV</a>(c);
+<a name='L146'>            <font color='red'>}</font>
+<a name='L147'>        <font color='red'>}</font>
+<a name='L148'><font color='darkred'>#endif</font> <i><font color='green'>/* BYFOUR */</font></i>
+<a name='L149'>
+<a name='L150'>        crc_table_empty = 0;
+<a name='L151'>    <font color='red'>}</font>
+<a name='L152'>    <b>else</b> <font color='red'>{</font>      <i><font color='green'>/* not first */</font></i>
+<a name='L153'>        <i><font color='green'>/* wait for the other guy to finish (not efficient, but rare) */</font></i>
+<a name='L154'>        <b>while</b> (crc_table_empty)
+<a name='L155'>            ;
+<a name='L156'>    <font color='red'>}</font>
+<a name='L157'>
+<a name='L158'><font color='darkred'>#ifdef</font> MAKECRCH
+<a name='L159'>    <i><font color='green'>/* write out CRC tables to crc32.h */</font></i>
+<a name='L160'>    <font color='red'>{</font>
+<a name='L161'>        FILE *out;
+<a name='L162'>
+<a name='L163'>        out = fopen("crc32.h", "w");
+<a name='L164'>        <b>if</b> (out == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <b>return</b>;
+<a name='L165'>        fprintf(out, "/* crc32.h -- tables for rapid CRC calculation\n");
+<a name='L166'>        fprintf(out, " * Generated automatically by crc32.c\n */\n\n");
+<a name='L167'>        fprintf(out, "local const unsigned long FAR ");
+<a name='L168'>        fprintf(out, "crc_table[TBLS][256] =\n{\n  {\n");
+<a name='L169'>        <a href='../S/2735.html#L185' title='Defined at 185 in Modules/zlib/crc32.c.'>write_table</a>(out, crc_table[0]);
+<a name='L170'><font color='darkred'>#  ifdef</font> <a href='../D/363.html' title='Multiple defined in 2 places.'>BYFOUR</a>
+<a name='L171'>        fprintf(out, "#ifdef BYFOUR\n");
+<a name='L172'>        <b>for</b> (k = 1; k &lt; 8; k++) <font color='red'>{</font>
+<a name='L173'>            fprintf(out, "  },\n  {\n");
+<a name='L174'>            <a href='../S/2735.html#L185' title='Defined at 185 in Modules/zlib/crc32.c.'>write_table</a>(out, crc_table[k]);
+<a name='L175'>        <font color='red'>}</font>
+<a name='L176'>        fprintf(out, "#endif\n");
+<a name='L177'><font color='darkred'>#  endif</font> <i><font color='green'>/* BYFOUR */</font></i>
+<a name='L178'>        fprintf(out, "  }\n};\n");
+<a name='L179'>        fclose(out);
+<a name='L180'>    <font color='red'>}</font>
+<a name='L181'><font color='darkred'>#endif</font> <i><font color='green'>/* MAKECRCH */</font></i>
+<a name='L182'><font color='red'>}</font>
+<a name='L183'>
+<a name='L184'><font color='darkred'>#ifdef</font> MAKECRCH
+<a name='L185'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/11480.html' title='Multiple refered from 3 places.'>write_table</a>(out, table)
+<a name='L186'>    FILE *out;
+<a name='L187'>    <b>const</b> <b>unsigned</b> <b>long</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *table;
+<a name='L188'><font color='red'>{</font>
+<a name='L189'>    <b>int</b> n;
+<a name='L190'>
+<a name='L191'>    <b>for</b> (n = 0; n &lt; 256; n++)
+<a name='L192'>        fprintf(out, "%s0x%08lxUL%s", n % 5 ? "" : "    ", table[n],
+<a name='L193'>                n == 255 ? "\n" : (n % 5 == 4 ? ",\n" : ", "));
+<a name='L194'><font color='red'>}</font>
+<a name='L195'><font color='darkred'>#endif</font> <i><font color='green'>/* MAKECRCH */</font></i>
+<a name='L196'>
+<a name='L197'><font color='darkred'>#else</font> <i><font color='green'>/* !DYNAMIC_CRC_TABLE */</font></i>
+<a name='L198'><i><font color='green'>/* ========================================================================</font></i>
+<a name='L199'><i><font color='green'> * Tables of CRC-32s of all single-byte values, made by make_crc_table().</font></i>
+<a name='L200'><i><font color='green'> */</font></i>
+<a name='L201'><font color='darkred'>#include</font> "<a href='2736.html'>crc32.h</a>"
+<a name='L202'><font color='darkred'>#endif</font> <i><font color='green'>/* DYNAMIC_CRC_TABLE */</font></i>
+<a name='L203'>
+<a name='L204'><i><font color='green'>/* =========================================================================</font></i>
+<a name='L205'><i><font color='green'> * This function can be used by asm versions of crc32()</font></i>
+<a name='L206'><i><font color='green'> */</font></i>
+<a name='L207'><b>const</b> <b>unsigned</b> <b>long</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> * <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L1606' title='Refered from 1606 in Modules/zlib/zlib.h.'>get_crc_table</a>()
+<a name='L208'><font color='red'>{</font>
+<a name='L209'><font color='darkred'>#ifdef</font> <a href='../S/2735.html#L25' title='Defined at 25 in Modules/zlib/crc32.c.'>DYNAMIC_CRC_TABLE</a>
+<a name='L210'>    <b>if</b> (crc_table_empty)
+<a name='L211'>        <a href='../S/2735.html#L108' title='Defined at 108 in Modules/zlib/crc32.c.'>make_crc_table</a>();
+<a name='L212'><font color='darkred'>#endif</font> <i><font color='green'>/* DYNAMIC_CRC_TABLE */</font></i>
+<a name='L213'>    <b>return</b> (<b>const</b> <b>unsigned</b> <b>long</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)crc_table;
+<a name='L214'><font color='red'>}</font>
+<a name='L215'>
+<a name='L216'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L217'><font color='darkred'>#define</font> <a href='../R/746.html' title='Multiple refered from 3 places.'>DO1</a> crc = crc_table[0][((<b>int</b>)crc ^ (*buf++)) &amp; 0xff] ^ (crc &gt;&gt; 8)
+<a name='L218'><font color='darkred'>#define</font> <a href='../R/750.html' title='Multiple refered from 2 places.'>DO8</a> <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>; <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>; <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>; <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>; <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>; <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>; <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>; <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>
+<a name='L219'>
+<a name='L220'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L221'><b>unsigned</b> <b>long</b> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7035.html' title='Multiple refered from 33 places.'>crc32</a>(crc, buf, len)
+<a name='L222'>    <b>unsigned</b> <b>long</b> crc;
+<a name='L223'>    <b>const</b> <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *buf;
+<a name='L224'>    uInt len;
+<a name='L225'><font color='red'>{</font>
+<a name='L226'>    <b>if</b> (buf == <a href='../S/2769.html#L208' title='Defined at 208 in Modules/zlib/zlib.h.'>Z_NULL</a>) <b>return</b> 0UL;
+<a name='L227'>
+<a name='L228'><font color='darkred'>#ifdef</font> <a href='../S/2735.html#L25' title='Defined at 25 in Modules/zlib/crc32.c.'>DYNAMIC_CRC_TABLE</a>
+<a name='L229'>    <b>if</b> (crc_table_empty)
+<a name='L230'>        <a href='../S/2735.html#L108' title='Defined at 108 in Modules/zlib/crc32.c.'>make_crc_table</a>();
+<a name='L231'><font color='darkred'>#endif</font> <i><font color='green'>/* DYNAMIC_CRC_TABLE */</font></i>
+<a name='L232'>
+<a name='L233'><font color='darkred'>#ifdef</font> <a href='../D/363.html' title='Multiple defined in 2 places.'>BYFOUR</a>
+<a name='L234'>    <b>if</b> (<b>sizeof</b>(<b>void</b> *) == <b>sizeof</b>(<a href='../S/2773.html#L148' title='Defined at 148 in Modules/zlib/zutil.h.'>ptrdiff_t</a>)) <font color='red'>{</font>
+<a name='L235'>        <a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a> endian;
+<a name='L236'>
+<a name='L237'>        endian = 1;
+<a name='L238'>        <b>if</b> (*((<b>unsigned</b> <b>char</b> *)(&amp;endian)))
+<a name='L239'>            <b>return</b> <a href='../S/2735.html#L264' title='Defined at 264 in Modules/zlib/crc32.c.'>crc32_little</a>(crc, buf, len);
+<a name='L240'>        <b>else</b>
+<a name='L241'>            <b>return</b> <a href='../S/2735.html#L304' title='Defined at 304 in Modules/zlib/crc32.c.'>crc32_big</a>(crc, buf, len);
+<a name='L242'>    <font color='red'>}</font>
+<a name='L243'><font color='darkred'>#endif</font> <i><font color='green'>/* BYFOUR */</font></i>
+<a name='L244'>    crc = crc ^ 0xffffffffUL;
+<a name='L245'>    <b>while</b> (len &gt;= 8) <font color='red'>{</font>
+<a name='L246'>        <a href='../D/804.html' title='Multiple defined in 2 places.'>DO8</a>;
+<a name='L247'>        len -= 8;
+<a name='L248'>    <font color='red'>}</font>
+<a name='L249'>    <b>if</b> (len) <b>do</b> <font color='red'>{</font>
+<a name='L250'>        <a href='../D/800.html' title='Multiple defined in 2 places.'>DO1</a>;
+<a name='L251'>    <font color='red'>}</font> <b>while</b> (--len);
+<a name='L252'>    <b>return</b> crc ^ 0xffffffffUL;
+<a name='L253'><font color='red'>}</font>
+<a name='L254'>
+<a name='L255'><font color='darkred'>#ifdef</font> <a href='../D/363.html' title='Multiple defined in 2 places.'>BYFOUR</a>
+<a name='L256'>
+<a name='L257'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L258'><font color='darkred'>#define</font> <a href='../R/754.html' title='Multiple refered from 2 places.'>DOLIT4</a> c ^= *buf4++; \
+<a name='L259'>        c = crc_table[3][c &amp; 0xff] ^ crc_table[2][(c &gt;&gt; 8) &amp; 0xff] ^ \
+<a name='L260'>            crc_table[1][(c &gt;&gt; 16) &amp; 0xff] ^ crc_table[0][c &gt;&gt; 24]
+<a name='L261'><font color='darkred'>#define</font> <a href='../S/2735.html#L281' title='Refered from 281 in Modules/zlib/crc32.c.'>DOLIT32</a> <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>; <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>; <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>; <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>; <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>; <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>; <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>; <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>
+<a name='L262'>
+<a name='L263'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L264'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <b>long</b> <a href='../R/7040.html' title='Multiple refered from 2 places.'>crc32_little</a>(crc, buf, len)
+<a name='L265'>    <b>unsigned</b> <b>long</b> crc;
+<a name='L266'>    <b>const</b> <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *buf;
+<a name='L267'>    <b>unsigned</b> len;
+<a name='L268'><font color='red'>{</font>
+<a name='L269'>    <b>register</b> <a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a> c;
+<a name='L270'>    <b>register</b> <b>const</b> <a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *buf4;
+<a name='L271'>
+<a name='L272'>    c = (<a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a>)crc;
+<a name='L273'>    c = ~c;
+<a name='L274'>    <b>while</b> (len &amp;&amp; ((<a href='../S/2773.html#L148' title='Defined at 148 in Modules/zlib/zutil.h.'>ptrdiff_t</a>)buf &amp; 3)) <font color='red'>{</font>
+<a name='L275'>        c = crc_table[0][(c ^ *buf++) &amp; 0xff] ^ (c &gt;&gt; 8);
+<a name='L276'>        len--;
+<a name='L277'>    <font color='red'>}</font>
+<a name='L278'>
+<a name='L279'>    buf4 = (<b>const</b> <a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)(<b>const</b> <b>void</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)buf;
+<a name='L280'>    <b>while</b> (len &gt;= 32) <font color='red'>{</font>
+<a name='L281'>        <a href='../S/2735.html#L261' title='Defined at 261 in Modules/zlib/crc32.c.'>DOLIT32</a>;
+<a name='L282'>        len -= 32;
+<a name='L283'>    <font color='red'>}</font>
+<a name='L284'>    <b>while</b> (len &gt;= 4) <font color='red'>{</font>
+<a name='L285'>        <a href='../S/2735.html#L258' title='Defined at 258 in Modules/zlib/crc32.c.'>DOLIT4</a>;
+<a name='L286'>        len -= 4;
+<a name='L287'>    <font color='red'>}</font>
+<a name='L288'>    buf = (<b>const</b> <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)buf4;
+<a name='L289'>
+<a name='L290'>    <b>if</b> (len) <b>do</b> <font color='red'>{</font>
+<a name='L291'>        c = crc_table[0][(c ^ *buf++) &amp; 0xff] ^ (c &gt;&gt; 8);
+<a name='L292'>    <font color='red'>}</font> <b>while</b> (--len);
+<a name='L293'>    c = ~c;
+<a name='L294'>    <b>return</b> (<b>unsigned</b> <b>long</b>)c;
+<a name='L295'><font color='red'>}</font>
+<a name='L296'>
+<a name='L297'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L298'><font color='darkred'>#define</font> <a href='../R/752.html' title='Multiple refered from 2 places.'>DOBIG4</a> c ^= *++buf4; \
+<a name='L299'>        c = crc_table[4][c &amp; 0xff] ^ crc_table[5][(c &gt;&gt; 8) &amp; 0xff] ^ \
+<a name='L300'>            crc_table[6][(c &gt;&gt; 16) &amp; 0xff] ^ crc_table[7][c &gt;&gt; 24]
+<a name='L301'><font color='darkred'>#define</font> <a href='../S/2735.html#L322' title='Refered from 322 in Modules/zlib/crc32.c.'>DOBIG32</a> <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>; <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>; <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>; <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>; <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>; <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>; <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>; <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>
+<a name='L302'>
+<a name='L303'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L304'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <b>long</b> <a href='../R/7036.html' title='Multiple refered from 2 places.'>crc32_big</a>(crc, buf, len)
+<a name='L305'>    <b>unsigned</b> <b>long</b> crc;
+<a name='L306'>    <b>const</b> <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *buf;
+<a name='L307'>    <b>unsigned</b> len;
+<a name='L308'><font color='red'>{</font>
+<a name='L309'>    <b>register</b> <a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a> c;
+<a name='L310'>    <b>register</b> <b>const</b> <a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *buf4;
+<a name='L311'>
+<a name='L312'>    c = <a href='../S/2735.html#L56' title='Defined at 56 in Modules/zlib/crc32.c.'>REV</a>((<a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a>)crc);
+<a name='L313'>    c = ~c;
+<a name='L314'>    <b>while</b> (len &amp;&amp; ((<a href='../S/2773.html#L148' title='Defined at 148 in Modules/zlib/zutil.h.'>ptrdiff_t</a>)buf &amp; 3)) <font color='red'>{</font>
+<a name='L315'>        c = crc_table[4][(c &gt;&gt; 24) ^ *buf++] ^ (c &lt;&lt; 8);
+<a name='L316'>        len--;
+<a name='L317'>    <font color='red'>}</font>
+<a name='L318'>
+<a name='L319'>    buf4 = (<b>const</b> <a href='../D/11917.html' title='Multiple defined in 3 places.'>u4</a> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)(<b>const</b> <b>void</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)buf;
+<a name='L320'>    buf4--;
+<a name='L321'>    <b>while</b> (len &gt;= 32) <font color='red'>{</font>
+<a name='L322'>        <a href='../S/2735.html#L301' title='Defined at 301 in Modules/zlib/crc32.c.'>DOBIG32</a>;
+<a name='L323'>        len -= 32;
+<a name='L324'>    <font color='red'>}</font>
+<a name='L325'>    <b>while</b> (len &gt;= 4) <font color='red'>{</font>
+<a name='L326'>        <a href='../S/2735.html#L298' title='Defined at 298 in Modules/zlib/crc32.c.'>DOBIG4</a>;
+<a name='L327'>        len -= 4;
+<a name='L328'>    <font color='red'>}</font>
+<a name='L329'>    buf4++;
+<a name='L330'>    buf = (<b>const</b> <b>unsigned</b> <b>char</b> <a href='../D/1088.html' title='Multiple defined in 13 places.'>FAR</a> *)buf4;
+<a name='L331'>
+<a name='L332'>    <b>if</b> (len) <b>do</b> <font color='red'>{</font>
+<a name='L333'>        c = crc_table[4][(c &gt;&gt; 24) ^ *buf++] ^ (c &lt;&lt; 8);
+<a name='L334'>    <font color='red'>}</font> <b>while</b> (--len);
+<a name='L335'>    c = ~c;
+<a name='L336'>    <b>return</b> (<b>unsigned</b> <b>long</b>)(<a href='../S/2735.html#L56' title='Defined at 56 in Modules/zlib/crc32.c.'>REV</a>(c));
+<a name='L337'><font color='red'>}</font>
+<a name='L338'>
+<a name='L339'><font color='darkred'>#endif</font> <i><font color='green'>/* BYFOUR */</font></i>
+<a name='L340'>
+<a name='L341'><font color='darkred'>#define</font> <a href='../R/1264.html' title='Multiple refered from 4 places.'>GF2_DIM</a> 32      <i><font color='green'>/* dimension of GF(2) vectors (length of CRC) */</font></i>
+<a name='L342'>
+<a name='L343'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L344'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>unsigned</b> <b>long</b> <a href='../R/8171.html' title='Multiple refered from 4 places.'>gf2_matrix_times</a>(mat, vec)
+<a name='L345'>    <b>unsigned</b> <b>long</b> *mat;
+<a name='L346'>    <b>unsigned</b> <b>long</b> vec;
+<a name='L347'><font color='red'>{</font>
+<a name='L348'>    <b>unsigned</b> <b>long</b> sum;
+<a name='L349'>
+<a name='L350'>    sum = 0;
+<a name='L351'>    <b>while</b> (vec) <font color='red'>{</font>
+<a name='L352'>        <b>if</b> (vec &amp; 1)
+<a name='L353'>            sum ^= *mat;
+<a name='L354'>        vec &gt;&gt;= 1;
+<a name='L355'>        mat++;
+<a name='L356'>    <font color='red'>}</font>
+<a name='L357'>    <b>return</b> sum;
+<a name='L358'><font color='red'>}</font>
+<a name='L359'>
+<a name='L360'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L361'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <b>void</b> <a href='../R/8170.html' title='Multiple refered from 5 places.'>gf2_matrix_square</a>(square, mat)
+<a name='L362'>    <b>unsigned</b> <b>long</b> *square;
+<a name='L363'>    <b>unsigned</b> <b>long</b> *mat;
+<a name='L364'><font color='red'>{</font>
+<a name='L365'>    <b>int</b> n;
+<a name='L366'>
+<a name='L367'>    <b>for</b> (n = 0; n &lt; <a href='../S/2735.html#L341' title='Defined at 341 in Modules/zlib/crc32.c.'>GF2_DIM</a>; n++)
+<a name='L368'>        square[n] = <a href='../S/2735.html#L344' title='Defined at 344 in Modules/zlib/crc32.c.'>gf2_matrix_times</a>(mat, mat[n]);
+<a name='L369'><font color='red'>}</font>
+<a name='L370'>
+<a name='L371'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L372'><a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> <a href='../D/11920.html' title='Multiple defined in 4 places.'>uLong</a> <a href='../R/7039.html' title='Multiple refered from 3 places.'>crc32_combine_</a>(crc1, crc2, len2)
+<a name='L373'>    uLong crc1;
+<a name='L374'>    uLong crc2;
+<a name='L375'>    <a href='../D/12436.html' title='Multiple defined in 2 places.'>z_off64_t</a> len2;
+<a name='L376'><font color='red'>{</font>
+<a name='L377'>    <b>int</b> n;
+<a name='L378'>    <b>unsigned</b> <b>long</b> row;
+<a name='L379'>    <b>unsigned</b> <b>long</b> even[<a href='../S/2735.html#L341' title='Defined at 341 in Modules/zlib/crc32.c.'>GF2_DIM</a>];    <i><font color='green'>/* even-power-of-two zeros operator */</font></i>
+<a name='L380'>    <b>unsigned</b> <b>long</b> odd[<a href='../S/2735.html#L341' title='Defined at 341 in Modules/zlib/crc32.c.'>GF2_DIM</a>];     <i><font color='green'>/* odd-power-of-two zeros operator */</font></i>
+<a name='L381'>
+<a name='L382'>    <i><font color='green'>/* degenerate case (also disallow negative lengths) */</font></i>
+<a name='L383'>    <b>if</b> (len2 &lt;= 0)
+<a name='L384'>        <b>return</b> crc1;
+<a name='L385'>
+<a name='L386'>    <i><font color='green'>/* put operator for one zero bit in odd */</font></i>
+<a name='L387'>    odd[0] = 0xedb88320UL;          <i><font color='green'>/* CRC-32 polynomial */</font></i>
+<a name='L388'>    row = 1;
+<a name='L389'>    <b>for</b> (n = 1; n &lt; <a href='../S/2735.html#L341' title='Defined at 341 in Modules/zlib/crc32.c.'>GF2_DIM</a>; n++) <font color='red'>{</font>
+<a name='L390'>        odd[n] = row;
+<a name='L391'>        row &lt;&lt;= 1;
+<a name='L392'>    <font color='red'>}</font>
+<a name='L393'>
+<a name='L394'>    <i><font color='green'>/* put operator for two zero bits in even */</font></i>
+<a name='L395'>    <a href='../S/2735.html#L361' title='Defined at 361 in Modules/zlib/crc32.c.'>gf2_matrix_square</a>(even, odd);
+<a name='L396'>
+<a name='L397'>    <i><font color='green'>/* put operator for four zero bits in odd */</font></i>
+<a name='L398'>    <a href='../S/2735.html#L361' title='Defined at 361 in Modules/zlib/crc32.c.'>gf2_matrix_square</a>(odd, even);
+<a name='L399'>
+<a name='L400'>    <i><font color='green'>/* apply len2 zeros to crc1 (first square will put the operator for one</font></i>
+<a name='L401'><i><font color='green'>       zero byte, eight zero bits, in even) */</font></i>
+<a name='L402'>    <b>do</b> <font color='red'>{</font>
+<a name='L403'>        <i><font color='green'>/* apply zeros operator for this bit of len2 */</font></i>
+<a name='L404'>        <a href='../S/2735.html#L361' title='Defined at 361 in Modules/zlib/crc32.c.'>gf2_matrix_square</a>(even, odd);
+<a name='L405'>        <b>if</b> (len2 &amp; 1)
+<a name='L406'>            crc1 = <a href='../S/2735.html#L344' title='Defined at 344 in Modules/zlib/crc32.c.'>gf2_matrix_times</a>(even, crc1);
+<a name='L407'>        len2 &gt;&gt;= 1;
+<a name='L408'>
+<a name='L409'>        <i><font color='green'>/* if no more bits set, then done */</font></i>
+<a name='L410'>        <b>if</b> (len2 == 0)
+<a name='L411'>            <b>break</b>;
+<a name='L412'>
+<a name='L413'>        <i><font color='green'>/* another iteration of the loop with odd and even swapped */</font></i>
+<a name='L414'>        <a href='../S/2735.html#L361' title='Defined at 361 in Modules/zlib/crc32.c.'>gf2_matrix_square</a>(odd, even);
+<a name='L415'>        <b>if</b> (len2 &amp; 1)
+<a name='L416'>            crc1 = <a href='../S/2735.html#L344' title='Defined at 344 in Modules/zlib/crc32.c.'>gf2_matrix_times</a>(odd, crc1);
+<a name='L417'>        len2 &gt;&gt;= 1;
+<a name='L418'>
+<a name='L419'>        <i><font color='green'>/* if no more bits set, then done */</font></i>
+<a name='L420'>    <font color='red'>}</font> <b>while</b> (len2 != 0);
+<a name='L421'>
+<a name='L422'>    <i><font color='green'>/* return combined crc */</font></i>
+<a name='L423'>    crc1 ^= crc2;
+<a name='L424'>    <b>return</b> crc1;
+<a name='L425'><font color='red'>}</font>
+<a name='L426'>
+<a name='L427'><i><font color='green'>/* ========================================================================= */</font></i>
+<a name='L428'><a href='../D/11920.html' title='Multiple defined in 4 places.'>uLong</a> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../S/2769.html#L1595' title='Refered from 1595 in Modules/zlib/zlib.h.'>crc32_combine</a>(crc1, crc2, len2)
+<a name='L429'>    uLong crc1;
+<a name='L430'>    uLong crc2;
+<a name='L431'>    <a href='../D/12437.html' title='Multiple defined in 4 places.'>z_off_t</a> len2;
+<a name='L432'><font color='red'>{</font>
+<a name='L433'>    <b>return</b> <a href='../S/2735.html#L372' title='Defined at 372 in Modules/zlib/crc32.c.'>crc32_combine_</a>(crc1, crc2, len2);
+<a name='L434'><font color='red'>}</font>
+<a name='L435'>
+<a name='L436'><a href='../D/11920.html' title='Multiple defined in 4 places.'>uLong</a> <a href='../D/5922.html' title='Multiple defined in 8 places.'>ZEXPORT</a> <a href='../R/7038.html' title='Multiple refered from 4 places.'>crc32_combine64</a>(crc1, crc2, len2)
+<a name='L437'>    uLong crc1;
+<a name='L438'>    uLong crc2;
+<a name='L439'>    <a href='../D/12436.html' title='Multiple defined in 2 places.'>z_off64_t</a> len2;
+<a name='L440'><font color='red'>{</font>
+<a name='L441'>    <b>return</b> <a href='../S/2735.html#L372' title='Defined at 372 in Modules/zlib/crc32.c.'>crc32_combine_</a>(crc1, crc2, len2);
+<a name='L442'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L108'>[^]</a><a href='#L436'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

@@ -1,0 +1,443 @@
+<html>
+<head>
+<title>Python/thread.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/thread.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L73'>[^]</a><a href='#L386'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L73' title='Defined at 73.'>PyThread_init_thread</a>
+<li><a href='#L146' title='Defined at 146.'>PyThread_get_stacksize</a>
+<li><a href='#L157' title='Defined at 157.'>PyThread_set_stacksize</a>
+<li><a href='#L251' title='Defined at 251.'>find_key</a>
+<li><a href='#L295' title='Defined at 295.'>PyThread_create_key</a>
+<li><a href='#L307' title='Defined at 307.'>PyThread_delete_key</a>
+<li><a href='#L332' title='Defined at 332.'>PyThread_set_key_value</a>
+<li><a href='#L348' title='Defined at 348.'>PyThread_get_key_value</a>
+<li><a href='#L360' title='Defined at 360.'>PyThread_delete_key_value</a>
+<li><a href='#L386' title='Defined at 386.'>PyThread_ReInitTLS</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Thread package.</font></i>
+<a name='L3'><i><font color='green'>   This is intended to be usable independently from Python.</font></i>
+<a name='L4'><i><font color='green'>   The implementation for system foobar is in a file thread_foobar.h</font></i>
+<a name='L5'><i><font color='green'>   which is included by this file dependent on config settings.</font></i>
+<a name='L6'><i><font color='green'>   Stuff shared by all thread_*.h files is collected here. */</font></i>
+<a name='L7'>
+<a name='L8'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L9'>
+<a name='L10'>
+<a name='L11'><font color='darkred'>#ifndef</font> <a href='../D/6019.html' title='Multiple defined in 3 places.'>_POSIX_THREADS</a>
+<a name='L12'><i><font color='green'>/* This means pthreads are not implemented in libc headers, hence the macro</font></i>
+<a name='L13'><i><font color='green'>   not present in unistd.h. But they still can be implemented as an external</font></i>
+<a name='L14'><i><font color='green'>   library (e.g. gnu pth in pthread emulation) */</font></i>
+<a name='L15'><font color='darkred'># ifdef</font> HAVE_PTHREAD_H
+<a name='L16'><font color='darkred'>#  include</font> &lt;pthread.h&gt; <i><font color='green'>/* _POSIX_THREADS */</font></i>
+<a name='L17'><font color='darkred'># endif</font>
+<a name='L18'><font color='darkred'>#endif</font>
+<a name='L19'>
+<a name='L20'><font color='darkred'>#ifndef</font> DONT_HAVE_STDIO_H
+<a name='L21'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L22'><font color='darkred'>#endif</font>
+<a name='L23'>
+<a name='L24'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L25'>
+<a name='L26'><font color='darkred'>#include</font> "<a href='572.html'>pythread.h</a>"
+<a name='L27'>
+<a name='L28'><font color='darkred'>#ifndef</font> <a href='../D/6019.html' title='Multiple defined in 3 places.'>_POSIX_THREADS</a>
+<a name='L29'>
+<a name='L30'><font color='darkred'>#ifdef</font> __sgi
+<a name='L31'><font color='darkred'>#define</font> <a href='../S/3145.html#L97' title='Refered from 97 in Python/thread.c.'>SGI_THREADS</a>
+<a name='L32'><font color='darkred'>#endif</font>
+<a name='L33'>
+<a name='L34'><font color='darkred'>#ifdef</font> HAVE_THREAD_H
+<a name='L35'><font color='darkred'>#define</font> <a href='../R/4210.html' title='Multiple refered from 2 places.'>SOLARIS_THREADS</a>
+<a name='L36'><font color='darkred'>#endif</font>
+<a name='L37'>
+<a name='L38'><font color='darkred'>#if</font> <b>defined</b>(sun) &amp;&amp; !<b>defined</b>(<a href='../S/3145.html#L35' title='Defined at 35 in Python/thread.c.'>SOLARIS_THREADS</a>)
+<a name='L39'><font color='darkred'>#define</font> <a href='../S/3145.html#L106' title='Refered from 106 in Python/thread.c.'>SUN_LWP</a>
+<a name='L40'><font color='darkred'>#endif</font>
+<a name='L41'>
+<a name='L42'><i><font color='green'>/* Check if we're running on HP-UX and _SC_THREADS is defined. If so, then</font></i>
+<a name='L43'><i><font color='green'>   enough of the Posix threads package is implimented to support python</font></i>
+<a name='L44'><i><font color='green'>   threads.</font></i>
+<a name='L45'><i><font color='green'></font></i>
+<a name='L46'><i><font color='green'>   This is valid for HP-UX 11.23 running on an ia64 system. If needed, add</font></i>
+<a name='L47'><i><font color='green'>   a check of __ia64 to verify that we're running on a ia64 system instead</font></i>
+<a name='L48'><i><font color='green'>   of a pa-risc system.</font></i>
+<a name='L49'><i><font color='green'>*/</font></i>
+<a name='L50'><font color='darkred'>#ifdef</font> __hpux
+<a name='L51'><font color='darkred'>#ifdef</font> _SC_THREADS
+<a name='L52'><font color='darkred'>#define</font> <a href='../R/5342.html' title='Multiple refered from 5 places.'>_POSIX_THREADS</a>
+<a name='L53'><font color='darkred'>#endif</font>
+<a name='L54'><font color='darkred'>#endif</font>
+<a name='L55'>
+<a name='L56'><font color='darkred'>#endif</font> <i><font color='green'>/* _POSIX_THREADS */</font></i>
+<a name='L57'>
+<a name='L58'>
+<a name='L59'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L60'><b>static</b> <b>int</b> thread_debug = 0;
+<a name='L61'><font color='darkred'>#define</font> <a href='../R/7470.html' title='Multiple refered from 102 places.'>dprintf</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>)   (<b>void</b>)((thread_debug &amp; 1) &amp;&amp; printf args)
+<a name='L62'><font color='darkred'>#define</font> d2printf(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>)  ((thread_debug &amp; 8) &amp;&amp; printf args)
+<a name='L63'><font color='darkred'>#else</font>
+<a name='L64'><font color='darkred'>#define</font> <a href='../R/7470.html' title='Multiple refered from 102 places.'>dprintf</a>(args)
+<a name='L65'><font color='darkred'>#define</font> d2printf(args)
+<a name='L66'><font color='darkred'>#endif</font>
+<a name='L67'>
+<a name='L68'><b>static</b> <b>int</b> initialized;
+<a name='L69'>
+<a name='L70'><b>static</b> <b>void</b> <a href='../D/3845.html' title='Multiple defined in 11 places.'>PyThread__init_thread</a>(<b>void</b>); <i><font color='green'>/* Forward */</font></i>
+<a name='L71'>
+<a name='L72'><b>void</b>
+<a name='L73'><a href='../R/3461.html' title='Multiple refered from 31 places.'>PyThread_init_thread</a>(<b>void</b>)
+<a name='L74'><font color='red'>{</font>
+<a name='L75'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L366' title='Defined at 366 in PC/pyconfig.h.'>Py_DEBUG</a>
+<a name='L76'>    <b>char</b> *p = Py_GETENV("PYTHONTHREADDEBUG");
+<a name='L77'>
+<a name='L78'>    <b>if</b> (p) <font color='red'>{</font>
+<a name='L79'>        <b>if</b> (*p)
+<a name='L80'>            thread_debug = atoi(p);
+<a name='L81'>        <b>else</b>
+<a name='L82'>            thread_debug = 1;
+<a name='L83'>    <font color='red'>}</font>
+<a name='L84'><font color='darkred'>#endif</font> <i><font color='green'>/* Py_DEBUG */</font></i>
+<a name='L85'>    <b>if</b> (initialized)
+<a name='L86'>        <b>return</b>;
+<a name='L87'>    initialized = 1;
+<a name='L88'>    <a href='../D/8255.html' title='Multiple defined in 2 places.'>dprintf</a>(("PyThread_init_thread called\n"));
+<a name='L89'>    <a href='../D/3845.html' title='Multiple defined in 11 places.'>PyThread__init_thread</a>();
+<a name='L90'><font color='red'>}</font>
+<a name='L91'>
+<a name='L92'><i><font color='green'>/* Support for runtime thread stack size tuning.</font></i>
+<a name='L93'><i><font color='green'>   A value of 0 means using the platform's default stack size</font></i>
+<a name='L94'><i><font color='green'>   or the size specified by the THREAD_STACK_SIZE macro. */</font></i>
+<a name='L95'><b>static</b> <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> _pythread_stacksize = 0;
+<a name='L96'>
+<a name='L97'><font color='darkred'>#ifdef</font> <a href='../S/3145.html#L31' title='Defined at 31 in Python/thread.c.'>SGI_THREADS</a>
+<a name='L98'><font color='darkred'>#error</font> SGI Irix threads are now unsupported, and code will be removed in 3.3.
+<a name='L99'><font color='darkred'>#include</font> "<a href='3153.html'>thread_sgi.h</a>"
+<a name='L100'><font color='darkred'>#endif</font>
+<a name='L101'>
+<a name='L102'><font color='darkred'>#ifdef</font> <a href='../S/3145.html#L35' title='Defined at 35 in Python/thread.c.'>SOLARIS_THREADS</a>
+<a name='L103'><font color='darkred'>#include</font> "<a href='3154.html'>thread_solaris.h</a>"
+<a name='L104'><font color='darkred'>#endif</font>
+<a name='L105'>
+<a name='L106'><font color='darkred'>#ifdef</font> <a href='../S/3145.html#L39' title='Defined at 39 in Python/thread.c.'>SUN_LWP</a>
+<a name='L107'><font color='darkred'>#error</font> SunOS lightweight processes are now unsupported, and code will be removed in 3.3.
+<a name='L108'><font color='darkred'>#include</font> "<a href='3148.html'>thread_lwp.h</a>"
+<a name='L109'><font color='darkred'>#endif</font>
+<a name='L110'>
+<a name='L111'><font color='darkred'>#ifdef</font> HAVE_PTH
+<a name='L112'><font color='darkred'>#error</font> GNU pth threads are now unsupported, and code will be removed in 3.3.
+<a name='L113'><font color='darkred'>#include</font> "<a href='3151.html'>thread_pth.h</a>"
+<a name='L114'><font color='darkred'>#undef</font> <a href='../R/5342.html' title='Multiple refered from 5 places.'>_POSIX_THREADS</a>
+<a name='L115'><font color='darkred'>#endif</font>
+<a name='L116'>
+<a name='L117'><font color='darkred'>#ifdef</font> <a href='../D/6019.html' title='Multiple defined in 3 places.'>_POSIX_THREADS</a>
+<a name='L118'><font color='darkred'>#include</font> "<a href='3152.html'>thread_pthread.h</a>"
+<a name='L119'><font color='darkred'>#endif</font>
+<a name='L120'>
+<a name='L121'><font color='darkred'>#ifdef</font> C_THREADS
+<a name='L122'><font color='darkred'>#error</font> Mach C Threads are now unsupported, and code will be removed in 3.3.
+<a name='L123'><font color='darkred'>#include</font> "<a href='3146.html'>thread_cthread.h</a>"
+<a name='L124'><font color='darkred'>#endif</font>
+<a name='L125'>
+<a name='L126'><font color='darkred'>#ifdef</font> <a href='../S/2906.html#L85' title='Defined at 85 in PC/pyconfig.h.'>NT_THREADS</a>
+<a name='L127'><font color='darkred'>#include</font> "<a href='3149.html'>thread_nt.h</a>"
+<a name='L128'><font color='darkred'>#endif</font>
+<a name='L129'>
+<a name='L130'><font color='darkred'>#ifdef</font> <a href='../D/2428.html' title='Multiple defined in 2 places.'>OS2_THREADS</a>
+<a name='L131'><font color='darkred'>#include</font> "<a href='3150.html'>thread_os2.h</a>"
+<a name='L132'><font color='darkred'>#endif</font>
+<a name='L133'>
+<a name='L134'><font color='darkred'>#ifdef</font> PLAN9_THREADS
+<a name='L135'><font color='darkred'>#include</font> "thread_plan9.h"
+<a name='L136'><font color='darkred'>#endif</font>
+<a name='L137'>
+<a name='L138'><i><font color='green'>/*</font></i>
+<a name='L139'><i><font color='green'>#ifdef FOOBAR_THREADS</font></i>
+<a name='L140'><i><font color='green'>#include "thread_foobar.h"</font></i>
+<a name='L141'><i><font color='green'>#endif</font></i>
+<a name='L142'><i><font color='green'>*/</font></i>
+<a name='L143'>
+<a name='L144'><i><font color='green'>/* return the current thread stack size */</font></i>
+<a name='L145'><a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a>
+<a name='L146'><a href='../S/2615.html#L1185' title='Refered from 1185 in Modules/_threadmodule.c.'>PyThread_get_stacksize</a>(<b>void</b>)
+<a name='L147'><font color='red'>{</font>
+<a name='L148'>    <b>return</b> _pythread_stacksize;
+<a name='L149'><font color='red'>}</font>
+<a name='L150'>
+<a name='L151'><i><font color='green'>/* Only platforms defining a THREAD_SET_STACKSIZE() macro</font></i>
+<a name='L152'><i><font color='green'>   in thread_&lt;platform&gt;.h support changing the stack size.</font></i>
+<a name='L153'><i><font color='green'>   Return 0 if stack size is valid,</font></i>
+<a name='L154'><i><font color='green'>      -1 if stack size value is invalid,</font></i>
+<a name='L155'><i><font color='green'>      -2 if setting stack size is not supported. */</font></i>
+<a name='L156'><b>int</b>
+<a name='L157'><a href='../S/2615.html#L1187' title='Refered from 1187 in Modules/_threadmodule.c.'>PyThread_set_stacksize</a>(<a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size)
+<a name='L158'><font color='red'>{</font>
+<a name='L159'><font color='darkred'>#if</font> <b>defined</b>(<a href='../D/5144.html' title='Multiple defined in 3 places.'>THREAD_SET_STACKSIZE</a>)
+<a name='L160'>    <b>return</b> <a href='../D/5144.html' title='Multiple defined in 3 places.'>THREAD_SET_STACKSIZE</a>(size);
+<a name='L161'><font color='darkred'>#else</font>
+<a name='L162'>    <b>return</b> -2;
+<a name='L163'><font color='darkred'>#endif</font>
+<a name='L164'><font color='red'>}</font>
+<a name='L165'>
+<a name='L166'><font color='darkred'>#ifndef</font> <a href='../D/4151.html' title='Multiple defined in 2 places.'>Py_HAVE_NATIVE_TLS</a>
+<a name='L167'><i><font color='green'>/* If the platform has not supplied a platform specific</font></i>
+<a name='L168'><i><font color='green'>   TLS implementation, provide our own.</font></i>
+<a name='L169'><i><font color='green'></font></i>
+<a name='L170'><i><font color='green'>   This code stolen from "thread_sgi.h", where it was the only</font></i>
+<a name='L171'><i><font color='green'>   implementation of an existing Python TLS API.</font></i>
+<a name='L172'><i><font color='green'>*/</font></i>
+<a name='L173'><i><font color='green'>/* ------------------------------------------------------------------------</font></i>
+<a name='L174'><i><font color='green'>Per-thread data ("key") support.</font></i>
+<a name='L175'><i><font color='green'></font></i>
+<a name='L176'><i><font color='green'>Use PyThread_create_key() to create a new key.  This is typically shared</font></i>
+<a name='L177'><i><font color='green'>across threads.</font></i>
+<a name='L178'><i><font color='green'></font></i>
+<a name='L179'><i><font color='green'>Use PyThread_set_key_value(thekey, value) to associate void* value with</font></i>
+<a name='L180'><i><font color='green'>thekey in the current thread.  Each thread has a distinct mapping of thekey</font></i>
+<a name='L181'><i><font color='green'>to a void* value.  Caution:  if the current thread already has a mapping</font></i>
+<a name='L182'><i><font color='green'>for thekey, value is ignored.</font></i>
+<a name='L183'><i><font color='green'></font></i>
+<a name='L184'><i><font color='green'>Use PyThread_get_key_value(thekey) to retrieve the void* value associated</font></i>
+<a name='L185'><i><font color='green'>with thekey in the current thread.  This returns NULL if no value is</font></i>
+<a name='L186'><i><font color='green'>associated with thekey in the current thread.</font></i>
+<a name='L187'><i><font color='green'></font></i>
+<a name='L188'><i><font color='green'>Use PyThread_delete_key_value(thekey) to forget the current thread's associated</font></i>
+<a name='L189'><i><font color='green'>value for thekey.  PyThread_delete_key(thekey) forgets the values associated</font></i>
+<a name='L190'><i><font color='green'>with thekey across *all* threads.</font></i>
+<a name='L191'><i><font color='green'></font></i>
+<a name='L192'><i><font color='green'>While some of these functions have error-return values, none set any</font></i>
+<a name='L193'><i><font color='green'>Python exception.</font></i>
+<a name='L194'><i><font color='green'></font></i>
+<a name='L195'><i><font color='green'>None of the functions does memory management on behalf of the void* values.</font></i>
+<a name='L196'><i><font color='green'>You need to allocate and deallocate them yourself.  If the void* values</font></i>
+<a name='L197'><i><font color='green'>happen to be PyObject*, these functions don't do refcount operations on</font></i>
+<a name='L198'><i><font color='green'>them either.</font></i>
+<a name='L199'><i><font color='green'></font></i>
+<a name='L200'><i><font color='green'>The GIL does not need to be held when calling these functions; they supply</font></i>
+<a name='L201'><i><font color='green'>their own locking.  This isn't true of PyThread_create_key(), though (see</font></i>
+<a name='L202'><i><font color='green'>next paragraph).</font></i>
+<a name='L203'><i><font color='green'></font></i>
+<a name='L204'><i><font color='green'>There's a hidden assumption that PyThread_create_key() will be called before</font></i>
+<a name='L205'><i><font color='green'>any of the other functions are called.  There's also a hidden assumption</font></i>
+<a name='L206'><i><font color='green'>that calls to PyThread_create_key() are serialized externally.</font></i>
+<a name='L207'><i><font color='green'>------------------------------------------------------------------------ */</font></i>
+<a name='L208'>
+<a name='L209'><i><font color='green'>/* A singly-linked list of struct key objects remembers all the key-&gt;value</font></i>
+<a name='L210'><i><font color='green'> * associations.  File static keyhead heads the list.  keymutex is used</font></i>
+<a name='L211'><i><font color='green'> * to enforce exclusion internally.</font></i>
+<a name='L212'><i><font color='green'> */</font></i>
+<a name='L213'><b>struct</b> <a href='../R/8580.html' title='Multiple refered from 870 places.'>key</a> <font color='red'>{</font>
+<a name='L214'>    <i><font color='green'>/* Next record in the list, or NULL if this is the last record. */</font></i>
+<a name='L215'>    <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *next;
+<a name='L216'>
+<a name='L217'>    <i><font color='green'>/* The thread id, according to PyThread_get_thread_ident(). */</font></i>
+<a name='L218'>    <b>long</b> id;
+<a name='L219'>
+<a name='L220'>    <i><font color='green'>/* The key and its associated value. */</font></i>
+<a name='L221'>    <b>int</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L222'>    <b>void</b> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L223'><font color='red'>}</font>;
+<a name='L224'>
+<a name='L225'><b>static</b> <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *keyhead = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L226'><b>static</b> <a href='../S/572.html#L5' title='Defined at 5 in Include/pythread.h.'>PyThread_type_lock</a> keymutex = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L227'><b>static</b> <b>int</b> nkeys = 0;  <i><font color='green'>/* PyThread_create_key() hands out nkeys+1 next */</font></i>
+<a name='L228'>
+<a name='L229'><i><font color='green'>/* Internal helper.</font></i>
+<a name='L230'><i><font color='green'> * If the current thread has a mapping for key, the appropriate struct key*</font></i>
+<a name='L231'><i><font color='green'> * is returned.  NB:  value is ignored in this case!</font></i>
+<a name='L232'><i><font color='green'> * If there is no mapping for key in the current thread, then:</font></i>
+<a name='L233'><i><font color='green'> *     If value is NULL, NULL is returned.</font></i>
+<a name='L234'><i><font color='green'> *     Else a mapping of key to value is created for the current thread,</font></i>
+<a name='L235'><i><font color='green'> *     and a pointer to a new struct key* is returned; except that if</font></i>
+<a name='L236'><i><font color='green'> *     malloc() can't find room for a new struct key*, NULL is returned.</font></i>
+<a name='L237'><i><font color='green'> * So when value==NULL, this acts like a pure lookup routine, and when</font></i>
+<a name='L238'><i><font color='green'> * value!=NULL, this acts like dict.setdefault(), returning an existing</font></i>
+<a name='L239'><i><font color='green'> * mapping if one exists, else creating a new mapping.</font></i>
+<a name='L240'><i><font color='green'> *</font></i>
+<a name='L241'><i><font color='green'> * Caution:  this used to be too clever, trying to hold keymutex only</font></i>
+<a name='L242'><i><font color='green'> * around the "p-&gt;next = keyhead; keyhead = p" pair.  That allowed</font></i>
+<a name='L243'><i><font color='green'> * another thread to mutate the list, via key deletion, concurrent with</font></i>
+<a name='L244'><i><font color='green'> * find_key() crawling over the list.  Hilarity ensued.  For example, when</font></i>
+<a name='L245'><i><font color='green'> * the for-loop here does "p = p-&gt;next", p could end up pointing at a</font></i>
+<a name='L246'><i><font color='green'> * record that PyThread_delete_key_value() was concurrently free()'ing.</font></i>
+<a name='L247'><i><font color='green'> * That could lead to anything, from failing to find a key that exists, to</font></i>
+<a name='L248'><i><font color='green'> * segfaults.  Now we lock the whole routine.</font></i>
+<a name='L249'><i><font color='green'> */</font></i>
+<a name='L250'><b>static</b> <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *
+<a name='L251'><a href='../R/7802.html' title='Multiple refered from 2 places.'>find_key</a>(<b>int</b> key, <b>void</b> *value)
+<a name='L252'><font color='red'>{</font>
+<a name='L253'>    <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *p, *prev_p;
+<a name='L254'>    <b>long</b> id = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L255'>
+<a name='L256'>    <b>if</b> (!keymutex)
+<a name='L257'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L258'>    <a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(keymutex, 1);
+<a name='L259'>    prev_p = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L260'>    <b>for</b> (p = keyhead; p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>; p = p-&gt;next) <font color='red'>{</font>
+<a name='L261'>        <b>if</b> (p-&gt;id == id &amp;&amp; p-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>)
+<a name='L262'>            <b>goto</b> Done;
+<a name='L263'>        <i><font color='green'>/* Sanity check.  These states should never happen but if</font></i>
+<a name='L264'><i><font color='green'>         * they do we must abort.  Otherwise we'll end up spinning in</font></i>
+<a name='L265'><i><font color='green'>         * in a tight loop with the lock held.  A similar check is done</font></i>
+<a name='L266'><i><font color='green'>         * in pystate.c tstate_delete_common().  */</font></i>
+<a name='L267'>        <b>if</b> (p == prev_p)
+<a name='L268'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("tls find_key: small circular list(!)");
+<a name='L269'>        prev_p = p;
+<a name='L270'>        <b>if</b> (p-&gt;next == keyhead)
+<a name='L271'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("tls find_key: circular list(!)");
+<a name='L272'>    <font color='red'>}</font>
+<a name='L273'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L274'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L275'>        <b>goto</b> Done;
+<a name='L276'>    <font color='red'>}</font>
+<a name='L277'>    p = (<b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *)malloc(<b>sizeof</b>(<b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>));
+<a name='L278'>    <b>if</b> (p != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L279'>        p-&gt;id = id;
+<a name='L280'>        p-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> = <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>;
+<a name='L281'>        p-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L282'>        p-&gt;next = keyhead;
+<a name='L283'>        keyhead = p;
+<a name='L284'>    <font color='red'>}</font>
+<a name='L285'> Done:
+<a name='L286'>    <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(keymutex);
+<a name='L287'>    <b>return</b> p;
+<a name='L288'><font color='red'>}</font>
+<a name='L289'>
+<a name='L290'><i><font color='green'>/* Return a new key.  This must be called before any other functions in</font></i>
+<a name='L291'><i><font color='green'> * this family, and callers must arrange to serialize calls to this</font></i>
+<a name='L292'><i><font color='green'> * function.  No violations are detected.</font></i>
+<a name='L293'><i><font color='green'> */</font></i>
+<a name='L294'><b>int</b>
+<a name='L295'><a href='../S/3134.html#L571' title='Refered from 571 in Python/pystate.c.'>PyThread_create_key</a>(<b>void</b>)
+<a name='L296'><font color='red'>{</font>
+<a name='L297'>    <i><font color='green'>/* All parts of this function are wrong if it's called by multiple</font></i>
+<a name='L298'><i><font color='green'>     * threads simultaneously.</font></i>
+<a name='L299'><i><font color='green'>     */</font></i>
+<a name='L300'>    <b>if</b> (keymutex == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L301'>        keymutex = <a href='../D/3848.html' title='Multiple defined in 11 places.'>PyThread_allocate_lock</a>();
+<a name='L302'>    <b>return</b> ++nkeys;
+<a name='L303'><font color='red'>}</font>
+<a name='L304'>
+<a name='L305'><i><font color='green'>/* Forget the associations for key across *all* threads. */</font></i>
+<a name='L306'><b>void</b>
+<a name='L307'><a href='../S/3134.html#L584' title='Refered from 584 in Python/pystate.c.'>PyThread_delete_key</a>(<b>int</b> key)
+<a name='L308'><font color='red'>{</font>
+<a name='L309'>    <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *p, **q;
+<a name='L310'>
+<a name='L311'>    <a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(keymutex, 1);
+<a name='L312'>    q = &amp;keyhead;
+<a name='L313'>    <b>while</b> ((p = *q) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L314'>        <b>if</b> (p-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>) <font color='red'>{</font>
+<a name='L315'>            *q = p-&gt;next;
+<a name='L316'>            free((<b>void</b> *)p);
+<a name='L317'>            <i><font color='green'>/* NB This does *not* free p-&gt;value! */</font></i>
+<a name='L318'>        <font color='red'>}</font>
+<a name='L319'>        <b>else</b>
+<a name='L320'>            q = &amp;p-&gt;next;
+<a name='L321'>    <font color='red'>}</font>
+<a name='L322'>    <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(keymutex);
+<a name='L323'><font color='red'>}</font>
+<a name='L324'>
+<a name='L325'><i><font color='green'>/* Confusing:  If the current thread has an association for key,</font></i>
+<a name='L326'><i><font color='green'> * value is ignored, and 0 is returned.  Else an attempt is made to create</font></i>
+<a name='L327'><i><font color='green'> * an association of key to value for the current thread.  0 is returned</font></i>
+<a name='L328'><i><font color='green'> * if that succeeds, but -1 is returned if there's not enough memory</font></i>
+<a name='L329'><i><font color='green'> * to create the association.  value must not be NULL.</font></i>
+<a name='L330'><i><font color='green'> */</font></i>
+<a name='L331'><b>int</b>
+<a name='L332'><a href='../S/3134.html#L616' title='Refered from 616 in Python/pystate.c.'>PyThread_set_key_value</a>(<b>int</b> key, <b>void</b> *value)
+<a name='L333'><font color='red'>{</font>
+<a name='L334'>    <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *p;
+<a name='L335'>
+<a name='L336'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L337'>    p = <a href='../S/3145.html#L251' title='Defined at 251 in Python/thread.c.'>find_key</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L338'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L339'>        <b>return</b> -1;
+<a name='L340'>    <b>else</b>
+<a name='L341'>        <b>return</b> 0;
+<a name='L342'><font color='red'>}</font>
+<a name='L343'>
+<a name='L344'><i><font color='green'>/* Retrieve the value associated with key in the current thread, or NULL</font></i>
+<a name='L345'><i><font color='green'> * if the current thread doesn't have an association for key.</font></i>
+<a name='L346'><i><font color='green'> */</font></i>
+<a name='L347'><b>void</b> *
+<a name='L348'><a href='../R/3458.html' title='Multiple refered from 6 places.'>PyThread_get_key_value</a>(<b>int</b> key)
+<a name='L349'><font color='red'>{</font>
+<a name='L350'>    <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *p = <a href='../S/3145.html#L251' title='Defined at 251 in Python/thread.c.'>find_key</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L351'>
+<a name='L352'>    <b>if</b> (p == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L353'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L354'>    <b>else</b>
+<a name='L355'>        <b>return</b> p-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>;
+<a name='L356'><font color='red'>}</font>
+<a name='L357'>
+<a name='L358'><i><font color='green'>/* Forget the current thread's association for key, if any. */</font></i>
+<a name='L359'><b>void</b>
+<a name='L360'><a href='../R/3455.html' title='Multiple refered from 2 places.'>PyThread_delete_key_value</a>(<b>int</b> key)
+<a name='L361'><font color='red'>{</font>
+<a name='L362'>    <b>long</b> id = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L363'>    <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *p, **q;
+<a name='L364'>
+<a name='L365'>    <a href='../D/3846.html' title='Multiple defined in 10 places.'>PyThread_acquire_lock</a>(keymutex, 1);
+<a name='L366'>    q = &amp;keyhead;
+<a name='L367'>    <b>while</b> ((p = *q) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L368'>        <b>if</b> (p-&gt;<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> == <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> &amp;&amp; p-&gt;id == id) <font color='red'>{</font>
+<a name='L369'>            *q = p-&gt;next;
+<a name='L370'>            free((<b>void</b> *)p);
+<a name='L371'>            <i><font color='green'>/* NB This does *not* free p-&gt;value! */</font></i>
+<a name='L372'>            <b>break</b>;
+<a name='L373'>        <font color='red'>}</font>
+<a name='L374'>        <b>else</b>
+<a name='L375'>            q = &amp;p-&gt;next;
+<a name='L376'>    <font color='red'>}</font>
+<a name='L377'>    <a href='../D/3858.html' title='Multiple defined in 11 places.'>PyThread_release_lock</a>(keymutex);
+<a name='L378'><font color='red'>}</font>
+<a name='L379'>
+<a name='L380'><i><font color='green'>/* Forget everything not associated with the current thread id.</font></i>
+<a name='L381'><i><font color='green'> * This function is called from PyOS_AfterFork().  It is necessary</font></i>
+<a name='L382'><i><font color='green'> * because other thread ids which were in use at the time of the fork</font></i>
+<a name='L383'><i><font color='green'> * may be reused for new threads created in the forked process.</font></i>
+<a name='L384'><i><font color='green'> */</font></i>
+<a name='L385'><b>void</b>
+<a name='L386'><a href='../R/3448.html' title='Multiple refered from 2 places.'>PyThread_ReInitTLS</a>(<b>void</b>)
+<a name='L387'><font color='red'>{</font>
+<a name='L388'>    <b>long</b> id = <a href='../D/3856.html' title='Multiple defined in 10 places.'>PyThread_get_thread_ident</a>();
+<a name='L389'>    <b>struct</b> <a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a> *p, **q;
+<a name='L390'>
+<a name='L391'>    <b>if</b> (!keymutex)
+<a name='L392'>        <b>return</b>;
+<a name='L393'>
+<a name='L394'>    <i><font color='green'>/* As with interpreter_lock in PyEval_ReInitThreads()</font></i>
+<a name='L395'><i><font color='green'>       we just create a new lock without freeing the old one */</font></i>
+<a name='L396'>    keymutex = <a href='../D/3848.html' title='Multiple defined in 11 places.'>PyThread_allocate_lock</a>();
+<a name='L397'>
+<a name='L398'>    <i><font color='green'>/* Delete all keys which do not match the current thread id */</font></i>
+<a name='L399'>    q = &amp;keyhead;
+<a name='L400'>    <b>while</b> ((p = *q) != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L401'>        <b>if</b> (p-&gt;id != id) <font color='red'>{</font>
+<a name='L402'>            *q = p-&gt;next;
+<a name='L403'>            free((<b>void</b> *)p);
+<a name='L404'>            <i><font color='green'>/* NB This does *not* free p-&gt;value! */</font></i>
+<a name='L405'>        <font color='red'>}</font>
+<a name='L406'>        <b>else</b>
+<a name='L407'>            q = &amp;p-&gt;next;
+<a name='L408'>    <font color='red'>}</font>
+<a name='L409'><font color='red'>}</font>
+<a name='L410'>
+<a name='L411'><font color='darkred'>#endif</font> <i><font color='green'>/* Py_HAVE_NATIVE_TLS */</font></i>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L73'>[^]</a><a href='#L386'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

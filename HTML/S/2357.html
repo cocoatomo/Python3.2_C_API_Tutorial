@@ -1,0 +1,808 @@
+<html>
+<head>
+<title>Modules/_ctypes/libffi/src/s390/ffi.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3354.html'>_ctypes</a>/<a href='../files/3356.html'>libffi</a>/<a href='../files/3358.html'>src</a>/<a href='../files/3371.html'>s390</a>/ffi.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L108'>[^]</a><a href='#L747'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L108' title='Defined at 108.'>ffi_check_struct_type</a>
+<li><a href='#L162' title='Defined at 162.'>ffi_prep_args</a>
+<li><a href='#L340' title='Defined at 340.'>ffi_prep_cif_machdep</a>
+<li><a href='#L501' title='Defined at 501.'>ffi_call</a>
+<li><a href='#L546' title='Defined at 546.'>ffi_closure_helper_SYSV</a>
+<li><a href='#L747' title='Defined at 747.'>ffi_prep_closure_loc</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/* -----------------------------------------------------------------------</font></i>
+<a name='L2'><i><font color='green'>   ffi.c - Copyright (c) 2000, 2007 Software AG</font></i>
+<a name='L3'><i><font color='green'>           Copyright (c) 2008 Red Hat, Inc</font></i>
+<a name='L4'><i><font color='green'> </font></i>
+<a name='L5'><i><font color='green'>   S390 Foreign Function Interface</font></i>
+<a name='L6'><i><font color='green'> </font></i>
+<a name='L7'><i><font color='green'>   Permission is hereby granted, free of charge, to any person obtaining</font></i>
+<a name='L8'><i><font color='green'>   a copy of this software and associated documentation files (the</font></i>
+<a name='L9'><i><font color='green'>   ``Software''), to deal in the Software without restriction, including</font></i>
+<a name='L10'><i><font color='green'>   without limitation the rights to use, copy, modify, merge, publish,</font></i>
+<a name='L11'><i><font color='green'>   distribute, sublicense, and/or sell copies of the Software, and to</font></i>
+<a name='L12'><i><font color='green'>   permit persons to whom the Software is furnished to do so, subject to</font></i>
+<a name='L13'><i><font color='green'>   the following conditions:</font></i>
+<a name='L14'><i><font color='green'> </font></i>
+<a name='L15'><i><font color='green'>   The above copyright notice and this permission notice shall be included</font></i>
+<a name='L16'><i><font color='green'>   in all copies or substantial portions of the Software.</font></i>
+<a name='L17'><i><font color='green'> </font></i>
+<a name='L18'><i><font color='green'>   THE SOFTWARE IS PROVIDED ``AS IS'', WITHOUT WARRANTY OF ANY KIND, EXPRESS</font></i>
+<a name='L19'><i><font color='green'>   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF</font></i>
+<a name='L20'><i><font color='green'>   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.</font></i>
+<a name='L21'><i><font color='green'>   IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR</font></i>
+<a name='L22'><i><font color='green'>   OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,</font></i>
+<a name='L23'><i><font color='green'>   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR</font></i>
+<a name='L24'><i><font color='green'>   OTHER DEALINGS IN THE SOFTWARE.</font></i>
+<a name='L25'><i><font color='green'>   ----------------------------------------------------------------------- */</font></i>
+<a name='L26'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L27'><i><font color='green'>/*                          Includes                                  */</font></i>
+<a name='L28'><i><font color='green'>/*                          --------                                  */</font></i>
+<a name='L29'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L30'> 
+<a name='L31'><font color='darkred'>#include</font> &lt;<a href='../I/325.html'>ffi.h</a>&gt;
+<a name='L32'><font color='darkred'>#include</font> &lt;<a href='../I/119.html'>ffi_common.h</a>&gt;
+<a name='L33'> 
+<a name='L34'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L35'><font color='darkred'>#include</font> &lt;stdio.h&gt;
+<a name='L36'> 
+<a name='L37'><i><font color='green'>/*====================== End of Includes =============================*/</font></i>
+<a name='L38'> 
+<a name='L39'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L40'><i><font color='green'>/*                           Defines                                  */</font></i>
+<a name='L41'><i><font color='green'>/*                           -------                                  */</font></i>
+<a name='L42'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L43'>
+<a name='L44'><i><font color='green'>/* Maximum number of GPRs available for argument passing.  */</font></i> 
+<a name='L45'><font color='darkred'>#define</font> <a href='../R/1862.html' title='Multiple refered from 23 places.'>MAX_GPRARGS</a> 5
+<a name='L46'>
+<a name='L47'><i><font color='green'>/* Maximum number of FPRs available for argument passing.  */</font></i> 
+<a name='L48'><font color='darkred'>#ifdef</font> __s390x__
+<a name='L49'><font color='darkred'>#define</font> <a href='../R/1861.html' title='Multiple refered from 6 places.'>MAX_FPRARGS</a> 4
+<a name='L50'><font color='darkred'>#else</font>
+<a name='L51'><font color='darkred'>#define</font> <a href='../R/1861.html' title='Multiple refered from 6 places.'>MAX_FPRARGS</a> 2
+<a name='L52'><font color='darkred'>#endif</font>
+<a name='L53'>
+<a name='L54'><i><font color='green'>/* Round to multiple of 16.  */</font></i>
+<a name='L55'><font color='darkred'>#define</font> <a href='../R/3982.html' title='Multiple refered from 4 places.'>ROUND_SIZE</a>(size) (((size) + 15) &amp; ~15)
+<a name='L56'>
+<a name='L57'><i><font color='green'>/* If these values change, sysv.S must be adapted!  */</font></i>
+<a name='L58'><font color='darkred'>#define</font> <a href='../R/1012.html' title='Multiple refered from 2 places.'>FFI390_RET_VOID</a>         0
+<a name='L59'><font color='darkred'>#define</font> <a href='../R/1011.html' title='Multiple refered from 5 places.'>FFI390_RET_STRUCT</a>       1
+<a name='L60'><font color='darkred'>#define</font> <a href='../S/2357.html#L367' title='Refered from 367 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_FLOAT</a>        2
+<a name='L61'><font color='darkred'>#define</font> <a href='../S/2357.html#L371' title='Refered from 371 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_DOUBLE</a>       3
+<a name='L62'><font color='darkred'>#define</font> <a href='../S/2357.html#L399' title='Refered from 399 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_INT32</a>        4
+<a name='L63'><font color='darkred'>#define</font> <a href='../R/1010.html' title='Multiple refered from 2 places.'>FFI390_RET_INT64</a>        5
+<a name='L64'>
+<a name='L65'><i><font color='green'>/*===================== End of Defines ===============================*/</font></i>
+<a name='L66'> 
+<a name='L67'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L68'><i><font color='green'>/*                          Prototypes                                */</font></i>
+<a name='L69'><i><font color='green'>/*                          ----------                                */</font></i>
+<a name='L70'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L71'> 
+<a name='L72'><b>static</b> <b>void</b> <a href='../D/8505.html' title='Multiple defined in 17 places.'>ffi_prep_args</a> (<b>unsigned</b> <b>char</b> *, extended_cif *);
+<a name='L73'><b>void</b>
+<a name='L74'><font color='darkred'>#if</font> __GNUC__ &gt; 3 || (__GNUC__ == 3 &amp;&amp; __GNUC_MINOR__ &gt; 2)
+<a name='L75'><b>__attribute__</b> ((visibility ("hidden")))
+<a name='L76'><font color='darkred'>#endif</font>
+<a name='L77'><a href='../D/8486.html' title='Multiple defined in 4 places.'>ffi_closure_helper_SYSV</a> (ffi_closure *, <b>unsigned</b> <b>long</b> *, 
+<a name='L78'>                         <b>unsigned</b> <b>long</b> <b>long</b> *, <b>unsigned</b> <b>long</b> *);
+<a name='L79'>
+<a name='L80'><i><font color='green'>/*====================== End of Prototypes ===========================*/</font></i>
+<a name='L81'> 
+<a name='L82'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L83'><i><font color='green'>/*                          Externals                                 */</font></i>
+<a name='L84'><i><font color='green'>/*                          ---------                                 */</font></i>
+<a name='L85'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L86'> 
+<a name='L87'><b>extern</b> <b>void</b> <a href='../D/8474.html' title='Multiple defined in 4 places.'>ffi_call_SYSV</a>(<b>unsigned</b>,
+<a name='L88'>                          extended_cif *,
+<a name='L89'>                          <b>void</b> (*)(<b>unsigned</b> <b>char</b> *, extended_cif *),
+<a name='L90'>                          <b>unsigned</b>,
+<a name='L91'>                          <b>void</b> *,
+<a name='L92'>                          <b>void</b> (*fn)(<b>void</b>));
+<a name='L93'>
+<a name='L94'><b>extern</b> <b>void</b> <a href='../D/8479.html' title='Multiple defined in 4 places.'>ffi_closure_SYSV</a>(<b>void</b>);
+<a name='L95'> 
+<a name='L96'><i><font color='green'>/*====================== End of Externals ============================*/</font></i>
+<a name='L97'> 
+<a name='L98'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L99'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L100'><i><font color='green'>/* Name     - ffi_check_struct_type.                                  */</font></i>
+<a name='L101'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L102'><i><font color='green'>/* Function - Determine if a structure can be passed within a         */</font></i>
+<a name='L103'><i><font color='green'>/*            general purpose or floating point register.             */</font></i>
+<a name='L104'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L105'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L106'> 
+<a name='L107'><b>static</b> <b>int</b>
+<a name='L108'><a href='../R/7687.html' title='Multiple refered from 3 places.'>ffi_check_struct_type</a> (ffi_type *arg)
+<a name='L109'><font color='red'>{</font>
+<a name='L110'>  <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> size = <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;size;
+<a name='L111'>
+<a name='L112'>  <i><font color='green'>/* If the struct has just one element, look at that element</font></i>
+<a name='L113'><i><font color='green'>     to find out whether to consider the struct as floating point.  */</font></i>
+<a name='L114'>  <b>while</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;type == <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a> 
+<a name='L115'>         &amp;&amp; <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;elements[0] &amp;&amp; !<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;elements[1])
+<a name='L116'>    <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;elements[0];
+<a name='L117'>
+<a name='L118'>  <i><font color='green'>/* Structs of size 1, 2, 4, and 8 are passed in registers,</font></i>
+<a name='L119'><i><font color='green'>     just like the corresponding int/float types.  */</font></i>
+<a name='L120'>  <b>switch</b> (size)
+<a name='L121'>    <font color='red'>{</font>
+<a name='L122'>      <b>case</b> 1:
+<a name='L123'>        <b>return</b> <a href='../D/1222.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT8</a>;
+<a name='L124'>
+<a name='L125'>      <b>case</b> 2:
+<a name='L126'>        <b>return</b> <a href='../D/1219.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT16</a>;
+<a name='L127'>
+<a name='L128'>      <b>case</b> 4:
+<a name='L129'>        <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;type == <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>)
+<a name='L130'>          <b>return</b> <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>;
+<a name='L131'>        <b>else</b>
+<a name='L132'>          <b>return</b> <a href='../D/1220.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT32</a>;
+<a name='L133'>
+<a name='L134'>      <b>case</b> 8:
+<a name='L135'>        <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;type == <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>)
+<a name='L136'>          <b>return</b> <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>;
+<a name='L137'>        <b>else</b>
+<a name='L138'>          <b>return</b> <a href='../D/1221.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT64</a>;
+<a name='L139'>
+<a name='L140'>      <b>default</b>:
+<a name='L141'>        <b>break</b>;
+<a name='L142'>    <font color='red'>}</font>
+<a name='L143'>
+<a name='L144'>  <i><font color='green'>/* Other structs are passed via a pointer to the data.  */</font></i>
+<a name='L145'>  <b>return</b> <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>;
+<a name='L146'><font color='red'>}</font>
+<a name='L147'> 
+<a name='L148'><i><font color='green'>/*======================== End of Routine ============================*/</font></i>
+<a name='L149'> 
+<a name='L150'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L151'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L152'><i><font color='green'>/* Name     - ffi_prep_args.                                          */</font></i>
+<a name='L153'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L154'><i><font color='green'>/* Function - Prepare parameters for call to function.                */</font></i>
+<a name='L155'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L156'><i><font color='green'>/* ffi_prep_args is called by the assembly routine once stack space   */</font></i>
+<a name='L157'><i><font color='green'>/* has been allocated for the function's arguments.                   */</font></i>
+<a name='L158'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L159'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L160'> 
+<a name='L161'><b>static</b> <b>void</b>
+<a name='L162'><a href='../R/7708.html' title='Multiple refered from 25 places.'>ffi_prep_args</a> (<b>unsigned</b> <b>char</b> *stack, extended_cif *ecif)
+<a name='L163'><font color='red'>{</font>
+<a name='L164'>  <i><font color='green'>/* The stack space will be filled with those areas:</font></i>
+<a name='L165'><i><font color='green'></font></i>
+<a name='L166'><i><font color='green'>        FPR argument register save area     (highest addresses)</font></i>
+<a name='L167'><i><font color='green'>        GPR argument register save area</font></i>
+<a name='L168'><i><font color='green'>        temporary struct copies</font></i>
+<a name='L169'><i><font color='green'>        overflow argument area              (lowest addresses)</font></i>
+<a name='L170'><i><font color='green'></font></i>
+<a name='L171'><i><font color='green'>     We set up the following pointers:</font></i>
+<a name='L172'><i><font color='green'></font></i>
+<a name='L173'><i><font color='green'>        p_fpr: bottom of the FPR area (growing upwards)</font></i>
+<a name='L174'><i><font color='green'>        p_gpr: bottom of the GPR area (growing upwards)</font></i>
+<a name='L175'><i><font color='green'>        p_ov: bottom of the overflow area (growing upwards)</font></i>
+<a name='L176'><i><font color='green'>        p_struct: top of the struct copy area (growing downwards)</font></i>
+<a name='L177'><i><font color='green'></font></i>
+<a name='L178'><i><font color='green'>     All areas are kept aligned to twice the word size.  */</font></i>
+<a name='L179'>
+<a name='L180'>  <b>int</b> gpr_off = ecif-&gt;cif-&gt;<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>;
+<a name='L181'>  <b>int</b> fpr_off = gpr_off + <a href='../S/2357.html#L55' title='Defined at 55 in Modules/_ctypes/libffi/src/s390/ffi.c.'>ROUND_SIZE</a> (<a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a> * <b>sizeof</b> (<b>long</b>));
+<a name='L182'>
+<a name='L183'>  <b>unsigned</b> <b>long</b> <b>long</b> *p_fpr = (<b>unsigned</b> <b>long</b> <b>long</b> *)(<a href='../S/2844.html#L22' title='Defined at 22 in Parser/parser.h.'>stack</a> + fpr_off);
+<a name='L184'>  <b>unsigned</b> <b>long</b> *p_gpr = (<b>unsigned</b> <b>long</b> *)(<a href='../S/2844.html#L22' title='Defined at 22 in Parser/parser.h.'>stack</a> + gpr_off);
+<a name='L185'>  <b>unsigned</b> <b>char</b> *p_struct = (<b>unsigned</b> <b>char</b> *)p_gpr;
+<a name='L186'>  <b>unsigned</b> <b>long</b> *p_ov = (<b>unsigned</b> <b>long</b> *)<a href='../S/2844.html#L22' title='Defined at 22 in Parser/parser.h.'>stack</a>;
+<a name='L187'>
+<a name='L188'>  <b>int</b> n_fpr = 0;
+<a name='L189'>  <b>int</b> n_gpr = 0;
+<a name='L190'>  <b>int</b> n_ov = 0;
+<a name='L191'>
+<a name='L192'>  <a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> **ptr;
+<a name='L193'>  <b>void</b> **p_argv = ecif-&gt;avalue;
+<a name='L194'>  <b>int</b> i;
+<a name='L195'> 
+<a name='L196'>  <i><font color='green'>/* If we returning a structure then we set the first parameter register</font></i>
+<a name='L197'><i><font color='green'>     to the address of where we are returning this structure.  */</font></i>
+<a name='L198'>
+<a name='L199'>  <b>if</b> (ecif-&gt;cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> == <a href='../S/2357.html#L59' title='Defined at 59 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_STRUCT</a>)
+<a name='L200'>    p_gpr[n_gpr++] = (<b>unsigned</b> <b>long</b>) ecif-&gt;rvalue;
+<a name='L201'>
+<a name='L202'>  <i><font color='green'>/* Now for the arguments.  */</font></i>
+<a name='L203'> 
+<a name='L204'>  <b>for</b> (ptr = ecif-&gt;cif-&gt;arg_types, i = ecif-&gt;cif-&gt;nargs;
+<a name='L205'>       i &gt; 0;
+<a name='L206'>       i--, ptr++, p_argv++)
+<a name='L207'>    <font color='red'>{</font>
+<a name='L208'>      <b>void</b> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = *p_argv;
+<a name='L209'>      <b>int</b> type = (*ptr)-&gt;type;
+<a name='L210'>
+<a name='L211'><font color='darkred'>#if</font> <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a> != <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>
+<a name='L212'>      <i><font color='green'>/* 16-byte long double is passed like a struct.  */</font></i>
+<a name='L213'>      <b>if</b> (type == <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a>)
+<a name='L214'>        type = <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>;
+<a name='L215'><font color='darkred'>#endif</font>
+<a name='L216'>
+<a name='L217'>      <i><font color='green'>/* Check how a structure type is passed.  */</font></i>
+<a name='L218'>      <b>if</b> (type == <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>)
+<a name='L219'>        <font color='red'>{</font>
+<a name='L220'>          type = <a href='../S/2357.html#L108' title='Defined at 108 in Modules/_ctypes/libffi/src/s390/ffi.c.'>ffi_check_struct_type</a> (*ptr);
+<a name='L221'>
+<a name='L222'>          <i><font color='green'>/* If we pass the struct via pointer, copy the data.  */</font></i>
+<a name='L223'>          <b>if</b> (type == <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>)
+<a name='L224'>            <font color='red'>{</font>
+<a name='L225'>              p_struct -= <a href='../S/2357.html#L55' title='Defined at 55 in Modules/_ctypes/libffi/src/s390/ffi.c.'>ROUND_SIZE</a> ((*ptr)-&gt;size);
+<a name='L226'>              <a href='../D/9803.html' title='Multiple defined in 4 places.'>memcpy</a> (p_struct, (<b>char</b> *)<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, (*ptr)-&gt;size);
+<a name='L227'>              <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = &amp;p_struct;
+<a name='L228'>            <font color='red'>}</font>
+<a name='L229'>        <font color='red'>}</font>
+<a name='L230'>
+<a name='L231'>      <i><font color='green'>/* Now handle all primitive int/pointer/float data types.  */</font></i>
+<a name='L232'>      <b>switch</b> (type) 
+<a name='L233'>        <font color='red'>{</font>
+<a name='L234'>          <b>case</b> <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>:
+<a name='L235'>            <b>if</b> (n_fpr &lt; <a href='../D/2060.html' title='Multiple defined in 2 places.'>MAX_FPRARGS</a>)
+<a name='L236'>              p_fpr[n_fpr++] = *(<b>unsigned</b> <b>long</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L237'>            <b>else</b>
+<a name='L238'><font color='darkred'>#ifdef</font> __s390x__
+<a name='L239'>              p_ov[n_ov++] = *(<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L240'><font color='darkred'>#else</font>
+<a name='L241'>              p_ov[n_ov++] = ((<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)[0],
+<a name='L242'>              p_ov[n_ov++] = ((<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)[1];
+<a name='L243'><font color='darkred'>#endif</font>
+<a name='L244'>            <b>break</b>;
+<a name='L245'>        
+<a name='L246'>          <b>case</b> <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>:
+<a name='L247'>            <b>if</b> (n_fpr &lt; <a href='../D/2060.html' title='Multiple defined in 2 places.'>MAX_FPRARGS</a>)
+<a name='L248'>              p_fpr[n_fpr++] = (<b>long</b> <b>long</b>) *(<b>unsigned</b> <b>int</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> &lt;&lt; 32;
+<a name='L249'>            <b>else</b>
+<a name='L250'>              p_ov[n_ov++] = *(<b>unsigned</b> <b>int</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L251'>            <b>break</b>;
+<a name='L252'>
+<a name='L253'>          <b>case</b> <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>:
+<a name='L254'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L255'>              p_gpr[n_gpr++] = (<b>unsigned</b> <b>long</b>)*(<b>unsigned</b> <b>char</b> **) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L256'>            <b>else</b>
+<a name='L257'>              p_ov[n_ov++] = (<b>unsigned</b> <b>long</b>)*(<b>unsigned</b> <b>char</b> **) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L258'>            <b>break</b>;
+<a name='L259'> 
+<a name='L260'>          <b>case</b> <a href='../D/1221.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT64</a>:
+<a name='L261'>          <b>case</b> <a href='../D/1188.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT64</a>:
+<a name='L262'><font color='darkred'>#ifdef</font> __s390x__
+<a name='L263'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L264'>              p_gpr[n_gpr++] = *(<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L265'>            <b>else</b>
+<a name='L266'>              p_ov[n_ov++] = *(<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L267'><font color='darkred'>#else</font>
+<a name='L268'>            <b>if</b> (n_gpr == <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>-1)
+<a name='L269'>              n_gpr = <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>;
+<a name='L270'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L271'>              p_gpr[n_gpr++] = ((<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)[0],
+<a name='L272'>              p_gpr[n_gpr++] = ((<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)[1];
+<a name='L273'>            <b>else</b>
+<a name='L274'>              p_ov[n_ov++] = ((<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)[0],
+<a name='L275'>              p_ov[n_ov++] = ((<b>unsigned</b> <b>long</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>)[1];
+<a name='L276'><font color='darkred'>#endif</font>
+<a name='L277'>            <b>break</b>;
+<a name='L278'> 
+<a name='L279'>          <b>case</b> <a href='../D/1220.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT32</a>:
+<a name='L280'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L281'>              p_gpr[n_gpr++] = *(<b>unsigned</b> <b>int</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L282'>            <b>else</b>
+<a name='L283'>              p_ov[n_ov++] = *(<b>unsigned</b> <b>int</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L284'>            <b>break</b>;
+<a name='L285'> 
+<a name='L286'>          <b>case</b> <a href='../D/1182.html' title='Multiple defined in 3 places.'>FFI_TYPE_INT</a>:
+<a name='L287'>          <b>case</b> <a href='../D/1187.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT32</a>:
+<a name='L288'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L289'>              p_gpr[n_gpr++] = *(<b>signed</b> <b>int</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L290'>            <b>else</b>
+<a name='L291'>              p_ov[n_ov++] = *(<b>signed</b> <b>int</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L292'>            <b>break</b>;
+<a name='L293'> 
+<a name='L294'>          <b>case</b> <a href='../D/1219.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT16</a>:
+<a name='L295'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L296'>              p_gpr[n_gpr++] = *(<b>unsigned</b> <b>short</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L297'>            <b>else</b>
+<a name='L298'>              p_ov[n_ov++] = *(<b>unsigned</b> <b>short</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L299'>            <b>break</b>;
+<a name='L300'> 
+<a name='L301'>          <b>case</b> <a href='../D/1186.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT16</a>:
+<a name='L302'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L303'>              p_gpr[n_gpr++] = *(<b>signed</b> <b>short</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L304'>            <b>else</b>
+<a name='L305'>              p_ov[n_ov++] = *(<b>signed</b> <b>short</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L306'>            <b>break</b>;
+<a name='L307'>
+<a name='L308'>          <b>case</b> <a href='../D/1222.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT8</a>:
+<a name='L309'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L310'>              p_gpr[n_gpr++] = *(<b>unsigned</b> <b>char</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L311'>            <b>else</b>
+<a name='L312'>              p_ov[n_ov++] = *(<b>unsigned</b> <b>char</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L313'>            <b>break</b>;
+<a name='L314'> 
+<a name='L315'>          <b>case</b> <a href='../D/1189.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT8</a>:
+<a name='L316'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L317'>              p_gpr[n_gpr++] = *(<b>signed</b> <b>char</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L318'>            <b>else</b>
+<a name='L319'>              p_ov[n_ov++] = *(<b>signed</b> <b>char</b> *) <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>;
+<a name='L320'>            <b>break</b>;
+<a name='L321'> 
+<a name='L322'>          <b>default</b>:
+<a name='L323'>            <a href='../D/1120.html' title='Multiple defined in 8 places.'>FFI_ASSERT</a> (0);
+<a name='L324'>            <b>break</b>;
+<a name='L325'>        <font color='red'>}</font>
+<a name='L326'>    <font color='red'>}</font>
+<a name='L327'><font color='red'>}</font>
+<a name='L328'>
+<a name='L329'><i><font color='green'>/*======================== End of Routine ============================*/</font></i>
+<a name='L330'> 
+<a name='L331'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L332'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L333'><i><font color='green'>/* Name     - ffi_prep_cif_machdep.                                   */</font></i>
+<a name='L334'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L335'><i><font color='green'>/* Function - Perform machine dependent CIF processing.               */</font></i>
+<a name='L336'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L337'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L338'> 
+<a name='L339'><a href='../D/8530.html' title='Multiple defined in 4 places.'>ffi_status</a>
+<a name='L340'><a href='../R/7714.html' title='Multiple refered from 9 places.'>ffi_prep_cif_machdep</a>(ffi_cif *cif)
+<a name='L341'><font color='red'>{</font>
+<a name='L342'>  <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> struct_size = 0;
+<a name='L343'>  <b>int</b> n_gpr = 0;
+<a name='L344'>  <b>int</b> n_fpr = 0;
+<a name='L345'>  <b>int</b> n_ov = 0;
+<a name='L346'>
+<a name='L347'>  <a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> **ptr;
+<a name='L348'>  <b>int</b> i;
+<a name='L349'>
+<a name='L350'>  <i><font color='green'>/* Determine return value handling.  */</font></i> 
+<a name='L351'>
+<a name='L352'>  <b>switch</b> (cif-&gt;rtype-&gt;type)
+<a name='L353'>    <font color='red'>{</font>
+<a name='L354'>      <i><font color='green'>/* Void is easy.  */</font></i>
+<a name='L355'>      <b>case</b> <a href='../D/1223.html' title='Multiple defined in 3 places.'>FFI_TYPE_VOID</a>:
+<a name='L356'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L58' title='Defined at 58 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_VOID</a>;
+<a name='L357'>        <b>break</b>;
+<a name='L358'>
+<a name='L359'>      <i><font color='green'>/* Structures are returned via a hidden pointer.  */</font></i>
+<a name='L360'>      <b>case</b> <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>:
+<a name='L361'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L59' title='Defined at 59 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_STRUCT</a>;
+<a name='L362'>        n_gpr++;  <i><font color='green'>/* We need one GPR to pass the pointer.  */</font></i>
+<a name='L363'>        <b>break</b>; 
+<a name='L364'>
+<a name='L365'>      <i><font color='green'>/* Floating point values are returned in fpr 0.  */</font></i>
+<a name='L366'>      <b>case</b> <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>:
+<a name='L367'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L60' title='Defined at 60 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_FLOAT</a>;
+<a name='L368'>        <b>break</b>;
+<a name='L369'>
+<a name='L370'>      <b>case</b> <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>:
+<a name='L371'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L61' title='Defined at 61 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_DOUBLE</a>;
+<a name='L372'>        <b>break</b>;
+<a name='L373'>
+<a name='L374'><font color='darkred'>#if</font> <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a> != <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>
+<a name='L375'>      <b>case</b> <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a>:
+<a name='L376'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L59' title='Defined at 59 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_STRUCT</a>;
+<a name='L377'>        n_gpr++;
+<a name='L378'>        <b>break</b>;
+<a name='L379'><font color='darkred'>#endif</font>
+<a name='L380'>      <i><font color='green'>/* Integer values are returned in gpr 2 (and gpr 3</font></i>
+<a name='L381'><i><font color='green'>         for 64-bit values on 31-bit machines).  */</font></i>
+<a name='L382'>      <b>case</b> <a href='../D/1221.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT64</a>:
+<a name='L383'>      <b>case</b> <a href='../D/1188.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT64</a>:
+<a name='L384'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L63' title='Defined at 63 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_INT64</a>;
+<a name='L385'>        <b>break</b>;
+<a name='L386'>
+<a name='L387'>      <b>case</b> <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>:
+<a name='L388'>      <b>case</b> <a href='../D/1182.html' title='Multiple defined in 3 places.'>FFI_TYPE_INT</a>:
+<a name='L389'>      <b>case</b> <a href='../D/1220.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT32</a>:
+<a name='L390'>      <b>case</b> <a href='../D/1187.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT32</a>:
+<a name='L391'>      <b>case</b> <a href='../D/1219.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT16</a>:
+<a name='L392'>      <b>case</b> <a href='../D/1186.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT16</a>:
+<a name='L393'>      <b>case</b> <a href='../D/1222.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT8</a>:
+<a name='L394'>      <b>case</b> <a href='../D/1189.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT8</a>:
+<a name='L395'>        <i><font color='green'>/* These are to be extended to word size.  */</font></i>
+<a name='L396'><font color='darkred'>#ifdef</font> __s390x__
+<a name='L397'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L63' title='Defined at 63 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_INT64</a>;
+<a name='L398'><font color='darkred'>#else</font>
+<a name='L399'>        cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = <a href='../S/2357.html#L62' title='Defined at 62 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_INT32</a>;
+<a name='L400'><font color='darkred'>#endif</font>
+<a name='L401'>        <b>break</b>;
+<a name='L402'> 
+<a name='L403'>      <b>default</b>:
+<a name='L404'>        <a href='../D/1120.html' title='Multiple defined in 8 places.'>FFI_ASSERT</a> (0);
+<a name='L405'>        <b>break</b>;
+<a name='L406'>    <font color='red'>}</font>
+<a name='L407'>
+<a name='L408'>  <i><font color='green'>/* Now for the arguments.  */</font></i>
+<a name='L409'> 
+<a name='L410'>  <b>for</b> (ptr = cif-&gt;arg_types, i = cif-&gt;nargs;
+<a name='L411'>       i &gt; 0;
+<a name='L412'>       i--, ptr++)
+<a name='L413'>    <font color='red'>{</font>
+<a name='L414'>      <b>int</b> type = (*ptr)-&gt;type;
+<a name='L415'>
+<a name='L416'><font color='darkred'>#if</font> <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a> != <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>
+<a name='L417'>      <i><font color='green'>/* 16-byte long double is passed like a struct.  */</font></i>
+<a name='L418'>      <b>if</b> (type == <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a>)
+<a name='L419'>        type = <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>;
+<a name='L420'><font color='darkred'>#endif</font>
+<a name='L421'>
+<a name='L422'>      <i><font color='green'>/* Check how a structure type is passed.  */</font></i>
+<a name='L423'>      <b>if</b> (type == <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>)
+<a name='L424'>        <font color='red'>{</font>
+<a name='L425'>          type = <a href='../S/2357.html#L108' title='Defined at 108 in Modules/_ctypes/libffi/src/s390/ffi.c.'>ffi_check_struct_type</a> (*ptr);
+<a name='L426'>
+<a name='L427'>          <i><font color='green'>/* If we pass the struct via pointer, we must reserve space</font></i>
+<a name='L428'><i><font color='green'>             to copy its data for proper call-by-value semantics.  */</font></i>
+<a name='L429'>          <b>if</b> (type == <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>)
+<a name='L430'>            struct_size += <a href='../S/2357.html#L55' title='Defined at 55 in Modules/_ctypes/libffi/src/s390/ffi.c.'>ROUND_SIZE</a> ((*ptr)-&gt;size);
+<a name='L431'>        <font color='red'>}</font>
+<a name='L432'>
+<a name='L433'>      <i><font color='green'>/* Now handle all primitive int/float data types.  */</font></i>
+<a name='L434'>      <b>switch</b> (type) 
+<a name='L435'>        <font color='red'>{</font>
+<a name='L436'>          <i><font color='green'>/* The first MAX_FPRARGS floating point arguments</font></i>
+<a name='L437'><i><font color='green'>             go in FPRs, the rest overflow to the stack.  */</font></i>
+<a name='L438'>
+<a name='L439'>          <b>case</b> <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>:
+<a name='L440'>            <b>if</b> (n_fpr &lt; <a href='../D/2060.html' title='Multiple defined in 2 places.'>MAX_FPRARGS</a>)
+<a name='L441'>              n_fpr++;
+<a name='L442'>            <b>else</b>
+<a name='L443'>              n_ov += <b>sizeof</b> (<b>double</b>) / <b>sizeof</b> (<b>long</b>);
+<a name='L444'>            <b>break</b>;
+<a name='L445'>        
+<a name='L446'>          <b>case</b> <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>:
+<a name='L447'>            <b>if</b> (n_fpr &lt; <a href='../D/2060.html' title='Multiple defined in 2 places.'>MAX_FPRARGS</a>)
+<a name='L448'>              n_fpr++;
+<a name='L449'>            <b>else</b>
+<a name='L450'>              n_ov++;
+<a name='L451'>            <b>break</b>;
+<a name='L452'>
+<a name='L453'>          <i><font color='green'>/* On 31-bit machines, 64-bit integers are passed in GPR pairs,</font></i>
+<a name='L454'><i><font color='green'>             if one is still available, or else on the stack.  If only one</font></i>
+<a name='L455'><i><font color='green'>             register is free, skip the register (it won't be used for any </font></i>
+<a name='L456'><i><font color='green'>             subsequent argument either).  */</font></i>
+<a name='L457'>              
+<a name='L458'><font color='darkred'>#ifndef</font> __s390x__
+<a name='L459'>          <b>case</b> <a href='../D/1221.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT64</a>:
+<a name='L460'>          <b>case</b> <a href='../D/1188.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT64</a>:
+<a name='L461'>            <b>if</b> (n_gpr == <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>-1)
+<a name='L462'>              n_gpr = <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>;
+<a name='L463'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L464'>              n_gpr += 2;
+<a name='L465'>            <b>else</b>
+<a name='L466'>              n_ov += 2;
+<a name='L467'>            <b>break</b>;
+<a name='L468'><font color='darkred'>#endif</font>
+<a name='L469'>
+<a name='L470'>          <i><font color='green'>/* Everything else is passed in GPRs (until MAX_GPRARGS</font></i>
+<a name='L471'><i><font color='green'>             have been used) or overflows to the stack.  */</font></i>
+<a name='L472'>
+<a name='L473'>          <b>default</b>: 
+<a name='L474'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L475'>              n_gpr++;
+<a name='L476'>            <b>else</b>
+<a name='L477'>              n_ov++;
+<a name='L478'>            <b>break</b>;
+<a name='L479'>        <font color='red'>}</font>
+<a name='L480'>    <font color='red'>}</font>
+<a name='L481'>
+<a name='L482'>  <i><font color='green'>/* Total stack space as required for overflow arguments</font></i>
+<a name='L483'><i><font color='green'>     and temporary structure copies.  */</font></i>
+<a name='L484'>
+<a name='L485'>  cif-&gt;<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a> = <a href='../S/2357.html#L55' title='Defined at 55 in Modules/_ctypes/libffi/src/s390/ffi.c.'>ROUND_SIZE</a> (n_ov * <b>sizeof</b> (<b>long</b>)) + struct_size;
+<a name='L486'> 
+<a name='L487'>  <b>return</b> <a href='../D/1165.html' title='Multiple defined in 3 places.'>FFI_OK</a>;
+<a name='L488'><font color='red'>}</font>
+<a name='L489'> 
+<a name='L490'><i><font color='green'>/*======================== End of Routine ============================*/</font></i>
+<a name='L491'> 
+<a name='L492'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L493'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L494'><i><font color='green'>/* Name     - ffi_call.                                               */</font></i>
+<a name='L495'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L496'><i><font color='green'>/* Function - Call the FFI routine.                                   */</font></i>
+<a name='L497'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L498'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L499'> 
+<a name='L500'><b>void</b>
+<a name='L501'><a href='../R/7684.html' title='Multiple refered from 112 places.'>ffi_call</a>(ffi_cif *cif,
+<a name='L502'>         <b>void</b> (*fn)(<b>void</b>),
+<a name='L503'>         <b>void</b> *rvalue,
+<a name='L504'>         <b>void</b> **avalue)
+<a name='L505'><font color='red'>{</font>
+<a name='L506'>  <b>int</b> ret_type = cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L507'>  <a href='../D/8426.html' title='Multiple defined in 5 places.'>extended_cif</a> ecif;
+<a name='L508'> 
+<a name='L509'>  ecif.cif    = cif;
+<a name='L510'>  ecif.avalue = avalue;
+<a name='L511'>  ecif.rvalue = rvalue;
+<a name='L512'>
+<a name='L513'>  <i><font color='green'>/* If we don't have a return value, we need to fake one.  */</font></i>
+<a name='L514'>  <b>if</b> (rvalue == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L515'>    <font color='red'>{</font>
+<a name='L516'>      <b>if</b> (ret_type == <a href='../S/2357.html#L59' title='Defined at 59 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_STRUCT</a>)
+<a name='L517'>        ecif.rvalue = <a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a> (cif-&gt;rtype-&gt;size);
+<a name='L518'>      <b>else</b>
+<a name='L519'>        ret_type = <a href='../S/2357.html#L58' title='Defined at 58 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_VOID</a>;
+<a name='L520'>    <font color='red'>}</font> 
+<a name='L521'>
+<a name='L522'>  <b>switch</b> (cif-&gt;abi)
+<a name='L523'>    <font color='red'>{</font>
+<a name='L524'>      <b>case</b> <a href='../D/1172.html' title='Multiple defined in 34 places.'>FFI_SYSV</a>:
+<a name='L525'>        <a href='../D/8474.html' title='Multiple defined in 4 places.'>ffi_call_SYSV</a> (cif-&gt;<a href='../D/7205.html' title='Multiple defined in 2 places.'>bytes</a>, &amp;ecif, <a href='../D/8505.html' title='Multiple defined in 17 places.'>ffi_prep_args</a>,
+<a name='L526'>                       ret_type, ecif.rvalue, <a href='../S/2334.html#L39' title='Defined at 39 in Modules/_ctypes/libffi/src/mips/n32.S.'>fn</a>);
+<a name='L527'>        <b>break</b>;
+<a name='L528'> 
+<a name='L529'>      <b>default</b>:
+<a name='L530'>        <a href='../D/1120.html' title='Multiple defined in 8 places.'>FFI_ASSERT</a> (0);
+<a name='L531'>        <b>break</b>;
+<a name='L532'>    <font color='red'>}</font>
+<a name='L533'><font color='red'>}</font>
+<a name='L534'> 
+<a name='L535'><i><font color='green'>/*======================== End of Routine ============================*/</font></i>
+<a name='L536'>
+<a name='L537'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L538'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L539'><i><font color='green'>/* Name     - ffi_closure_helper_SYSV.                                */</font></i>
+<a name='L540'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L541'><i><font color='green'>/* Function - Call a FFI closure target function.                     */</font></i>
+<a name='L542'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L543'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L544'> 
+<a name='L545'><b>void</b>
+<a name='L546'><a href='../R/7697.html' title='Multiple refered from 2 places.'>ffi_closure_helper_SYSV</a> (ffi_closure *closure,
+<a name='L547'>                         <b>unsigned</b> <b>long</b> *p_gpr,
+<a name='L548'>                         <b>unsigned</b> <b>long</b> <b>long</b> *p_fpr,
+<a name='L549'>                         <b>unsigned</b> <b>long</b> *p_ov)
+<a name='L550'><font color='red'>{</font>
+<a name='L551'>  <b>unsigned</b> <b>long</b> <b>long</b> ret_buffer;
+<a name='L552'>
+<a name='L553'>  <b>void</b> *rvalue = &amp;ret_buffer;
+<a name='L554'>  <b>void</b> **avalue;
+<a name='L555'>  <b>void</b> **p_arg;
+<a name='L556'>
+<a name='L557'>  <b>int</b> n_gpr = 0;
+<a name='L558'>  <b>int</b> n_fpr = 0;
+<a name='L559'>  <b>int</b> n_ov = 0;
+<a name='L560'>
+<a name='L561'>  <a href='../D/8534.html' title='Multiple defined in 3 places.'>ffi_type</a> **ptr;
+<a name='L562'>  <b>int</b> i;
+<a name='L563'>
+<a name='L564'>  <i><font color='green'>/* Allocate buffer for argument list pointers.  */</font></i>
+<a name='L565'>
+<a name='L566'>  p_arg = avalue = <a href='../D/6714.html' title='Multiple defined in 6 places.'>alloca</a> (closure-&gt;cif-&gt;nargs * <b>sizeof</b> (<b>void</b> *));
+<a name='L567'>
+<a name='L568'>  <i><font color='green'>/* If we returning a structure, pass the structure address </font></i>
+<a name='L569'><i><font color='green'>     directly to the target function.  Otherwise, have the target </font></i>
+<a name='L570'><i><font color='green'>     function store the return value to the GPR save area.  */</font></i>
+<a name='L571'>
+<a name='L572'>  <b>if</b> (closure-&gt;cif-&gt;<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> == <a href='../S/2357.html#L59' title='Defined at 59 in Modules/_ctypes/libffi/src/s390/ffi.c.'>FFI390_RET_STRUCT</a>)
+<a name='L573'>    rvalue = (<b>void</b> *) p_gpr[n_gpr++];
+<a name='L574'>
+<a name='L575'>  <i><font color='green'>/* Now for the arguments.  */</font></i>
+<a name='L576'>
+<a name='L577'>  <b>for</b> (ptr = closure-&gt;cif-&gt;arg_types, i = closure-&gt;cif-&gt;nargs;
+<a name='L578'>       i &gt; 0;
+<a name='L579'>       i--, p_arg++, ptr++)
+<a name='L580'>    <font color='red'>{</font>
+<a name='L581'>      <b>int</b> deref_struct_pointer = 0;
+<a name='L582'>      <b>int</b> type = (*ptr)-&gt;type;
+<a name='L583'>
+<a name='L584'><font color='darkred'>#if</font> <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a> != <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>
+<a name='L585'>      <i><font color='green'>/* 16-byte long double is passed like a struct.  */</font></i>
+<a name='L586'>      <b>if</b> (type == <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a>)
+<a name='L587'>        type = <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>;
+<a name='L588'><font color='darkred'>#endif</font>
+<a name='L589'>
+<a name='L590'>      <i><font color='green'>/* Check how a structure type is passed.  */</font></i>
+<a name='L591'>      <b>if</b> (type == <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>)
+<a name='L592'>        <font color='red'>{</font>
+<a name='L593'>          type = <a href='../S/2357.html#L108' title='Defined at 108 in Modules/_ctypes/libffi/src/s390/ffi.c.'>ffi_check_struct_type</a> (*ptr);
+<a name='L594'>
+<a name='L595'>          <i><font color='green'>/* If we pass the struct via pointer, remember to </font></i>
+<a name='L596'><i><font color='green'>             retrieve the pointer later.  */</font></i>
+<a name='L597'>          <b>if</b> (type == <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>)
+<a name='L598'>            deref_struct_pointer = 1;
+<a name='L599'>        <font color='red'>}</font>
+<a name='L600'>
+<a name='L601'>      <i><font color='green'>/* Pointers are passed like UINTs of the same size.  */</font></i>
+<a name='L602'>      <b>if</b> (type == <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>)
+<a name='L603'><font color='darkred'>#ifdef</font> __s390x__
+<a name='L604'>        type = <a href='../D/1221.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT64</a>;
+<a name='L605'><font color='darkred'>#else</font>
+<a name='L606'>        type = <a href='../D/1220.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT32</a>;
+<a name='L607'><font color='darkred'>#endif</font>
+<a name='L608'>
+<a name='L609'>      <i><font color='green'>/* Now handle all primitive int/float data types.  */</font></i>
+<a name='L610'>      <b>switch</b> (type) 
+<a name='L611'>        <font color='red'>{</font>
+<a name='L612'>          <b>case</b> <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>:
+<a name='L613'>            <b>if</b> (n_fpr &lt; <a href='../D/2060.html' title='Multiple defined in 2 places.'>MAX_FPRARGS</a>)
+<a name='L614'>              *p_arg = &amp;p_fpr[n_fpr++];
+<a name='L615'>            <b>else</b>
+<a name='L616'>              *p_arg = &amp;p_ov[n_ov], 
+<a name='L617'>              n_ov += <b>sizeof</b> (<b>double</b>) / <b>sizeof</b> (<b>long</b>);
+<a name='L618'>            <b>break</b>;
+<a name='L619'>        
+<a name='L620'>          <b>case</b> <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>:
+<a name='L621'>            <b>if</b> (n_fpr &lt; <a href='../D/2060.html' title='Multiple defined in 2 places.'>MAX_FPRARGS</a>)
+<a name='L622'>              *p_arg = &amp;p_fpr[n_fpr++];
+<a name='L623'>            <b>else</b>
+<a name='L624'>              *p_arg = (<b>char</b> *)&amp;p_ov[n_ov++] + <b>sizeof</b> (<b>long</b>) - 4;
+<a name='L625'>            <b>break</b>;
+<a name='L626'> 
+<a name='L627'>          <b>case</b> <a href='../D/1221.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT64</a>:
+<a name='L628'>          <b>case</b> <a href='../D/1188.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT64</a>:
+<a name='L629'><font color='darkred'>#ifdef</font> __s390x__
+<a name='L630'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L631'>              *p_arg = &amp;p_gpr[n_gpr++];
+<a name='L632'>            <b>else</b>
+<a name='L633'>              *p_arg = &amp;p_ov[n_ov++];
+<a name='L634'><font color='darkred'>#else</font>
+<a name='L635'>            <b>if</b> (n_gpr == <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>-1)
+<a name='L636'>              n_gpr = <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>;
+<a name='L637'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L638'>              *p_arg = &amp;p_gpr[n_gpr], n_gpr += 2;
+<a name='L639'>            <b>else</b>
+<a name='L640'>              *p_arg = &amp;p_ov[n_ov], n_ov += 2;
+<a name='L641'><font color='darkred'>#endif</font>
+<a name='L642'>            <b>break</b>;
+<a name='L643'> 
+<a name='L644'>          <b>case</b> <a href='../D/1182.html' title='Multiple defined in 3 places.'>FFI_TYPE_INT</a>:
+<a name='L645'>          <b>case</b> <a href='../D/1220.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT32</a>:
+<a name='L646'>          <b>case</b> <a href='../D/1187.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT32</a>:
+<a name='L647'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L648'>              *p_arg = (<b>char</b> *)&amp;p_gpr[n_gpr++] + <b>sizeof</b> (<b>long</b>) - 4;
+<a name='L649'>            <b>else</b>
+<a name='L650'>              *p_arg = (<b>char</b> *)&amp;p_ov[n_ov++] + <b>sizeof</b> (<b>long</b>) - 4;
+<a name='L651'>            <b>break</b>;
+<a name='L652'> 
+<a name='L653'>          <b>case</b> <a href='../D/1219.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT16</a>:
+<a name='L654'>          <b>case</b> <a href='../D/1186.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT16</a>:
+<a name='L655'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L656'>              *p_arg = (<b>char</b> *)&amp;p_gpr[n_gpr++] + <b>sizeof</b> (<b>long</b>) - 2;
+<a name='L657'>            <b>else</b>
+<a name='L658'>              *p_arg = (<b>char</b> *)&amp;p_ov[n_ov++] + <b>sizeof</b> (<b>long</b>) - 2;
+<a name='L659'>            <b>break</b>;
+<a name='L660'>
+<a name='L661'>          <b>case</b> <a href='../D/1222.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT8</a>:
+<a name='L662'>          <b>case</b> <a href='../D/1189.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT8</a>:
+<a name='L663'>            <b>if</b> (n_gpr &lt; <a href='../S/2357.html#L45' title='Defined at 45 in Modules/_ctypes/libffi/src/s390/ffi.c.'>MAX_GPRARGS</a>)
+<a name='L664'>              *p_arg = (<b>char</b> *)&amp;p_gpr[n_gpr++] + <b>sizeof</b> (<b>long</b>) - 1;
+<a name='L665'>            <b>else</b>
+<a name='L666'>              *p_arg = (<b>char</b> *)&amp;p_ov[n_ov++] + <b>sizeof</b> (<b>long</b>) - 1;
+<a name='L667'>            <b>break</b>;
+<a name='L668'> 
+<a name='L669'>          <b>default</b>:
+<a name='L670'>            <a href='../D/1120.html' title='Multiple defined in 8 places.'>FFI_ASSERT</a> (0);
+<a name='L671'>            <b>break</b>;
+<a name='L672'>        <font color='red'>}</font>
+<a name='L673'>
+<a name='L674'>      <i><font color='green'>/* If this is a struct passed via pointer, we need to</font></i>
+<a name='L675'><i><font color='green'>         actually retrieve that pointer.  */</font></i>
+<a name='L676'>      <b>if</b> (deref_struct_pointer)
+<a name='L677'>        *p_arg = *(<b>void</b> **)*p_arg;
+<a name='L678'>    <font color='red'>}</font>
+<a name='L679'>
+<a name='L680'>
+<a name='L681'>  <i><font color='green'>/* Call the target function.  */</font></i>
+<a name='L682'>  (closure-&gt;fun) (closure-&gt;cif, rvalue, avalue, closure-&gt;user_data);
+<a name='L683'>
+<a name='L684'>  <i><font color='green'>/* Convert the return value.  */</font></i>
+<a name='L685'>  <b>switch</b> (closure-&gt;cif-&gt;rtype-&gt;type)
+<a name='L686'>    <font color='red'>{</font>
+<a name='L687'>      <i><font color='green'>/* Void is easy, and so is struct.  */</font></i>
+<a name='L688'>      <b>case</b> <a href='../D/1223.html' title='Multiple defined in 3 places.'>FFI_TYPE_VOID</a>:
+<a name='L689'>      <b>case</b> <a href='../D/1202.html' title='Multiple defined in 3 places.'>FFI_TYPE_STRUCT</a>:
+<a name='L690'><font color='darkred'>#if</font> <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a> != <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>
+<a name='L691'>      <b>case</b> <a href='../D/1184.html' title='Multiple defined in 8 places.'>FFI_TYPE_LONGDOUBLE</a>:
+<a name='L692'><font color='darkred'>#endif</font>
+<a name='L693'>        <b>break</b>;
+<a name='L694'>
+<a name='L695'>      <i><font color='green'>/* Floating point values are returned in fpr 0.  */</font></i>
+<a name='L696'>      <b>case</b> <a href='../D/1181.html' title='Multiple defined in 3 places.'>FFI_TYPE_FLOAT</a>:
+<a name='L697'>        p_fpr[0] = (<b>long</b> <b>long</b>) *(<b>unsigned</b> <b>int</b> *) rvalue &lt;&lt; 32;
+<a name='L698'>        <b>break</b>;
+<a name='L699'>
+<a name='L700'>      <b>case</b> <a href='../D/1180.html' title='Multiple defined in 3 places.'>FFI_TYPE_DOUBLE</a>:
+<a name='L701'>        p_fpr[0] = *(<b>unsigned</b> <b>long</b> <b>long</b> *) rvalue;
+<a name='L702'>        <b>break</b>;
+<a name='L703'>
+<a name='L704'>      <i><font color='green'>/* Integer values are returned in gpr 2 (and gpr 3</font></i>
+<a name='L705'><i><font color='green'>         for 64-bit values on 31-bit machines).  */</font></i>
+<a name='L706'>      <b>case</b> <a href='../D/1221.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT64</a>:
+<a name='L707'>      <b>case</b> <a href='../D/1188.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT64</a>:
+<a name='L708'><font color='darkred'>#ifdef</font> __s390x__
+<a name='L709'>        p_gpr[0] = *(<b>unsigned</b> <b>long</b> *) rvalue;
+<a name='L710'><font color='darkred'>#else</font>
+<a name='L711'>        p_gpr[0] = ((<b>unsigned</b> <b>long</b> *) rvalue)[0],
+<a name='L712'>        p_gpr[1] = ((<b>unsigned</b> <b>long</b> *) rvalue)[1];
+<a name='L713'><font color='darkred'>#endif</font>
+<a name='L714'>        <b>break</b>;
+<a name='L715'>
+<a name='L716'>      <b>case</b> <a href='../D/1185.html' title='Multiple defined in 3 places.'>FFI_TYPE_POINTER</a>:
+<a name='L717'>      <b>case</b> <a href='../D/1220.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT32</a>:
+<a name='L718'>      <b>case</b> <a href='../D/1219.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT16</a>:
+<a name='L719'>      <b>case</b> <a href='../D/1222.html' title='Multiple defined in 3 places.'>FFI_TYPE_UINT8</a>:
+<a name='L720'>        p_gpr[0] = *(<b>unsigned</b> <b>long</b> *) rvalue;
+<a name='L721'>        <b>break</b>;
+<a name='L722'>
+<a name='L723'>      <b>case</b> <a href='../D/1182.html' title='Multiple defined in 3 places.'>FFI_TYPE_INT</a>:
+<a name='L724'>      <b>case</b> <a href='../D/1187.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT32</a>:
+<a name='L725'>      <b>case</b> <a href='../D/1186.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT16</a>:
+<a name='L726'>      <b>case</b> <a href='../D/1189.html' title='Multiple defined in 3 places.'>FFI_TYPE_SINT8</a>:
+<a name='L727'>        p_gpr[0] = *(<b>signed</b> <b>long</b> *) rvalue;
+<a name='L728'>        <b>break</b>;
+<a name='L729'>
+<a name='L730'>      <b>default</b>:
+<a name='L731'>        <a href='../D/1120.html' title='Multiple defined in 8 places.'>FFI_ASSERT</a> (0);
+<a name='L732'>        <b>break</b>;
+<a name='L733'>    <font color='red'>}</font>
+<a name='L734'><font color='red'>}</font>
+<a name='L735'> 
+<a name='L736'><i><font color='green'>/*======================== End of Routine ============================*/</font></i>
+<a name='L737'>
+<a name='L738'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L739'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L740'><i><font color='green'>/* Name     - ffi_prep_closure_loc.                                   */</font></i>
+<a name='L741'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L742'><i><font color='green'>/* Function - Prepare a FFI closure.                                  */</font></i>
+<a name='L743'><i><font color='green'>/*                                                                    */</font></i>
+<a name='L744'><i><font color='green'>/*====================================================================*/</font></i>
+<a name='L745'> 
+<a name='L746'><a href='../D/8530.html' title='Multiple defined in 4 places.'>ffi_status</a>
+<a name='L747'><a href='../R/7717.html' title='Multiple refered from 92 places.'>ffi_prep_closure_loc</a> (ffi_closure *closure,
+<a name='L748'>                      ffi_cif *cif,
+<a name='L749'>                      <b>void</b> (*fun) (ffi_cif *, <b>void</b> *, <b>void</b> **, <b>void</b> *),
+<a name='L750'>                      <b>void</b> *user_data,
+<a name='L751'>                      <b>void</b> *codeloc)
+<a name='L752'><font color='red'>{</font>
+<a name='L753'>  <a href='../D/1120.html' title='Multiple defined in 8 places.'>FFI_ASSERT</a> (cif-&gt;abi == <a href='../D/1172.html' title='Multiple defined in 34 places.'>FFI_SYSV</a>);
+<a name='L754'>
+<a name='L755'><font color='darkred'>#ifndef</font> __s390x__
+<a name='L756'>  *(<b>short</b> *)&amp;closure-&gt;tramp [0] = 0x0d10;   <i><font color='green'>/* basr %r1,0 */</font></i>
+<a name='L757'>  *(<b>short</b> *)&amp;closure-&gt;tramp [2] = 0x9801;   <i><font color='green'>/* lm %r0,%r1,6(%r1) */</font></i>
+<a name='L758'>  *(<b>short</b> *)&amp;closure-&gt;tramp [4] = 0x1006;
+<a name='L759'>  *(<b>short</b> *)&amp;closure-&gt;tramp [6] = 0x07f1;   <i><font color='green'>/* br %r1 */</font></i>
+<a name='L760'>  *(<b>long</b>  *)&amp;closure-&gt;tramp [8] = (<b>long</b>)codeloc;
+<a name='L761'>  *(<b>long</b>  *)&amp;closure-&gt;tramp[12] = (<b>long</b>)&amp;<a href='../D/8479.html' title='Multiple defined in 4 places.'>ffi_closure_SYSV</a>;
+<a name='L762'><font color='darkred'>#else</font>
+<a name='L763'>  *(<b>short</b> *)&amp;closure-&gt;tramp [0] = 0x0d10;   <i><font color='green'>/* basr %r1,0 */</font></i>
+<a name='L764'>  *(<b>short</b> *)&amp;closure-&gt;tramp [2] = 0xeb01;   <i><font color='green'>/* lmg %r0,%r1,14(%r1) */</font></i>
+<a name='L765'>  *(<b>short</b> *)&amp;closure-&gt;tramp [4] = 0x100e;
+<a name='L766'>  *(<b>short</b> *)&amp;closure-&gt;tramp [6] = 0x0004;
+<a name='L767'>  *(<b>short</b> *)&amp;closure-&gt;tramp [8] = 0x07f1;   <i><font color='green'>/* br %r1 */</font></i>
+<a name='L768'>  *(<b>long</b>  *)&amp;closure-&gt;tramp[16] = (<b>long</b>)codeloc;
+<a name='L769'>  *(<b>long</b>  *)&amp;closure-&gt;tramp[24] = (<b>long</b>)&amp;<a href='../D/8479.html' title='Multiple defined in 4 places.'>ffi_closure_SYSV</a>;
+<a name='L770'><font color='darkred'>#endif</font> 
+<a name='L771'> 
+<a name='L772'>  closure-&gt;cif = cif;
+<a name='L773'>  closure-&gt;user_data = user_data;
+<a name='L774'>  closure-&gt;fun = fun;
+<a name='L775'> 
+<a name='L776'>  <b>return</b> <a href='../D/1165.html' title='Multiple defined in 3 places.'>FFI_OK</a>;
+<a name='L777'><font color='red'>}</font>
+<a name='L778'>
+<a name='L779'><i><font color='green'>/*======================== End of Routine ============================*/</font></i>
+<a name='L780'> 
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L108'>[^]</a><a href='#L747'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

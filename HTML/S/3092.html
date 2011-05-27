@@ -1,0 +1,470 @@
+<html>
+<head>
+<title>Python/ceval_gil.h</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/ceval_gil.h</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L184'>[^]</a><a href='#L430'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2><a href='3091.html#L295' title='Included from 295 in Python/ceval.c.'>INCLUDED FROM</a></h2>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L184' title='Defined at 184.'>_cond_init</a>
+<li><a href='#L195' title='Defined at 195.'>_cond_fini</a>
+<li><a href='#L202' title='Defined at 202.'>_cond_wait</a>
+<li><a href='#L215' title='Defined at 215.'>_cond_timed_wait</a>
+<li><a href='#L243' title='Defined at 243.'>_cond_signal</a>
+<li><a href='#L294' title='Defined at 294.'>gil_created</a>
+<li><a href='#L299' title='Defined at 299.'>create_gil</a>
+<li><a href='#L314' title='Defined at 314.'>destroy_gil</a>
+<li><a href='#L328' title='Defined at 328.'>recreate_gil</a>
+<li><a href='#L335' title='Defined at 335.'>drop_gil</a>
+<li><a href='#L370' title='Defined at 370.'>take_gil</a>
+<li><a href='#L425' title='Defined at 425.'>_PyEval_SetSwitchInterval</a>
+<li><a href='#L430' title='Defined at 430.'>_PyEval_GetSwitchInterval</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'> * Implementation of the Global Interpreter Lock (GIL).</font></i>
+<a name='L3'><i><font color='green'> */</font></i>
+<a name='L4'>
+<a name='L5'><font color='darkred'>#include</font> &lt;stdlib.h&gt;
+<a name='L6'><font color='darkred'>#include</font> &lt;errno.h&gt;
+<a name='L7'>
+<a name='L8'>
+<a name='L9'><i><font color='green'>/* First some general settings */</font></i>
+<a name='L10'>
+<a name='L11'><i><font color='green'>/* microseconds (the Python API uses seconds, though) */</font></i>
+<a name='L12'><font color='darkred'>#define</font> <a href='../S/3092.html#L13' title='Refered from 13 in Python/ceval_gil.h.'>DEFAULT_INTERVAL</a> 5000
+<a name='L13'><b>static</b> <b>unsigned</b> <b>long</b> gil_interval = <a href='../S/3092.html#L12' title='Defined at 12 in Python/ceval_gil.h.'>DEFAULT_INTERVAL</a>;
+<a name='L14'><font color='darkred'>#define</font> <a href='../S/3092.html#L387' title='Refered from 387 in Python/ceval_gil.h.'>INTERVAL</a> (gil_interval &gt;= 1 ? gil_interval : 1)
+<a name='L15'>
+<a name='L16'><i><font color='green'>/* Enable if you want to force the switching of threads at least every `gil_interval` */</font></i>
+<a name='L17'><font color='darkred'>#undef</font> <a href='../R/1149.html' title='Multiple refered from 8 places.'>FORCE_SWITCHING</a>
+<a name='L18'><font color='darkred'>#define</font> <a href='../R/1149.html' title='Multiple refered from 8 places.'>FORCE_SWITCHING</a>
+<a name='L19'>
+<a name='L20'>
+<a name='L21'><i><font color='green'>/*</font></i>
+<a name='L22'><i><font color='green'>   Notes about the implementation:</font></i>
+<a name='L23'><i><font color='green'></font></i>
+<a name='L24'><i><font color='green'>   - The GIL is just a boolean variable (gil_locked) whose access is protected</font></i>
+<a name='L25'><i><font color='green'>     by a mutex (gil_mutex), and whose changes are signalled by a condition</font></i>
+<a name='L26'><i><font color='green'>     variable (gil_cond). gil_mutex is taken for short periods of time,</font></i>
+<a name='L27'><i><font color='green'>     and therefore mostly uncontended.</font></i>
+<a name='L28'><i><font color='green'></font></i>
+<a name='L29'><i><font color='green'>   - In the GIL-holding thread, the main loop (PyEval_EvalFrameEx) must be</font></i>
+<a name='L30'><i><font color='green'>     able to release the GIL on demand by another thread. A volatile boolean</font></i>
+<a name='L31'><i><font color='green'>     variable (gil_drop_request) is used for that purpose, which is checked</font></i>
+<a name='L32'><i><font color='green'>     at every turn of the eval loop. That variable is set after a wait of</font></i>
+<a name='L33'><i><font color='green'>     `interval` microseconds on `gil_cond` has timed out.</font></i>
+<a name='L34'><i><font color='green'>      </font></i>
+<a name='L35'><i><font color='green'>      [Actually, another volatile boolean variable (eval_breaker) is used</font></i>
+<a name='L36'><i><font color='green'>       which ORs several conditions into one. Volatile booleans are</font></i>
+<a name='L37'><i><font color='green'>       sufficient as inter-thread signalling means since Python is run</font></i>
+<a name='L38'><i><font color='green'>       on cache-coherent architectures only.]</font></i>
+<a name='L39'><i><font color='green'></font></i>
+<a name='L40'><i><font color='green'>   - A thread wanting to take the GIL will first let pass a given amount of</font></i>
+<a name='L41'><i><font color='green'>     time (`interval` microseconds) before setting gil_drop_request. This</font></i>
+<a name='L42'><i><font color='green'>     encourages a defined switching period, but doesn't enforce it since</font></i>
+<a name='L43'><i><font color='green'>     opcodes can take an arbitrary time to execute.</font></i>
+<a name='L44'><i><font color='green'> </font></i>
+<a name='L45'><i><font color='green'>     The `interval` value is available for the user to read and modify</font></i>
+<a name='L46'><i><font color='green'>     using the Python API `sys.{get,set}switchinterval()`.</font></i>
+<a name='L47'><i><font color='green'></font></i>
+<a name='L48'><i><font color='green'>   - When a thread releases the GIL and gil_drop_request is set, that thread</font></i>
+<a name='L49'><i><font color='green'>     ensures that another GIL-awaiting thread gets scheduled.</font></i>
+<a name='L50'><i><font color='green'>     It does so by waiting on a condition variable (switch_cond) until</font></i>
+<a name='L51'><i><font color='green'>     the value of gil_last_holder is changed to something else than its</font></i>
+<a name='L52'><i><font color='green'>     own thread state pointer, indicating that another thread was able to</font></i>
+<a name='L53'><i><font color='green'>     take the GIL.</font></i>
+<a name='L54'><i><font color='green'> </font></i>
+<a name='L55'><i><font color='green'>     This is meant to prohibit the latency-adverse behaviour on multi-core</font></i>
+<a name='L56'><i><font color='green'>     machines where one thread would speculatively release the GIL, but still</font></i>
+<a name='L57'><i><font color='green'>     run and end up being the first to re-acquire it, making the "timeslices"</font></i>
+<a name='L58'><i><font color='green'>     much longer than expected.</font></i>
+<a name='L59'><i><font color='green'>     (Note: this mechanism is enabled with FORCE_SWITCHING above)</font></i>
+<a name='L60'><i><font color='green'>*/</font></i>
+<a name='L61'>
+<a name='L62'><font color='darkred'>#ifndef</font> <a href='../D/6019.html' title='Multiple defined in 3 places.'>_POSIX_THREADS</a>
+<a name='L63'><i><font color='green'>/* This means pthreads are not implemented in libc headers, hence the macro</font></i>
+<a name='L64'><i><font color='green'>   not present in unistd.h. But they still can be implemented as an external</font></i>
+<a name='L65'><i><font color='green'>   library (e.g. gnu pth in pthread emulation) */</font></i>
+<a name='L66'><font color='darkred'># ifdef</font> HAVE_PTHREAD_H
+<a name='L67'><font color='darkred'>#  include</font> &lt;pthread.h&gt; <i><font color='green'>/* _POSIX_THREADS */</font></i>
+<a name='L68'><font color='darkred'># endif</font>
+<a name='L69'><font color='darkred'>#endif</font>
+<a name='L70'>
+<a name='L71'>
+<a name='L72'><font color='darkred'>#ifdef</font> <a href='../D/6019.html' title='Multiple defined in 3 places.'>_POSIX_THREADS</a>
+<a name='L73'>
+<a name='L74'><i><font color='green'>/*</font></i>
+<a name='L75'><i><font color='green'> * POSIX support</font></i>
+<a name='L76'><i><font color='green'> */</font></i>
+<a name='L77'>
+<a name='L78'><font color='darkred'>#include</font> &lt;pthread.h&gt;
+<a name='L79'>
+<a name='L80'><font color='darkred'>#define</font> <a href='../S/3092.html#L128' title='Refered from 128 in Python/ceval_gil.h.'>ADD_MICROSECONDS</a>(tv, interval) \
+<a name='L81'><b>do</b> <font color='red'>{</font> \
+<a name='L82'>    tv.tv_usec += (<b>long</b>) interval; \
+<a name='L83'>    tv.tv_sec += tv.tv_usec / 1000000; \
+<a name='L84'>    tv.tv_usec %= 1000000; \
+<a name='L85'><font color='red'>}</font> <b>while</b> (0)
+<a name='L86'>
+<a name='L87'><i><font color='green'>/* We assume all modern POSIX systems have gettimeofday() */</font></i>
+<a name='L88'><font color='darkred'>#ifdef</font> GETTIMEOFDAY_NO_TZ
+<a name='L89'><font color='darkred'>#define</font> <a href='../R/1240.html' title='Multiple refered from 2 places.'>GETTIMEOFDAY</a>(ptv) gettimeofday(ptv)
+<a name='L90'><font color='darkred'>#else</font>
+<a name='L91'><font color='darkred'>#define</font> <a href='../R/1240.html' title='Multiple refered from 2 places.'>GETTIMEOFDAY</a>(ptv) gettimeofday(ptv, (<b>struct</b> <a href='../S/2720.html#L41' title='Defined at 41 in Modules/timemodule.c.'>timezone</a> *)<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L92'><font color='darkred'>#endif</font>
+<a name='L93'>
+<a name='L94'><font color='darkred'>#define</font> <a href='../R/1995.html' title='Multiple refered from 4 places.'>MUTEX_T</a> pthread_mutex_t
+<a name='L95'><font color='darkred'>#define</font> <a href='../R/1993.html' title='Multiple refered from 2 places.'>MUTEX_INIT</a>(mut) \
+<a name='L96'>    <b>if</b> (pthread_mutex_init(&amp;mut, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)) <font color='red'>{</font> \
+<a name='L97'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_mutex_init(" #mut ") failed"); <font color='red'>}</font>;
+<a name='L98'><font color='darkred'>#define</font> <a href='../R/1992.html' title='Multiple refered from 2 places.'>MUTEX_FINI</a>(mut) \
+<a name='L99'>    <b>if</b> (pthread_mutex_destroy(&amp;mut)) <font color='red'>{</font> \
+<a name='L100'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_mutex_destroy(" #mut ") failed"); <font color='red'>}</font>;
+<a name='L101'><font color='darkred'>#define</font> <a href='../R/1994.html' title='Multiple refered from 6 places.'>MUTEX_LOCK</a>(mut) \
+<a name='L102'>    <b>if</b> (pthread_mutex_lock(&amp;mut)) <font color='red'>{</font> \
+<a name='L103'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_mutex_lock(" #mut ") failed"); <font color='red'>}</font>;
+<a name='L104'><font color='darkred'>#define</font> <a href='../R/1996.html' title='Multiple refered from 6 places.'>MUTEX_UNLOCK</a>(mut) \
+<a name='L105'>    <b>if</b> (pthread_mutex_unlock(&amp;mut)) <font color='red'>{</font> \
+<a name='L106'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_mutex_unlock(" #mut ") failed"); <font color='red'>}</font>;
+<a name='L107'>
+<a name='L108'><font color='darkred'>#define</font> <a href='../R/563.html' title='Multiple refered from 7 places.'>COND_T</a> pthread_cond_t
+<a name='L109'><font color='darkred'>#define</font> <a href='../R/561.html' title='Multiple refered from 2 places.'>COND_INIT</a>(cond) \
+<a name='L110'>    <b>if</b> (pthread_cond_init(&amp;cond, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)) <font color='red'>{</font> \
+<a name='L111'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_cond_init(" #cond ") failed"); <font color='red'>}</font>;
+<a name='L112'><font color='darkred'>#define</font> <a href='../R/560.html' title='Multiple refered from 2 places.'>COND_FINI</a>(cond) \
+<a name='L113'>    <b>if</b> (pthread_cond_destroy(&amp;cond)) <font color='red'>{</font> \
+<a name='L114'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_cond_destroy(" #cond ") failed"); <font color='red'>}</font>;
+<a name='L115'><font color='darkred'>#define</font> <a href='../R/562.html' title='Multiple refered from 2 places.'>COND_SIGNAL</a>(cond) \
+<a name='L116'>    <b>if</b> (pthread_cond_signal(&amp;cond)) <font color='red'>{</font> \
+<a name='L117'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_cond_signal(" #cond ") failed"); <font color='red'>}</font>;
+<a name='L118'><font color='darkred'>#define</font> <a href='../S/3092.html#L363' title='Refered from 363 in Python/ceval_gil.h.'>COND_WAIT</a>(cond, mut) \
+<a name='L119'>    <b>if</b> (pthread_cond_wait(&amp;cond, &amp;mut)) <font color='red'>{</font> \
+<a name='L120'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_cond_wait(" #cond ") failed"); <font color='red'>}</font>;
+<a name='L121'><font color='darkred'>#define</font> <a href='../S/3092.html#L387' title='Refered from 387 in Python/ceval_gil.h.'>COND_TIMED_WAIT</a>(cond, mut, microseconds, timeout_result) \
+<a name='L122'>    <font color='red'>{</font> \
+<a name='L123'>        <b>int</b> r; \
+<a name='L124'>        <b>struct</b> timespec ts; \
+<a name='L125'>        <b>struct</b> timeval deadline; \
+<a name='L126'>        \
+<a name='L127'>        <a href='../D/1382.html' title='Multiple defined in 4 places.'>GETTIMEOFDAY</a>(&amp;deadline); \
+<a name='L128'>        <a href='../S/3092.html#L80' title='Defined at 80 in Python/ceval_gil.h.'>ADD_MICROSECONDS</a>(deadline, microseconds); \
+<a name='L129'>        ts.tv_sec = deadline.tv_sec; \
+<a name='L130'>        ts.tv_nsec = deadline.tv_usec * 1000; \
+<a name='L131'>        \
+<a name='L132'>        r = pthread_cond_timedwait(&amp;cond, &amp;mut, &amp;ts); \
+<a name='L133'>        <b>if</b> (r == ETIMEDOUT) \
+<a name='L134'>            timeout_result = 1; \
+<a name='L135'>        <b>else</b> <b>if</b> (r) \
+<a name='L136'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("pthread_cond_timedwait(" #cond ") failed"); \
+<a name='L137'>        <b>else</b> \
+<a name='L138'>            timeout_result = 0; \
+<a name='L139'>    <font color='red'>}</font> \
+<a name='L140'>
+<a name='L141'><font color='darkred'>#elif</font> <b>defined</b>(<a href='../S/2906.html#L85' title='Defined at 85 in PC/pyconfig.h.'>NT_THREADS</a>)
+<a name='L142'>
+<a name='L143'><i><font color='green'>/*</font></i>
+<a name='L144'><i><font color='green'> * Windows (2000 and later, as well as (hopefully) CE) support</font></i>
+<a name='L145'><i><font color='green'> */</font></i>
+<a name='L146'>
+<a name='L147'><font color='darkred'>#include</font> &lt;windows.h&gt;
+<a name='L148'>
+<a name='L149'><font color='darkred'>#define</font> <a href='../R/1995.html' title='Multiple refered from 4 places.'>MUTEX_T</a> CRITICAL_SECTION
+<a name='L150'><font color='darkred'>#define</font> <a href='../R/1993.html' title='Multiple refered from 2 places.'>MUTEX_INIT</a>(mut) <b>do</b> <font color='red'>{</font> \
+<a name='L151'>    <b>if</b> (!(InitializeCriticalSectionAndSpinCount(&amp;(mut), 4000))) \
+<a name='L152'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("CreateMutex(" #mut ") failed"); \
+<a name='L153'><font color='red'>}</font> <b>while</b> (0)
+<a name='L154'><font color='darkred'>#define</font> <a href='../R/1992.html' title='Multiple refered from 2 places.'>MUTEX_FINI</a>(mut) \
+<a name='L155'>    DeleteCriticalSection(&amp;(mut))
+<a name='L156'><font color='darkred'>#define</font> <a href='../R/1994.html' title='Multiple refered from 6 places.'>MUTEX_LOCK</a>(mut) \
+<a name='L157'>    EnterCriticalSection(&amp;(mut))
+<a name='L158'><font color='darkred'>#define</font> <a href='../R/1996.html' title='Multiple refered from 6 places.'>MUTEX_UNLOCK</a>(mut) \
+<a name='L159'>    LeaveCriticalSection(&amp;(mut))
+<a name='L160'>
+<a name='L161'><i><font color='green'>/* We emulate condition variables with a semaphore.</font></i>
+<a name='L162'><i><font color='green'>   We use a Semaphore rather than an auto-reset event, because although</font></i>
+<a name='L163'><i><font color='green'>   an auto-resent event might appear to solve the lost-wakeup bug (race</font></i>
+<a name='L164'><i><font color='green'>   condition between releasing the outer lock and waiting) because it</font></i>
+<a name='L165'><i><font color='green'>   maintains state even though a wait hasn't happened, there is still</font></i>
+<a name='L166'><i><font color='green'>   a lost wakeup problem if more than one thread are interrupted in the</font></i>
+<a name='L167'><i><font color='green'>   critical place.  A semaphore solves that.</font></i>
+<a name='L168'><i><font color='green'>   Because it is ok to signal a condition variable with no one</font></i>
+<a name='L169'><i><font color='green'>   waiting, we need to keep track of the number of</font></i>
+<a name='L170'><i><font color='green'>   waiting threads.  Otherwise, the semaphore's state could rise</font></i>
+<a name='L171'><i><font color='green'>   without bound.</font></i>
+<a name='L172'><i><font color='green'></font></i>
+<a name='L173'><i><font color='green'>   Generic emulations of the pthread_cond_* API using</font></i>
+<a name='L174'><i><font color='green'>   Win32 functions can be found on the Web.</font></i>
+<a name='L175'><i><font color='green'>   The following read can be edificating (or not):</font></i>
+<a name='L176'><i><font color='green'>   http://www.cse.wustl.edu/~schmidt/win32-cv-1.html</font></i>
+<a name='L177'><i><font color='green'>*/</font></i>
+<a name='L178'><b>typedef</b> <b>struct</b> <a href='../R/563.html' title='Multiple refered from 7 places.'>COND_T</a>
+<a name='L179'><font color='red'>{</font>
+<a name='L180'>    <a href='../S/2583.html#L40' title='Defined at 40 in Modules/_multiprocessing/multiprocessing.h.'>HANDLE</a> sem;    <i><font color='green'>/* the semaphore */</font></i>
+<a name='L181'>    <b>int</b> n_waiting; <i><font color='green'>/* how many are unreleased */</font></i>
+<a name='L182'><font color='red'>}</font> <a href='../R/563.html' title='Multiple refered from 7 places.'>COND_T</a>;
+<a name='L183'>
+<a name='L184'><b>__inline</b> <b>static</b> <b>void</b> <a href='../S/3092.html#L253' title='Refered from 253 in Python/ceval_gil.h.'>_cond_init</a>(<a href='../D/605.html' title='Multiple defined in 3 places.'>COND_T</a> *cond)
+<a name='L185'><font color='red'>{</font>
+<a name='L186'>    <i><font color='green'>/* A semaphore with a large max value,  The positive value</font></i>
+<a name='L187'><i><font color='green'>     * is only needed to catch those "lost wakeup" events and</font></i>
+<a name='L188'><i><font color='green'>     * race conditions when a timed wait elapses.</font></i>
+<a name='L189'><i><font color='green'>     */</font></i>
+<a name='L190'>    <b>if</b> (!(cond-&gt;sem = CreateSemaphore(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0, 1000, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)))
+<a name='L191'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("CreateSemaphore() failed");
+<a name='L192'>    cond-&gt;n_waiting = 0;
+<a name='L193'><font color='red'>}</font>
+<a name='L194'>
+<a name='L195'><b>__inline</b> <b>static</b> <b>void</b> <a href='../S/3092.html#L255' title='Refered from 255 in Python/ceval_gil.h.'>_cond_fini</a>(<a href='../D/605.html' title='Multiple defined in 3 places.'>COND_T</a> *cond)
+<a name='L196'><font color='red'>{</font>
+<a name='L197'>    <a href='../S/2583.html#L42' title='Defined at 42 in Modules/_multiprocessing/multiprocessing.h.'>BOOL</a> ok = CloseHandle(cond-&gt;sem);
+<a name='L198'>    <b>if</b> (!ok)
+<a name='L199'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("CloseHandle() failed");
+<a name='L200'><font color='red'>}</font>
+<a name='L201'>
+<a name='L202'><b>__inline</b> <b>static</b> <b>void</b> <a href='../S/3092.html#L259' title='Refered from 259 in Python/ceval_gil.h.'>_cond_wait</a>(<a href='../D/605.html' title='Multiple defined in 3 places.'>COND_T</a> *cond, <a href='../D/2199.html' title='Multiple defined in 2 places.'>MUTEX_T</a> *mut)
+<a name='L203'><font color='red'>{</font>
+<a name='L204'>    ++cond-&gt;n_waiting;
+<a name='L205'>    <a href='../D/2200.html' title='Multiple defined in 2 places.'>MUTEX_UNLOCK</a>(*mut);
+<a name='L206'>    <i><font color='green'>/* "lost wakeup bug" would occur if the caller were interrupted here,</font></i>
+<a name='L207'><i><font color='green'>     * but we are safe because we are using a semaphore wich has an internal</font></i>
+<a name='L208'><i><font color='green'>     * count.</font></i>
+<a name='L209'><i><font color='green'>     */</font></i>
+<a name='L210'>    <b>if</b> (WaitForSingleObject(cond-&gt;sem, INFINITE) == WAIT_FAILED)
+<a name='L211'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("WaitForSingleObject() failed");
+<a name='L212'>    <a href='../D/2198.html' title='Multiple defined in 2 places.'>MUTEX_LOCK</a>(*mut);
+<a name='L213'><font color='red'>}</font>
+<a name='L214'>
+<a name='L215'><b>__inline</b> <b>static</b> <b>int</b> <a href='../S/3092.html#L261' title='Refered from 261 in Python/ceval_gil.h.'>_cond_timed_wait</a>(<a href='../D/605.html' title='Multiple defined in 3 places.'>COND_T</a> *cond, <a href='../D/2199.html' title='Multiple defined in 2 places.'>MUTEX_T</a> *mut,
+<a name='L216'>                              <b>int</b> us)
+<a name='L217'><font color='red'>{</font>
+<a name='L218'>    DWORD r;
+<a name='L219'>    ++cond-&gt;n_waiting;
+<a name='L220'>    <a href='../D/2200.html' title='Multiple defined in 2 places.'>MUTEX_UNLOCK</a>(*mut);
+<a name='L221'>    r = WaitForSingleObject(cond-&gt;sem, us / 1000);
+<a name='L222'>    <b>if</b> (r == WAIT_FAILED)
+<a name='L223'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("WaitForSingleObject() failed");
+<a name='L224'>    <a href='../D/2198.html' title='Multiple defined in 2 places.'>MUTEX_LOCK</a>(*mut);
+<a name='L225'>    <b>if</b> (r == WAIT_TIMEOUT)
+<a name='L226'>        --cond-&gt;n_waiting;
+<a name='L227'>        <i><font color='green'>/* Here we have a benign race condition with _cond_signal.  If the</font></i>
+<a name='L228'><i><font color='green'>         * wait operation has timed out, but before we can acquire the</font></i>
+<a name='L229'><i><font color='green'>         * mutex again to decrement n_waiting, a thread holding the mutex</font></i>
+<a name='L230'><i><font color='green'>         * still sees a positive n_waiting value and may call</font></i>
+<a name='L231'><i><font color='green'>         * ReleaseSemaphore and decrement n_waiting.</font></i>
+<a name='L232'><i><font color='green'>         * This will cause n_waiting to be decremented twice.</font></i>
+<a name='L233'><i><font color='green'>         * This is benign, though, because ReleaseSemaphore will also have</font></i>
+<a name='L234'><i><font color='green'>         * been called, leaving the semaphore state positive.  We may</font></i>
+<a name='L235'><i><font color='green'>         * thus end up with semaphore in state 1, and n_waiting == -1, and</font></i>
+<a name='L236'><i><font color='green'>         * the next time someone calls _cond_wait(), that thread will</font></i>
+<a name='L237'><i><font color='green'>         * pass right through, decrementing the semaphore state and</font></i>
+<a name='L238'><i><font color='green'>         * incrementing n_waiting, thus correcting the extra _cond_signal.</font></i>
+<a name='L239'><i><font color='green'>         */</font></i>
+<a name='L240'>    <b>return</b> r == WAIT_TIMEOUT;
+<a name='L241'><font color='red'>}</font>
+<a name='L242'>
+<a name='L243'><b>__inline</b> <b>static</b> <b>void</b> <a href='../S/3092.html#L257' title='Refered from 257 in Python/ceval_gil.h.'>_cond_signal</a>(<a href='../D/605.html' title='Multiple defined in 3 places.'>COND_T</a>  *cond) <font color='red'>{</font>
+<a name='L244'>    <i><font color='green'>/* NOTE: This must be called with the mutex held */</font></i>
+<a name='L245'>    <b>if</b> (cond-&gt;n_waiting &gt; 0) <font color='red'>{</font>
+<a name='L246'>        <b>if</b> (!ReleaseSemaphore(cond-&gt;sem, 1, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))
+<a name='L247'>            <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("ReleaseSemaphore() failed");
+<a name='L248'>        --cond-&gt;n_waiting;
+<a name='L249'>    <font color='red'>}</font>
+<a name='L250'><font color='red'>}</font>
+<a name='L251'>
+<a name='L252'><font color='darkred'>#define</font> <a href='../R/561.html' title='Multiple refered from 2 places.'>COND_INIT</a>(cond) \
+<a name='L253'>    <a href='../S/3092.html#L184' title='Defined at 184 in Python/ceval_gil.h.'>_cond_init</a>(&amp;(cond))
+<a name='L254'><font color='darkred'>#define</font> <a href='../R/560.html' title='Multiple refered from 2 places.'>COND_FINI</a>(cond) \
+<a name='L255'>    <a href='../S/3092.html#L195' title='Defined at 195 in Python/ceval_gil.h.'>_cond_fini</a>(&amp;(cond))
+<a name='L256'><font color='darkred'>#define</font> <a href='../R/562.html' title='Multiple refered from 2 places.'>COND_SIGNAL</a>(cond) \
+<a name='L257'>    <a href='../S/3092.html#L243' title='Defined at 243 in Python/ceval_gil.h.'>_cond_signal</a>(&amp;(cond))
+<a name='L258'><font color='darkred'>#define</font> <a href='../S/3092.html#L363' title='Refered from 363 in Python/ceval_gil.h.'>COND_WAIT</a>(cond, mut) \
+<a name='L259'>    <a href='../S/3092.html#L202' title='Defined at 202 in Python/ceval_gil.h.'>_cond_wait</a>(&amp;(cond), &amp;(mut))
+<a name='L260'><font color='darkred'>#define</font> <a href='../S/3092.html#L387' title='Refered from 387 in Python/ceval_gil.h.'>COND_TIMED_WAIT</a>(cond, mut, us, timeout_result) <b>do</b> <font color='red'>{</font> \
+<a name='L261'>    (timeout_result) = <a href='../S/3092.html#L215' title='Defined at 215 in Python/ceval_gil.h.'>_cond_timed_wait</a>(&amp;(cond), &amp;(mut), us); \
+<a name='L262'><font color='red'>}</font> <b>while</b> (0)
+<a name='L263'>
+<a name='L264'><font color='darkred'>#else</font>
+<a name='L265'>
+<a name='L266'><font color='darkred'>#error</font> You need either a POSIX-compatible or a Windows system!
+<a name='L267'>
+<a name='L268'><font color='darkred'>#endif</font> <i><font color='green'>/* _POSIX_THREADS, NT_THREADS */</font></i>
+<a name='L269'>
+<a name='L270'>
+<a name='L271'><i><font color='green'>/* Whether the GIL is already taken (-1 if uninitialized). This is atomic</font></i>
+<a name='L272'><i><font color='green'>   because it can be read without any lock taken in ceval.c. */</font></i>
+<a name='L273'><b>static</b> <a href='../D/6327.html' title='Multiple defined in 2 places.'>_Py_atomic_int</a> gil_locked = <font color='red'>{</font>-1<font color='red'>}</font>;
+<a name='L274'><i><font color='green'>/* Number of GIL switches since the beginning. */</font></i>
+<a name='L275'><b>static</b> <b>unsigned</b> <b>long</b> gil_switch_number = 0;
+<a name='L276'><i><font color='green'>/* Last PyThreadState holding / having held the GIL. This helps us know</font></i>
+<a name='L277'><i><font color='green'>   whether anyone else was scheduled after we dropped the GIL. */</font></i>
+<a name='L278'><b>static</b> <a href='../D/6326.html' title='Multiple defined in 2 places.'>_Py_atomic_address</a> gil_last_holder = <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L279'>
+<a name='L280'><i><font color='green'>/* This condition variable allows one or several threads to wait until</font></i>
+<a name='L281'><i><font color='green'>   the GIL is released. In addition, the mutex also protects the above</font></i>
+<a name='L282'><i><font color='green'>   variables. */</font></i>
+<a name='L283'><b>static</b> <a href='../D/605.html' title='Multiple defined in 3 places.'>COND_T</a> gil_cond;
+<a name='L284'><b>static</b> <a href='../D/2199.html' title='Multiple defined in 2 places.'>MUTEX_T</a> gil_mutex;
+<a name='L285'>
+<a name='L286'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L287'><i><font color='green'>/* This condition variable helps the GIL-releasing thread wait for</font></i>
+<a name='L288'><i><font color='green'>   a GIL-awaiting thread to be scheduled and take the GIL. */</font></i>
+<a name='L289'><b>static</b> <a href='../D/605.html' title='Multiple defined in 3 places.'>COND_T</a> switch_cond;
+<a name='L290'><b>static</b> <a href='../D/2199.html' title='Multiple defined in 2 places.'>MUTEX_T</a> switch_mutex;
+<a name='L291'><font color='darkred'>#endif</font>
+<a name='L292'>
+<a name='L293'>
+<a name='L294'><b>static</b> <b>int</b> <a href='../R/8173.html' title='Multiple refered from 8 places.'>gil_created</a>(<b>void</b>)
+<a name='L295'><font color='red'>{</font>
+<a name='L296'>    <b>return</b> <a href='../D/6329.html' title='Multiple defined in 2 places.'>_Py_atomic_load_explicit</a>(&amp;gil_locked, <a href='../S/554.html#L25' title='Defined at 25 in Include/pyatomic.h.'>_Py_memory_order_acquire</a>) &gt;= 0;
+<a name='L297'><font color='red'>}</font>
+<a name='L298'>
+<a name='L299'><b>static</b> <b>void</b> <a href='../R/7044.html' title='Multiple refered from 2 places.'>create_gil</a>(<b>void</b>)
+<a name='L300'><font color='red'>{</font>
+<a name='L301'>    <a href='../D/2197.html' title='Multiple defined in 2 places.'>MUTEX_INIT</a>(gil_mutex);
+<a name='L302'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L303'>    <a href='../D/2197.html' title='Multiple defined in 2 places.'>MUTEX_INIT</a>(switch_mutex);
+<a name='L304'><font color='darkred'>#endif</font>
+<a name='L305'>    <a href='../D/603.html' title='Multiple defined in 2 places.'>COND_INIT</a>(gil_cond);
+<a name='L306'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L307'>    <a href='../D/603.html' title='Multiple defined in 2 places.'>COND_INIT</a>(switch_cond);
+<a name='L308'><font color='darkred'>#endif</font>
+<a name='L309'>    <a href='../S/554.html#L171' title='Defined at 171 in Include/pyatomic.h.'>_Py_atomic_store_relaxed</a>(&amp;gil_last_holder, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L310'>    <a href='../D/6270.html' title='Multiple defined in 2 places.'>_Py_ANNOTATE_RWLOCK_CREATE</a>(&amp;gil_locked);
+<a name='L311'>    <a href='../D/6333.html' title='Multiple defined in 2 places.'>_Py_atomic_store_explicit</a>(&amp;gil_locked, 0, <a href='../S/554.html#L26' title='Defined at 26 in Include/pyatomic.h.'>_Py_memory_order_release</a>);
+<a name='L312'><font color='red'>}</font>
+<a name='L313'>
+<a name='L314'><b>static</b> <b>void</b> <a href='../S/3091.html#L320' title='Refered from 320 in Python/ceval.c.'>destroy_gil</a>(<b>void</b>)
+<a name='L315'><font color='red'>{</font>
+<a name='L316'>    <a href='../D/2196.html' title='Multiple defined in 2 places.'>MUTEX_FINI</a>(gil_mutex);
+<a name='L317'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L318'>    <a href='../D/2196.html' title='Multiple defined in 2 places.'>MUTEX_FINI</a>(switch_mutex);
+<a name='L319'><font color='darkred'>#endif</font>
+<a name='L320'>    <a href='../D/602.html' title='Multiple defined in 2 places.'>COND_FINI</a>(gil_cond);
+<a name='L321'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L322'>    <a href='../D/602.html' title='Multiple defined in 2 places.'>COND_FINI</a>(switch_cond);
+<a name='L323'><font color='darkred'>#endif</font>
+<a name='L324'>    <a href='../D/6333.html' title='Multiple defined in 2 places.'>_Py_atomic_store_explicit</a>(&amp;gil_locked, -1, <a href='../S/554.html#L26' title='Defined at 26 in Include/pyatomic.h.'>_Py_memory_order_release</a>);
+<a name='L325'>    <a href='../D/6271.html' title='Multiple defined in 2 places.'>_Py_ANNOTATE_RWLOCK_DESTROY</a>(&amp;gil_locked);
+<a name='L326'><font color='red'>}</font>
+<a name='L327'>
+<a name='L328'><b>static</b> <b>void</b> <a href='../S/3091.html#L380' title='Refered from 380 in Python/ceval.c.'>recreate_gil</a>(<b>void</b>)
+<a name='L329'><font color='red'>{</font>
+<a name='L330'>    <a href='../D/6271.html' title='Multiple defined in 2 places.'>_Py_ANNOTATE_RWLOCK_DESTROY</a>(&amp;gil_locked);
+<a name='L331'>    <i><font color='green'>/* XXX should we destroy the old OS resources here? */</font></i>
+<a name='L332'>    <a href='../S/3092.html#L299' title='Defined at 299 in Python/ceval_gil.h.'>create_gil</a>();
+<a name='L333'><font color='red'>}</font>
+<a name='L334'>
+<a name='L335'><b>static</b> <b>void</b> <a href='../R/7471.html' title='Multiple refered from 4 places.'>drop_gil</a>(PyThreadState *tstate)
+<a name='L336'><font color='red'>{</font>
+<a name='L337'>    <b>if</b> (!<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_locked))
+<a name='L338'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("drop_gil: GIL is not locked");
+<a name='L339'>    <i><font color='green'>/* tstate is allowed to be NULL (early interpreter init) */</font></i>
+<a name='L340'>    <b>if</b> (tstate != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L341'>        <i><font color='green'>/* Sub-interpreter support: threads might have been switched</font></i>
+<a name='L342'><i><font color='green'>           under our feet using PyThreadState_Swap(). Fix the GIL last</font></i>
+<a name='L343'><i><font color='green'>           holder variable so that our heuristics work. */</font></i>
+<a name='L344'>        <a href='../S/554.html#L171' title='Defined at 171 in Include/pyatomic.h.'>_Py_atomic_store_relaxed</a>(&amp;gil_last_holder, tstate);
+<a name='L345'>    <font color='red'>}</font>
+<a name='L346'>
+<a name='L347'>    <a href='../D/2198.html' title='Multiple defined in 2 places.'>MUTEX_LOCK</a>(gil_mutex);
+<a name='L348'>    <a href='../D/6272.html' title='Multiple defined in 2 places.'>_Py_ANNOTATE_RWLOCK_RELEASED</a>(&amp;gil_locked, <i><font color='green'>/*is_write=*/</font></i>1);
+<a name='L349'>    <a href='../S/554.html#L171' title='Defined at 171 in Include/pyatomic.h.'>_Py_atomic_store_relaxed</a>(&amp;gil_locked, 0);
+<a name='L350'>    <a href='../D/604.html' title='Multiple defined in 2 places.'>COND_SIGNAL</a>(gil_cond);
+<a name='L351'>    <a href='../D/2200.html' title='Multiple defined in 2 places.'>MUTEX_UNLOCK</a>(gil_mutex);
+<a name='L352'>    
+<a name='L353'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L354'>    <b>if</b> (<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_drop_request) &amp;&amp; tstate != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L355'>        <a href='../D/2198.html' title='Multiple defined in 2 places.'>MUTEX_LOCK</a>(switch_mutex);
+<a name='L356'>        <i><font color='green'>/* Not switched yet =&gt; wait */</font></i>
+<a name='L357'>        <b>if</b> (<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_last_holder) == tstate) <font color='red'>{</font>
+<a name='L358'>            <a href='../S/3091.html#L244' title='Defined at 244 in Python/ceval.c.'>RESET_GIL_DROP_REQUEST</a>();
+<a name='L359'>            <i><font color='green'>/* NOTE: if COND_WAIT does not atomically start waiting when</font></i>
+<a name='L360'><i><font color='green'>               releasing the mutex, another thread can run through, take</font></i>
+<a name='L361'><i><font color='green'>               the GIL and drop it again, and reset the condition</font></i>
+<a name='L362'><i><font color='green'>               before we even had a chance to wait for it. */</font></i>
+<a name='L363'>            <a href='../D/607.html' title='Multiple defined in 2 places.'>COND_WAIT</a>(switch_cond, switch_mutex);
+<a name='L364'>        <font color='red'>}</font>
+<a name='L365'>        <a href='../D/2200.html' title='Multiple defined in 2 places.'>MUTEX_UNLOCK</a>(switch_mutex);
+<a name='L366'>    <font color='red'>}</font>
+<a name='L367'><font color='darkred'>#endif</font>
+<a name='L368'><font color='red'>}</font>
+<a name='L369'>
+<a name='L370'><b>static</b> <b>void</b> <a href='../R/10728.html' title='Multiple refered from 6 places.'>take_gil</a>(PyThreadState *tstate)
+<a name='L371'><font color='red'>{</font>
+<a name='L372'>    <b>int</b> err;
+<a name='L373'>    <b>if</b> (tstate == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L374'>        <a href='../D/4129.html' title='Multiple defined in 2 places.'>Py_FatalError</a>("take_gil: NULL tstate");
+<a name='L375'>
+<a name='L376'>    err = errno;
+<a name='L377'>    <a href='../D/2198.html' title='Multiple defined in 2 places.'>MUTEX_LOCK</a>(gil_mutex);
+<a name='L378'>
+<a name='L379'>    <b>if</b> (!<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_locked))
+<a name='L380'>        <b>goto</b> _ready;
+<a name='L381'>    
+<a name='L382'>    <b>while</b> (<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_locked)) <font color='red'>{</font>
+<a name='L383'>        <b>int</b> timed_out = 0;
+<a name='L384'>        <b>unsigned</b> <b>long</b> saved_switchnum;
+<a name='L385'>
+<a name='L386'>        saved_switchnum = gil_switch_number;
+<a name='L387'>        <a href='../D/606.html' title='Multiple defined in 2 places.'>COND_TIMED_WAIT</a>(gil_cond, gil_mutex, <a href='../S/3092.html#L14' title='Defined at 14 in Python/ceval_gil.h.'>INTERVAL</a>, timed_out);
+<a name='L388'>        <i><font color='green'>/* If we timed out and no switch occurred in the meantime, it is time</font></i>
+<a name='L389'><i><font color='green'>           to ask the GIL-holding thread to drop it. */</font></i>
+<a name='L390'>        <b>if</b> (timed_out &amp;&amp;
+<a name='L391'>            <a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_locked) &amp;&amp;
+<a name='L392'>            gil_switch_number == saved_switchnum) <font color='red'>{</font>
+<a name='L393'>            <a href='../S/3091.html#L238' title='Defined at 238 in Python/ceval.c.'>SET_GIL_DROP_REQUEST</a>();
+<a name='L394'>        <font color='red'>}</font>
+<a name='L395'>    <font color='red'>}</font>
+<a name='L396'>_ready:
+<a name='L397'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L398'>    <i><font color='green'>/* This mutex must be taken before modifying gil_last_holder (see drop_gil()). */</font></i>
+<a name='L399'>    <a href='../D/2198.html' title='Multiple defined in 2 places.'>MUTEX_LOCK</a>(switch_mutex);
+<a name='L400'><font color='darkred'>#endif</font>
+<a name='L401'>    <i><font color='green'>/* We now hold the GIL */</font></i>
+<a name='L402'>    <a href='../S/554.html#L171' title='Defined at 171 in Include/pyatomic.h.'>_Py_atomic_store_relaxed</a>(&amp;gil_locked, 1);
+<a name='L403'>    <a href='../D/6269.html' title='Multiple defined in 2 places.'>_Py_ANNOTATE_RWLOCK_ACQUIRED</a>(&amp;gil_locked, <i><font color='green'>/*is_write=*/</font></i>1);
+<a name='L404'>
+<a name='L405'>    <b>if</b> (tstate != <a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_last_holder)) <font color='red'>{</font>
+<a name='L406'>        <a href='../S/554.html#L171' title='Defined at 171 in Include/pyatomic.h.'>_Py_atomic_store_relaxed</a>(&amp;gil_last_holder, tstate);
+<a name='L407'>        ++gil_switch_number;
+<a name='L408'>    <font color='red'>}</font>
+<a name='L409'>
+<a name='L410'><font color='darkred'>#ifdef</font> <a href='../D/1287.html' title='Multiple defined in 2 places.'>FORCE_SWITCHING</a>
+<a name='L411'>    <a href='../D/604.html' title='Multiple defined in 2 places.'>COND_SIGNAL</a>(switch_cond);
+<a name='L412'>    <a href='../D/2200.html' title='Multiple defined in 2 places.'>MUTEX_UNLOCK</a>(switch_mutex);
+<a name='L413'><font color='darkred'>#endif</font>
+<a name='L414'>    <b>if</b> (<a href='../S/554.html#L173' title='Defined at 173 in Include/pyatomic.h.'>_Py_atomic_load_relaxed</a>(&amp;gil_drop_request)) <font color='red'>{</font>
+<a name='L415'>        <a href='../S/3091.html#L244' title='Defined at 244 in Python/ceval.c.'>RESET_GIL_DROP_REQUEST</a>();
+<a name='L416'>    <font color='red'>}</font>
+<a name='L417'>    <b>if</b> (tstate-&gt;async_exc != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L418'>        <a href='../S/3091.html#L412' title='Defined at 412 in Python/ceval.c.'>_PyEval_SignalAsyncExc</a>();
+<a name='L419'>    <font color='red'>}</font>
+<a name='L420'>    
+<a name='L421'>    <a href='../D/2200.html' title='Multiple defined in 2 places.'>MUTEX_UNLOCK</a>(gil_mutex);
+<a name='L422'>    errno = err;
+<a name='L423'><font color='red'>}</font>
+<a name='L424'>
+<a name='L425'><b>void</b> <a href='../R/5390.html' title='Multiple refered from 2 places.'>_PyEval_SetSwitchInterval</a>(<b>unsigned</b> <b>long</b> microseconds)
+<a name='L426'><font color='red'>{</font>
+<a name='L427'>    gil_interval = microseconds;
+<a name='L428'><font color='red'>}</font>
+<a name='L429'>
+<a name='L430'><b>unsigned</b> <b>long</b> <a href='../R/5389.html' title='Multiple refered from 2 places.'>_PyEval_GetSwitchInterval</a>()
+<a name='L431'><font color='red'>{</font>
+<a name='L432'>    <b>return</b> gil_interval;
+<a name='L433'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L184'>[^]</a><a href='#L430'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

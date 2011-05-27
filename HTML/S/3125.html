@@ -1,0 +1,613 @@
+<html>
+<head>
+<title>Python/modsupport.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/modsupport.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L17'>[^]</a><a href='#L566'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L17' title='Defined at 17.'>countformat</a>
+<li><a href='#L67' title='Defined at 67.'>do_mkdict</a>
+<li><a href='#L113' title='Defined at 113.'>do_mklist</a>
+<li><a href='#L152' title='Defined at 152.'>_ustrlen</a>
+<li><a href='#L161' title='Defined at 161.'>do_mktuple</a>
+<li><a href='#L198' title='Defined at 198.'>do_mkvalue</a>
+<li><a href='#L419' title='Defined at 419.'>Py_BuildValue</a>
+<li><a href='#L430' title='Defined at 430.'>_Py_BuildValue_SizeT</a>
+<li><a href='#L441' title='Defined at 441.'>Py_VaBuildValue</a>
+<li><a href='#L447' title='Defined at 447.'>_Py_VaBuildValue_SizeT</a>
+<li><a href='#L453' title='Defined at 453.'>va_build_value</a>
+<li><a href='#L474' title='Defined at 474.'>PyEval_CallFunction</a>
+<li><a href='#L496' title='Defined at 496.'>PyEval_CallMethod</a>
+<li><a href='#L525' title='Defined at 525.'>PyModule_AddObject</a>
+<li><a href='#L554' title='Defined at 554.'>PyModule_AddIntConstant</a>
+<li><a href='#L566' title='Defined at 566.'>PyModule_AddStringConstant</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'>
+<a name='L2'><i><font color='green'>/* Module support implementation */</font></i>
+<a name='L3'>
+<a name='L4'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L5'>
+<a name='L6'><font color='darkred'>#define</font> <a href='../R/1135.html' title='Multiple refered from 15 places.'>FLAG_SIZE_T</a> 1
+<a name='L7'><b>typedef</b> <b>double</b> <a href='../S/3125.html#L280' title='Refered from 280 in Python/modsupport.c.'>va_double</a>;
+<a name='L8'>
+<a name='L9'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3125.html#L453' title='Defined at 453 in Python/modsupport.c.'>va_build_value</a>(<b>const</b> <b>char</b> *, va_list, <b>int</b>);
+<a name='L10'>
+<a name='L11'><i><font color='green'>/* Package context -- the full module name for package imports */</font></i>
+<a name='L12'><b>char</b> *_Py_PackageContext = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L13'>
+<a name='L14'><i><font color='green'>/* Helper for mkvalue() to scan the length of a format */</font></i>
+<a name='L15'>
+<a name='L16'><b>static</b> <b>int</b>
+<a name='L17'><a href='../R/7032.html' title='Multiple refered from 4 places.'>countformat</a>(<b>const</b> <b>char</b> *format, <b>int</b> endchar)
+<a name='L18'><font color='red'>{</font>
+<a name='L19'>    <b>int</b> count = 0;
+<a name='L20'>    <b>int</b> level = 0;
+<a name='L21'>    <b>while</b> (level &gt; 0 || *format != endchar) <font color='red'>{</font>
+<a name='L22'>        <b>switch</b> (*format) <font color='red'>{</font>
+<a name='L23'>        <b>case</b> '\0':
+<a name='L24'>            <i><font color='green'>/* Premature end */</font></i>
+<a name='L25'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L26'>                            "unmatched paren in format");
+<a name='L27'>            <b>return</b> -1;
+<a name='L28'>        <b>case</b> '(':
+<a name='L29'>        <b>case</b> '[':
+<a name='L30'>        <b>case</b> '{':
+<a name='L31'>            <b>if</b> (level == 0)
+<a name='L32'>                count++;
+<a name='L33'>            level++;
+<a name='L34'>            <b>break</b>;
+<a name='L35'>        <b>case</b> ')':
+<a name='L36'>        <b>case</b> ']':
+<a name='L37'>        <b>case</b> '}':
+<a name='L38'>            level--;
+<a name='L39'>            <b>break</b>;
+<a name='L40'>        <b>case</b> '#':
+<a name='L41'>        <b>case</b> '&amp;':
+<a name='L42'>        <b>case</b> ',':
+<a name='L43'>        <b>case</b> ':':
+<a name='L44'>        <b>case</b> ' ':
+<a name='L45'>        <b>case</b> '\t':
+<a name='L46'>            <b>break</b>;
+<a name='L47'>        <b>default</b>:
+<a name='L48'>            <b>if</b> (level == 0)
+<a name='L49'>                count++;
+<a name='L50'>        <font color='red'>}</font>
+<a name='L51'>        format++;
+<a name='L52'>    <font color='red'>}</font>
+<a name='L53'>    <b>return</b> count;
+<a name='L54'><font color='red'>}</font>
+<a name='L55'>
+<a name='L56'>
+<a name='L57'><i><font color='green'>/* Generic function to create a value -- the inverse of getargs() */</font></i>
+<a name='L58'><i><font color='green'>/* After an original idea and first implementation by Steven Miale */</font></i>
+<a name='L59'>
+<a name='L60'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3125.html#L161' title='Defined at 161 in Python/modsupport.c.'>do_mktuple</a>(<b>const</b> <b>char</b>**, va_list *, <b>int</b>, <b>int</b>, <b>int</b>);
+<a name='L61'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3125.html#L113' title='Defined at 113 in Python/modsupport.c.'>do_mklist</a>(<b>const</b> <b>char</b>**, va_list *, <b>int</b>, <b>int</b>, <b>int</b>);
+<a name='L62'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3125.html#L67' title='Defined at 67 in Python/modsupport.c.'>do_mkdict</a>(<b>const</b> <b>char</b>**, va_list *, <b>int</b>, <b>int</b>, <b>int</b>);
+<a name='L63'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/3125.html#L198' title='Defined at 198 in Python/modsupport.c.'>do_mkvalue</a>(<b>const</b> <b>char</b>**, va_list *, <b>int</b>);
+<a name='L64'>
+<a name='L65'>
+<a name='L66'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L67'><a href='../R/7440.html' title='Multiple refered from 2 places.'>do_mkdict</a>(<b>const</b> <b>char</b> **p_format, va_list *p_va, <b>int</b> endchar, <b>int</b> n, <b>int</b> flags)
+<a name='L68'><font color='red'>{</font>
+<a name='L69'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *d;
+<a name='L70'>    <b>int</b> i;
+<a name='L71'>    <b>int</b> itemfailed = 0;
+<a name='L72'>    <b>if</b> (n &lt; 0)
+<a name='L73'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L74'>    <b>if</b> ((d = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>()) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L75'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L76'>    <i><font color='green'>/* Note that we can't bail immediately on error as this will leak</font></i>
+<a name='L77'><i><font color='green'>       refcounts on any 'N' arguments. */</font></i>
+<a name='L78'>    <b>for</b> (i = 0; i &lt; n; i+= 2) <font color='red'>{</font>
+<a name='L79'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *k, *v;
+<a name='L80'>        <b>int</b> err;
+<a name='L81'>        k = <a href='../S/3125.html#L198' title='Defined at 198 in Python/modsupport.c.'>do_mkvalue</a>(p_format, p_va, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L82'>        <b>if</b> (k == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L83'>            itemfailed = 1;
+<a name='L84'>            Py_INCREF(Py_None);
+<a name='L85'>            k = Py_None;
+<a name='L86'>        <font color='red'>}</font>
+<a name='L87'>        v = <a href='../S/3125.html#L198' title='Defined at 198 in Python/modsupport.c.'>do_mkvalue</a>(p_format, p_va, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L88'>        <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L89'>            itemfailed = 1;
+<a name='L90'>            Py_INCREF(Py_None);
+<a name='L91'>            v = Py_None;
+<a name='L92'>        <font color='red'>}</font>
+<a name='L93'>        err = <a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(d, k, v);
+<a name='L94'>        Py_DECREF(k);
+<a name='L95'>        Py_DECREF(v);
+<a name='L96'>        <b>if</b> (err &lt; 0 || itemfailed) <font color='red'>{</font>
+<a name='L97'>            Py_DECREF(d);
+<a name='L98'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L99'>        <font color='red'>}</font>
+<a name='L100'>    <font color='red'>}</font>
+<a name='L101'>    <b>if</b> (d != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp; **p_format != endchar) <font color='red'>{</font>
+<a name='L102'>        Py_DECREF(d);
+<a name='L103'>        d = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L104'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L105'>                        "Unmatched paren in format");
+<a name='L106'>    <font color='red'>}</font>
+<a name='L107'>    <b>else</b> <b>if</b> (endchar)
+<a name='L108'>        ++*p_format;
+<a name='L109'>    <b>return</b> d;
+<a name='L110'><font color='red'>}</font>
+<a name='L111'>
+<a name='L112'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L113'><a href='../R/7441.html' title='Multiple refered from 2 places.'>do_mklist</a>(<b>const</b> <b>char</b> **p_format, va_list *p_va, <b>int</b> endchar, <b>int</b> n, <b>int</b> flags)
+<a name='L114'><font color='red'>{</font>
+<a name='L115'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L116'>    <b>int</b> i;
+<a name='L117'>    <b>int</b> itemfailed = 0;
+<a name='L118'>    <b>if</b> (n &lt; 0)
+<a name='L119'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L120'>    v = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(n);
+<a name='L121'>    <b>if</b> (v == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L122'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L123'>    <i><font color='green'>/* Note that we can't bail immediately on error as this will leak</font></i>
+<a name='L124'><i><font color='green'>       refcounts on any 'N' arguments. */</font></i>
+<a name='L125'>    <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L126'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *w = <a href='../S/3125.html#L198' title='Defined at 198 in Python/modsupport.c.'>do_mkvalue</a>(p_format, p_va, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L127'>        <b>if</b> (w == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L128'>            itemfailed = 1;
+<a name='L129'>            Py_INCREF(Py_None);
+<a name='L130'>            w = Py_None;
+<a name='L131'>        <font color='red'>}</font>
+<a name='L132'>        PyList_SET_ITEM(v, i, w);
+<a name='L133'>    <font color='red'>}</font>
+<a name='L134'>
+<a name='L135'>    <b>if</b> (itemfailed) <font color='red'>{</font>
+<a name='L136'>        <i><font color='green'>/* do_mkvalue() should have already set an error */</font></i>
+<a name='L137'>        Py_DECREF(v);
+<a name='L138'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L139'>    <font color='red'>}</font>
+<a name='L140'>    <b>if</b> (**p_format != endchar) <font color='red'>{</font>
+<a name='L141'>        Py_DECREF(v);
+<a name='L142'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L143'>                        "Unmatched paren in format");
+<a name='L144'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L145'>    <font color='red'>}</font>
+<a name='L146'>    <b>if</b> (endchar)
+<a name='L147'>        ++*p_format;
+<a name='L148'>    <b>return</b> v;
+<a name='L149'><font color='red'>}</font>
+<a name='L150'>
+<a name='L151'><b>static</b> <b>int</b>
+<a name='L152'><a href='../S/3125.html#L272' title='Refered from 272 in Python/modsupport.c.'>_ustrlen</a>(Py_UNICODE *u)
+<a name='L153'><font color='red'>{</font>
+<a name='L154'>    <b>int</b> i = 0;
+<a name='L155'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *v = u;
+<a name='L156'>    <b>while</b> (*v != 0) <font color='red'>{</font> i++; v++; <font color='red'>}</font>
+<a name='L157'>    <b>return</b> i;
+<a name='L158'><font color='red'>}</font>
+<a name='L159'>
+<a name='L160'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L161'><a href='../R/7442.html' title='Multiple refered from 3 places.'>do_mktuple</a>(<b>const</b> <b>char</b> **p_format, va_list *p_va, <b>int</b> endchar, <b>int</b> n, <b>int</b> flags)
+<a name='L162'><font color='red'>{</font>
+<a name='L163'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L164'>    <b>int</b> i;
+<a name='L165'>    <b>int</b> itemfailed = 0;
+<a name='L166'>    <b>if</b> (n &lt; 0)
+<a name='L167'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L168'>    <b>if</b> ((v = <a href='../S/2823.html#L49' title='Defined at 49 in Objects/tupleobject.c.'>PyTuple_New</a>(n)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L169'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L170'>    <i><font color='green'>/* Note that we can't bail immediately on error as this will leak</font></i>
+<a name='L171'><i><font color='green'>       refcounts on any 'N' arguments. */</font></i>
+<a name='L172'>    <b>for</b> (i = 0; i &lt; n; i++) <font color='red'>{</font>
+<a name='L173'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *w = <a href='../S/3125.html#L198' title='Defined at 198 in Python/modsupport.c.'>do_mkvalue</a>(p_format, p_va, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L174'>        <b>if</b> (w == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L175'>            itemfailed = 1;
+<a name='L176'>            Py_INCREF(Py_None);
+<a name='L177'>            w = Py_None;
+<a name='L178'>        <font color='red'>}</font>
+<a name='L179'>        PyTuple_SET_ITEM(v, i, w);
+<a name='L180'>    <font color='red'>}</font>
+<a name='L181'>    <b>if</b> (itemfailed) <font color='red'>{</font>
+<a name='L182'>        <i><font color='green'>/* do_mkvalue() should have already set an error */</font></i>
+<a name='L183'>        Py_DECREF(v);
+<a name='L184'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L185'>    <font color='red'>}</font>
+<a name='L186'>    <b>if</b> (**p_format != endchar) <font color='red'>{</font>
+<a name='L187'>        Py_DECREF(v);
+<a name='L188'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L189'>                        "Unmatched paren in format");
+<a name='L190'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L191'>    <font color='red'>}</font>
+<a name='L192'>    <b>if</b> (endchar)
+<a name='L193'>        ++*p_format;
+<a name='L194'>    <b>return</b> v;
+<a name='L195'><font color='red'>}</font>
+<a name='L196'>
+<a name='L197'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L198'><a href='../R/7443.html' title='Multiple refered from 6 places.'>do_mkvalue</a>(<b>const</b> <b>char</b> **p_format, va_list *p_va, <b>int</b> flags)
+<a name='L199'><font color='red'>{</font>
+<a name='L200'>    <b>for</b> (;;) <font color='red'>{</font>
+<a name='L201'>        <b>switch</b> (*(*p_format)++) <font color='red'>{</font>
+<a name='L202'>        <b>case</b> '(':
+<a name='L203'>            <b>return</b> <a href='../S/3125.html#L161' title='Defined at 161 in Python/modsupport.c.'>do_mktuple</a>(p_format, p_va, ')',
+<a name='L204'>                              <a href='../S/3125.html#L17' title='Defined at 17 in Python/modsupport.c.'>countformat</a>(*p_format, ')'), <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L205'>
+<a name='L206'>        <b>case</b> '[':
+<a name='L207'>            <b>return</b> <a href='../S/3125.html#L113' title='Defined at 113 in Python/modsupport.c.'>do_mklist</a>(p_format, p_va, ']',
+<a name='L208'>                             <a href='../S/3125.html#L17' title='Defined at 17 in Python/modsupport.c.'>countformat</a>(*p_format, ']'), <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L209'>
+<a name='L210'>        <b>case</b> '{':
+<a name='L211'>            <b>return</b> <a href='../S/3125.html#L67' title='Defined at 67 in Python/modsupport.c.'>do_mkdict</a>(p_format, p_va, '}',
+<a name='L212'>                             <a href='../S/3125.html#L17' title='Defined at 17 in Python/modsupport.c.'>countformat</a>(*p_format, '}'), <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L213'>
+<a name='L214'>        <b>case</b> 'b':
+<a name='L215'>        <b>case</b> 'B':
+<a name='L216'>        <b>case</b> 'h':
+<a name='L217'>        <b>case</b> 'i':
+<a name='L218'>            <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)va_arg(*p_va, <b>int</b>));
+<a name='L219'>
+<a name='L220'>        <b>case</b> 'H':
+<a name='L221'>            <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>((<b>long</b>)va_arg(*p_va, <b>unsigned</b> <b>int</b>));
+<a name='L222'>
+<a name='L223'>        <b>case</b> 'I':
+<a name='L224'>        <font color='red'>{</font>
+<a name='L225'>            <b>unsigned</b> <b>int</b> n;
+<a name='L226'>            n = va_arg(*p_va, <b>unsigned</b> <b>int</b>);
+<a name='L227'>            <b>return</b> <a href='../S/2799.html#L245' title='Defined at 245 in Objects/longobject.c.'>PyLong_FromUnsignedLong</a>(n);
+<a name='L228'>        <font color='red'>}</font>
+<a name='L229'>
+<a name='L230'>        <b>case</b> 'n':
+<a name='L231'><font color='darkred'>#if</font> <a href='../D/4740.html' title='Multiple defined in 6 places.'>SIZEOF_SIZE_T</a>!=<a href='../D/4734.html' title='Multiple defined in 7 places.'>SIZEOF_LONG</a>
+<a name='L232'>            <b>return</b> <a href='../D/3469.html' title='Multiple defined in 2 places.'>PyLong_FromSsize_t</a>(va_arg(*p_va, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>));
+<a name='L233'><font color='darkred'>#endif</font>
+<a name='L234'>            <i><font color='green'>/* Fall through from 'n' to 'l' if Py_ssize_t is long */</font></i>
+<a name='L235'>        <b>case</b> 'l':
+<a name='L236'>            <b>return</b> <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(va_arg(*p_va, <b>long</b>));
+<a name='L237'>
+<a name='L238'>        <b>case</b> 'k':
+<a name='L239'>        <font color='red'>{</font>
+<a name='L240'>            <b>unsigned</b> <b>long</b> n;
+<a name='L241'>            n = va_arg(*p_va, <b>unsigned</b> <b>long</b>);
+<a name='L242'>            <b>return</b> <a href='../S/2799.html#L245' title='Defined at 245 in Objects/longobject.c.'>PyLong_FromUnsignedLong</a>(n);
+<a name='L243'>        <font color='red'>}</font>
+<a name='L244'>
+<a name='L245'><font color='darkred'>#ifdef</font> <a href='../D/1527.html' title='Multiple defined in 2 places.'>HAVE_LONG_LONG</a>
+<a name='L246'>        <b>case</b> 'L':
+<a name='L247'>            <b>return</b> <a href='../S/2799.html#L994' title='Defined at 994 in Objects/longobject.c.'>PyLong_FromLongLong</a>((<a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>)va_arg(*p_va, <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>));
+<a name='L248'>
+<a name='L249'>        <b>case</b> 'K':
+<a name='L250'>            <b>return</b> <a href='../S/2799.html#L1038' title='Defined at 1038 in Objects/longobject.c.'>PyLong_FromUnsignedLongLong</a>((<a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>)va_arg(*p_va, <b>unsigned</b> <a href='../D/2608.html' title='Multiple defined in 3 places.'>PY_LONG_LONG</a>));
+<a name='L251'><font color='darkred'>#endif</font>
+<a name='L252'>        <b>case</b> 'u':
+<a name='L253'>        <font color='red'>{</font>
+<a name='L254'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L255'>            <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *u = va_arg(*p_va, <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *);
+<a name='L256'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n;
+<a name='L257'>            <b>if</b> (**p_format == '#') <font color='red'>{</font>
+<a name='L258'>                ++*p_format;
+<a name='L259'>                <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/3125.html#L6' title='Defined at 6 in Python/modsupport.c.'>FLAG_SIZE_T</a>)
+<a name='L260'>                    n = va_arg(*p_va, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>);
+<a name='L261'>                <b>else</b>
+<a name='L262'>                    n = va_arg(*p_va, <b>int</b>);
+<a name='L263'>            <font color='red'>}</font>
+<a name='L264'>            <b>else</b>
+<a name='L265'>                n = -1;
+<a name='L266'>            <b>if</b> (u == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L267'>                v = Py_None;
+<a name='L268'>                Py_INCREF(v);
+<a name='L269'>            <font color='red'>}</font>
+<a name='L270'>            <b>else</b> <font color='red'>{</font>
+<a name='L271'>                <b>if</b> (n &lt; 0)
+<a name='L272'>                    n = <a href='../S/3125.html#L152' title='Defined at 152 in Python/modsupport.c.'>_ustrlen</a>(u);
+<a name='L273'>                v = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(u, n);
+<a name='L274'>            <font color='red'>}</font>
+<a name='L275'>            <b>return</b> v;
+<a name='L276'>        <font color='red'>}</font>
+<a name='L277'>        <b>case</b> 'f':
+<a name='L278'>        <b>case</b> 'd':
+<a name='L279'>            <b>return</b> <a href='../S/2791.html#L157' title='Defined at 157 in Objects/floatobject.c.'>PyFloat_FromDouble</a>(
+<a name='L280'>                (<b>double</b>)va_arg(*p_va, <a href='../S/3125.html#L7' title='Defined at 7 in Python/modsupport.c.'>va_double</a>));
+<a name='L281'>
+<a name='L282'>        <b>case</b> 'D':
+<a name='L283'>            <b>return</b> <a href='../S/2784.html#L212' title='Defined at 212 in Objects/complexobject.c.'>PyComplex_FromCComplex</a>(
+<a name='L284'>                *((<a href='../S/514.html#L13' title='Defined at 13 in Include/complexobject.h.'>Py_complex</a> *)va_arg(*p_va, <a href='../S/514.html#L13' title='Defined at 13 in Include/complexobject.h.'>Py_complex</a> *)));
+<a name='L285'>
+<a name='L286'>        <b>case</b> 'c':
+<a name='L287'>        <font color='red'>{</font>
+<a name='L288'>            <b>char</b> p[1];
+<a name='L289'>            p[0] = (<b>char</b>)va_arg(*p_va, <b>int</b>);
+<a name='L290'>            <b>return</b> <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(p, 1);
+<a name='L291'>        <font color='red'>}</font>
+<a name='L292'>        <b>case</b> 'C':
+<a name='L293'>        <font color='red'>{</font>
+<a name='L294'>            <b>int</b> i = va_arg(*p_va, <b>int</b>);
+<a name='L295'>            <b>if</b> (i &lt; 0 || i &gt; <a href='../D/4019.html' title='Multiple defined in 3 places.'>PyUnicode_GetMax</a>()) <font color='red'>{</font>
+<a name='L296'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L297'>                                "%c arg not in range(0x110000)");
+<a name='L298'>                <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L299'>            <font color='red'>}</font>
+<a name='L300'>            <b>return</b> <a href='../D/4011.html' title='Multiple defined in 3 places.'>PyUnicode_FromOrdinal</a>(i);
+<a name='L301'>        <font color='red'>}</font>
+<a name='L302'>
+<a name='L303'>        <b>case</b> 's':
+<a name='L304'>        <b>case</b> 'z':
+<a name='L305'>        <b>case</b> 'U':   <i><font color='green'>/* XXX deprecated alias */</font></i>
+<a name='L306'>        <font color='red'>{</font>
+<a name='L307'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L308'>            <b>char</b> *str = va_arg(*p_va, <b>char</b> *);
+<a name='L309'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n;
+<a name='L310'>            <b>if</b> (**p_format == '#') <font color='red'>{</font>
+<a name='L311'>                ++*p_format;
+<a name='L312'>                <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/3125.html#L6' title='Defined at 6 in Python/modsupport.c.'>FLAG_SIZE_T</a>)
+<a name='L313'>                    n = va_arg(*p_va, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>);
+<a name='L314'>                <b>else</b>
+<a name='L315'>                    n = va_arg(*p_va, <b>int</b>);
+<a name='L316'>            <font color='red'>}</font>
+<a name='L317'>            <b>else</b>
+<a name='L318'>                n = -1;
+<a name='L319'>            <b>if</b> (str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L320'>                v = Py_None;
+<a name='L321'>                Py_INCREF(v);
+<a name='L322'>            <font color='red'>}</font>
+<a name='L323'>            <b>else</b> <font color='red'>{</font>
+<a name='L324'>                <b>if</b> (n &lt; 0) <font color='red'>{</font>
+<a name='L325'>                    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> m = strlen(str);
+<a name='L326'>                    <b>if</b> (m &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a>) <font color='red'>{</font>
+<a name='L327'>                        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L328'>                            "string too long for Python string");
+<a name='L329'>                        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L330'>                    <font color='red'>}</font>
+<a name='L331'>                    n = (<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)m;
+<a name='L332'>                <font color='red'>}</font>
+<a name='L333'>                v = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(str, n);
+<a name='L334'>            <font color='red'>}</font>
+<a name='L335'>            <b>return</b> v;
+<a name='L336'>        <font color='red'>}</font>
+<a name='L337'>
+<a name='L338'>        <b>case</b> 'y':
+<a name='L339'>        <font color='red'>{</font>
+<a name='L340'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L341'>            <b>char</b> *str = va_arg(*p_va, <b>char</b> *);
+<a name='L342'>            <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> n;
+<a name='L343'>            <b>if</b> (**p_format == '#') <font color='red'>{</font>
+<a name='L344'>                ++*p_format;
+<a name='L345'>                <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; <a href='../S/3125.html#L6' title='Defined at 6 in Python/modsupport.c.'>FLAG_SIZE_T</a>)
+<a name='L346'>                    n = va_arg(*p_va, <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>);
+<a name='L347'>                <b>else</b>
+<a name='L348'>                    n = va_arg(*p_va, <b>int</b>);
+<a name='L349'>            <font color='red'>}</font>
+<a name='L350'>            <b>else</b>
+<a name='L351'>                n = -1;
+<a name='L352'>            <b>if</b> (str == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L353'>                v = Py_None;
+<a name='L354'>                Py_INCREF(v);
+<a name='L355'>            <font color='red'>}</font>
+<a name='L356'>            <b>else</b> <font color='red'>{</font>
+<a name='L357'>                <b>if</b> (n &lt; 0) <font color='red'>{</font>
+<a name='L358'>                    <a href='../D/11182.html' title='Multiple defined in 2 places.'>size_t</a> m = strlen(str);
+<a name='L359'>                    <b>if</b> (m &gt; <a href='../D/2625.html' title='Multiple defined in 3 places.'>PY_SSIZE_T_MAX</a>) <font color='red'>{</font>
+<a name='L360'>                        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_OverflowError,
+<a name='L361'>                            "string too long for Python bytes");
+<a name='L362'>                        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L363'>                    <font color='red'>}</font>
+<a name='L364'>                    n = (<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a>)m;
+<a name='L365'>                <font color='red'>}</font>
+<a name='L366'>                v = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(str, n);
+<a name='L367'>            <font color='red'>}</font>
+<a name='L368'>            <b>return</b> v;
+<a name='L369'>        <font color='red'>}</font>
+<a name='L370'>
+<a name='L371'>        <b>case</b> 'N':
+<a name='L372'>        <b>case</b> 'S':
+<a name='L373'>        <b>case</b> 'O':
+<a name='L374'>        <b>if</b> (**p_format == '&amp;') <font color='red'>{</font>
+<a name='L375'>            <b>typedef</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *(*converter)(<b>void</b> *);
+<a name='L376'>            <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a> func = va_arg(*p_va, <a href='../S/2250.html#L1603' title='Defined at 1603 in Modules/_ctypes/callproc.c.'>converter</a>);
+<a name='L377'>            <b>void</b> *<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = va_arg(*p_va, <b>void</b> *);
+<a name='L378'>            ++*p_format;
+<a name='L379'>            <b>return</b> (*func)(<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>);
+<a name='L380'>        <font color='red'>}</font>
+<a name='L381'>        <b>else</b> <font color='red'>{</font>
+<a name='L382'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v;
+<a name='L383'>            v = va_arg(*p_va, <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *);
+<a name='L384'>            <b>if</b> (v != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L385'>                <b>if</b> (*(*p_format - 1) != 'N')
+<a name='L386'>                    Py_INCREF(v);
+<a name='L387'>            <font color='red'>}</font>
+<a name='L388'>            <b>else</b> <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L389'>                <i><font color='green'>/* If a NULL was passed</font></i>
+<a name='L390'><i><font color='green'>                 * because a call that should</font></i>
+<a name='L391'><i><font color='green'>                 * have constructed a value</font></i>
+<a name='L392'><i><font color='green'>                 * failed, that's OK, and we</font></i>
+<a name='L393'><i><font color='green'>                 * pass the error on; but if</font></i>
+<a name='L394'><i><font color='green'>                 * no error occurred it's not</font></i>
+<a name='L395'><i><font color='green'>                 * clear that the caller knew</font></i>
+<a name='L396'><i><font color='green'>                 * what she was doing. */</font></i>
+<a name='L397'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L398'>                    "NULL object passed to Py_BuildValue");
+<a name='L399'>            <b>return</b> v;
+<a name='L400'>        <font color='red'>}</font>
+<a name='L401'>
+<a name='L402'>        <b>case</b> ':':
+<a name='L403'>        <b>case</b> ',':
+<a name='L404'>        <b>case</b> ' ':
+<a name='L405'>        <b>case</b> '\t':
+<a name='L406'>            <b>break</b>;
+<a name='L407'>
+<a name='L408'>        <b>default</b>:
+<a name='L409'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SystemError,
+<a name='L410'>                "bad format char passed to Py_BuildValue");
+<a name='L411'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L412'>
+<a name='L413'>        <font color='red'>}</font>
+<a name='L414'>    <font color='red'>}</font>
+<a name='L415'><font color='red'>}</font>
+<a name='L416'>
+<a name='L417'>
+<a name='L418'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L419'><a href='../R/3660.html' title='Multiple refered from 252 places.'>Py_BuildValue</a>(<b>const</b> <b>char</b> *format, ...)
+<a name='L420'><font color='red'>{</font>
+<a name='L421'>    va_list va;
+<a name='L422'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* retval;
+<a name='L423'>    va_start(va, format);
+<a name='L424'>    retval = <a href='../S/3125.html#L453' title='Defined at 453 in Python/modsupport.c.'>va_build_value</a>(format, va, 0);
+<a name='L425'>    va_end(va);
+<a name='L426'>    <b>return</b> retval;
+<a name='L427'><font color='red'>}</font>
+<a name='L428'>
+<a name='L429'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L430'><a href='../S/541.html#L20' title='Refered from 20 in Include/modsupport.h.'>_Py_BuildValue_SizeT</a>(<b>const</b> <b>char</b> *format, ...)
+<a name='L431'><font color='red'>{</font>
+<a name='L432'>    va_list va;
+<a name='L433'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a>* retval;
+<a name='L434'>    va_start(va, format);
+<a name='L435'>    retval = <a href='../S/3125.html#L453' title='Defined at 453 in Python/modsupport.c.'>va_build_value</a>(format, va, <a href='../S/3125.html#L6' title='Defined at 6 in Python/modsupport.c.'>FLAG_SIZE_T</a>);
+<a name='L436'>    va_end(va);
+<a name='L437'>    <b>return</b> retval;
+<a name='L438'><font color='red'>}</font>
+<a name='L439'>
+<a name='L440'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L441'><a href='../R/3849.html' title='Multiple refered from 6 places.'>Py_VaBuildValue</a>(<b>const</b> <b>char</b> *format, va_list va)
+<a name='L442'><font color='red'>{</font>
+<a name='L443'>    <b>return</b> <a href='../S/3125.html#L453' title='Defined at 453 in Python/modsupport.c.'>va_build_value</a>(format, va, 0);
+<a name='L444'><font color='red'>}</font>
+<a name='L445'>
+<a name='L446'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L447'><a href='../R/5594.html' title='Multiple refered from 3 places.'>_Py_VaBuildValue_SizeT</a>(<b>const</b> <b>char</b> *format, va_list va)
+<a name='L448'><font color='red'>{</font>
+<a name='L449'>    <b>return</b> <a href='../S/3125.html#L453' title='Defined at 453 in Python/modsupport.c.'>va_build_value</a>(format, va, <a href='../S/3125.html#L6' title='Defined at 6 in Python/modsupport.c.'>FLAG_SIZE_T</a>);
+<a name='L450'><font color='red'>}</font>
+<a name='L451'>
+<a name='L452'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L453'><a href='../R/11242.html' title='Multiple refered from 5 places.'>va_build_value</a>(<b>const</b> <b>char</b> *format, va_list va, <b>int</b> flags)
+<a name='L454'><font color='red'>{</font>
+<a name='L455'>    <b>const</b> <b>char</b> *f = format;
+<a name='L456'>    <b>int</b> n = <a href='../S/3125.html#L17' title='Defined at 17 in Python/modsupport.c.'>countformat</a>(f, '\0');
+<a name='L457'>    va_list lva;
+<a name='L458'>
+<a name='L459'>        <a href='../D/4300.html' title='Multiple defined in 3 places.'>Py_VA_COPY</a>(lva, va);
+<a name='L460'>
+<a name='L461'>    <b>if</b> (n &lt; 0)
+<a name='L462'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L463'>    <b>if</b> (n == 0) <font color='red'>{</font>
+<a name='L464'>        Py_INCREF(Py_None);
+<a name='L465'>        <b>return</b> Py_None;
+<a name='L466'>    <font color='red'>}</font>
+<a name='L467'>    <b>if</b> (n == 1)
+<a name='L468'>        <b>return</b> <a href='../S/3125.html#L198' title='Defined at 198 in Python/modsupport.c.'>do_mkvalue</a>(&amp;f, &amp;lva, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L469'>    <b>return</b> <a href='../S/3125.html#L161' title='Defined at 161 in Python/modsupport.c.'>do_mktuple</a>(&amp;f, &amp;lva, '\0', n, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L470'><font color='red'>}</font>
+<a name='L471'>
+<a name='L472'>
+<a name='L473'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L474'>PyEval_CallFunction(PyObject *obj, <b>const</b> <b>char</b> *format, ...)
+<a name='L475'><font color='red'>{</font>
+<a name='L476'>    va_list vargs;
+<a name='L477'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L478'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L479'>
+<a name='L480'>    va_start(vargs, format);
+<a name='L481'>
+<a name='L482'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = <a href='../D/4301.html' title='Multiple defined in 2 places.'>Py_VaBuildValue</a>(format, vargs);
+<a name='L483'>    va_end(vargs);
+<a name='L484'>
+<a name='L485'>    <b>if</b> (<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L486'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L487'>
+<a name='L488'>    res = PyEval_CallObject(obj, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L489'>    Py_DECREF(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L490'>
+<a name='L491'>    <b>return</b> res;
+<a name='L492'><font color='red'>}</font>
+<a name='L493'>
+<a name='L494'>
+<a name='L495'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L496'><a href='../S/2824.html#L3290' title='Refered from 3290 in Objects/typeobject.c.'>PyEval_CallMethod</a>(PyObject *obj, <b>const</b> <b>char</b> *methodname, <b>const</b> <b>char</b> *format, ...)
+<a name='L497'><font color='red'>{</font>
+<a name='L498'>    va_list vargs;
+<a name='L499'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *meth;
+<a name='L500'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L501'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res;
+<a name='L502'>
+<a name='L503'>    meth = <a href='../S/2803.html#L779' title='Defined at 779 in Objects/object.c.'>PyObject_GetAttrString</a>(obj, methodname);
+<a name='L504'>    <b>if</b> (meth == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L505'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L506'>
+<a name='L507'>    va_start(vargs, format);
+<a name='L508'>
+<a name='L509'>    <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> = <a href='../D/4301.html' title='Multiple defined in 2 places.'>Py_VaBuildValue</a>(format, vargs);
+<a name='L510'>    va_end(vargs);
+<a name='L511'>
+<a name='L512'>    <b>if</b> (<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L513'>        Py_DECREF(meth);
+<a name='L514'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L515'>    <font color='red'>}</font>
+<a name='L516'>
+<a name='L517'>    res = PyEval_CallObject(meth, <a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L518'>    Py_DECREF(meth);
+<a name='L519'>    Py_DECREF(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L520'>
+<a name='L521'>    <b>return</b> res;
+<a name='L522'><font color='red'>}</font>
+<a name='L523'>
+<a name='L524'><b>int</b>
+<a name='L525'><a href='../R/3191.html' title='Multiple refered from 193 places.'>PyModule_AddObject</a>(PyObject *m, <b>const</b> <b>char</b> *name, PyObject *o)
+<a name='L526'><font color='red'>{</font>
+<a name='L527'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict;
+<a name='L528'>    <b>if</b> (!PyModule_Check(m)) <font color='red'>{</font>
+<a name='L529'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L530'>                    "PyModule_AddObject() needs module as first arg");
+<a name='L531'>        <b>return</b> -1;
+<a name='L532'>    <font color='red'>}</font>
+<a name='L533'>    <b>if</b> (!o) <font color='red'>{</font>
+<a name='L534'>        <b>if</b> (!<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L535'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_TypeError,
+<a name='L536'>                            "PyModule_AddObject() needs non-NULL value");
+<a name='L537'>        <b>return</b> -1;
+<a name='L538'>    <font color='red'>}</font>
+<a name='L539'>
+<a name='L540'>    dict = <a href='../S/2802.html#L159' title='Defined at 159 in Objects/moduleobject.c.'>PyModule_GetDict</a>(m);
+<a name='L541'>    <b>if</b> (dict == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L542'>        <i><font color='green'>/* Internal error -- modules must have a dict! */</font></i>
+<a name='L543'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SystemError, "module '%s' has no __dict__",
+<a name='L544'>                     <a href='../S/2802.html#L173' title='Defined at 173 in Objects/moduleobject.c.'>PyModule_GetName</a>(m));
+<a name='L545'>        <b>return</b> -1;
+<a name='L546'>    <font color='red'>}</font>
+<a name='L547'>    <b>if</b> (<a href='../S/2787.html#L2180' title='Defined at 2180 in Objects/dictobject.c.'>PyDict_SetItemString</a>(dict, name, o))
+<a name='L548'>        <b>return</b> -1;
+<a name='L549'>    Py_DECREF(o);
+<a name='L550'>    <b>return</b> 0;
+<a name='L551'><font color='red'>}</font>
+<a name='L552'>
+<a name='L553'><b>int</b>
+<a name='L554'><a href='../R/3190.html' title='Multiple refered from 518 places.'>PyModule_AddIntConstant</a>(PyObject *m, <b>const</b> <b>char</b> *name, <b>long</b> value)
+<a name='L555'><font color='red'>{</font>
+<a name='L556'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L557'>    <b>if</b> (!o)
+<a name='L558'>        <b>return</b> -1;
+<a name='L559'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, name, o) == 0)
+<a name='L560'>        <b>return</b> 0;
+<a name='L561'>    Py_DECREF(o);
+<a name='L562'>    <b>return</b> -1;
+<a name='L563'><font color='red'>}</font>
+<a name='L564'>
+<a name='L565'><b>int</b>
+<a name='L566'><a href='../R/3192.html' title='Multiple refered from 20 places.'>PyModule_AddStringConstant</a>(PyObject *m, <b>const</b> <b>char</b> *name, <b>const</b> <b>char</b> *value)
+<a name='L567'><font color='red'>{</font>
+<a name='L568'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L569'>    <b>if</b> (!o)
+<a name='L570'>        <b>return</b> -1;
+<a name='L571'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, name, o) == 0)
+<a name='L572'>        <b>return</b> 0;
+<a name='L573'>    Py_DECREF(o);
+<a name='L574'>    <b>return</b> -1;
+<a name='L575'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L17'>[^]</a><a href='#L566'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

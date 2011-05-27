@@ -1,0 +1,1754 @@
+<html>
+<head>
+<title>Python/symtable.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3402.html'>Python</a>/symtable.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L27'>[^]</a><a href='#L1688'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L27' title='Defined at 27.'>ste_new</a>
+<li><a href='#L91' title='Defined at 91.'>ste_repr</a>
+<li><a href='#L99' title='Defined at 99.'>ste_dealloc</a>
+<li><a href='#L201' title='Defined at 201.'>symtable_new</a>
+<li><a href='#L225' title='Defined at 225.'>PySymtable_Build</a>
+<li><a href='#L284' title='Defined at 284.'>PySymtable_Free</a>
+<li><a href='#L292' title='Defined at 292.'>PySymtable_Lookup</a>
+<li><a href='#L314' title='Defined at 314.'>PyST_GetScope</a>
+<li><a href='#L388' title='Defined at 388.'>analyze_name</a>
+<li><a href='#L483' title='Defined at 483.'>analyze_cells</a>
+<li><a href='#L520' title='Defined at 520.'>check_unoptimized</a>
+<li><a href='#L551' title='Defined at 551.'>update_symbols</a>
+<li><a href='#L658' title='Defined at 658.'>analyze_block</a>
+<li><a href='#L812' title='Defined at 812.'>analyze_child_block</a>
+<li><a href='#L853' title='Defined at 853.'>symtable_analyze</a>
+<li><a href='#L874' title='Defined at 874.'>symtable_warn</a>
+<li><a href='#L894' title='Defined at 894.'>symtable_exit_block</a>
+<li><a href='#L913' title='Defined at 913.'>symtable_enter_block</a>
+<li><a href='#L940' title='Defined at 940.'>symtable_lookup</a>
+<li><a href='#L954' title='Defined at 954.'>symtable_add_def</a>
+<li><a href='#L1088' title='Defined at 1088.'>symtable_new_tmpname</a>
+<li><a href='#L1106' title='Defined at 1106.'>symtable_visit_stmt</a>
+<li><a href='#L1319' title='Defined at 1319.'>symtable_visit_expr</a>
+<li><a href='#L1442' title='Defined at 1442.'>symtable_implicit_arg</a>
+<li><a href='#L1456' title='Defined at 1456.'>symtable_visit_params</a>
+<li><a href='#L1473' title='Defined at 1473.'>symtable_visit_argannotations</a>
+<li><a href='#L1490' title='Defined at 1490.'>symtable_visit_annotations</a>
+<li><a href='#L1508' title='Defined at 1508.'>symtable_visit_arguments</a>
+<li><a href='#L1532' title='Defined at 1532.'>symtable_visit_excepthandler</a>
+<li><a href='#L1545' title='Defined at 1545.'>symtable_visit_alias</a>
+<li><a href='#L1586' title='Defined at 1586.'>symtable_visit_comprehension</a>
+<li><a href='#L1596' title='Defined at 1596.'>symtable_visit_keyword</a>
+<li><a href='#L1604' title='Defined at 1604.'>symtable_visit_slice</a>
+<li><a href='#L1626' title='Defined at 1626.'>symtable_handle_comprehension</a>
+<li><a href='#L1664' title='Defined at 1664.'>symtable_visit_genexp</a>
+<li><a href='#L1672' title='Defined at 1672.'>symtable_visit_listcomp</a>
+<li><a href='#L1680' title='Defined at 1680.'>symtable_visit_setcomp</a>
+<li><a href='#L1688' title='Defined at 1688.'>symtable_visit_dictcomp</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L2'><font color='darkred'>#include</font> "<a href='569.html'>Python-ast.h</a>"
+<a name='L3'><font color='darkred'>#include</font> "<a href='511.html'>code.h</a>"
+<a name='L4'><font color='darkred'>#include</font> "<a href='579.html'>symtable.h</a>"
+<a name='L5'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L6'>
+<a name='L7'><i><font color='green'>/* error strings used for warnings */</font></i>
+<a name='L8'><font color='darkred'>#define</font> <a href='../S/3143.html#L1258' title='Refered from 1258 in Python/symtable.c.'>GLOBAL_AFTER_ASSIGN</a> \
+<a name='L9'>"name '%.400s' is assigned to before global declaration"
+<a name='L10'>
+<a name='L11'><font color='darkred'>#define</font> <a href='../S/3143.html#L1285' title='Refered from 1285 in Python/symtable.c.'>NONLOCAL_AFTER_ASSIGN</a> \
+<a name='L12'>"name '%.400s' is assigned to before nonlocal declaration"
+<a name='L13'>
+<a name='L14'><font color='darkred'>#define</font> <a href='../S/3143.html#L1262' title='Refered from 1262 in Python/symtable.c.'>GLOBAL_AFTER_USE</a> \
+<a name='L15'>"name '%.400s' is used prior to global declaration"
+<a name='L16'>
+<a name='L17'><font color='darkred'>#define</font> <a href='../S/3143.html#L1289' title='Refered from 1289 in Python/symtable.c.'>NONLOCAL_AFTER_USE</a> \
+<a name='L18'>"name '%.400s' is used prior to nonlocal declaration"
+<a name='L19'>
+<a name='L20'><font color='darkred'>#define</font> <a href='../S/3143.html#L1573' title='Refered from 1573 in Python/symtable.c.'>IMPORT_STAR_WARNING</a> "import * only allowed at module level"
+<a name='L21'>
+<a name='L22'><font color='darkred'>#define</font> <a href='../R/3964.html' title='Multiple refered from 2 places.'>RETURN_VAL_IN_GENERATOR</a> \
+<a name='L23'>    "'return' with argument inside generator"
+<a name='L24'>
+<a name='L25'>
+<a name='L26'><b>static</b> <a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a> *
+<a name='L27'><a href='../S/3143.html#L925' title='Refered from 925 in Python/symtable.c.'>ste_new</a>(<b>struct</b> symtable *st, identifier name, _Py_block_ty block,
+<a name='L28'>        <b>void</b> *key, <b>int</b> lineno, <b>int</b> col_offset)
+<a name='L29'><font color='red'>{</font>
+<a name='L30'>    <a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a> *ste = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L31'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *k;
+<a name='L32'>
+<a name='L33'>    k = <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L34'>    <b>if</b> (k == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L35'>        <b>goto</b> fail;
+<a name='L36'>    ste = PyObject_New(<a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a>, &amp;PySTEntry_Type);
+<a name='L37'>    <b>if</b> (ste == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L38'>        <b>goto</b> fail;
+<a name='L39'>    ste-&gt;ste_table = st;
+<a name='L40'>    ste-&gt;ste_id = k;
+<a name='L41'>
+<a name='L42'>    ste-&gt;ste_name = name;
+<a name='L43'>    Py_INCREF(name);
+<a name='L44'>
+<a name='L45'>    ste-&gt;ste_symbols = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L46'>    ste-&gt;ste_varnames = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L47'>    ste-&gt;ste_children = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L48'>
+<a name='L49'>    ste-&gt;ste_symbols = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();
+<a name='L50'>    <b>if</b> (ste-&gt;ste_symbols == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L51'>        <b>goto</b> fail;
+<a name='L52'>
+<a name='L53'>    ste-&gt;ste_varnames = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L54'>    <b>if</b> (ste-&gt;ste_varnames == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L55'>        <b>goto</b> fail;
+<a name='L56'>
+<a name='L57'>    ste-&gt;ste_children = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0);
+<a name='L58'>    <b>if</b> (ste-&gt;ste_children == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L59'>        <b>goto</b> fail;
+<a name='L60'>
+<a name='L61'>    ste-&gt;ste_type = <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>;
+<a name='L62'>    ste-&gt;ste_unoptimized = 0;
+<a name='L63'>    ste-&gt;ste_nested = 0;
+<a name='L64'>    ste-&gt;ste_free = 0;
+<a name='L65'>    ste-&gt;ste_varargs = 0;
+<a name='L66'>    ste-&gt;ste_varkeywords = 0;
+<a name='L67'>    ste-&gt;ste_opt_lineno = 0;
+<a name='L68'>    ste-&gt;ste_opt_col_offset = 0;
+<a name='L69'>    ste-&gt;ste_tmpname = 0;
+<a name='L70'>    ste-&gt;ste_lineno = lineno;
+<a name='L71'>    ste-&gt;ste_col_offset = col_offset;
+<a name='L72'>
+<a name='L73'>    <b>if</b> (st-&gt;st_cur != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp;
+<a name='L74'>        (st-&gt;st_cur-&gt;ste_nested ||
+<a name='L75'>         st-&gt;st_cur-&gt;ste_type == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a>))
+<a name='L76'>        ste-&gt;ste_nested = 1;
+<a name='L77'>    ste-&gt;ste_child_free = 0;
+<a name='L78'>    ste-&gt;ste_generator = 0;
+<a name='L79'>    ste-&gt;ste_returns_value = 0;
+<a name='L80'>
+<a name='L81'>    <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(st-&gt;st_blocks, ste-&gt;ste_id, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)ste) &lt; 0)
+<a name='L82'>        <b>goto</b> fail;
+<a name='L83'>
+<a name='L84'>    <b>return</b> ste;
+<a name='L85'> fail:
+<a name='L86'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(ste);
+<a name='L87'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L88'><font color='red'>}</font>
+<a name='L89'>
+<a name='L90'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L91'><a href='../S/3143.html#L135' title='Refered from 135 in Python/symtable.c.'>ste_repr</a>(PySTEntryObject *ste)
+<a name='L92'><font color='red'>{</font>
+<a name='L93'>    <b>return</b> <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>("&lt;symtable entry %U(%ld), line %d&gt;",
+<a name='L94'>                                ste-&gt;ste_name,
+<a name='L95'>                                PyLong_AS_LONG(ste-&gt;ste_id), ste-&gt;ste_lineno);
+<a name='L96'><font color='red'>}</font>
+<a name='L97'>
+<a name='L98'><b>static</b> <b>void</b>
+<a name='L99'><a href='../S/3143.html#L130' title='Refered from 130 in Python/symtable.c.'>ste_dealloc</a>(PySTEntryObject *ste)
+<a name='L100'><font color='red'>{</font>
+<a name='L101'>    ste-&gt;ste_table = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L102'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(ste-&gt;ste_id);
+<a name='L103'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(ste-&gt;ste_name);
+<a name='L104'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(ste-&gt;ste_symbols);
+<a name='L105'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(ste-&gt;ste_varnames);
+<a name='L106'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(ste-&gt;ste_children);
+<a name='L107'>    PyObject_Del(ste);
+<a name='L108'><font color='red'>}</font>
+<a name='L109'>
+<a name='L110'><font color='darkred'>#define</font> <a href='../R/2175.html' title='Multiple refered from 57 places.'>OFF</a>(x) <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a>, x)
+<a name='L111'>
+<a name='L112'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> ste_memberlist[] = <font color='red'>{</font>
+<a name='L113'>    <font color='red'>{</font>"id",       <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_id), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L114'>    <font color='red'>{</font>"name",     <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_name), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L115'>    <font color='red'>{</font>"symbols",  <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_symbols), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L116'>    <font color='red'>{</font>"varnames", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_varnames), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L117'>    <font color='red'>{</font>"children", <a href='../S/577.html#L44' title='Defined at 44 in Include/structmember.h.'>T_OBJECT</a>, <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_children), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L118'>    <font color='red'>{</font>"optimized",<a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,    <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_unoptimized), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L119'>    <font color='red'>{</font>"nested",   <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,    <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_nested), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L120'>    <font color='red'>{</font>"type",     <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,    <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_type), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L121'>    <font color='red'>{</font>"lineno",   <a href='../S/577.html#L39' title='Defined at 39 in Include/structmember.h.'>T_INT</a>,    <a href='../D/2402.html' title='Multiple defined in 16 places.'>OFF</a>(ste_lineno), <a href='../S/577.html#L73' title='Defined at 73 in Include/structmember.h.'>READONLY</a><font color='red'>}</font>,
+<a name='L122'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L123'><font color='red'>}</font>;
+<a name='L124'>
+<a name='L125'><a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> PySTEntry_Type = <font color='red'>{</font>
+<a name='L126'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(&amp;PyType_Type, 0)
+<a name='L127'>    "symtable entry",
+<a name='L128'>    <b>sizeof</b>(<a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a>),
+<a name='L129'>    0,
+<a name='L130'>    (<a href='../D/8095.html' title='Multiple defined in 2 places.'>destructor</a>)<a href='../S/3143.html#L99' title='Defined at 99 in Python/symtable.c.'>ste_dealloc</a>,                <i><font color='green'>/* tp_dealloc */</font></i>
+<a name='L131'>    0,                                      <i><font color='green'>/* tp_print */</font></i>
+<a name='L132'>    0,                                         <i><font color='green'>/* tp_getattr */</font></i>
+<a name='L133'>    0,                                          <i><font color='green'>/* tp_setattr */</font></i>
+<a name='L134'>    0,                                          <i><font color='green'>/* tp_reserved */</font></i>
+<a name='L135'>    (reprfunc)<a href='../S/3143.html#L91' title='Defined at 91 in Python/symtable.c.'>ste_repr</a>,                         <i><font color='green'>/* tp_repr */</font></i>
+<a name='L136'>    0,                                          <i><font color='green'>/* tp_as_number */</font></i>
+<a name='L137'>    0,                                          <i><font color='green'>/* tp_as_sequence */</font></i>
+<a name='L138'>    0,                                          <i><font color='green'>/* tp_as_mapping */</font></i>
+<a name='L139'>    0,                                          <i><font color='green'>/* tp_hash */</font></i>
+<a name='L140'>    0,                                          <i><font color='green'>/* tp_call */</font></i>
+<a name='L141'>    0,                                          <i><font color='green'>/* tp_str */</font></i>
+<a name='L142'>    <a href='../S/2803.html#L1046' title='Defined at 1046 in Objects/object.c.'>PyObject_GenericGetAttr</a>,                    <i><font color='green'>/* tp_getattro */</font></i>
+<a name='L143'>    0,                                          <i><font color='green'>/* tp_setattro */</font></i>
+<a name='L144'>    0,                                          <i><font color='green'>/* tp_as_buffer */</font></i>
+<a name='L145'>    Py_TPFLAGS_DEFAULT,                         <i><font color='green'>/* tp_flags */</font></i>
+<a name='L146'>    0,                                          <i><font color='green'>/* tp_doc */</font></i>
+<a name='L147'>    0,                                          <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L148'>    0,                                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L149'>    0,                                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L150'>    0,                                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L151'>    0,                                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L152'>    0,                                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L153'>    0,                                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L154'>    ste_memberlist,                             <i><font color='green'>/* tp_members */</font></i>
+<a name='L155'>    0,                                          <i><font color='green'>/* tp_getset */</font></i>
+<a name='L156'>    0,                                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L157'>    0,                                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L158'>    0,                                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L159'>    0,                                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L160'>    0,                                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L161'>    0,                                          <i><font color='green'>/* tp_init */</font></i>
+<a name='L162'>    0,                                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L163'>    0,                                          <i><font color='green'>/* tp_new */</font></i>
+<a name='L164'><font color='red'>}</font>;
+<a name='L165'>
+<a name='L166'><b>static</b> <b>int</b> <a href='../S/3143.html#L853' title='Defined at 853 in Python/symtable.c.'>symtable_analyze</a>(<b>struct</b> symtable *st);
+<a name='L167'><b>static</b> <b>int</b> <a href='../S/3143.html#L874' title='Defined at 874 in Python/symtable.c.'>symtable_warn</a>(<b>struct</b> symtable *st, <b>char</b> *msg, <b>int</b> lineno);
+<a name='L168'><b>static</b> <b>int</b> <a href='../S/3143.html#L913' title='Defined at 913 in Python/symtable.c.'>symtable_enter_block</a>(<b>struct</b> symtable *st, identifier name,
+<a name='L169'>                                _Py_block_ty block, <b>void</b> *ast, <b>int</b> lineno,
+<a name='L170'>                                <b>int</b> col_offset);
+<a name='L171'><b>static</b> <b>int</b> <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(<b>struct</b> symtable *st, <b>void</b> *ast);
+<a name='L172'><b>static</b> <b>int</b> <a href='../S/3143.html#L1106' title='Defined at 1106 in Python/symtable.c.'>symtable_visit_stmt</a>(<b>struct</b> symtable *st, stmt_ty s);
+<a name='L173'><b>static</b> <b>int</b> <a href='../S/3143.html#L1319' title='Defined at 1319 in Python/symtable.c.'>symtable_visit_expr</a>(<b>struct</b> symtable *st, expr_ty s);
+<a name='L174'><b>static</b> <b>int</b> <a href='../S/3143.html#L1664' title='Defined at 1664 in Python/symtable.c.'>symtable_visit_genexp</a>(<b>struct</b> symtable *st, expr_ty s);
+<a name='L175'><b>static</b> <b>int</b> <a href='../S/3143.html#L1672' title='Defined at 1672 in Python/symtable.c.'>symtable_visit_listcomp</a>(<b>struct</b> symtable *st, expr_ty s);
+<a name='L176'><b>static</b> <b>int</b> <a href='../S/3143.html#L1680' title='Defined at 1680 in Python/symtable.c.'>symtable_visit_setcomp</a>(<b>struct</b> symtable *st, expr_ty s);
+<a name='L177'><b>static</b> <b>int</b> <a href='../S/3143.html#L1688' title='Defined at 1688 in Python/symtable.c.'>symtable_visit_dictcomp</a>(<b>struct</b> symtable *st, expr_ty s);
+<a name='L178'><b>static</b> <b>int</b> <a href='../S/3143.html#L1508' title='Defined at 1508 in Python/symtable.c.'>symtable_visit_arguments</a>(<b>struct</b> symtable *st, arguments_ty);
+<a name='L179'><b>static</b> <b>int</b> <a href='../S/3143.html#L1532' title='Defined at 1532 in Python/symtable.c.'>symtable_visit_excepthandler</a>(<b>struct</b> symtable *st, excepthandler_ty);
+<a name='L180'><b>static</b> <b>int</b> <a href='../S/3143.html#L1545' title='Defined at 1545 in Python/symtable.c.'>symtable_visit_alias</a>(<b>struct</b> symtable *st, alias_ty);
+<a name='L181'><b>static</b> <b>int</b> <a href='../S/3143.html#L1586' title='Defined at 1586 in Python/symtable.c.'>symtable_visit_comprehension</a>(<b>struct</b> symtable *st, comprehension_ty);
+<a name='L182'><b>static</b> <b>int</b> <a href='../S/3143.html#L1596' title='Defined at 1596 in Python/symtable.c.'>symtable_visit_keyword</a>(<b>struct</b> symtable *st, keyword_ty);
+<a name='L183'><b>static</b> <b>int</b> <a href='../S/3143.html#L1604' title='Defined at 1604 in Python/symtable.c.'>symtable_visit_slice</a>(<b>struct</b> symtable *st, slice_ty);
+<a name='L184'><b>static</b> <b>int</b> <a href='../S/3143.html#L1456' title='Defined at 1456 in Python/symtable.c.'>symtable_visit_params</a>(<b>struct</b> symtable *st, asdl_seq *args);
+<a name='L185'><b>static</b> <b>int</b> <a href='../S/3143.html#L1473' title='Defined at 1473 in Python/symtable.c.'>symtable_visit_argannotations</a>(<b>struct</b> symtable *st, asdl_seq *args);
+<a name='L186'><b>static</b> <b>int</b> <a href='../S/3143.html#L1442' title='Defined at 1442 in Python/symtable.c.'>symtable_implicit_arg</a>(<b>struct</b> symtable *st, <b>int</b> pos);
+<a name='L187'><b>static</b> <b>int</b> <a href='../S/3143.html#L1490' title='Defined at 1490 in Python/symtable.c.'>symtable_visit_annotations</a>(<b>struct</b> symtable *st, stmt_ty s);
+<a name='L188'>
+<a name='L189'>
+<a name='L190'><b>static</b> <a href='../S/500.html#L4' title='Defined at 4 in Include/asdl.h.'>identifier</a> top = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, lambda = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, genexpr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L191'>    listcomp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, setcomp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, dictcomp = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L192'>    __class__ = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, __locals__ = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L193'>
+<a name='L194'><font color='darkred'>#define</font> <a href='../R/1250.html' title='Multiple refered from 10 places.'>GET_IDENTIFIER</a>(VAR) \
+<a name='L195'>    ((VAR) ? (VAR) : ((VAR) = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>(# VAR)))
+<a name='L196'>
+<a name='L197'><font color='darkred'>#define</font> <a href='../S/3143.html#L969' title='Refered from 969 in Python/symtable.c.'>DUPLICATE_ARGUMENT</a> \
+<a name='L198'>"duplicate argument '%U' in function definition"
+<a name='L199'>
+<a name='L200'><b>static</b> <b>struct</b> <a href='../S/579.html#L18' title='Defined at 18 in Include/symtable.h.'>symtable</a> *
+<a name='L201'><a href='../S/3143.html#L227' title='Refered from 227 in Python/symtable.c.'>symtable_new</a>(<b>void</b>)
+<a name='L202'><font color='red'>{</font>
+<a name='L203'>    <b>struct</b> <a href='../S/579.html#L18' title='Defined at 18 in Include/symtable.h.'>symtable</a> *st;
+<a name='L204'>
+<a name='L205'>    st = (<b>struct</b> <a href='../S/579.html#L18' title='Defined at 18 in Include/symtable.h.'>symtable</a> *)<a href='../S/2803.html#L1769' title='Defined at 1769 in Objects/object.c.'>PyMem_Malloc</a>(<b>sizeof</b>(<b>struct</b> <a href='../S/579.html#L18' title='Defined at 18 in Include/symtable.h.'>symtable</a>));
+<a name='L206'>    <b>if</b> (st == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L207'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L208'>
+<a name='L209'>    st-&gt;st_filename = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L210'>    st-&gt;st_blocks = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L211'>
+<a name='L212'>    <b>if</b> ((st-&gt;st_stack = <a href='../S/2796.html#L113' title='Defined at 113 in Objects/listobject.c.'>PyList_New</a>(0)) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L213'>        <b>goto</b> fail;
+<a name='L214'>    <b>if</b> ((st-&gt;st_blocks = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>()) == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L215'>        <b>goto</b> fail;
+<a name='L216'>    st-&gt;st_cur = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L217'>    st-&gt;st_private = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L218'>    <b>return</b> st;
+<a name='L219'> fail:
+<a name='L220'>    <a href='../S/3143.html#L284' title='Defined at 284 in Python/symtable.c.'>PySymtable_Free</a>(st);
+<a name='L221'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L222'><font color='red'>}</font>
+<a name='L223'>
+<a name='L224'><b>struct</b> <a href='../S/579.html#L18' title='Defined at 18 in Include/symtable.h.'>symtable</a> *
+<a name='L225'><a href='../R/3411.html' title='Multiple refered from 2 places.'>PySymtable_Build</a>(mod_ty mod, <b>const</b> <b>char</b> *filename, PyFutureFeatures *future)
+<a name='L226'><font color='red'>{</font>
+<a name='L227'>    <b>struct</b> <a href='../S/579.html#L18' title='Defined at 18 in Include/symtable.h.'>symtable</a> *st = <a href='../S/3143.html#L201' title='Defined at 201 in Python/symtable.c.'>symtable_new</a>();
+<a name='L228'>    <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq;
+<a name='L229'>    <b>int</b> i;
+<a name='L230'>
+<a name='L231'>    <b>if</b> (st == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L232'>        <b>return</b> st;
+<a name='L233'>    st-&gt;st_filename = filename;
+<a name='L234'>    st-&gt;st_future = future;
+<a name='L235'>    <i><font color='green'>/* Make the initial symbol information gathering pass */</font></i>
+<a name='L236'>    <b>if</b> (!<a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(top) ||
+<a name='L237'>        !<a href='../S/3143.html#L913' title='Defined at 913 in Python/symtable.c.'>symtable_enter_block</a>(st, top, <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ModuleBlock</a>, (<b>void</b> *)mod, 0, 0)) <font color='red'>{</font>
+<a name='L238'>        <a href='../S/3143.html#L284' title='Defined at 284 in Python/symtable.c.'>PySymtable_Free</a>(st);
+<a name='L239'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L240'>    <font color='red'>}</font>
+<a name='L241'>
+<a name='L242'>    st-&gt;st_top = st-&gt;st_cur;
+<a name='L243'>    st-&gt;st_cur-&gt;ste_unoptimized = OPT_TOPLEVEL;
+<a name='L244'>    <b>switch</b> (mod-&gt;kind) <font color='red'>{</font>
+<a name='L245'>    <b>case</b> <a href='../S/569.html#L40' title='Defined at 40 in Include/Python-ast.h.'>Module_kind</a>:
+<a name='L246'>        seq = mod-&gt;v.<a href='../D/2223.html' title='Multiple defined in 4 places.'>Module</a>.body;
+<a name='L247'>        <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++)
+<a name='L248'>            <b>if</b> (!<a href='../S/3143.html#L1106' title='Defined at 1106 in Python/symtable.c.'>symtable_visit_stmt</a>(st,
+<a name='L249'>                        (<a href='../S/569.html#L7' title='Defined at 7 in Include/Python-ast.h.'>stmt_ty</a>)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i)))
+<a name='L250'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L251'>        <b>break</b>;
+<a name='L252'>    <b>case</b> <a href='../S/569.html#L40' title='Defined at 40 in Include/Python-ast.h.'>Expression_kind</a>:
+<a name='L253'>        <b>if</b> (!<a href='../S/3143.html#L1319' title='Defined at 1319 in Python/symtable.c.'>symtable_visit_expr</a>(st, mod-&gt;v.<a href='../D/1066.html' title='Multiple defined in 2 places.'>Expression</a>.body))
+<a name='L254'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L255'>        <b>break</b>;
+<a name='L256'>    <b>case</b> <a href='../S/569.html#L40' title='Defined at 40 in Include/Python-ast.h.'>Interactive_kind</a>:
+<a name='L257'>        seq = mod-&gt;v.<a href='../D/1824.html' title='Multiple defined in 2 places.'>Interactive</a>.body;
+<a name='L258'>        <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++)
+<a name='L259'>            <b>if</b> (!<a href='../S/3143.html#L1106' title='Defined at 1106 in Python/symtable.c.'>symtable_visit_stmt</a>(st,
+<a name='L260'>                        (<a href='../S/569.html#L7' title='Defined at 7 in Include/Python-ast.h.'>stmt_ty</a>)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i)))
+<a name='L261'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L262'>        <b>break</b>;
+<a name='L263'>    <b>case</b> <a href='../S/569.html#L41' title='Defined at 41 in Include/Python-ast.h.'>Suite_kind</a>:
+<a name='L264'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_RuntimeError,
+<a name='L265'>                        "this compiler does not handle Suites");
+<a name='L266'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L267'>    <font color='red'>}</font>
+<a name='L268'>    <b>if</b> (!<a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, (<b>void</b> *)mod)) <font color='red'>{</font>
+<a name='L269'>        <a href='../S/3143.html#L284' title='Defined at 284 in Python/symtable.c.'>PySymtable_Free</a>(st);
+<a name='L270'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L271'>    <font color='red'>}</font>
+<a name='L272'>    <i><font color='green'>/* Make the second symbol analysis pass */</font></i>
+<a name='L273'>    <b>if</b> (<a href='../S/3143.html#L853' title='Defined at 853 in Python/symtable.c.'>symtable_analyze</a>(st))
+<a name='L274'>        <b>return</b> st;
+<a name='L275'>    <a href='../S/3143.html#L284' title='Defined at 284 in Python/symtable.c.'>PySymtable_Free</a>(st);
+<a name='L276'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L277'> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L278'>    (<b>void</b>) <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, (<b>void</b> *)mod);
+<a name='L279'>    <a href='../S/3143.html#L284' title='Defined at 284 in Python/symtable.c.'>PySymtable_Free</a>(st);
+<a name='L280'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L281'><font color='red'>}</font>
+<a name='L282'>
+<a name='L283'><b>void</b>
+<a name='L284'><a href='../R/3412.html' title='Multiple refered from 7 places.'>PySymtable_Free</a>(<b>struct</b> symtable *st)
+<a name='L285'><font color='red'>{</font>
+<a name='L286'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(st-&gt;st_blocks);
+<a name='L287'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(st-&gt;st_stack);
+<a name='L288'>    <a href='../S/2803.html#L1781' title='Defined at 1781 in Objects/object.c.'>PyMem_Free</a>((<b>void</b> *)st);
+<a name='L289'><font color='red'>}</font>
+<a name='L290'>
+<a name='L291'><a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a> *
+<a name='L292'><a href='../S/3094.html#L465' title='Refered from 465 in Python/compile.c.'>PySymtable_Lookup</a>(<b>struct</b> symtable *st, <b>void</b> *key)
+<a name='L293'><font color='red'>{</font>
+<a name='L294'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *k, *v;
+<a name='L295'>
+<a name='L296'>    k = <a href='../S/2799.html#L929' title='Defined at 929 in Objects/longobject.c.'>PyLong_FromVoidPtr</a>(<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>);
+<a name='L297'>    <b>if</b> (k == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L298'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L299'>    v = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(st-&gt;st_blocks, k);
+<a name='L300'>    <b>if</b> (v) <font color='red'>{</font>
+<a name='L301'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PySTEntry_Check(v));
+<a name='L302'>        Py_INCREF(v);
+<a name='L303'>    <font color='red'>}</font>
+<a name='L304'>    <b>else</b> <font color='red'>{</font>
+<a name='L305'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_KeyError,
+<a name='L306'>                        "unknown symbol table entry");
+<a name='L307'>    <font color='red'>}</font>
+<a name='L308'>
+<a name='L309'>    Py_DECREF(k);
+<a name='L310'>    <b>return</b> (<a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a> *)v;
+<a name='L311'><font color='red'>}</font>
+<a name='L312'>
+<a name='L313'><b>int</b>
+<a name='L314'><a href='../R/3359.html' title='Multiple refered from 2 places.'>PyST_GetScope</a>(PySTEntryObject *ste, PyObject *name)
+<a name='L315'><font color='red'>{</font>
+<a name='L316'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(ste-&gt;ste_symbols, name);
+<a name='L317'>    <b>if</b> (!v)
+<a name='L318'>        <b>return</b> 0;
+<a name='L319'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyLong_Check(v));
+<a name='L320'>    <b>return</b> (PyLong_AS_LONG(v) &gt;&gt; SCOPE_OFFSET) &amp; SCOPE_MASK;
+<a name='L321'><font color='red'>}</font>
+<a name='L322'>
+<a name='L323'>
+<a name='L324'><i><font color='green'>/* Analyze raw symbol information to determine scope of each name.</font></i>
+<a name='L325'><i><font color='green'></font></i>
+<a name='L326'><i><font color='green'>   The next several functions are helpers for symtable_analyze(),</font></i>
+<a name='L327'><i><font color='green'>   which determines whether a name is local, global, or free.  In addition,</font></i>
+<a name='L328'><i><font color='green'>   it determines which local variables are cell variables; they provide</font></i>
+<a name='L329'><i><font color='green'>   bindings that are used for free variables in enclosed blocks.</font></i>
+<a name='L330'><i><font color='green'></font></i>
+<a name='L331'><i><font color='green'>   There are also two kinds of global variables, implicit and explicit.  An</font></i>
+<a name='L332'><i><font color='green'>   explicit global is declared with the global statement.  An implicit</font></i>
+<a name='L333'><i><font color='green'>   global is a free variable for which the compiler has found no binding</font></i>
+<a name='L334'><i><font color='green'>   in an enclosing function scope.  The implicit global is either a global</font></i>
+<a name='L335'><i><font color='green'>   or a builtin.  Python's module and class blocks use the xxx_NAME opcodes</font></i>
+<a name='L336'><i><font color='green'>   to handle these names to implement slightly odd semantics.  In such a</font></i>
+<a name='L337'><i><font color='green'>   block, the name is treated as global until it is assigned to; then it</font></i>
+<a name='L338'><i><font color='green'>   is treated as a local.</font></i>
+<a name='L339'><i><font color='green'></font></i>
+<a name='L340'><i><font color='green'>   The symbol table requires two passes to determine the scope of each name.</font></i>
+<a name='L341'><i><font color='green'>   The first pass collects raw facts from the AST via the symtable_visit_*</font></i>
+<a name='L342'><i><font color='green'>   functions: the name is a parameter here, the name is used but not defined</font></i>
+<a name='L343'><i><font color='green'>   here, etc.  The second pass analyzes these facts during a pass over the</font></i>
+<a name='L344'><i><font color='green'>   PySTEntryObjects created during pass 1.</font></i>
+<a name='L345'><i><font color='green'></font></i>
+<a name='L346'><i><font color='green'>   When a function is entered during the second pass, the parent passes</font></i>
+<a name='L347'><i><font color='green'>   the set of all name bindings visible to its children.  These bindings</font></i>
+<a name='L348'><i><font color='green'>   are used to determine if non-local variables are free or implicit globals.</font></i>
+<a name='L349'><i><font color='green'>   Names which are explicitly declared nonlocal must exist in this set of</font></i>
+<a name='L350'><i><font color='green'>   visible names - if they do not, a syntax error is raised. After doing</font></i>
+<a name='L351'><i><font color='green'>   the local analysis, it analyzes each of its child blocks using an</font></i>
+<a name='L352'><i><font color='green'>   updated set of name bindings.</font></i>
+<a name='L353'><i><font color='green'></font></i>
+<a name='L354'><i><font color='green'>   The children update the free variable set.  If a local variable is added to</font></i>
+<a name='L355'><i><font color='green'>   the free variable set by the child, the variable is marked as a cell.  The</font></i>
+<a name='L356'><i><font color='green'>   function object being defined must provide runtime storage for the variable</font></i>
+<a name='L357'><i><font color='green'>   that may outlive the function's frame.  Cell variables are removed from the</font></i>
+<a name='L358'><i><font color='green'>   free set before the analyze function returns to its parent.</font></i>
+<a name='L359'><i><font color='green'></font></i>
+<a name='L360'><i><font color='green'>   During analysis, the names are:</font></i>
+<a name='L361'><i><font color='green'>      symbols: dict mapping from symbol names to flag values (including offset scope values)</font></i>
+<a name='L362'><i><font color='green'>      scopes: dict mapping from symbol names to scope values (no offset)</font></i>
+<a name='L363'><i><font color='green'>      local: set of all symbol names local to the current scope</font></i>
+<a name='L364'><i><font color='green'>      bound: set of all symbol names local to a containing function scope</font></i>
+<a name='L365'><i><font color='green'>      free: set of all symbol names referenced but not bound in child scopes</font></i>
+<a name='L366'><i><font color='green'>      global: set of all symbol names explicitly declared as global</font></i>
+<a name='L367'><i><font color='green'>*/</font></i>
+<a name='L368'>
+<a name='L369'><font color='darkred'>#define</font> <a href='../R/4079.html' title='Multiple refered from 6 places.'>SET_SCOPE</a>(DICT, NAME, I) <font color='red'>{</font> \
+<a name='L370'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../S/2690.html#L104' title='Defined at 104 in Modules/md5module.c.'>I</a>); \
+<a name='L371'>    <b>if</b> (!o) \
+<a name='L372'>        <b>return</b> 0; \
+<a name='L373'>    <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>((<a href='../D/783.html' title='Multiple defined in 2 places.'>DICT</a>), (<a href='../D/2251.html' title='Multiple defined in 2 places.'>NAME</a>), o) &lt; 0) <font color='red'>{</font> \
+<a name='L374'>        Py_DECREF(o); \
+<a name='L375'>        <b>return</b> 0; \
+<a name='L376'>    <font color='red'>}</font> \
+<a name='L377'>    Py_DECREF(o); \
+<a name='L378'><font color='red'>}</font>
+<a name='L379'>
+<a name='L380'><i><font color='green'>/* Decide on scope of name, given flags.</font></i>
+<a name='L381'><i><font color='green'></font></i>
+<a name='L382'><i><font color='green'>   The namespace dictionaries may be modified to record information</font></i>
+<a name='L383'><i><font color='green'>   about the new name.  For example, a new global will add an entry to</font></i>
+<a name='L384'><i><font color='green'>   global.  A name that was global can be changed to local.</font></i>
+<a name='L385'><i><font color='green'>*/</font></i>
+<a name='L386'>
+<a name='L387'><b>static</b> <b>int</b>
+<a name='L388'><a href='../S/3143.html#L717' title='Refered from 717 in Python/symtable.c.'>analyze_name</a>(PySTEntryObject *ste, PyObject *scopes, PyObject *name, <b>long</b> flags,
+<a name='L389'>             PyObject *bound, PyObject *local, PyObject *free,
+<a name='L390'>             PyObject *global)
+<a name='L391'><font color='red'>{</font>
+<a name='L392'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; DEF_GLOBAL) <font color='red'>{</font>
+<a name='L393'>        <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; DEF_PARAM) <font color='red'>{</font>
+<a name='L394'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError,
+<a name='L395'>                        "name '%U' is parameter and global",
+<a name='L396'>                        name);
+<a name='L397'>            <a href='../S/3106.html#L774' title='Defined at 774 in Python/errors.c.'>PyErr_SyntaxLocationEx</a>(ste-&gt;ste_table-&gt;st_filename,
+<a name='L398'>                                   ste-&gt;ste_lineno, ste-&gt;ste_col_offset);
+<a name='L399'>
+<a name='L400'>            <b>return</b> 0;
+<a name='L401'>        <font color='red'>}</font>
+<a name='L402'>        <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; DEF_NONLOCAL) <font color='red'>{</font>
+<a name='L403'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError,
+<a name='L404'>                         "name '%U' is nonlocal and global",
+<a name='L405'>                         name);
+<a name='L406'>            <b>return</b> 0;
+<a name='L407'>        <font color='red'>}</font>
+<a name='L408'>        <a href='../D/4621.html' title='Multiple defined in 2 places.'>SET_SCOPE</a>(scopes, name, GLOBAL_EXPLICIT);
+<a name='L409'>        <b>if</b> (<a href='../S/2806.html#L2315' title='Defined at 2315 in Objects/setobject.c.'>PySet_Add</a>(global, name) &lt; 0)
+<a name='L410'>            <b>return</b> 0;
+<a name='L411'>        <b>if</b> (bound &amp;&amp; (<a href='../S/2806.html#L2305' title='Defined at 2305 in Objects/setobject.c.'>PySet_Discard</a>(bound, name) &lt; 0))
+<a name='L412'>            <b>return</b> 0;
+<a name='L413'>        <b>return</b> 1;
+<a name='L414'>    <font color='red'>}</font>
+<a name='L415'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; DEF_NONLOCAL) <font color='red'>{</font>
+<a name='L416'>        <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; DEF_PARAM) <font color='red'>{</font>
+<a name='L417'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError,
+<a name='L418'>                         "name '%U' is parameter and nonlocal",
+<a name='L419'>                         name);
+<a name='L420'>            <b>return</b> 0;
+<a name='L421'>        <font color='red'>}</font>
+<a name='L422'>        <b>if</b> (!bound) <font color='red'>{</font>
+<a name='L423'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError,
+<a name='L424'>                         "nonlocal declaration not allowed at module level");
+<a name='L425'>            <b>return</b> 0;
+<a name='L426'>        <font color='red'>}</font>
+<a name='L427'>        <b>if</b> (!<a href='../S/2806.html#L2295' title='Defined at 2295 in Objects/setobject.c.'>PySet_Contains</a>(bound, name)) <font color='red'>{</font>
+<a name='L428'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError,
+<a name='L429'>                         "no binding for nonlocal '%U' found",
+<a name='L430'>                         name);
+<a name='L431'>
+<a name='L432'>            <b>return</b> 0;
+<a name='L433'>        <font color='red'>}</font>
+<a name='L434'>        <a href='../D/4621.html' title='Multiple defined in 2 places.'>SET_SCOPE</a>(scopes, name, <a href='../D/1301.html' title='Multiple defined in 2 places.'>FREE</a>);
+<a name='L435'>        ste-&gt;ste_free = 1;
+<a name='L436'>        <b>return</b> <a href='../S/2806.html#L2315' title='Defined at 2315 in Objects/setobject.c.'>PySet_Add</a>(free, name) &gt;= 0;
+<a name='L437'>    <font color='red'>}</font>
+<a name='L438'>    <b>if</b> (<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> &amp; DEF_BOUND) <font color='red'>{</font>
+<a name='L439'>        <a href='../D/4621.html' title='Multiple defined in 2 places.'>SET_SCOPE</a>(scopes, name, <a href='../D/1945.html' title='Multiple defined in 38 places.'>LOCAL</a>);
+<a name='L440'>        <b>if</b> (<a href='../S/2806.html#L2315' title='Defined at 2315 in Objects/setobject.c.'>PySet_Add</a>(<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>, name) &lt; 0)
+<a name='L441'>            <b>return</b> 0;
+<a name='L442'>        <b>if</b> (<a href='../S/2806.html#L2305' title='Defined at 2305 in Objects/setobject.c.'>PySet_Discard</a>(global, name) &lt; 0)
+<a name='L443'>            <b>return</b> 0;
+<a name='L444'>        <b>return</b> 1;
+<a name='L445'>    <font color='red'>}</font>
+<a name='L446'>    <i><font color='green'>/* If an enclosing block has a binding for this name, it</font></i>
+<a name='L447'><i><font color='green'>       is a free variable rather than a global variable.</font></i>
+<a name='L448'><i><font color='green'>       Note that having a non-NULL bound implies that the block</font></i>
+<a name='L449'><i><font color='green'>       is nested.</font></i>
+<a name='L450'><i><font color='green'>    */</font></i>
+<a name='L451'>    <b>if</b> (bound &amp;&amp; <a href='../S/2806.html#L2295' title='Defined at 2295 in Objects/setobject.c.'>PySet_Contains</a>(bound, name)) <font color='red'>{</font>
+<a name='L452'>        <a href='../D/4621.html' title='Multiple defined in 2 places.'>SET_SCOPE</a>(scopes, name, <a href='../D/1301.html' title='Multiple defined in 2 places.'>FREE</a>);
+<a name='L453'>        ste-&gt;ste_free = 1;
+<a name='L454'>        <b>return</b> <a href='../S/2806.html#L2315' title='Defined at 2315 in Objects/setobject.c.'>PySet_Add</a>(free, name) &gt;= 0;
+<a name='L455'>    <font color='red'>}</font>
+<a name='L456'>    <i><font color='green'>/* If a parent has a global statement, then call it global</font></i>
+<a name='L457'><i><font color='green'>       explicit?  It could also be global implicit.</font></i>
+<a name='L458'><i><font color='green'>     */</font></i>
+<a name='L459'>    <b>if</b> (global &amp;&amp; <a href='../S/2806.html#L2295' title='Defined at 2295 in Objects/setobject.c.'>PySet_Contains</a>(global, name)) <font color='red'>{</font>
+<a name='L460'>        <a href='../D/4621.html' title='Multiple defined in 2 places.'>SET_SCOPE</a>(scopes, name, GLOBAL_IMPLICIT);
+<a name='L461'>        <b>return</b> 1;
+<a name='L462'>    <font color='red'>}</font>
+<a name='L463'>    <b>if</b> (ste-&gt;ste_nested)
+<a name='L464'>        ste-&gt;ste_free = 1;
+<a name='L465'>    <a href='../D/4621.html' title='Multiple defined in 2 places.'>SET_SCOPE</a>(scopes, name, GLOBAL_IMPLICIT);
+<a name='L466'>    <b>return</b> 1;
+<a name='L467'><font color='red'>}</font>
+<a name='L468'>
+<a name='L469'><font color='darkred'>#undef</font> <a href='../R/4079.html' title='Multiple refered from 6 places.'>SET_SCOPE</a>
+<a name='L470'>
+<a name='L471'><i><font color='green'>/* If a name is defined in free and also in locals, then this block</font></i>
+<a name='L472'><i><font color='green'>   provides the binding for the free variable.  The name should be</font></i>
+<a name='L473'><i><font color='green'>   marked CELL in this block and removed from the free list.</font></i>
+<a name='L474'><i><font color='green'></font></i>
+<a name='L475'><i><font color='green'>   Note that the current block's free variables are included in free.</font></i>
+<a name='L476'><i><font color='green'>   That's safe because no name can be free and local in the same scope.</font></i>
+<a name='L477'><i><font color='green'></font></i>
+<a name='L478'><i><font color='green'>   The 'restricted' argument may be set to a string to restrict the analysis</font></i>
+<a name='L479'><i><font color='green'>   to the one variable whose name equals that string (e.g. "__class__").</font></i>
+<a name='L480'><i><font color='green'>*/</font></i>
+<a name='L481'>
+<a name='L482'><b>static</b> <b>int</b>
+<a name='L483'><a href='../R/5965.html' title='Multiple refered from 2 places.'>analyze_cells</a>(PyObject *scopes, PyObject *free, <b>const</b> <b>char</b> *restricted)
+<a name='L484'><font color='red'>{</font>
+<a name='L485'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name, *v, *v_cell;
+<a name='L486'>    <b>int</b> success = 0;
+<a name='L487'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos = 0;
+<a name='L488'>
+<a name='L489'>    v_cell = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(CELL);
+<a name='L490'>    <b>if</b> (!v_cell)
+<a name='L491'>        <b>return</b> 0;
+<a name='L492'>    <b>while</b> (<a href='../S/2787.html#L954' title='Defined at 954 in Objects/dictobject.c.'>PyDict_Next</a>(scopes, &amp;pos, &amp;name, &amp;v)) <font color='red'>{</font>
+<a name='L493'>        <b>long</b> scope;
+<a name='L494'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyLong_Check(v));
+<a name='L495'>        scope = PyLong_AS_LONG(v);
+<a name='L496'>        <b>if</b> (scope != <a href='../D/1945.html' title='Multiple defined in 38 places.'>LOCAL</a>)
+<a name='L497'>            <b>continue</b>;
+<a name='L498'>        <b>if</b> (!<a href='../S/2806.html#L2295' title='Defined at 2295 in Objects/setobject.c.'>PySet_Contains</a>(free, name))
+<a name='L499'>            <b>continue</b>;
+<a name='L500'>        <b>if</b> (restricted != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a> &amp;&amp;
+<a name='L501'>            <a href='../D/3968.html' title='Multiple defined in 3 places.'>PyUnicode_CompareWithASCIIString</a>(name, restricted))
+<a name='L502'>            <b>continue</b>;
+<a name='L503'>        <i><font color='green'>/* Replace LOCAL with CELL for this name, and remove</font></i>
+<a name='L504'><i><font color='green'>           from free. It is safe to replace the value of name</font></i>
+<a name='L505'><i><font color='green'>           in the dict, because it will not cause a resize.</font></i>
+<a name='L506'><i><font color='green'>         */</font></i>
+<a name='L507'>        <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(scopes, name, v_cell) &lt; 0)
+<a name='L508'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L509'>        <b>if</b> (<a href='../S/2806.html#L2305' title='Defined at 2305 in Objects/setobject.c.'>PySet_Discard</a>(free, name) &lt; 0)
+<a name='L510'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L511'>    <font color='red'>}</font>
+<a name='L512'>    success = 1;
+<a name='L513'> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L514'>    Py_DECREF(v_cell);
+<a name='L515'>    <b>return</b> success;
+<a name='L516'><font color='red'>}</font>
+<a name='L517'>
+<a name='L518'><i><font color='green'>/* Check for illegal statements in unoptimized namespaces */</font></i>
+<a name='L519'><b>static</b> <b>int</b>
+<a name='L520'><a href='../S/3143.html#L791' title='Refered from 791 in Python/symtable.c.'>check_unoptimized</a>(<b>const</b> PySTEntryObject* ste) <font color='red'>{</font>
+<a name='L521'>    <b>const</b> <b>char</b>* <a href='../S/529.html#L69' title='Defined at 69 in Include/graminit.h.'>trailer</a>;
+<a name='L522'>
+<a name='L523'>    <b>if</b> (ste-&gt;ste_type != <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a> || !ste-&gt;ste_unoptimized
+<a name='L524'>        || !(ste-&gt;ste_free || ste-&gt;ste_child_free))
+<a name='L525'>        <b>return</b> 1;
+<a name='L526'>
+<a name='L527'>    <a href='../S/529.html#L69' title='Defined at 69 in Include/graminit.h.'>trailer</a> = (ste-&gt;ste_child_free ?
+<a name='L528'>                   "contains a nested function with free variables" :
+<a name='L529'>                   "is a nested function");
+<a name='L530'>
+<a name='L531'>    <b>switch</b> (ste-&gt;ste_unoptimized) <font color='red'>{</font>
+<a name='L532'>    <b>case</b> OPT_TOPLEVEL: <i><font color='green'>/* import * at top-level is fine */</font></i>
+<a name='L533'>        <b>return</b> 1;
+<a name='L534'>    <b>case</b> OPT_IMPORT_STAR:
+<a name='L535'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError,
+<a name='L536'>                     "import * is not allowed in function '%U' because it %s",
+<a name='L537'>                     ste-&gt;ste_name, <a href='../S/529.html#L69' title='Defined at 69 in Include/graminit.h.'>trailer</a>);
+<a name='L538'>        <b>break</b>;
+<a name='L539'>    <font color='red'>}</font>
+<a name='L540'>
+<a name='L541'>    <a href='../S/3106.html#L774' title='Defined at 774 in Python/errors.c.'>PyErr_SyntaxLocationEx</a>(ste-&gt;ste_table-&gt;st_filename, ste-&gt;ste_opt_lineno,
+<a name='L542'>                           ste-&gt;ste_opt_col_offset);
+<a name='L543'>    <b>return</b> 0;
+<a name='L544'><font color='red'>}</font>
+<a name='L545'>
+<a name='L546'><i><font color='green'>/* Enter the final scope information into the ste_symbols dict.</font></i>
+<a name='L547'><i><font color='green'> *</font></i>
+<a name='L548'><i><font color='green'> * All arguments are dicts.  Modifies symbols, others are read-only.</font></i>
+<a name='L549'><i><font color='green'>*/</font></i>
+<a name='L550'><b>static</b> <b>int</b>
+<a name='L551'><a href='../S/3143.html#L788' title='Refered from 788 in Python/symtable.c.'>update_symbols</a>(PyObject *symbols, PyObject *scopes,
+<a name='L552'>               PyObject *bound, PyObject *free, <b>int</b> classflag)
+<a name='L553'><font color='red'>{</font>
+<a name='L554'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *itr = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L555'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *v = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *v_scope = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *v_new = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *v_free = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L556'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos = 0;
+<a name='L557'>
+<a name='L558'>    <i><font color='green'>/* Update scope information for all symbols in this scope */</font></i>
+<a name='L559'>    <b>while</b> (<a href='../S/2787.html#L954' title='Defined at 954 in Objects/dictobject.c.'>PyDict_Next</a>(symbols, &amp;pos, &amp;name, &amp;v)) <font color='red'>{</font>
+<a name='L560'>        <b>long</b> scope, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>;
+<a name='L561'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyLong_Check(v));
+<a name='L562'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = PyLong_AS_LONG(v);
+<a name='L563'>        v_scope = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(scopes, name);
+<a name='L564'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(v_scope &amp;&amp; PyLong_Check(v_scope));
+<a name='L565'>        scope = PyLong_AS_LONG(v_scope);
+<a name='L566'>        <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> |= (scope &lt;&lt; SCOPE_OFFSET);
+<a name='L567'>        v_new = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L568'>        <b>if</b> (!v_new)
+<a name='L569'>            <b>return</b> 0;
+<a name='L570'>        <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(symbols, name, v_new) &lt; 0) <font color='red'>{</font>
+<a name='L571'>            Py_DECREF(v_new);
+<a name='L572'>            <b>return</b> 0;
+<a name='L573'>        <font color='red'>}</font>
+<a name='L574'>        Py_DECREF(v_new);
+<a name='L575'>    <font color='red'>}</font>
+<a name='L576'>
+<a name='L577'>    <i><font color='green'>/* Record not yet resolved free variables from children (if any) */</font></i>
+<a name='L578'>    v_free = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../D/1301.html' title='Multiple defined in 2 places.'>FREE</a> &lt;&lt; SCOPE_OFFSET);
+<a name='L579'>    <b>if</b> (!v_free)
+<a name='L580'>        <b>return</b> 0;
+<a name='L581'>
+<a name='L582'>    itr = <a href='../S/2775.html#L2668' title='Defined at 2668 in Objects/abstract.c.'>PyObject_GetIter</a>(free);
+<a name='L583'>    <b>if</b> (!itr)
+<a name='L584'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L585'>
+<a name='L586'>    <b>while</b> ((name = <a href='../S/2775.html#L2700' title='Defined at 2700 in Objects/abstract.c.'>PyIter_Next</a>(itr))) <font color='red'>{</font>
+<a name='L587'>        v = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(symbols, name);
+<a name='L588'>
+<a name='L589'>        <i><font color='green'>/* Handle symbol that already exists in this scope */</font></i>
+<a name='L590'>        <b>if</b> (v) <font color='red'>{</font>
+<a name='L591'>            <i><font color='green'>/* Handle a free variable in a method of</font></i>
+<a name='L592'><i><font color='green'>               the class that has the same name as a local</font></i>
+<a name='L593'><i><font color='green'>               or global in the class scope.</font></i>
+<a name='L594'><i><font color='green'>            */</font></i>
+<a name='L595'>            <b>if</b>  (classflag &amp;&amp;
+<a name='L596'>                 PyLong_AS_LONG(v) &amp; (DEF_BOUND | DEF_GLOBAL)) <font color='red'>{</font>
+<a name='L597'>                <b>long</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = PyLong_AS_LONG(v) | DEF_FREE_CLASS;
+<a name='L598'>                v_new = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(<a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>);
+<a name='L599'>                <b>if</b> (!v_new) <font color='red'>{</font>
+<a name='L600'>                    <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L601'>                <font color='red'>}</font>
+<a name='L602'>                <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(symbols, name, v_new) &lt; 0) <font color='red'>{</font>
+<a name='L603'>                    Py_DECREF(v_new);
+<a name='L604'>                    <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L605'>                <font color='red'>}</font>
+<a name='L606'>                Py_DECREF(v_new);
+<a name='L607'>            <font color='red'>}</font>
+<a name='L608'>            <i><font color='green'>/* It's a cell, or already free in this scope */</font></i>
+<a name='L609'>            Py_DECREF(name);
+<a name='L610'>            <b>continue</b>;
+<a name='L611'>        <font color='red'>}</font>
+<a name='L612'>        <i><font color='green'>/* Handle global symbol */</font></i>
+<a name='L613'>        <b>if</b> (!<a href='../S/2806.html#L2295' title='Defined at 2295 in Objects/setobject.c.'>PySet_Contains</a>(bound, name)) <font color='red'>{</font>
+<a name='L614'>            Py_DECREF(name);
+<a name='L615'>            <b>continue</b>;       <i><font color='green'>/* it's a global */</font></i>
+<a name='L616'>        <font color='red'>}</font>
+<a name='L617'>        <i><font color='green'>/* Propagate new free symbol up the lexical stack */</font></i>
+<a name='L618'>        <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(symbols, name, v_free) &lt; 0) <font color='red'>{</font>
+<a name='L619'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L620'>        <font color='red'>}</font>
+<a name='L621'>        Py_DECREF(name);
+<a name='L622'>    <font color='red'>}</font>
+<a name='L623'>    Py_DECREF(itr);
+<a name='L624'>    Py_DECREF(v_free);
+<a name='L625'>    <b>return</b> 1;
+<a name='L626'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L627'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(v_free);
+<a name='L628'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(itr);
+<a name='L629'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(name);
+<a name='L630'>    <b>return</b> 0;
+<a name='L631'><font color='red'>}</font>
+<a name='L632'>
+<a name='L633'><i><font color='green'>/* Make final symbol table decisions for block of ste.</font></i>
+<a name='L634'><i><font color='green'></font></i>
+<a name='L635'><i><font color='green'>   Arguments:</font></i>
+<a name='L636'><i><font color='green'>   ste -- current symtable entry (input/output)</font></i>
+<a name='L637'><i><font color='green'>   bound -- set of variables bound in enclosing scopes (input).  bound</font></i>
+<a name='L638'><i><font color='green'>       is NULL for module blocks.</font></i>
+<a name='L639'><i><font color='green'>   free -- set of free variables in enclosed scopes (output)</font></i>
+<a name='L640'><i><font color='green'>   globals -- set of declared global variables in enclosing scopes (input)</font></i>
+<a name='L641'><i><font color='green'></font></i>
+<a name='L642'><i><font color='green'>   The implementation uses two mutually recursive functions,</font></i>
+<a name='L643'><i><font color='green'>   analyze_block() and analyze_child_block().  analyze_block() is</font></i>
+<a name='L644'><i><font color='green'>   responsible for analyzing the individual names defined in a block.</font></i>
+<a name='L645'><i><font color='green'>   analyze_child_block() prepares temporary namespace dictionaries</font></i>
+<a name='L646'><i><font color='green'>   used to evaluated nested blocks.</font></i>
+<a name='L647'><i><font color='green'></font></i>
+<a name='L648'><i><font color='green'>   The two functions exist because a child block should see the name</font></i>
+<a name='L649'><i><font color='green'>   bindings of its enclosing blocks, but those bindings should not</font></i>
+<a name='L650'><i><font color='green'>   propagate back to a parent block.</font></i>
+<a name='L651'><i><font color='green'>*/</font></i>
+<a name='L652'>
+<a name='L653'><b>static</b> <b>int</b>
+<a name='L654'><a href='../S/3143.html#L812' title='Defined at 812 in Python/symtable.c.'>analyze_child_block</a>(PySTEntryObject *entry, PyObject *bound, PyObject *free,
+<a name='L655'>                    PyObject *global, PyObject* child_free);
+<a name='L656'>
+<a name='L657'><b>static</b> <b>int</b>
+<a name='L658'><a href='../R/5964.html' title='Multiple refered from 2 places.'>analyze_block</a>(PySTEntryObject *ste, PyObject *bound, PyObject *free,
+<a name='L659'>              PyObject *global)
+<a name='L660'><font color='red'>{</font>
+<a name='L661'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name, *v, *<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *scopes = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *newbound = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L662'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *newglobal = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *newfree = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *allfree = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L663'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *temp;
+<a name='L664'>    <b>int</b> i, success = 0;
+<a name='L665'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> pos = 0;
+<a name='L666'>
+<a name='L667'>    <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a> = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);  <i><font color='green'>/* collect new names bound in block */</font></i>
+<a name='L668'>    <b>if</b> (!<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>)
+<a name='L669'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L670'>    scopes = <a href='../S/2787.html#L233' title='Defined at 233 in Objects/dictobject.c.'>PyDict_New</a>();  <i><font color='green'>/* collect scopes defined for each name */</font></i>
+<a name='L671'>    <b>if</b> (!scopes)
+<a name='L672'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L673'>
+<a name='L674'>    <i><font color='green'>/* Allocate new global and bound variable dictionaries.  These</font></i>
+<a name='L675'><i><font color='green'>       dictionaries hold the names visible in nested blocks.  For</font></i>
+<a name='L676'><i><font color='green'>       ClassBlocks, the bound and global names are initialized</font></i>
+<a name='L677'><i><font color='green'>       before analyzing names, because class bindings aren't</font></i>
+<a name='L678'><i><font color='green'>       visible in methods.  For other blocks, they are initialized</font></i>
+<a name='L679'><i><font color='green'>       after names are analyzed.</font></i>
+<a name='L680'><i><font color='green'>     */</font></i>
+<a name='L681'>
+<a name='L682'>    <i><font color='green'>/* TODO(jhylton): Package these dicts in a struct so that we</font></i>
+<a name='L683'><i><font color='green'>       can write reasonable helper functions?</font></i>
+<a name='L684'><i><font color='green'>    */</font></i>
+<a name='L685'>    newglobal = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L686'>    <b>if</b> (!newglobal)
+<a name='L687'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L688'>    newfree = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L689'>    <b>if</b> (!newfree)
+<a name='L690'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L691'>    newbound = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L692'>    <b>if</b> (!newbound)
+<a name='L693'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L694'>
+<a name='L695'>    <i><font color='green'>/* Class namespace has no effect on names visible in</font></i>
+<a name='L696'><i><font color='green'>       nested functions, so populate the global and bound</font></i>
+<a name='L697'><i><font color='green'>       sets to be passed to child blocks before analyzing</font></i>
+<a name='L698'><i><font color='green'>       this one.</font></i>
+<a name='L699'><i><font color='green'>     */</font></i>
+<a name='L700'>    <b>if</b> (ste-&gt;ste_type == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ClassBlock</a>) <font color='red'>{</font>
+<a name='L701'>        <i><font color='green'>/* Pass down known globals */</font></i>
+<a name='L702'>        temp = PyNumber_InPlaceOr(newglobal, global);
+<a name='L703'>        <b>if</b> (!temp)
+<a name='L704'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L705'>        Py_DECREF(temp);
+<a name='L706'>        <i><font color='green'>/* Pass down previously bound symbols */</font></i>
+<a name='L707'>        <b>if</b> (bound) <font color='red'>{</font>
+<a name='L708'>            temp = PyNumber_InPlaceOr(newbound, bound);
+<a name='L709'>            <b>if</b> (!temp)
+<a name='L710'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L711'>            Py_DECREF(temp);
+<a name='L712'>        <font color='red'>}</font>
+<a name='L713'>    <font color='red'>}</font>
+<a name='L714'>
+<a name='L715'>    <b>while</b> (<a href='../S/2787.html#L954' title='Defined at 954 in Objects/dictobject.c.'>PyDict_Next</a>(ste-&gt;ste_symbols, &amp;pos, &amp;name, &amp;v)) <font color='red'>{</font>
+<a name='L716'>        <b>long</b> <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a> = PyLong_AS_LONG(v);
+<a name='L717'>        <b>if</b> (!<a href='../S/3143.html#L388' title='Defined at 388 in Python/symtable.c.'>analyze_name</a>(ste, scopes, name, <a href='../D/8626.html' title='Multiple defined in 2 places.'>flags</a>,
+<a name='L718'>                          bound, <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>, free, global))
+<a name='L719'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L720'>    <font color='red'>}</font>
+<a name='L721'>
+<a name='L722'>    <i><font color='green'>/* Populate global and bound sets to be passed to children. */</font></i>
+<a name='L723'>    <b>if</b> (ste-&gt;ste_type != <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ClassBlock</a>) <font color='red'>{</font>
+<a name='L724'>        <i><font color='green'>/* Add function locals to bound set */</font></i>
+<a name='L725'>        <b>if</b> (ste-&gt;ste_type == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a>) <font color='red'>{</font>
+<a name='L726'>            temp = PyNumber_InPlaceOr(newbound, <a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>);
+<a name='L727'>            <b>if</b> (!temp)
+<a name='L728'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L729'>            Py_DECREF(temp);
+<a name='L730'>        <font color='red'>}</font>
+<a name='L731'>        <i><font color='green'>/* Pass down previously bound symbols */</font></i>
+<a name='L732'>        <b>if</b> (bound) <font color='red'>{</font>
+<a name='L733'>            temp = PyNumber_InPlaceOr(newbound, bound);
+<a name='L734'>            <b>if</b> (!temp)
+<a name='L735'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L736'>            Py_DECREF(temp);
+<a name='L737'>        <font color='red'>}</font>
+<a name='L738'>        <i><font color='green'>/* Pass down known globals */</font></i>
+<a name='L739'>        temp = PyNumber_InPlaceOr(newglobal, global);
+<a name='L740'>        <b>if</b> (!temp)
+<a name='L741'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L742'>        Py_DECREF(temp);
+<a name='L743'>    <font color='red'>}</font>
+<a name='L744'>    <b>else</b> <font color='red'>{</font>
+<a name='L745'>        <i><font color='green'>/* Special-case __class__ */</font></i>
+<a name='L746'>        <b>if</b> (!<a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(__class__))
+<a name='L747'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L748'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../S/2806.html#L2295' title='Defined at 2295 in Objects/setobject.c.'>PySet_Contains</a>(<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>, __class__) == 1);
+<a name='L749'>        <b>if</b> (<a href='../S/2806.html#L2315' title='Defined at 2315 in Objects/setobject.c.'>PySet_Add</a>(newbound, __class__) &lt; 0)
+<a name='L750'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L751'>    <font color='red'>}</font>
+<a name='L752'>
+<a name='L753'>    <i><font color='green'>/* Recursively call analyze_block() on each child block.</font></i>
+<a name='L754'><i><font color='green'></font></i>
+<a name='L755'><i><font color='green'>       newbound, newglobal now contain the names visible in</font></i>
+<a name='L756'><i><font color='green'>       nested blocks.  The free variables in the children will</font></i>
+<a name='L757'><i><font color='green'>       be collected in allfree.</font></i>
+<a name='L758'><i><font color='green'>    */</font></i>
+<a name='L759'>    allfree = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L760'>    <b>if</b> (!allfree)
+<a name='L761'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L762'>    <b>for</b> (i = 0; i &lt; <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(ste-&gt;ste_children); ++i) <font color='red'>{</font>
+<a name='L763'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *c = PyList_GET_ITEM(ste-&gt;ste_children, i);
+<a name='L764'>        <a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a>* entry;
+<a name='L765'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(c &amp;&amp; PySTEntry_Check(c));
+<a name='L766'>        entry = (<a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a>*)c;
+<a name='L767'>        <b>if</b> (!<a href='../S/3143.html#L812' title='Defined at 812 in Python/symtable.c.'>analyze_child_block</a>(entry, newbound, newfree, newglobal,
+<a name='L768'>                                 allfree))
+<a name='L769'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L770'>        <i><font color='green'>/* Check if any children have free variables */</font></i>
+<a name='L771'>        <b>if</b> (entry-&gt;ste_free || entry-&gt;ste_child_free)
+<a name='L772'>            ste-&gt;ste_child_free = 1;
+<a name='L773'>    <font color='red'>}</font>
+<a name='L774'>
+<a name='L775'>    temp = PyNumber_InPlaceOr(newfree, allfree);
+<a name='L776'>    <b>if</b> (!temp)
+<a name='L777'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L778'>    Py_DECREF(temp);
+<a name='L779'>
+<a name='L780'>    <i><font color='green'>/* Check if any local variables must be converted to cell variables */</font></i>
+<a name='L781'>    <b>if</b> (ste-&gt;ste_type == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a> &amp;&amp; !<a href='../S/3143.html#L483' title='Defined at 483 in Python/symtable.c.'>analyze_cells</a>(scopes, newfree,
+<a name='L782'>                                                         <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>))
+<a name='L783'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L784'>    <b>else</b> <b>if</b> (ste-&gt;ste_type == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ClassBlock</a> &amp;&amp; !<a href='../S/3143.html#L483' title='Defined at 483 in Python/symtable.c.'>analyze_cells</a>(scopes, newfree,
+<a name='L785'>                                                           "__class__"))
+<a name='L786'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L787'>    <i><font color='green'>/* Records the results of the analysis in the symbol table entry */</font></i>
+<a name='L788'>    <b>if</b> (!<a href='../S/3143.html#L551' title='Defined at 551 in Python/symtable.c.'>update_symbols</a>(ste-&gt;ste_symbols, scopes, bound, newfree,
+<a name='L789'>                        ste-&gt;ste_type == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ClassBlock</a>))
+<a name='L790'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L791'>    <b>if</b> (!<a href='../S/3143.html#L520' title='Defined at 520 in Python/symtable.c.'>check_unoptimized</a>(ste))
+<a name='L792'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L793'>
+<a name='L794'>    temp = PyNumber_InPlaceOr(free, newfree);
+<a name='L795'>    <b>if</b> (!temp)
+<a name='L796'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L797'>    Py_DECREF(temp);
+<a name='L798'>    success = 1;
+<a name='L799'> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L800'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(scopes);
+<a name='L801'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../D/9558.html' title='Multiple defined in 6 places.'>local</a>);
+<a name='L802'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(newbound);
+<a name='L803'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(newglobal);
+<a name='L804'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(newfree);
+<a name='L805'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(allfree);
+<a name='L806'>    <b>if</b> (!success)
+<a name='L807'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(<a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>());
+<a name='L808'>    <b>return</b> success;
+<a name='L809'><font color='red'>}</font>
+<a name='L810'>
+<a name='L811'><b>static</b> <b>int</b>
+<a name='L812'><a href='../R/5966.html' title='Multiple refered from 2 places.'>analyze_child_block</a>(PySTEntryObject *entry, PyObject *bound, PyObject *free,
+<a name='L813'>                    PyObject *global, PyObject* child_free)
+<a name='L814'><font color='red'>{</font>
+<a name='L815'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *temp_bound = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *temp_global = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *temp_free = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L816'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *temp;
+<a name='L817'>
+<a name='L818'>    <i><font color='green'>/* Copy the bound and global dictionaries.</font></i>
+<a name='L819'><i><font color='green'></font></i>
+<a name='L820'><i><font color='green'>       These dictionary are used by all blocks enclosed by the</font></i>
+<a name='L821'><i><font color='green'>       current block.  The analyze_block() call modifies these</font></i>
+<a name='L822'><i><font color='green'>       dictionaries.</font></i>
+<a name='L823'><i><font color='green'></font></i>
+<a name='L824'><i><font color='green'>    */</font></i>
+<a name='L825'>    temp_bound = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(bound);
+<a name='L826'>    <b>if</b> (!temp_bound)
+<a name='L827'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L828'>    temp_free = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(free);
+<a name='L829'>    <b>if</b> (!temp_free)
+<a name='L830'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L831'>    temp_global = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(global);
+<a name='L832'>    <b>if</b> (!temp_global)
+<a name='L833'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L834'>
+<a name='L835'>    <b>if</b> (!<a href='../S/3143.html#L658' title='Defined at 658 in Python/symtable.c.'>analyze_block</a>(entry, temp_bound, temp_free, temp_global))
+<a name='L836'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L837'>    temp = PyNumber_InPlaceOr(child_free, temp_free);
+<a name='L838'>    <b>if</b> (!temp)
+<a name='L839'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L840'>    Py_DECREF(temp);
+<a name='L841'>    Py_DECREF(temp_bound);
+<a name='L842'>    Py_DECREF(temp_free);
+<a name='L843'>    Py_DECREF(temp_global);
+<a name='L844'>    <b>return</b> 1;
+<a name='L845'> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L846'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(temp_bound);
+<a name='L847'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(temp_free);
+<a name='L848'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(temp_global);
+<a name='L849'>    <b>return</b> 0;
+<a name='L850'><font color='red'>}</font>
+<a name='L851'>
+<a name='L852'><b>static</b> <b>int</b>
+<a name='L853'><a href='../R/10642.html' title='Multiple refered from 2 places.'>symtable_analyze</a>(<b>struct</b> symtable *st)
+<a name='L854'><font color='red'>{</font>
+<a name='L855'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *free, *global;
+<a name='L856'>    <b>int</b> r;
+<a name='L857'>
+<a name='L858'>    free = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L859'>    <b>if</b> (!free)
+<a name='L860'>        <b>return</b> 0;
+<a name='L861'>    global = <a href='../S/2806.html#L2263' title='Defined at 2263 in Objects/setobject.c.'>PySet_New</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L862'>    <b>if</b> (!global) <font color='red'>{</font>
+<a name='L863'>        Py_DECREF(free);
+<a name='L864'>        <b>return</b> 0;
+<a name='L865'>    <font color='red'>}</font>
+<a name='L866'>    r = <a href='../S/3143.html#L658' title='Defined at 658 in Python/symtable.c.'>analyze_block</a>(st-&gt;st_top, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, free, global);
+<a name='L867'>    Py_DECREF(free);
+<a name='L868'>    Py_DECREF(global);
+<a name='L869'>    <b>return</b> r;
+<a name='L870'><font color='red'>}</font>
+<a name='L871'>
+<a name='L872'>
+<a name='L873'><b>static</b> <b>int</b>
+<a name='L874'><a href='../R/10666.html' title='Multiple refered from 3 places.'>symtable_warn</a>(<b>struct</b> symtable *st, <b>char</b> *msg, <b>int</b> lineno)
+<a name='L875'><font color='red'>{</font>
+<a name='L876'>    <b>if</b> (<a href='../S/3087.html#L780' title='Defined at 780 in Python/_warnings.c.'>PyErr_WarnExplicit</a>(PyExc_SyntaxWarning, msg, st-&gt;st_filename,
+<a name='L877'>                           lineno, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) &lt; 0)     <font color='red'>{</font>
+<a name='L878'>        <b>if</b> (<a href='../S/3106.html#L189' title='Defined at 189 in Python/errors.c.'>PyErr_ExceptionMatches</a>(PyExc_SyntaxWarning)) <font color='red'>{</font>
+<a name='L879'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SyntaxError, msg);
+<a name='L880'>            <a href='../S/3106.html#L774' title='Defined at 774 in Python/errors.c.'>PyErr_SyntaxLocationEx</a>(st-&gt;st_filename, st-&gt;st_cur-&gt;ste_lineno,
+<a name='L881'>                                   st-&gt;st_cur-&gt;ste_col_offset);
+<a name='L882'>        <font color='red'>}</font>
+<a name='L883'>        <b>return</b> 0;
+<a name='L884'>    <font color='red'>}</font>
+<a name='L885'>    <b>return</b> 1;
+<a name='L886'><font color='red'>}</font>
+<a name='L887'>
+<a name='L888'><i><font color='green'>/* symtable_enter_block() gets a reference via ste_new.</font></i>
+<a name='L889'><i><font color='green'>   This reference is released when the block is exited, via the DECREF</font></i>
+<a name='L890'><i><font color='green'>   in symtable_exit_block().</font></i>
+<a name='L891'><i><font color='green'>*/</font></i>
+<a name='L892'>
+<a name='L893'><b>static</b> <b>int</b>
+<a name='L894'><a href='../R/10644.html' title='Multiple refered from 13 places.'>symtable_exit_block</a>(<b>struct</b> symtable *st, <b>void</b> *ast)
+<a name='L895'><font color='red'>{</font>
+<a name='L896'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> end;
+<a name='L897'>
+<a name='L898'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(st-&gt;st_cur);
+<a name='L899'>    end = <a href='../S/534.html#L71' title='Defined at 71 in Include/listobject.h.'>PyList_GET_SIZE</a>(st-&gt;st_stack) - 1;
+<a name='L900'>    <b>if</b> (end &gt;= 0) <font color='red'>{</font>
+<a name='L901'>        st-&gt;st_cur = (<a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a> *)PyList_GET_ITEM(st-&gt;st_stack,
+<a name='L902'>                                                        end);
+<a name='L903'>        <b>if</b> (st-&gt;st_cur == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L904'>            <b>return</b> 0;
+<a name='L905'>        Py_INCREF(st-&gt;st_cur);
+<a name='L906'>        <b>if</b> (<a href='../S/2775.html#L1656' title='Defined at 1656 in Objects/abstract.c.'>PySequence_DelItem</a>(st-&gt;st_stack, end) &lt; 0)
+<a name='L907'>            <b>return</b> 0;
+<a name='L908'>    <font color='red'>}</font>
+<a name='L909'>    <b>return</b> 1;
+<a name='L910'><font color='red'>}</font>
+<a name='L911'>
+<a name='L912'><b>static</b> <b>int</b>
+<a name='L913'><a href='../R/10643.html' title='Multiple refered from 6 places.'>symtable_enter_block</a>(<b>struct</b> symtable *st, identifier name, _Py_block_ty block,
+<a name='L914'>                     <b>void</b> *ast, <b>int</b> lineno, <b>int</b> col_offset)
+<a name='L915'><font color='red'>{</font>
+<a name='L916'>    <a href='../S/579.html#L56' title='Defined at 56 in Include/symtable.h.'>PySTEntryObject</a> *prev = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L917'>
+<a name='L918'>    <b>if</b> (st-&gt;st_cur) <font color='red'>{</font>
+<a name='L919'>        prev = st-&gt;st_cur;
+<a name='L920'>        <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(st-&gt;st_stack, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)st-&gt;st_cur) &lt; 0) <font color='red'>{</font>
+<a name='L921'>            <b>return</b> 0;
+<a name='L922'>        <font color='red'>}</font>
+<a name='L923'>        Py_DECREF(st-&gt;st_cur);
+<a name='L924'>    <font color='red'>}</font>
+<a name='L925'>    st-&gt;st_cur = <a href='../S/3143.html#L27' title='Defined at 27 in Python/symtable.c.'>ste_new</a>(st, name, <a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a>, ast, lineno, col_offset);
+<a name='L926'>    <b>if</b> (st-&gt;st_cur == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L927'>        <b>return</b> 0;
+<a name='L928'>    <b>if</b> (<a href='../D/7006.html' title='Multiple defined in 4 places.'>block</a> == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ModuleBlock</a>)
+<a name='L929'>        st-&gt;st_global = st-&gt;st_cur-&gt;ste_symbols;
+<a name='L930'>    <b>if</b> (prev) <font color='red'>{</font>
+<a name='L931'>        <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(prev-&gt;ste_children,
+<a name='L932'>                          (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)st-&gt;st_cur) &lt; 0) <font color='red'>{</font>
+<a name='L933'>            <b>return</b> 0;
+<a name='L934'>        <font color='red'>}</font>
+<a name='L935'>    <font color='red'>}</font>
+<a name='L936'>    <b>return</b> 1;
+<a name='L937'><font color='red'>}</font>
+<a name='L938'>
+<a name='L939'><b>static</b> <b>long</b>
+<a name='L940'><a href='../R/10647.html' title='Multiple refered from 2 places.'>symtable_lookup</a>(<b>struct</b> symtable *st, PyObject *name)
+<a name='L941'><font color='red'>{</font>
+<a name='L942'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o;
+<a name='L943'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *mangled = <a href='../S/3094.html#L194' title='Defined at 194 in Python/compile.c.'>_Py_Mangle</a>(st-&gt;st_private, name);
+<a name='L944'>    <b>if</b> (!mangled)
+<a name='L945'>        <b>return</b> 0;
+<a name='L946'>    o = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(st-&gt;st_cur-&gt;ste_symbols, mangled);
+<a name='L947'>    Py_DECREF(mangled);
+<a name='L948'>    <b>if</b> (!o)
+<a name='L949'>        <b>return</b> 0;
+<a name='L950'>    <b>return</b> <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(o);
+<a name='L951'><font color='red'>}</font>
+<a name='L952'>
+<a name='L953'><b>static</b> <b>int</b>
+<a name='L954'><a href='../R/10641.html' title='Multiple refered from 15 places.'>symtable_add_def</a>(<b>struct</b> symtable *st, PyObject *name, <b>int</b> flag)
+<a name='L955'><font color='red'>{</font>
+<a name='L956'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *o;
+<a name='L957'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *dict;
+<a name='L958'>    <b>long</b> val;
+<a name='L959'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *mangled = <a href='../S/3094.html#L194' title='Defined at 194 in Python/compile.c.'>_Py_Mangle</a>(st-&gt;st_private, name);
+<a name='L960'>
+<a name='L961'>
+<a name='L962'>    <b>if</b> (!mangled)
+<a name='L963'>        <b>return</b> 0;
+<a name='L964'>    dict = st-&gt;st_cur-&gt;ste_symbols;
+<a name='L965'>    <b>if</b> ((o = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(dict, mangled))) <font color='red'>{</font>
+<a name='L966'>        val = PyLong_AS_LONG(o);
+<a name='L967'>        <b>if</b> ((flag &amp; DEF_PARAM) &amp;&amp; (val &amp; DEF_PARAM)) <font color='red'>{</font>
+<a name='L968'>            <i><font color='green'>/* Is it better to use 'mangled' or 'name' here? */</font></i>
+<a name='L969'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_SyntaxError, <a href='../S/3143.html#L197' title='Defined at 197 in Python/symtable.c.'>DUPLICATE_ARGUMENT</a>, name);
+<a name='L970'>            <a href='../S/3106.html#L774' title='Defined at 774 in Python/errors.c.'>PyErr_SyntaxLocationEx</a>(st-&gt;st_filename,
+<a name='L971'>                                   st-&gt;st_cur-&gt;ste_lineno,
+<a name='L972'>                                   st-&gt;st_cur-&gt;ste_col_offset);
+<a name='L973'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L974'>        <font color='red'>}</font>
+<a name='L975'>        val |= flag;
+<a name='L976'>    <font color='red'>}</font> <b>else</b>
+<a name='L977'>        val = flag;
+<a name='L978'>    o = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(val);
+<a name='L979'>    <b>if</b> (o == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L980'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L981'>    <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(dict, mangled, o) &lt; 0) <font color='red'>{</font>
+<a name='L982'>        Py_DECREF(o);
+<a name='L983'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L984'>    <font color='red'>}</font>
+<a name='L985'>    Py_DECREF(o);
+<a name='L986'>
+<a name='L987'>    <b>if</b> (flag &amp; DEF_PARAM) <font color='red'>{</font>
+<a name='L988'>        <b>if</b> (<a href='../S/2796.html#L286' title='Defined at 286 in Objects/listobject.c.'>PyList_Append</a>(st-&gt;st_cur-&gt;ste_varnames, mangled) &lt; 0)
+<a name='L989'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L990'>    <font color='red'>}</font> <b>else</b>      <b>if</b> (flag &amp; DEF_GLOBAL) <font color='red'>{</font>
+<a name='L991'>        <i><font color='green'>/* XXX need to update DEF_GLOBAL for other flags too;</font></i>
+<a name='L992'><i><font color='green'>           perhaps only DEF_FREE_GLOBAL */</font></i>
+<a name='L993'>        val = flag;
+<a name='L994'>        <b>if</b> ((o = <a href='../S/2787.html#L704' title='Defined at 704 in Objects/dictobject.c.'>PyDict_GetItem</a>(st-&gt;st_global, mangled))) <font color='red'>{</font>
+<a name='L995'>            val |= PyLong_AS_LONG(o);
+<a name='L996'>        <font color='red'>}</font>
+<a name='L997'>        o = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(val);
+<a name='L998'>        <b>if</b> (o == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L999'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L1000'>        <b>if</b> (<a href='../S/2787.html#L786' title='Defined at 786 in Objects/dictobject.c.'>PyDict_SetItem</a>(st-&gt;st_global, mangled, o) &lt; 0) <font color='red'>{</font>
+<a name='L1001'>            Py_DECREF(o);
+<a name='L1002'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L1003'>        <font color='red'>}</font>
+<a name='L1004'>        Py_DECREF(o);
+<a name='L1005'>    <font color='red'>}</font>
+<a name='L1006'>    Py_DECREF(mangled);
+<a name='L1007'>    <b>return</b> 1;
+<a name='L1008'>
+<a name='L1009'><a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L1010'>    Py_DECREF(mangled);
+<a name='L1011'>    <b>return</b> 0;
+<a name='L1012'><font color='red'>}</font>
+<a name='L1013'>
+<a name='L1014'><i><font color='green'>/* VISIT, VISIT_SEQ and VIST_SEQ_TAIL take an ASDL type as their second argument.</font></i>
+<a name='L1015'><i><font color='green'>   They use the ASDL name to synthesize the name of the C type and the visit</font></i>
+<a name='L1016'><i><font color='green'>   function.</font></i>
+<a name='L1017'><i><font color='green'></font></i>
+<a name='L1018'><i><font color='green'>   VISIT_SEQ_TAIL permits the start of an ASDL sequence to be skipped, which is</font></i>
+<a name='L1019'><i><font color='green'>   useful if the first node in the sequence requires special treatment.</font></i>
+<a name='L1020'><i><font color='green'>*/</font></i>
+<a name='L1021'>
+<a name='L1022'><font color='darkred'>#define</font> <a href='../R/4854.html' title='Multiple refered from 110 places.'>VISIT</a>(ST, TYPE, V) \
+<a name='L1023'>    <b>if</b> (!symtable_visit_ ## <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>((ST), (V))) \
+<a name='L1024'>        <b>return</b> 0;
+<a name='L1025'>
+<a name='L1026'><font color='darkred'>#define</font> <a href='../R/4855.html' title='Multiple refered from 6 places.'>VISIT_IN_BLOCK</a>(ST, TYPE, V, S) \
+<a name='L1027'>    <b>if</b> (!symtable_visit_ ## <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>((ST), (V))) <font color='red'>{</font> \
+<a name='L1028'>        <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>((ST), (<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>)); \
+<a name='L1029'>        <b>return</b> 0; \
+<a name='L1030'>    <font color='red'>}</font>
+<a name='L1031'>
+<a name='L1032'><font color='darkred'>#define</font> <a href='../R/4858.html' title='Multiple refered from 58 places.'>VISIT_SEQ</a>(ST, TYPE, SEQ) <font color='red'>{</font> \
+<a name='L1033'>    <b>int</b> i; \
+<a name='L1034'>    <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq = (SEQ); <i><font color='green'>/* avoid variable capture */</font></i> \
+<a name='L1035'>    <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++) <font color='red'>{</font> \
+<a name='L1036'>        <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty elt = (<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i); \
+<a name='L1037'>        <b>if</b> (!symtable_visit_ ## <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>((ST), elt)) \
+<a name='L1038'>            <b>return</b> 0; \
+<a name='L1039'>    <font color='red'>}</font> \
+<a name='L1040'><font color='red'>}</font>
+<a name='L1041'>
+<a name='L1042'><font color='darkred'>#define</font> <a href='../R/4859.html' title='Multiple refered from 3 places.'>VISIT_SEQ_IN_BLOCK</a>(ST, TYPE, SEQ, S) <font color='red'>{</font> \
+<a name='L1043'>    <b>int</b> i; \
+<a name='L1044'>    <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq = (SEQ); <i><font color='green'>/* avoid variable capture */</font></i> \
+<a name='L1045'>    <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++) <font color='red'>{</font> \
+<a name='L1046'>        <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty elt = (<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i); \
+<a name='L1047'>        <b>if</b> (!symtable_visit_ ## <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>((ST), elt)) <font color='red'>{</font> \
+<a name='L1048'>            <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>((ST), (<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>)); \
+<a name='L1049'>            <b>return</b> 0; \
+<a name='L1050'>        <font color='red'>}</font> \
+<a name='L1051'>    <font color='red'>}</font> \
+<a name='L1052'><font color='red'>}</font>
+<a name='L1053'>
+<a name='L1054'><font color='darkred'>#define</font> VISIT_SEQ_TAIL(ST, TYPE, SEQ, START) <font color='red'>{</font> \
+<a name='L1055'>    <b>int</b> i; \
+<a name='L1056'>    <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq = (SEQ); <i><font color='green'>/* avoid variable capture */</font></i> \
+<a name='L1057'>    <b>for</b> (i = (START); i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++) <font color='red'>{</font> \
+<a name='L1058'>        <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty elt = (<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i); \
+<a name='L1059'>        <b>if</b> (!symtable_visit_ ## <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>((ST), elt)) \
+<a name='L1060'>            <b>return</b> 0; \
+<a name='L1061'>    <font color='red'>}</font> \
+<a name='L1062'><font color='red'>}</font>
+<a name='L1063'>
+<a name='L1064'><font color='darkred'>#define</font> <a href='../S/3143.html#L1655' title='Refered from 1655 in Python/symtable.c.'>VISIT_SEQ_TAIL_IN_BLOCK</a>(ST, TYPE, SEQ, START, S) <font color='red'>{</font> \
+<a name='L1065'>    <b>int</b> i; \
+<a name='L1066'>    <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq = (SEQ); <i><font color='green'>/* avoid variable capture */</font></i> \
+<a name='L1067'>    <b>for</b> (i = (START); i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++) <font color='red'>{</font> \
+<a name='L1068'>        <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty elt = (<a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a> ## _ty)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i); \
+<a name='L1069'>        <b>if</b> (!symtable_visit_ ## <a href='../S/2753.html#L32' title='Defined at 32 in Modules/zlib/inflate.h.'>TYPE</a>((ST), elt)) <font color='red'>{</font> \
+<a name='L1070'>            <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>((ST), (<a href='../D/4558.html' title='Multiple defined in 3 places.'>S</a>)); \
+<a name='L1071'>            <b>return</b> 0; \
+<a name='L1072'>        <font color='red'>}</font> \
+<a name='L1073'>    <font color='red'>}</font> \
+<a name='L1074'><font color='red'>}</font>
+<a name='L1075'>
+<a name='L1076'><font color='darkred'>#define</font> <a href='../S/3143.html#L1115' title='Refered from 1115 in Python/symtable.c.'>VISIT_KWONLYDEFAULTS</a>(ST, KW_DEFAULTS) <font color='red'>{</font> \
+<a name='L1077'>    <b>int</b> i = 0; \
+<a name='L1078'>    <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq = (KW_DEFAULTS); <i><font color='green'>/* avoid variable capture */</font></i> \
+<a name='L1079'>    <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++) <font color='red'>{</font> \
+<a name='L1080'>        <a href='../S/569.html#L9' title='Defined at 9 in Include/Python-ast.h.'>expr_ty</a> elt = (<a href='../S/569.html#L9' title='Defined at 9 in Include/Python-ast.h.'>expr_ty</a>)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i); \
+<a name='L1081'>        <b>if</b> (!elt) <b>continue</b>; <i><font color='green'>/* can be NULL */</font></i> \
+<a name='L1082'>        <b>if</b> (!<a href='../S/3143.html#L1319' title='Defined at 1319 in Python/symtable.c.'>symtable_visit_expr</a>((ST), elt)) \
+<a name='L1083'>            <b>return</b> 0; \
+<a name='L1084'>    <font color='red'>}</font> \
+<a name='L1085'><font color='red'>}</font>
+<a name='L1086'>
+<a name='L1087'><b>static</b> <b>int</b>
+<a name='L1088'><a href='../S/3143.html#L1649' title='Refered from 1649 in Python/symtable.c.'>symtable_new_tmpname</a>(<b>struct</b> symtable *st)
+<a name='L1089'><font color='red'>{</font>
+<a name='L1090'>    <b>char</b> tmpname[256];
+<a name='L1091'>    <a href='../S/500.html#L4' title='Defined at 4 in Include/asdl.h.'>identifier</a> tmp;
+<a name='L1092'>
+<a name='L1093'>    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(tmpname, <b>sizeof</b>(tmpname), "_[%d]",
+<a name='L1094'>                  ++st-&gt;st_cur-&gt;ste_tmpname);
+<a name='L1095'>    tmp = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>(tmpname);
+<a name='L1096'>    <b>if</b> (!tmp)
+<a name='L1097'>        <b>return</b> 0;
+<a name='L1098'>    <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, tmp, DEF_LOCAL))
+<a name='L1099'>        <b>return</b> 0;
+<a name='L1100'>    Py_DECREF(tmp);
+<a name='L1101'>    <b>return</b> 1;
+<a name='L1102'><font color='red'>}</font>
+<a name='L1103'>
+<a name='L1104'>
+<a name='L1105'><b>static</b> <b>int</b>
+<a name='L1106'><a href='../R/10665.html' title='Multiple refered from 3 places.'>symtable_visit_stmt</a>(<b>struct</b> symtable *st, stmt_ty s)
+<a name='L1107'><font color='red'>{</font>
+<a name='L1108'>    <b>switch</b> (s-&gt;kind) <font color='red'>{</font>
+<a name='L1109'>    <b>case</b> <a href='../S/569.html#L64' title='Defined at 64 in Include/Python-ast.h.'>FunctionDef_kind</a>:
+<a name='L1110'>        <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.name, DEF_LOCAL))
+<a name='L1111'>            <b>return</b> 0;
+<a name='L1112'>        <b>if</b> (s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;defaults)
+<a name='L1113'>            <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;defaults);
+<a name='L1114'>        <b>if</b> (s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;kw_defaults)
+<a name='L1115'>            <a href='../S/3143.html#L1076' title='Defined at 1076 in Python/symtable.c.'>VISIT_KWONLYDEFAULTS</a>(st,
+<a name='L1116'>                               s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;kw_defaults);
+<a name='L1117'>        <b>if</b> (!<a href='../S/3143.html#L1490' title='Defined at 1490 in Python/symtable.c.'>symtable_visit_annotations</a>(st, s))
+<a name='L1118'>            <b>return</b> 0;
+<a name='L1119'>        <b>if</b> (s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.decorator_list)
+<a name='L1120'>            <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.decorator_list);
+<a name='L1121'>        <b>if</b> (!<a href='../S/3143.html#L913' title='Defined at 913 in Python/symtable.c.'>symtable_enter_block</a>(st, s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.name,
+<a name='L1122'>                                  <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a>, (<b>void</b> *)s, s-&gt;lineno,
+<a name='L1123'>                                  s-&gt;col_offset))
+<a name='L1124'>            <b>return</b> 0;
+<a name='L1125'>        <a href='../S/3143.html#L1026' title='Defined at 1026 in Python/symtable.c.'>VISIT_IN_BLOCK</a>(st, <a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>, s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, s);
+<a name='L1126'>        <a href='../S/3143.html#L1042' title='Defined at 1042 in Python/symtable.c.'>VISIT_SEQ_IN_BLOCK</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.body, s);
+<a name='L1127'>        <b>if</b> (!<a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, s))
+<a name='L1128'>            <b>return</b> 0;
+<a name='L1129'>        <b>break</b>;
+<a name='L1130'>    <b>case</b> <a href='../S/569.html#L64' title='Defined at 64 in Include/Python-ast.h.'>ClassDef_kind</a>: <font color='red'>{</font>
+<a name='L1131'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *tmp;
+<a name='L1132'>        <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.name, DEF_LOCAL))
+<a name='L1133'>            <b>return</b> 0;
+<a name='L1134'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.bases);
+<a name='L1135'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../D/9394.html' title='Multiple defined in 2 places.'>keyword</a>, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.keywords);
+<a name='L1136'>        <b>if</b> (s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.starargs)
+<a name='L1137'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.starargs);
+<a name='L1138'>        <b>if</b> (s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.kwargs)
+<a name='L1139'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.kwargs);
+<a name='L1140'>        <b>if</b> (s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.decorator_list)
+<a name='L1141'>            <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.decorator_list);
+<a name='L1142'>        <b>if</b> (!<a href='../S/3143.html#L913' title='Defined at 913 in Python/symtable.c.'>symtable_enter_block</a>(st, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.name, <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ClassBlock</a>,
+<a name='L1143'>                                  (<b>void</b> *)s, s-&gt;lineno, s-&gt;col_offset))
+<a name='L1144'>            <b>return</b> 0;
+<a name='L1145'>        <b>if</b> (!<a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(__class__) ||
+<a name='L1146'>            !<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, __class__, DEF_LOCAL) ||
+<a name='L1147'>            !<a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(__locals__) ||
+<a name='L1148'>            !<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, __locals__, DEF_PARAM)) <font color='red'>{</font>
+<a name='L1149'>            <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, s);
+<a name='L1150'>            <b>return</b> 0;
+<a name='L1151'>        <font color='red'>}</font>
+<a name='L1152'>        tmp = st-&gt;st_private;
+<a name='L1153'>        st-&gt;st_private = s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.name;
+<a name='L1154'>        <a href='../S/3143.html#L1042' title='Defined at 1042 in Python/symtable.c.'>VISIT_SEQ_IN_BLOCK</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/687.html' title='Multiple defined in 2 places.'>ClassDef</a>.body, s);
+<a name='L1155'>        st-&gt;st_private = tmp;
+<a name='L1156'>        <b>if</b> (!<a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, s))
+<a name='L1157'>            <b>return</b> 0;
+<a name='L1158'>        <b>break</b>;
+<a name='L1159'>    <font color='red'>}</font>
+<a name='L1160'>    <b>case</b> <a href='../S/569.html#L64' title='Defined at 64 in Include/Python-ast.h.'>Return_kind</a>:
+<a name='L1161'>        <b>if</b> (s-&gt;v.<a href='../D/4546.html' title='Multiple defined in 2 places.'>Return</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) <font color='red'>{</font>
+<a name='L1162'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/4546.html' title='Multiple defined in 2 places.'>Return</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1163'>            st-&gt;st_cur-&gt;ste_returns_value = 1;
+<a name='L1164'>            <b>if</b> (st-&gt;st_cur-&gt;ste_generator) <font color='red'>{</font>
+<a name='L1165'>                <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SyntaxError,
+<a name='L1166'>                    <a href='../S/3143.html#L22' title='Defined at 22 in Python/symtable.c.'>RETURN_VAL_IN_GENERATOR</a>);
+<a name='L1167'>                <a href='../S/3106.html#L774' title='Defined at 774 in Python/errors.c.'>PyErr_SyntaxLocationEx</a>(st-&gt;st_filename,
+<a name='L1168'>                                       s-&gt;lineno,
+<a name='L1169'>                                       s-&gt;col_offset);
+<a name='L1170'>                <b>return</b> 0;
+<a name='L1171'>            <font color='red'>}</font>
+<a name='L1172'>        <font color='red'>}</font>
+<a name='L1173'>        <b>break</b>;
+<a name='L1174'>    <b>case</b> <a href='../S/569.html#L65' title='Defined at 65 in Include/Python-ast.h.'>Delete_kind</a>:
+<a name='L1175'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/847.html' title='Multiple defined in 2 places.'>Delete</a>.targets);
+<a name='L1176'>        <b>break</b>;
+<a name='L1177'>    <b>case</b> <a href='../S/569.html#L65' title='Defined at 65 in Include/Python-ast.h.'>Assign_kind</a>:
+<a name='L1178'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/221.html' title='Multiple defined in 2 places.'>Assign</a>.targets);
+<a name='L1179'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/221.html' title='Multiple defined in 2 places.'>Assign</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1180'>        <b>break</b>;
+<a name='L1181'>    <b>case</b> <a href='../S/569.html#L65' title='Defined at 65 in Include/Python-ast.h.'>AugAssign_kind</a>:
+<a name='L1182'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/226.html' title='Multiple defined in 2 places.'>AugAssign</a>.target);
+<a name='L1183'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/226.html' title='Multiple defined in 2 places.'>AugAssign</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1184'>        <b>break</b>;
+<a name='L1185'>    <b>case</b> <a href='../S/569.html#L65' title='Defined at 65 in Include/Python-ast.h.'>For_kind</a>:
+<a name='L1186'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1353.html' title='Multiple defined in 2 places.'>For</a>.target);
+<a name='L1187'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1353.html' title='Multiple defined in 2 places.'>For</a>.iter);
+<a name='L1188'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/1353.html' title='Multiple defined in 2 places.'>For</a>.body);
+<a name='L1189'>        <b>if</b> (s-&gt;v.<a href='../D/1353.html' title='Multiple defined in 2 places.'>For</a>.orelse)
+<a name='L1190'>            <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/1353.html' title='Multiple defined in 2 places.'>For</a>.orelse);
+<a name='L1191'>        <b>break</b>;
+<a name='L1192'>    <b>case</b> <a href='../S/569.html#L66' title='Defined at 66 in Include/Python-ast.h.'>While_kind</a>:
+<a name='L1193'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/5561.html' title='Multiple defined in 2 places.'>While</a>.<a href='../D/11648.html' title='Multiple defined in 2 places.'>test</a>);
+<a name='L1194'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/5561.html' title='Multiple defined in 2 places.'>While</a>.body);
+<a name='L1195'>        <b>if</b> (s-&gt;v.<a href='../D/5561.html' title='Multiple defined in 2 places.'>While</a>.orelse)
+<a name='L1196'>            <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/5561.html' title='Multiple defined in 2 places.'>While</a>.orelse);
+<a name='L1197'>        <b>break</b>;
+<a name='L1198'>    <b>case</b> <a href='../S/569.html#L66' title='Defined at 66 in Include/Python-ast.h.'>If_kind</a>:
+<a name='L1199'>        <i><font color='green'>/* XXX if 0: and lookup_yield() hacks */</font></i>
+<a name='L1200'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1808.html' title='Multiple defined in 2 places.'>If</a>.<a href='../D/11648.html' title='Multiple defined in 2 places.'>test</a>);
+<a name='L1201'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/1808.html' title='Multiple defined in 2 places.'>If</a>.body);
+<a name='L1202'>        <b>if</b> (s-&gt;v.<a href='../D/1808.html' title='Multiple defined in 2 places.'>If</a>.orelse)
+<a name='L1203'>            <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/1808.html' title='Multiple defined in 2 places.'>If</a>.orelse);
+<a name='L1204'>        <b>break</b>;
+<a name='L1205'>    <b>case</b> <a href='../S/569.html#L66' title='Defined at 66 in Include/Python-ast.h.'>Raise_kind</a>:
+<a name='L1206'>        <b>if</b> (s-&gt;v.<a href='../D/4533.html' title='Multiple defined in 2 places.'>Raise</a>.exc) <font color='red'>{</font>
+<a name='L1207'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/4533.html' title='Multiple defined in 2 places.'>Raise</a>.exc);
+<a name='L1208'>        <b>if</b> (s-&gt;v.<a href='../D/4533.html' title='Multiple defined in 2 places.'>Raise</a>.cause) <font color='red'>{</font>
+<a name='L1209'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/4533.html' title='Multiple defined in 2 places.'>Raise</a>.cause);
+<a name='L1210'>        <font color='red'>}</font>
+<a name='L1211'>        <font color='red'>}</font>
+<a name='L1212'>        <b>break</b>;
+<a name='L1213'>    <b>case</b> <a href='../S/569.html#L67' title='Defined at 67 in Include/Python-ast.h.'>TryExcept_kind</a>:
+<a name='L1214'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/5318.html' title='Multiple defined in 2 places.'>TryExcept</a>.body);
+<a name='L1215'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/5318.html' title='Multiple defined in 2 places.'>TryExcept</a>.orelse);
+<a name='L1216'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, excepthandler, s-&gt;v.<a href='../D/5318.html' title='Multiple defined in 2 places.'>TryExcept</a>.handlers);
+<a name='L1217'>        <b>break</b>;
+<a name='L1218'>    <b>case</b> <a href='../S/569.html#L67' title='Defined at 67 in Include/Python-ast.h.'>TryFinally_kind</a>:
+<a name='L1219'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/5320.html' title='Multiple defined in 2 places.'>TryFinally</a>.body);
+<a name='L1220'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/5320.html' title='Multiple defined in 2 places.'>TryFinally</a>.finalbody);
+<a name='L1221'>        <b>break</b>;
+<a name='L1222'>    <b>case</b> <a href='../S/569.html#L67' title='Defined at 67 in Include/Python-ast.h.'>Assert_kind</a>:
+<a name='L1223'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>.<a href='../D/11648.html' title='Multiple defined in 2 places.'>test</a>);
+<a name='L1224'>        <b>if</b> (s-&gt;v.<a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>.msg)
+<a name='L1225'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/219.html' title='Multiple defined in 4 places.'>Assert</a>.msg);
+<a name='L1226'>        <b>break</b>;
+<a name='L1227'>    <b>case</b> <a href='../S/569.html#L68' title='Defined at 68 in Include/Python-ast.h.'>Import_kind</a>:
+<a name='L1228'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../D/6702.html' title='Multiple defined in 2 places.'>alias</a>, s-&gt;v.<a href='../D/1812.html' title='Multiple defined in 2 places.'>Import</a>.names);
+<a name='L1229'>        <i><font color='green'>/* XXX Don't have the lineno available inside</font></i>
+<a name='L1230'><i><font color='green'>           visit_alias */</font></i>
+<a name='L1231'>        <b>if</b> (st-&gt;st_cur-&gt;ste_unoptimized &amp;&amp; !st-&gt;st_cur-&gt;ste_opt_lineno) <font color='red'>{</font>
+<a name='L1232'>            st-&gt;st_cur-&gt;ste_opt_lineno = s-&gt;lineno;
+<a name='L1233'>            st-&gt;st_cur-&gt;ste_opt_col_offset = s-&gt;col_offset;
+<a name='L1234'>        <font color='red'>}</font>
+<a name='L1235'>        <b>break</b>;
+<a name='L1236'>    <b>case</b> <a href='../S/569.html#L68' title='Defined at 68 in Include/Python-ast.h.'>ImportFrom_kind</a>:
+<a name='L1237'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../D/6702.html' title='Multiple defined in 2 places.'>alias</a>, s-&gt;v.<a href='../D/1813.html' title='Multiple defined in 2 places.'>ImportFrom</a>.names);
+<a name='L1238'>        <i><font color='green'>/* XXX Don't have the lineno available inside</font></i>
+<a name='L1239'><i><font color='green'>           visit_alias */</font></i>
+<a name='L1240'>        <b>if</b> (st-&gt;st_cur-&gt;ste_unoptimized &amp;&amp; !st-&gt;st_cur-&gt;ste_opt_lineno) <font color='red'>{</font>
+<a name='L1241'>            st-&gt;st_cur-&gt;ste_opt_lineno = s-&gt;lineno;
+<a name='L1242'>            st-&gt;st_cur-&gt;ste_opt_col_offset = s-&gt;col_offset;
+<a name='L1243'>        <font color='red'>}</font>
+<a name='L1244'>        <b>break</b>;
+<a name='L1245'>    <b>case</b> <a href='../S/569.html#L68' title='Defined at 68 in Include/Python-ast.h.'>Global_kind</a>: <font color='red'>{</font>
+<a name='L1246'>        <b>int</b> i;
+<a name='L1247'>        <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq = s-&gt;v.<a href='../D/1443.html' title='Multiple defined in 2 places.'>Global</a>.names;
+<a name='L1248'>        <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++) <font color='red'>{</font>
+<a name='L1249'>            <a href='../S/500.html#L4' title='Defined at 4 in Include/asdl.h.'>identifier</a> name = (<a href='../S/500.html#L4' title='Defined at 4 in Include/asdl.h.'>identifier</a>)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i);
+<a name='L1250'>            <b>char</b> *c_name = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(name);
+<a name='L1251'>            <b>long</b> cur = <a href='../S/3143.html#L940' title='Defined at 940 in Python/symtable.c.'>symtable_lookup</a>(st, name);
+<a name='L1252'>            <b>if</b> (cur &lt; 0)
+<a name='L1253'>                <b>return</b> 0;
+<a name='L1254'>            <b>if</b> (cur &amp; (DEF_LOCAL | USE)) <font color='red'>{</font>
+<a name='L1255'>                <b>char</b> buf[256];
+<a name='L1256'>                <b>if</b> (cur &amp; DEF_LOCAL)
+<a name='L1257'>                    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L1258'>                                  <a href='../S/3143.html#L8' title='Defined at 8 in Python/symtable.c.'>GLOBAL_AFTER_ASSIGN</a>,
+<a name='L1259'>                                  c_name);
+<a name='L1260'>                <b>else</b>
+<a name='L1261'>                    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L1262'>                                  <a href='../S/3143.html#L14' title='Defined at 14 in Python/symtable.c.'>GLOBAL_AFTER_USE</a>,
+<a name='L1263'>                                  c_name);
+<a name='L1264'>                <b>if</b> (!<a href='../S/3143.html#L874' title='Defined at 874 in Python/symtable.c.'>symtable_warn</a>(st, buf, s-&gt;lineno))
+<a name='L1265'>                    <b>return</b> 0;
+<a name='L1266'>            <font color='red'>}</font>
+<a name='L1267'>            <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, name, DEF_GLOBAL))
+<a name='L1268'>                <b>return</b> 0;
+<a name='L1269'>        <font color='red'>}</font>
+<a name='L1270'>        <b>break</b>;
+<a name='L1271'>    <font color='red'>}</font>
+<a name='L1272'>    <b>case</b> <a href='../S/569.html#L69' title='Defined at 69 in Include/Python-ast.h.'>Nonlocal_kind</a>: <font color='red'>{</font>
+<a name='L1273'>        <b>int</b> i;
+<a name='L1274'>        <a href='../S/500.html#L19' title='Defined at 19 in Include/asdl.h.'>asdl_seq</a> *seq = s-&gt;v.<a href='../D/2386.html' title='Multiple defined in 2 places.'>Nonlocal</a>.names;
+<a name='L1275'>        <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(seq); i++) <font color='red'>{</font>
+<a name='L1276'>            <a href='../S/500.html#L4' title='Defined at 4 in Include/asdl.h.'>identifier</a> name = (<a href='../S/500.html#L4' title='Defined at 4 in Include/asdl.h.'>identifier</a>)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(seq, i);
+<a name='L1277'>            <b>char</b> *c_name = <a href='../S/2828.html#L1919' title='Defined at 1919 in Objects/unicodeobject.c.'>_PyUnicode_AsString</a>(name);
+<a name='L1278'>            <b>long</b> cur = <a href='../S/3143.html#L940' title='Defined at 940 in Python/symtable.c.'>symtable_lookup</a>(st, name);
+<a name='L1279'>            <b>if</b> (cur &lt; 0)
+<a name='L1280'>                <b>return</b> 0;
+<a name='L1281'>            <b>if</b> (cur &amp; (DEF_LOCAL | USE)) <font color='red'>{</font>
+<a name='L1282'>                <b>char</b> buf[256];
+<a name='L1283'>                <b>if</b> (cur &amp; DEF_LOCAL)
+<a name='L1284'>                    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L1285'>                                  <a href='../S/3143.html#L11' title='Defined at 11 in Python/symtable.c.'>NONLOCAL_AFTER_ASSIGN</a>,
+<a name='L1286'>                                  c_name);
+<a name='L1287'>                <b>else</b>
+<a name='L1288'>                    <a href='../S/3126.html#L41' title='Defined at 41 in Python/mysnprintf.c.'>PyOS_snprintf</a>(buf, <b>sizeof</b>(buf),
+<a name='L1289'>                                  <a href='../S/3143.html#L17' title='Defined at 17 in Python/symtable.c.'>NONLOCAL_AFTER_USE</a>,
+<a name='L1290'>                                  c_name);
+<a name='L1291'>                <b>if</b> (!<a href='../S/3143.html#L874' title='Defined at 874 in Python/symtable.c.'>symtable_warn</a>(st, buf, s-&gt;lineno))
+<a name='L1292'>                    <b>return</b> 0;
+<a name='L1293'>            <font color='red'>}</font>
+<a name='L1294'>            <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, name, DEF_NONLOCAL))
+<a name='L1295'>                <b>return</b> 0;
+<a name='L1296'>        <font color='red'>}</font>
+<a name='L1297'>        <b>break</b>;
+<a name='L1298'>    <font color='red'>}</font>
+<a name='L1299'>    <b>case</b> <a href='../S/569.html#L69' title='Defined at 69 in Include/Python-ast.h.'>Expr_kind</a>:
+<a name='L1300'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1064.html' title='Multiple defined in 2 places.'>Expr</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1301'>        <b>break</b>;
+<a name='L1302'>    <b>case</b> <a href='../S/569.html#L69' title='Defined at 69 in Include/Python-ast.h.'>Pass_kind</a>:
+<a name='L1303'>    <b>case</b> <a href='../S/569.html#L69' title='Defined at 69 in Include/Python-ast.h.'>Break_kind</a>:
+<a name='L1304'>    <b>case</b> <a href='../S/569.html#L70' title='Defined at 70 in Include/Python-ast.h.'>Continue_kind</a>:
+<a name='L1305'>        <i><font color='green'>/* nothing to do here */</font></i>
+<a name='L1306'>        <b>break</b>;
+<a name='L1307'>    <b>case</b> <a href='../S/569.html#L66' title='Defined at 66 in Include/Python-ast.h.'>With_kind</a>:
+<a name='L1308'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/5577.html' title='Multiple defined in 2 places.'>With</a>.context_expr);
+<a name='L1309'>        <b>if</b> (s-&gt;v.<a href='../D/5577.html' title='Multiple defined in 2 places.'>With</a>.optional_vars) <font color='red'>{</font>
+<a name='L1310'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/5577.html' title='Multiple defined in 2 places.'>With</a>.optional_vars);
+<a name='L1311'>        <font color='red'>}</font>
+<a name='L1312'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, s-&gt;v.<a href='../D/5577.html' title='Multiple defined in 2 places.'>With</a>.body);
+<a name='L1313'>        <b>break</b>;
+<a name='L1314'>    <font color='red'>}</font>
+<a name='L1315'>    <b>return</b> 1;
+<a name='L1316'><font color='red'>}</font>
+<a name='L1317'>
+<a name='L1318'><b>static</b> <b>int</b>
+<a name='L1319'><a href='../R/10658.html' title='Multiple refered from 3 places.'>symtable_visit_expr</a>(<b>struct</b> symtable *st, expr_ty e)
+<a name='L1320'><font color='red'>{</font>
+<a name='L1321'>    <b>switch</b> (e-&gt;kind) <font color='red'>{</font>
+<a name='L1322'>    <b>case</b> <a href='../S/569.html#L184' title='Defined at 184 in Include/Python-ast.h.'>BoolOp_kind</a>:
+<a name='L1323'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/452.html' title='Multiple defined in 2 places.'>BoolOp</a>.values);
+<a name='L1324'>        <b>break</b>;
+<a name='L1325'>    <b>case</b> <a href='../S/569.html#L184' title='Defined at 184 in Include/Python-ast.h.'>BinOp_kind</a>:
+<a name='L1326'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/444.html' title='Multiple defined in 2 places.'>BinOp</a>.left);
+<a name='L1327'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/444.html' title='Multiple defined in 2 places.'>BinOp</a>.right);
+<a name='L1328'>        <b>break</b>;
+<a name='L1329'>    <b>case</b> <a href='../S/569.html#L184' title='Defined at 184 in Include/Python-ast.h.'>UnaryOp_kind</a>:
+<a name='L1330'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/5428.html' title='Multiple defined in 2 places.'>UnaryOp</a>.operand);
+<a name='L1331'>        <b>break</b>;
+<a name='L1332'>    <b>case</b> <a href='../S/569.html#L184' title='Defined at 184 in Include/Python-ast.h.'>Lambda_kind</a>: <font color='red'>{</font>
+<a name='L1333'>        <b>if</b> (!<a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(lambda))
+<a name='L1334'>            <b>return</b> 0;
+<a name='L1335'>        <b>if</b> (e-&gt;v.<a href='../D/1985.html' title='Multiple defined in 2 places.'>Lambda</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;defaults)
+<a name='L1336'>            <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/1985.html' title='Multiple defined in 2 places.'>Lambda</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>-&gt;defaults);
+<a name='L1337'>        <b>if</b> (!<a href='../S/3143.html#L913' title='Defined at 913 in Python/symtable.c.'>symtable_enter_block</a>(st, lambda,
+<a name='L1338'>                                  <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a>, (<b>void</b> *)e, e-&gt;lineno,
+<a name='L1339'>                                  e-&gt;col_offset))
+<a name='L1340'>            <b>return</b> 0;
+<a name='L1341'>        <a href='../S/3143.html#L1026' title='Defined at 1026 in Python/symtable.c.'>VISIT_IN_BLOCK</a>(st, <a href='../D/6737.html' title='Multiple defined in 2 places.'>arguments</a>, e-&gt;v.<a href='../D/1985.html' title='Multiple defined in 2 places.'>Lambda</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, (<b>void</b>*)e);
+<a name='L1342'>        <a href='../S/3143.html#L1026' title='Defined at 1026 in Python/symtable.c.'>VISIT_IN_BLOCK</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/1985.html' title='Multiple defined in 2 places.'>Lambda</a>.body, (<b>void</b>*)e);
+<a name='L1343'>        <b>if</b> (!<a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, (<b>void</b> *)e))
+<a name='L1344'>            <b>return</b> 0;
+<a name='L1345'>        <b>break</b>;
+<a name='L1346'>    <font color='red'>}</font>
+<a name='L1347'>    <b>case</b> <a href='../S/569.html#L185' title='Defined at 185 in Include/Python-ast.h.'>IfExp_kind</a>:
+<a name='L1348'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/1809.html' title='Multiple defined in 2 places.'>IfExp</a>.<a href='../D/11648.html' title='Multiple defined in 2 places.'>test</a>);
+<a name='L1349'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/1809.html' title='Multiple defined in 2 places.'>IfExp</a>.body);
+<a name='L1350'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/1809.html' title='Multiple defined in 2 places.'>IfExp</a>.orelse);
+<a name='L1351'>        <b>break</b>;
+<a name='L1352'>    <b>case</b> <a href='../S/569.html#L185' title='Defined at 185 in Include/Python-ast.h.'>Dict_kind</a>:
+<a name='L1353'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/860.html' title='Multiple defined in 2 places.'>Dict</a>.keys);
+<a name='L1354'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/860.html' title='Multiple defined in 2 places.'>Dict</a>.values);
+<a name='L1355'>        <b>break</b>;
+<a name='L1356'>    <b>case</b> <a href='../S/569.html#L185' title='Defined at 185 in Include/Python-ast.h.'>Set_kind</a>:
+<a name='L1357'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/5058.html' title='Multiple defined in 2 places.'>Set</a>.elts);
+<a name='L1358'>        <b>break</b>;
+<a name='L1359'>    <b>case</b> <a href='../S/569.html#L186' title='Defined at 186 in Include/Python-ast.h.'>GeneratorExp_kind</a>:
+<a name='L1360'>        <b>if</b> (!<a href='../S/3143.html#L1664' title='Defined at 1664 in Python/symtable.c.'>symtable_visit_genexp</a>(st, e))
+<a name='L1361'>            <b>return</b> 0;
+<a name='L1362'>        <b>break</b>;
+<a name='L1363'>    <b>case</b> <a href='../S/569.html#L185' title='Defined at 185 in Include/Python-ast.h.'>ListComp_kind</a>:
+<a name='L1364'>        <b>if</b> (!<a href='../S/3143.html#L1672' title='Defined at 1672 in Python/symtable.c.'>symtable_visit_listcomp</a>(st, e))
+<a name='L1365'>            <b>return</b> 0;
+<a name='L1366'>        <b>break</b>;
+<a name='L1367'>    <b>case</b> <a href='../S/569.html#L186' title='Defined at 186 in Include/Python-ast.h.'>SetComp_kind</a>:
+<a name='L1368'>        <b>if</b> (!<a href='../S/3143.html#L1680' title='Defined at 1680 in Python/symtable.c.'>symtable_visit_setcomp</a>(st, e))
+<a name='L1369'>            <b>return</b> 0;
+<a name='L1370'>        <b>break</b>;
+<a name='L1371'>    <b>case</b> <a href='../S/569.html#L186' title='Defined at 186 in Include/Python-ast.h.'>DictComp_kind</a>:
+<a name='L1372'>        <b>if</b> (!<a href='../S/3143.html#L1688' title='Defined at 1688 in Python/symtable.c.'>symtable_visit_dictcomp</a>(st, e))
+<a name='L1373'>            <b>return</b> 0;
+<a name='L1374'>        <b>break</b>;
+<a name='L1375'>    <b>case</b> <a href='../S/569.html#L187' title='Defined at 187 in Include/Python-ast.h.'>Yield_kind</a>:
+<a name='L1376'>        <b>if</b> (e-&gt;v.<a href='../D/5918.html' title='Multiple defined in 5 places.'>Yield</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)
+<a name='L1377'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/5918.html' title='Multiple defined in 5 places.'>Yield</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1378'>        st-&gt;st_cur-&gt;ste_generator = 1;
+<a name='L1379'>        <b>if</b> (st-&gt;st_cur-&gt;ste_returns_value) <font color='red'>{</font>
+<a name='L1380'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SyntaxError,
+<a name='L1381'>                <a href='../S/3143.html#L22' title='Defined at 22 in Python/symtable.c.'>RETURN_VAL_IN_GENERATOR</a>);
+<a name='L1382'>            <a href='../S/3106.html#L774' title='Defined at 774 in Python/errors.c.'>PyErr_SyntaxLocationEx</a>(st-&gt;st_filename,
+<a name='L1383'>                                   e-&gt;lineno, e-&gt;col_offset);
+<a name='L1384'>            <b>return</b> 0;
+<a name='L1385'>        <font color='red'>}</font>
+<a name='L1386'>        <b>break</b>;
+<a name='L1387'>    <b>case</b> <a href='../S/569.html#L187' title='Defined at 187 in Include/Python-ast.h.'>Compare_kind</a>:
+<a name='L1388'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/693.html' title='Multiple defined in 2 places.'>Compare</a>.left);
+<a name='L1389'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/693.html' title='Multiple defined in 2 places.'>Compare</a>.comparators);
+<a name='L1390'>        <b>break</b>;
+<a name='L1391'>    <b>case</b> <a href='../S/569.html#L187' title='Defined at 187 in Include/Python-ast.h.'>Call_kind</a>:
+<a name='L1392'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a>.func);
+<a name='L1393'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>);
+<a name='L1394'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../D/9394.html' title='Multiple defined in 2 places.'>keyword</a>, e-&gt;v.<a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a>.keywords);
+<a name='L1395'>        <b>if</b> (e-&gt;v.<a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a>.starargs)
+<a name='L1396'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a>.starargs);
+<a name='L1397'>        <b>if</b> (e-&gt;v.<a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a>.kwargs)
+<a name='L1398'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/671.html' title='Multiple defined in 2 places.'>Call</a>.kwargs);
+<a name='L1399'>        <b>break</b>;
+<a name='L1400'>    <b>case</b> <a href='../S/569.html#L187' title='Defined at 187 in Include/Python-ast.h.'>Num_kind</a>:
+<a name='L1401'>    <b>case</b> <a href='../S/569.html#L188' title='Defined at 188 in Include/Python-ast.h.'>Str_kind</a>:
+<a name='L1402'>    <b>case</b> <a href='../S/569.html#L188' title='Defined at 188 in Include/Python-ast.h.'>Bytes_kind</a>:
+<a name='L1403'>    <b>case</b> <a href='../S/569.html#L188' title='Defined at 188 in Include/Python-ast.h.'>Ellipsis_kind</a>:
+<a name='L1404'>        <i><font color='green'>/* Nothing to do here. */</font></i>
+<a name='L1405'>        <b>break</b>;
+<a name='L1406'>    <i><font color='green'>/* The following exprs can be assignment targets. */</font></i>
+<a name='L1407'>    <b>case</b> <a href='../S/569.html#L189' title='Defined at 189 in Include/Python-ast.h.'>Attribute_kind</a>:
+<a name='L1408'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/224.html' title='Multiple defined in 2 places.'>Attribute</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1409'>        <b>break</b>;
+<a name='L1410'>    <b>case</b> <a href='../S/569.html#L189' title='Defined at 189 in Include/Python-ast.h.'>Subscript_kind</a>:
+<a name='L1411'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/5111.html' title='Multiple defined in 2 places.'>Subscript</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1412'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, slice, e-&gt;v.<a href='../D/5111.html' title='Multiple defined in 2 places.'>Subscript</a>.slice);
+<a name='L1413'>        <b>break</b>;
+<a name='L1414'>    <b>case</b> <a href='../S/569.html#L189' title='Defined at 189 in Include/Python-ast.h.'>Starred_kind</a>:
+<a name='L1415'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/5092.html' title='Multiple defined in 2 places.'>Starred</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1416'>        <b>break</b>;
+<a name='L1417'>    <b>case</b> <a href='../S/569.html#L190' title='Defined at 190 in Include/Python-ast.h.'>Name_kind</a>:
+<a name='L1418'>        <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, e-&gt;v.<a href='../D/2364.html' title='Multiple defined in 2 places.'>Name</a>.id,
+<a name='L1419'>                              e-&gt;v.<a href='../D/2364.html' title='Multiple defined in 2 places.'>Name</a>.ctx == <a href='../S/569.html#L11' title='Defined at 11 in Include/Python-ast.h.'>Load</a> ? USE : DEF_LOCAL))
+<a name='L1420'>            <b>return</b> 0;
+<a name='L1421'>        <i><font color='green'>/* Special-case super: it counts as a use of __class__ */</font></i>
+<a name='L1422'>        <b>if</b> (e-&gt;v.<a href='../D/2364.html' title='Multiple defined in 2 places.'>Name</a>.ctx == <a href='../S/569.html#L11' title='Defined at 11 in Include/Python-ast.h.'>Load</a> &amp;&amp;
+<a name='L1423'>            st-&gt;st_cur-&gt;ste_type == <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a> &amp;&amp;
+<a name='L1424'>            !<a href='../D/3968.html' title='Multiple defined in 3 places.'>PyUnicode_CompareWithASCIIString</a>(e-&gt;v.<a href='../D/2364.html' title='Multiple defined in 2 places.'>Name</a>.id, "super")) <font color='red'>{</font>
+<a name='L1425'>            <b>if</b> (!<a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(__class__) ||
+<a name='L1426'>                !<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, __class__, USE))
+<a name='L1427'>                <b>return</b> 0;
+<a name='L1428'>        <font color='red'>}</font>
+<a name='L1429'>        <b>break</b>;
+<a name='L1430'>    <i><font color='green'>/* child nodes of List and Tuple will have expr_context set */</font></i>
+<a name='L1431'>    <b>case</b> <a href='../S/569.html#L190' title='Defined at 190 in Include/Python-ast.h.'>List_kind</a>:
+<a name='L1432'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/1989.html' title='Multiple defined in 2 places.'>List</a>.elts);
+<a name='L1433'>        <b>break</b>;
+<a name='L1434'>    <b>case</b> <a href='../S/569.html#L190' title='Defined at 190 in Include/Python-ast.h.'>Tuple_kind</a>:
+<a name='L1435'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, e-&gt;v.<a href='../D/5322.html' title='Multiple defined in 2 places.'>Tuple</a>.elts);
+<a name='L1436'>        <b>break</b>;
+<a name='L1437'>    <font color='red'>}</font>
+<a name='L1438'>    <b>return</b> 1;
+<a name='L1439'><font color='red'>}</font>
+<a name='L1440'>
+<a name='L1441'><b>static</b> <b>int</b>
+<a name='L1442'><a href='../R/10646.html' title='Multiple refered from 2 places.'>symtable_implicit_arg</a>(<b>struct</b> symtable *st, <b>int</b> pos)
+<a name='L1443'><font color='red'>{</font>
+<a name='L1444'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *id = <a href='../D/4008.html' title='Multiple defined in 3 places.'>PyUnicode_FromFormat</a>(".%d", pos);
+<a name='L1445'>    <b>if</b> (id == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L1446'>        <b>return</b> 0;
+<a name='L1447'>    <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, id, DEF_PARAM)) <font color='red'>{</font>
+<a name='L1448'>        Py_DECREF(id);
+<a name='L1449'>        <b>return</b> 0;
+<a name='L1450'>    <font color='red'>}</font>
+<a name='L1451'>    Py_DECREF(id);
+<a name='L1452'>    <b>return</b> 1;
+<a name='L1453'><font color='red'>}</font>
+<a name='L1454'>
+<a name='L1455'><b>static</b> <b>int</b>
+<a name='L1456'><a href='../R/10662.html' title='Multiple refered from 3 places.'>symtable_visit_params</a>(<b>struct</b> symtable *st, asdl_seq *args)
+<a name='L1457'><font color='red'>{</font>
+<a name='L1458'>    <b>int</b> i;
+<a name='L1459'>
+<a name='L1460'>    <b>if</b> (!<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>)
+<a name='L1461'>        <b>return</b> -1;
+<a name='L1462'>
+<a name='L1463'>    <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>); i++) <font color='red'>{</font>
+<a name='L1464'>        <a href='../S/569.html#L33' title='Defined at 33 in Include/Python-ast.h.'>arg_ty</a> <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = (<a href='../S/569.html#L33' title='Defined at 33 in Include/Python-ast.h.'>arg_ty</a>)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, i);
+<a name='L1465'>        <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>, DEF_PARAM))
+<a name='L1466'>            <b>return</b> 0;
+<a name='L1467'>    <font color='red'>}</font>
+<a name='L1468'>
+<a name='L1469'>    <b>return</b> 1;
+<a name='L1470'><font color='red'>}</font>
+<a name='L1471'>
+<a name='L1472'><b>static</b> <b>int</b>
+<a name='L1473'><a href='../R/10653.html' title='Multiple refered from 3 places.'>symtable_visit_argannotations</a>(<b>struct</b> symtable *st, asdl_seq *args)
+<a name='L1474'><font color='red'>{</font>
+<a name='L1475'>    <b>int</b> i;
+<a name='L1476'>
+<a name='L1477'>    <b>if</b> (!<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>)
+<a name='L1478'>        <b>return</b> -1;
+<a name='L1479'>
+<a name='L1480'>    <b>for</b> (i = 0; i &lt; <a href='../S/500.html#L30' title='Defined at 30 in Include/asdl.h.'>asdl_seq_LEN</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>); i++) <font color='red'>{</font>
+<a name='L1481'>        <a href='../S/569.html#L33' title='Defined at 33 in Include/Python-ast.h.'>arg_ty</a> <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a> = (<a href='../S/569.html#L33' title='Defined at 33 in Include/Python-ast.h.'>arg_ty</a>)<a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, i);
+<a name='L1482'>        <b>if</b> (<a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;annotation)
+<a name='L1483'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, <a href='../D/6730.html' title='Multiple defined in 2 places.'>arg</a>-&gt;annotation);
+<a name='L1484'>    <font color='red'>}</font>
+<a name='L1485'>
+<a name='L1486'>    <b>return</b> 1;
+<a name='L1487'><font color='red'>}</font>
+<a name='L1488'>
+<a name='L1489'><b>static</b> <b>int</b>
+<a name='L1490'><a href='../R/10652.html' title='Multiple refered from 2 places.'>symtable_visit_annotations</a>(<b>struct</b> symtable *st, stmt_ty s)
+<a name='L1491'><font color='red'>{</font>
+<a name='L1492'>    <a href='../S/569.html#L31' title='Defined at 31 in Include/Python-ast.h.'>arguments_ty</a> a = s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>;
+<a name='L1493'>
+<a name='L1494'>    <b>if</b> (a-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> &amp;&amp; !<a href='../S/3143.html#L1473' title='Defined at 1473 in Python/symtable.c.'>symtable_visit_argannotations</a>(st, a-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>))
+<a name='L1495'>        <b>return</b> 0;
+<a name='L1496'>    <b>if</b> (a-&gt;varargannotation)
+<a name='L1497'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, a-&gt;varargannotation);
+<a name='L1498'>    <b>if</b> (a-&gt;kwargannotation)
+<a name='L1499'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, a-&gt;kwargannotation);
+<a name='L1500'>    <b>if</b> (a-&gt;kwonlyargs &amp;&amp; !<a href='../S/3143.html#L1473' title='Defined at 1473 in Python/symtable.c.'>symtable_visit_argannotations</a>(st, a-&gt;kwonlyargs))
+<a name='L1501'>        <b>return</b> 0;
+<a name='L1502'>    <b>if</b> (s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.returns)
+<a name='L1503'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1362.html' title='Multiple defined in 2 places.'>FunctionDef</a>.returns);
+<a name='L1504'>    <b>return</b> 1;
+<a name='L1505'><font color='red'>}</font>
+<a name='L1506'>
+<a name='L1507'><b>static</b> <b>int</b>
+<a name='L1508'><a href='../S/3143.html#L178' title='Refered from 178 in Python/symtable.c.'>symtable_visit_arguments</a>(<b>struct</b> symtable *st, arguments_ty a)
+<a name='L1509'><font color='red'>{</font>
+<a name='L1510'>    <i><font color='green'>/* skip default arguments inside function block</font></i>
+<a name='L1511'><i><font color='green'>       XXX should ast be different?</font></i>
+<a name='L1512'><i><font color='green'>    */</font></i>
+<a name='L1513'>    <b>if</b> (a-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a> &amp;&amp; !<a href='../S/3143.html#L1456' title='Defined at 1456 in Python/symtable.c.'>symtable_visit_params</a>(st, a-&gt;<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>))
+<a name='L1514'>        <b>return</b> 0;
+<a name='L1515'>    <b>if</b> (a-&gt;kwonlyargs &amp;&amp; !<a href='../S/3143.html#L1456' title='Defined at 1456 in Python/symtable.c.'>symtable_visit_params</a>(st, a-&gt;kwonlyargs))
+<a name='L1516'>        <b>return</b> 0;
+<a name='L1517'>    <b>if</b> (a-&gt;vararg) <font color='red'>{</font>
+<a name='L1518'>        <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, a-&gt;vararg, DEF_PARAM))
+<a name='L1519'>            <b>return</b> 0;
+<a name='L1520'>        st-&gt;st_cur-&gt;ste_varargs = 1;
+<a name='L1521'>    <font color='red'>}</font>
+<a name='L1522'>    <b>if</b> (a-&gt;kwarg) <font color='red'>{</font>
+<a name='L1523'>        <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, a-&gt;kwarg, DEF_PARAM))
+<a name='L1524'>            <b>return</b> 0;
+<a name='L1525'>        st-&gt;st_cur-&gt;ste_varkeywords = 1;
+<a name='L1526'>    <font color='red'>}</font>
+<a name='L1527'>    <b>return</b> 1;
+<a name='L1528'><font color='red'>}</font>
+<a name='L1529'>
+<a name='L1530'>
+<a name='L1531'><b>static</b> <b>int</b>
+<a name='L1532'><a href='../S/3143.html#L179' title='Refered from 179 in Python/symtable.c.'>symtable_visit_excepthandler</a>(<b>struct</b> symtable *st, excepthandler_ty eh)
+<a name='L1533'><font color='red'>{</font>
+<a name='L1534'>    <b>if</b> (eh-&gt;v.<a href='../D/1053.html' title='Multiple defined in 2 places.'>ExceptHandler</a>.type)
+<a name='L1535'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, eh-&gt;v.<a href='../D/1053.html' title='Multiple defined in 2 places.'>ExceptHandler</a>.type);
+<a name='L1536'>    <b>if</b> (eh-&gt;v.<a href='../D/1053.html' title='Multiple defined in 2 places.'>ExceptHandler</a>.name)
+<a name='L1537'>        <b>if</b> (!<a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, eh-&gt;v.<a href='../D/1053.html' title='Multiple defined in 2 places.'>ExceptHandler</a>.name, DEF_LOCAL))
+<a name='L1538'>            <b>return</b> 0;
+<a name='L1539'>    <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L15' title='Defined at 15 in Include/graminit.h.'>stmt</a>, eh-&gt;v.<a href='../D/1053.html' title='Multiple defined in 2 places.'>ExceptHandler</a>.body);
+<a name='L1540'>    <b>return</b> 1;
+<a name='L1541'><font color='red'>}</font>
+<a name='L1542'>
+<a name='L1543'>
+<a name='L1544'><b>static</b> <b>int</b>
+<a name='L1545'><a href='../S/3143.html#L180' title='Refered from 180 in Python/symtable.c.'>symtable_visit_alias</a>(<b>struct</b> symtable *st, alias_ty a)
+<a name='L1546'><font color='red'>{</font>
+<a name='L1547'>    <i><font color='green'>/* Compute store_name, the name actually bound by the import</font></i>
+<a name='L1548'><i><font color='green'>       operation.  It is different than a-&gt;name when a-&gt;name is a</font></i>
+<a name='L1549'><i><font color='green'>       dotted package name (e.g. spam.eggs)</font></i>
+<a name='L1550'><i><font color='green'>    */</font></i>
+<a name='L1551'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *store_name;
+<a name='L1552'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *name = (a-&gt;asname == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) ? a-&gt;name : a-&gt;asname;
+<a name='L1553'>    <b>const</b> <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *base = <a href='../S/587.html#L408' title='Defined at 408 in Include/unicodeobject.h.'>PyUnicode_AS_UNICODE</a>(name);
+<a name='L1554'>    <a href='../S/587.html#L135' title='Defined at 135 in Include/unicodeobject.h.'>Py_UNICODE</a> *dot = <a href='../S/2828.html#L10306' title='Defined at 10306 in Objects/unicodeobject.c.'>Py_UNICODE_strchr</a>(base, '.');
+<a name='L1555'>    <b>if</b> (dot) <font color='red'>{</font>
+<a name='L1556'>        store_name = <a href='../D/4014.html' title='Multiple defined in 3 places.'>PyUnicode_FromUnicode</a>(base, dot - base);
+<a name='L1557'>        <b>if</b> (!store_name)
+<a name='L1558'>            <b>return</b> 0;
+<a name='L1559'>    <font color='red'>}</font>
+<a name='L1560'>    <b>else</b> <font color='red'>{</font>
+<a name='L1561'>        store_name = name;
+<a name='L1562'>        Py_INCREF(store_name);
+<a name='L1563'>    <font color='red'>}</font>
+<a name='L1564'>    <b>if</b> (<a href='../D/3968.html' title='Multiple defined in 3 places.'>PyUnicode_CompareWithASCIIString</a>(name, "*")) <font color='red'>{</font>
+<a name='L1565'>        <b>int</b> r = <a href='../S/3143.html#L954' title='Defined at 954 in Python/symtable.c.'>symtable_add_def</a>(st, store_name, DEF_IMPORT);
+<a name='L1566'>        Py_DECREF(store_name);
+<a name='L1567'>        <b>return</b> r;
+<a name='L1568'>    <font color='red'>}</font>
+<a name='L1569'>    <b>else</b> <font color='red'>{</font>
+<a name='L1570'>        <b>if</b> (st-&gt;st_cur-&gt;ste_type != <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>ModuleBlock</a>) <font color='red'>{</font>
+<a name='L1571'>        <b>int</b> lineno = st-&gt;st_cur-&gt;ste_lineno;
+<a name='L1572'>        <b>int</b> col_offset = st-&gt;st_cur-&gt;ste_col_offset;
+<a name='L1573'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_SyntaxError, <a href='../S/3143.html#L20' title='Defined at 20 in Python/symtable.c.'>IMPORT_STAR_WARNING</a>);
+<a name='L1574'>        <a href='../S/3106.html#L774' title='Defined at 774 in Python/errors.c.'>PyErr_SyntaxLocationEx</a>(st-&gt;st_filename, lineno, col_offset);
+<a name='L1575'>        Py_DECREF(store_name);
+<a name='L1576'>        <b>return</b> 0;
+<a name='L1577'>        <font color='red'>}</font>
+<a name='L1578'>        st-&gt;st_cur-&gt;ste_unoptimized |= OPT_IMPORT_STAR;
+<a name='L1579'>        Py_DECREF(store_name);
+<a name='L1580'>        <b>return</b> 1;
+<a name='L1581'>    <font color='red'>}</font>
+<a name='L1582'><font color='red'>}</font>
+<a name='L1583'>
+<a name='L1584'>
+<a name='L1585'><b>static</b> <b>int</b>
+<a name='L1586'><a href='../S/3143.html#L181' title='Refered from 181 in Python/symtable.c.'>symtable_visit_comprehension</a>(<b>struct</b> symtable *st, comprehension_ty lc)
+<a name='L1587'><font color='red'>{</font>
+<a name='L1588'>    <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, lc-&gt;target);
+<a name='L1589'>    <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, lc-&gt;iter);
+<a name='L1590'>    <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, lc-&gt;ifs);
+<a name='L1591'>    <b>return</b> 1;
+<a name='L1592'><font color='red'>}</font>
+<a name='L1593'>
+<a name='L1594'>
+<a name='L1595'><b>static</b> <b>int</b>
+<a name='L1596'><a href='../S/3143.html#L182' title='Refered from 182 in Python/symtable.c.'>symtable_visit_keyword</a>(<b>struct</b> symtable *st, keyword_ty k)
+<a name='L1597'><font color='red'>{</font>
+<a name='L1598'>    <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, k-&gt;<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1599'>    <b>return</b> 1;
+<a name='L1600'><font color='red'>}</font>
+<a name='L1601'>
+<a name='L1602'>
+<a name='L1603'><b>static</b> <b>int</b>
+<a name='L1604'><a href='../S/3143.html#L183' title='Refered from 183 in Python/symtable.c.'>symtable_visit_slice</a>(<b>struct</b> symtable *st, slice_ty s)
+<a name='L1605'><font color='red'>{</font>
+<a name='L1606'>    <b>switch</b> (s-&gt;kind) <font color='red'>{</font>
+<a name='L1607'>    <b>case</b> <a href='../S/569.html#L318' title='Defined at 318 in Include/Python-ast.h.'>Slice_kind</a>:
+<a name='L1608'>        <b>if</b> (s-&gt;v.<a href='../D/5087.html' title='Multiple defined in 2 places.'>Slice</a>.lower)
+<a name='L1609'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/5087.html' title='Multiple defined in 2 places.'>Slice</a>.lower)
+<a name='L1610'>        <b>if</b> (s-&gt;v.<a href='../D/5087.html' title='Multiple defined in 2 places.'>Slice</a>.upper)
+<a name='L1611'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/5087.html' title='Multiple defined in 2 places.'>Slice</a>.upper)
+<a name='L1612'>        <b>if</b> (s-&gt;v.<a href='../D/5087.html' title='Multiple defined in 2 places.'>Slice</a>.step)
+<a name='L1613'>            <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/5087.html' title='Multiple defined in 2 places.'>Slice</a>.step)
+<a name='L1614'>        <b>break</b>;
+<a name='L1615'>    <b>case</b> <a href='../S/569.html#L318' title='Defined at 318 in Include/Python-ast.h.'>ExtSlice_kind</a>:
+<a name='L1616'>        <a href='../D/5485.html' title='Multiple defined in 2 places.'>VISIT_SEQ</a>(st, slice, s-&gt;v.<a href='../D/1068.html' title='Multiple defined in 2 places.'>ExtSlice</a>.dims)
+<a name='L1617'>        <b>break</b>;
+<a name='L1618'>    <b>case</b> <a href='../S/569.html#L318' title='Defined at 318 in Include/Python-ast.h.'>Index_kind</a>:
+<a name='L1619'>        <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, s-&gt;v.<a href='../D/1817.html' title='Multiple defined in 2 places.'>Index</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)
+<a name='L1620'>        <b>break</b>;
+<a name='L1621'>    <font color='red'>}</font>
+<a name='L1622'>    <b>return</b> 1;
+<a name='L1623'><font color='red'>}</font>
+<a name='L1624'>
+<a name='L1625'><b>static</b> <b>int</b>
+<a name='L1626'><a href='../R/10645.html' title='Multiple refered from 4 places.'>symtable_handle_comprehension</a>(<b>struct</b> symtable *st, expr_ty e,
+<a name='L1627'>                              identifier scope_name, asdl_seq *generators,
+<a name='L1628'>                              expr_ty elt, expr_ty value)
+<a name='L1629'><font color='red'>{</font>
+<a name='L1630'>    <b>int</b> is_generator = (e-&gt;kind == <a href='../S/569.html#L186' title='Defined at 186 in Include/Python-ast.h.'>GeneratorExp_kind</a>);
+<a name='L1631'>    <b>int</b> needs_tmp = !is_generator;
+<a name='L1632'>    <a href='../S/569.html#L27' title='Defined at 27 in Include/Python-ast.h.'>comprehension_ty</a> outermost = ((<a href='../S/569.html#L27' title='Defined at 27 in Include/Python-ast.h.'>comprehension_ty</a>)
+<a name='L1633'>                                    <a href='../S/500.html#L29' title='Defined at 29 in Include/asdl.h.'>asdl_seq_GET</a>(generators, 0));
+<a name='L1634'>    <i><font color='green'>/* Outermost iterator is evaluated in current scope */</font></i>
+<a name='L1635'>    <a href='../D/5481.html' title='Multiple defined in 2 places.'>VISIT</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, outermost-&gt;iter);
+<a name='L1636'>    <i><font color='green'>/* Create comprehension scope for the rest */</font></i>
+<a name='L1637'>    <b>if</b> (!scope_name ||
+<a name='L1638'>        !<a href='../S/3143.html#L913' title='Defined at 913 in Python/symtable.c.'>symtable_enter_block</a>(st, scope_name, <a href='../S/579.html#L13' title='Defined at 13 in Include/symtable.h.'>FunctionBlock</a>, (<b>void</b> *)e,
+<a name='L1639'>                              e-&gt;lineno, e-&gt;col_offset)) <font color='red'>{</font>
+<a name='L1640'>        <b>return</b> 0;
+<a name='L1641'>    <font color='red'>}</font>
+<a name='L1642'>    st-&gt;st_cur-&gt;ste_generator = is_generator;
+<a name='L1643'>    <i><font color='green'>/* Outermost iter is received as an argument */</font></i>
+<a name='L1644'>    <b>if</b> (!<a href='../S/3143.html#L1442' title='Defined at 1442 in Python/symtable.c.'>symtable_implicit_arg</a>(st, 0)) <font color='red'>{</font>
+<a name='L1645'>        <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, (<b>void</b> *)e);
+<a name='L1646'>        <b>return</b> 0;
+<a name='L1647'>    <font color='red'>}</font>
+<a name='L1648'>    <i><font color='green'>/* Allocate temporary name if needed */</font></i>
+<a name='L1649'>    <b>if</b> (needs_tmp &amp;&amp; !<a href='../S/3143.html#L1088' title='Defined at 1088 in Python/symtable.c.'>symtable_new_tmpname</a>(st)) <font color='red'>{</font>
+<a name='L1650'>        <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, (<b>void</b> *)e);
+<a name='L1651'>        <b>return</b> 0;
+<a name='L1652'>    <font color='red'>}</font>
+<a name='L1653'>    <a href='../S/3143.html#L1026' title='Defined at 1026 in Python/symtable.c.'>VISIT_IN_BLOCK</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, outermost-&gt;target, (<b>void</b>*)e);
+<a name='L1654'>    <a href='../S/3143.html#L1042' title='Defined at 1042 in Python/symtable.c.'>VISIT_SEQ_IN_BLOCK</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, outermost-&gt;ifs, (<b>void</b>*)e);
+<a name='L1655'>    <a href='../S/3143.html#L1064' title='Defined at 1064 in Python/symtable.c.'>VISIT_SEQ_TAIL_IN_BLOCK</a>(st, <a href='../D/7717.html' title='Multiple defined in 2 places.'>comprehension</a>,
+<a name='L1656'>                            generators, 1, (<b>void</b>*)e);
+<a name='L1657'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>)
+<a name='L1658'>        <a href='../S/3143.html#L1026' title='Defined at 1026 in Python/symtable.c.'>VISIT_IN_BLOCK</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, <a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>, (<b>void</b>*)e);
+<a name='L1659'>    <a href='../S/3143.html#L1026' title='Defined at 1026 in Python/symtable.c.'>VISIT_IN_BLOCK</a>(st, <a href='../S/529.html#L59' title='Defined at 59 in Include/graminit.h.'>expr</a>, elt, (<b>void</b>*)e);
+<a name='L1660'>    <b>return</b> <a href='../S/3143.html#L894' title='Defined at 894 in Python/symtable.c.'>symtable_exit_block</a>(st, (<b>void</b> *)e);
+<a name='L1661'><font color='red'>}</font>
+<a name='L1662'>
+<a name='L1663'><b>static</b> <b>int</b>
+<a name='L1664'><a href='../R/10659.html' title='Multiple refered from 2 places.'>symtable_visit_genexp</a>(<b>struct</b> symtable *st, expr_ty e)
+<a name='L1665'><font color='red'>{</font>
+<a name='L1666'>    <b>return</b> <a href='../S/3143.html#L1626' title='Defined at 1626 in Python/symtable.c.'>symtable_handle_comprehension</a>(st, e, <a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(genexpr),
+<a name='L1667'>                                         e-&gt;v.<a href='../D/1428.html' title='Multiple defined in 2 places.'>GeneratorExp</a>.generators,
+<a name='L1668'>                                         e-&gt;v.<a href='../D/1428.html' title='Multiple defined in 2 places.'>GeneratorExp</a>.elt, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1669'><font color='red'>}</font>
+<a name='L1670'>
+<a name='L1671'><b>static</b> <b>int</b>
+<a name='L1672'><a href='../R/10661.html' title='Multiple refered from 2 places.'>symtable_visit_listcomp</a>(<b>struct</b> symtable *st, expr_ty e)
+<a name='L1673'><font color='red'>{</font>
+<a name='L1674'>    <b>return</b> <a href='../S/3143.html#L1626' title='Defined at 1626 in Python/symtable.c.'>symtable_handle_comprehension</a>(st, e, <a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(listcomp),
+<a name='L1675'>                                         e-&gt;v.<a href='../D/1990.html' title='Multiple defined in 2 places.'>ListComp</a>.generators,
+<a name='L1676'>                                         e-&gt;v.<a href='../D/1990.html' title='Multiple defined in 2 places.'>ListComp</a>.elt, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1677'><font color='red'>}</font>
+<a name='L1678'>
+<a name='L1679'><b>static</b> <b>int</b>
+<a name='L1680'><a href='../R/10663.html' title='Multiple refered from 2 places.'>symtable_visit_setcomp</a>(<b>struct</b> symtable *st, expr_ty e)
+<a name='L1681'><font color='red'>{</font>
+<a name='L1682'>    <b>return</b> <a href='../S/3143.html#L1626' title='Defined at 1626 in Python/symtable.c.'>symtable_handle_comprehension</a>(st, e, <a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(setcomp),
+<a name='L1683'>                                         e-&gt;v.<a href='../D/5059.html' title='Multiple defined in 2 places.'>SetComp</a>.generators,
+<a name='L1684'>                                         e-&gt;v.<a href='../D/5059.html' title='Multiple defined in 2 places.'>SetComp</a>.elt, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L1685'><font color='red'>}</font>
+<a name='L1686'>
+<a name='L1687'><b>static</b> <b>int</b>
+<a name='L1688'><a href='../R/10656.html' title='Multiple refered from 2 places.'>symtable_visit_dictcomp</a>(<b>struct</b> symtable *st, expr_ty e)
+<a name='L1689'><font color='red'>{</font>
+<a name='L1690'>    <b>return</b> <a href='../S/3143.html#L1626' title='Defined at 1626 in Python/symtable.c.'>symtable_handle_comprehension</a>(st, e, <a href='../S/3143.html#L194' title='Defined at 194 in Python/symtable.c.'>GET_IDENTIFIER</a>(dictcomp),
+<a name='L1691'>                                         e-&gt;v.<a href='../D/861.html' title='Multiple defined in 2 places.'>DictComp</a>.generators,
+<a name='L1692'>                                         e-&gt;v.<a href='../D/861.html' title='Multiple defined in 2 places.'>DictComp</a>.<a href='../S/3145.html#L213' title='Defined at 213 in Python/thread.c.'>key</a>,
+<a name='L1693'>                                         e-&gt;v.<a href='../D/861.html' title='Multiple defined in 2 places.'>DictComp</a>.<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L1694'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L27'>[^]</a><a href='#L1688'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>

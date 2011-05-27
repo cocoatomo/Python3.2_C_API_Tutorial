@@ -1,0 +1,837 @@
+<html>
+<head>
+<title>Modules/_io/_iomodule.c</title>
+<meta name='robots' content='noindex,nofollow'>
+<meta name='generator' content='GLOBAL-5.8.1'>
+</head>
+<body text='#191970' bgcolor='#f5f5dc' vlink='gray'>
+<a name='TOP'><h2><a href='../mains.html'>root</a>/<a href='../files/3353.html'>Modules</a>/<a href='../files/3385.html'>_io</a>/_iomodule.c</h2>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L97'>[^]</a><a href='#L655'>[v]</a>[top]<a href='#BOTTOM'>[bottom]</a><a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+<hr>
+<h2>DEFINITIONS</h2>
+This source file includes following definitions.
+<ol>
+<li><a href='#L97' title='Defined at 97.'>blockingioerror_init</a>
+<li><a href='#L291' title='Defined at 291.'>io_open</a>
+<li><a href='#L534' title='Defined at 534.'>PyNumber_AsOff_t</a>
+<li><a href='#L580' title='Defined at 580.'>_PyIO_ConvertSsize_t</a>
+<li><a href='#L602' title='Defined at 602.'>iomodule_traverse</a>
+<li><a href='#L616' title='Defined at 616.'>iomodule_clear</a>
+<li><a href='#L628' title='Defined at 628.'>iomodule_free</a>
+<li><a href='#L655' title='Defined at 655.'>PyInit__io</a>
+</ol>
+<hr>
+<pre>
+<a name='L1'><i><font color='green'>/*</font></i>
+<a name='L2'><i><font color='green'>    An implementation of the new I/O lib as defined by PEP 3116 - "New I/O"</font></i>
+<a name='L3'><i><font color='green'>    </font></i>
+<a name='L4'><i><font color='green'>    Classes defined here: UnsupportedOperation, BlockingIOError.</font></i>
+<a name='L5'><i><font color='green'>    Functions defined here: open().</font></i>
+<a name='L6'><i><font color='green'>    </font></i>
+<a name='L7'><i><font color='green'>    Mostly written by Amaury Forgeot d'Arc</font></i>
+<a name='L8'><i><font color='green'>*/</font></i>
+<a name='L9'>
+<a name='L10'><font color='darkred'>#define</font> <a href='../R/2388.html' title='Multiple refered from 2 places.'>PY_SSIZE_T_CLEAN</a>
+<a name='L11'><font color='darkred'>#include</font> "<a href='570.html'>Python.h</a>"
+<a name='L12'><font color='darkred'>#include</font> "<a href='577.html'>structmember.h</a>"
+<a name='L13'><font color='darkred'>#include</font> "<a href='2569.html'>_iomodule.h</a>"
+<a name='L14'>
+<a name='L15'><font color='darkred'>#ifdef</font> <a href='../D/1582.html' title='Multiple defined in 4 places.'>HAVE_SYS_TYPES_H</a>
+<a name='L16'><font color='darkred'>#include</font> &lt;sys/types.h&gt;
+<a name='L17'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_SYS_TYPES_H */</font></i>
+<a name='L18'>
+<a name='L19'><font color='darkred'>#ifdef</font> <a href='../D/1579.html' title='Multiple defined in 4 places.'>HAVE_SYS_STAT_H</a>
+<a name='L20'><font color='darkred'>#include</font> &lt;sys/stat.h&gt;
+<a name='L21'><font color='darkred'>#endif</font> <i><font color='green'>/* HAVE_SYS_STAT_H */</font></i>
+<a name='L22'>
+<a name='L23'>
+<a name='L24'><i><font color='green'>/* Various interned strings */</font></i>
+<a name='L25'>
+<a name='L26'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_close;
+<a name='L27'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_closed;
+<a name='L28'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_decode;
+<a name='L29'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_encode;
+<a name='L30'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_fileno;
+<a name='L31'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_flush;
+<a name='L32'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_getstate;
+<a name='L33'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_isatty;
+<a name='L34'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_newlines;
+<a name='L35'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_nl;
+<a name='L36'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_read;
+<a name='L37'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_read1;
+<a name='L38'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_readable;
+<a name='L39'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_readinto;
+<a name='L40'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_readline;
+<a name='L41'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_reset;
+<a name='L42'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_seek;
+<a name='L43'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_seekable;
+<a name='L44'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_setstate;
+<a name='L45'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_tell;
+<a name='L46'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_truncate;
+<a name='L47'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_writable;
+<a name='L48'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_str_write;
+<a name='L49'>
+<a name='L50'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_empty_str;
+<a name='L51'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_empty_bytes;
+<a name='L52'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *_PyIO_zero;
+<a name='L53'>
+<a name='L54'>
+<a name='L55'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(module_doc,
+<a name='L56'>"The io module provides the Python interfaces to stream handling. The\n"
+<a name='L57'>"builtin open function is defined in this module.\n"
+<a name='L58'>"\n"
+<a name='L59'>"At the top of the I/O hierarchy is the abstract base class IOBase. It\n"
+<a name='L60'>"defines the basic interface to a stream. Note, however, that there is no\n"
+<a name='L61'>"seperation between reading and writing to streams; implementations are\n"
+<a name='L62'>"allowed to throw an IOError if they do not support a given operation.\n"
+<a name='L63'>"\n"
+<a name='L64'>"Extending IOBase is RawIOBase which deals simply with the reading and\n"
+<a name='L65'>"writing of raw bytes to a stream. FileIO subclasses RawIOBase to provide\n"
+<a name='L66'>"an interface to OS files.\n"
+<a name='L67'>"\n"
+<a name='L68'>"BufferedIOBase deals with buffering on a raw byte stream (RawIOBase). Its\n"
+<a name='L69'>"subclasses, BufferedWriter, BufferedReader, and BufferedRWPair buffer\n"
+<a name='L70'>"streams that are readable, writable, and both respectively.\n"
+<a name='L71'>"BufferedRandom provides a buffered interface to random access\n"
+<a name='L72'>"streams. BytesIO is a simple stream of in-memory bytes.\n"
+<a name='L73'>"\n"
+<a name='L74'>"Another IOBase subclass, TextIOBase, deals with the encoding and decoding\n"
+<a name='L75'>"of streams into text. TextIOWrapper, which extends it, is a buffered text\n"
+<a name='L76'>"interface to a buffered raw stream (`BufferedIOBase`). Finally, StringIO\n"
+<a name='L77'>"is a in-memory stream for text.\n"
+<a name='L78'>"\n"
+<a name='L79'>"Argument names are not part of the specification, and only the arguments\n"
+<a name='L80'>"of open() are intended to be used as keyword arguments.\n"
+<a name='L81'>"\n"
+<a name='L82'>"data:\n"
+<a name='L83'>"\n"
+<a name='L84'>"DEFAULT_BUFFER_SIZE\n"
+<a name='L85'>"\n"
+<a name='L86'>"   An int containing the default buffer size used by the module's buffered\n"
+<a name='L87'>"   I/O classes. open() uses the file's blksize (as obtained by os.stat) if\n"
+<a name='L88'>"   possible.\n"
+<a name='L89'>    );
+<a name='L90'>
+<a name='L91'>
+<a name='L92'><i><font color='green'>/*</font></i>
+<a name='L93'><i><font color='green'> * BlockingIOError extends IOError</font></i>
+<a name='L94'><i><font color='green'> */</font></i>
+<a name='L95'>
+<a name='L96'><b>static</b> <b>int</b>
+<a name='L97'><a href='../S/2568.html#L168' title='Refered from 168 in Modules/_io/_iomodule.c.'>blockingioerror_init</a>(PyBlockingIOErrorObject *self, PyObject *args,
+<a name='L98'>                     PyObject *kwds)
+<a name='L99'><font color='red'>{</font>
+<a name='L100'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *myerrno = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *strerror = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L101'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *baseargs = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L102'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> written = 0;
+<a name='L103'>
+<a name='L104'>    <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyTuple_Check(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>));
+<a name='L105'>
+<a name='L106'>    self-&gt;written = 0;
+<a name='L107'>    <b>if</b> (!<a href='../D/2731.html' title='Multiple defined in 2 places.'>PyArg_ParseTuple</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, "OO|n:BlockingIOError",
+<a name='L108'>                          &amp;myerrno, &amp;strerror, &amp;written))
+<a name='L109'>        <b>return</b> -1;
+<a name='L110'>
+<a name='L111'>    baseargs = <a href='../S/2823.html#L186' title='Defined at 186 in Objects/tupleobject.c.'>PyTuple_Pack</a>(2, myerrno, strerror);
+<a name='L112'>    <b>if</b> (baseargs == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L113'>        <b>return</b> -1;
+<a name='L114'>    <i><font color='green'>/* This will take care of initializing of myerrno and strerror members */</font></i>
+<a name='L115'>    <b>if</b> (((<a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *)PyExc_IOError)-&gt;tp_init(
+<a name='L116'>                (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)self, baseargs, kwds) == -1) <font color='red'>{</font>
+<a name='L117'>        Py_DECREF(baseargs);
+<a name='L118'>        <b>return</b> -1;
+<a name='L119'>    <font color='red'>}</font>
+<a name='L120'>    Py_DECREF(baseargs);
+<a name='L121'>
+<a name='L122'>    self-&gt;written = written;
+<a name='L123'>    <b>return</b> 0;
+<a name='L124'><font color='red'>}</font>
+<a name='L125'>
+<a name='L126'><b>static</b> <a href='../D/3506.html' title='Multiple defined in 2 places.'>PyMemberDef</a> blockingioerror_members[] = <font color='red'>{</font>
+<a name='L127'>    <font color='red'>{</font>"characters_written", <a href='../S/577.html#L68' title='Defined at 68 in Include/structmember.h.'>T_PYSSIZET</a>, <a href='../D/10194.html' title='Multiple defined in 2 places.'>offsetof</a>(<a href='../S/2569.html#L69' title='Defined at 69 in Modules/_io/_iomodule.h.'>PyBlockingIOErrorObject</a>, written), 0<font color='red'>}</font>,
+<a name='L128'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>  <i><font color='green'>/* Sentinel */</font></i>
+<a name='L129'><font color='red'>}</font>;
+<a name='L130'>
+<a name='L131'><b>static</b> <a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> _PyExc_BlockingIOError = <font color='red'>{</font>
+<a name='L132'>    <a href='../D/4042.html' title='Multiple defined in 3 places.'>PyVarObject_HEAD_INIT</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)
+<a name='L133'>    "BlockingIOError", <i><font color='green'>/*tp_name*/</font></i>
+<a name='L134'>    <b>sizeof</b>(<a href='../S/2569.html#L69' title='Defined at 69 in Modules/_io/_iomodule.h.'>PyBlockingIOErrorObject</a>), <i><font color='green'>/*tp_basicsize*/</font></i>
+<a name='L135'>    0,                          <i><font color='green'>/*tp_itemsize*/</font></i>
+<a name='L136'>    0,                          <i><font color='green'>/*tp_dealloc*/</font></i>
+<a name='L137'>    0,                          <i><font color='green'>/*tp_print*/</font></i>
+<a name='L138'>    0,                          <i><font color='green'>/*tp_getattr*/</font></i>
+<a name='L139'>    0,                          <i><font color='green'>/*tp_setattr*/</font></i>
+<a name='L140'>    0,                          <i><font color='green'>/*tp_compare */</font></i>
+<a name='L141'>    0,                          <i><font color='green'>/*tp_repr*/</font></i>
+<a name='L142'>    0,                          <i><font color='green'>/*tp_as_number*/</font></i>
+<a name='L143'>    0,                          <i><font color='green'>/*tp_as_sequence*/</font></i>
+<a name='L144'>    0,                          <i><font color='green'>/*tp_as_mapping*/</font></i>
+<a name='L145'>    0,                          <i><font color='green'>/*tp_hash */</font></i>
+<a name='L146'>    0,                          <i><font color='green'>/*tp_call*/</font></i>
+<a name='L147'>    0,                          <i><font color='green'>/*tp_str*/</font></i>
+<a name='L148'>    0,                          <i><font color='green'>/*tp_getattro*/</font></i>
+<a name='L149'>    0,                          <i><font color='green'>/*tp_setattro*/</font></i>
+<a name='L150'>    0,                          <i><font color='green'>/*tp_as_buffer*/</font></i>
+<a name='L151'>    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, <i><font color='green'>/*tp_flags*/</font></i>
+<a name='L152'>    <a href='../D/3130.html' title='Multiple defined in 4 places.'>PyDoc_STR</a>("Exception raised when I/O would block "
+<a name='L153'>              "on a non-blocking I/O stream"), <i><font color='green'>/* tp_doc */</font></i>
+<a name='L154'>    0,                          <i><font color='green'>/* tp_traverse */</font></i>
+<a name='L155'>    0,                          <i><font color='green'>/* tp_clear */</font></i>
+<a name='L156'>    0,                          <i><font color='green'>/* tp_richcompare */</font></i>
+<a name='L157'>    0,                          <i><font color='green'>/* tp_weaklistoffset */</font></i>
+<a name='L158'>    0,                          <i><font color='green'>/* tp_iter */</font></i>
+<a name='L159'>    0,                          <i><font color='green'>/* tp_iternext */</font></i>
+<a name='L160'>    0,                          <i><font color='green'>/* tp_methods */</font></i>
+<a name='L161'>    blockingioerror_members,    <i><font color='green'>/* tp_members */</font></i>
+<a name='L162'>    0,                          <i><font color='green'>/* tp_getset */</font></i>
+<a name='L163'>    0,                          <i><font color='green'>/* tp_base */</font></i>
+<a name='L164'>    0,                          <i><font color='green'>/* tp_dict */</font></i>
+<a name='L165'>    0,                          <i><font color='green'>/* tp_descr_get */</font></i>
+<a name='L166'>    0,                          <i><font color='green'>/* tp_descr_set */</font></i>
+<a name='L167'>    0,                          <i><font color='green'>/* tp_dictoffset */</font></i>
+<a name='L168'>    (initproc)<a href='../S/2568.html#L97' title='Defined at 97 in Modules/_io/_iomodule.c.'>blockingioerror_init</a>, <i><font color='green'>/* tp_init */</font></i>
+<a name='L169'>    0,                          <i><font color='green'>/* tp_alloc */</font></i>
+<a name='L170'>    0,                          <i><font color='green'>/* tp_new */</font></i>
+<a name='L171'><font color='red'>}</font>;
+<a name='L172'><a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *PyExc_BlockingIOError = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;_PyExc_BlockingIOError;
+<a name='L173'>
+<a name='L174'>
+<a name='L175'><i><font color='green'>/*</font></i>
+<a name='L176'><i><font color='green'> * The main open() function</font></i>
+<a name='L177'><i><font color='green'> */</font></i>
+<a name='L178'><a href='../D/3131.html' title='Multiple defined in 2 places.'>PyDoc_STRVAR</a>(open_doc,
+<a name='L179'>"open(file, mode='r', buffering=-1, encoding=None,\n"
+<a name='L180'>"     errors=None, newline=None, closefd=True) -&gt; file object\n"
+<a name='L181'>"\n"
+<a name='L182'>"Open file and return a stream.  Raise IOError upon failure.\n"
+<a name='L183'>"\n"
+<a name='L184'>"file is either a text or byte string giving the name (and the path\n"
+<a name='L185'>"if the file isn't in the current working directory) of the file to\n"
+<a name='L186'>"be opened or an integer file descriptor of the file to be\n"
+<a name='L187'>"wrapped. (If a file descriptor is given, it is closed when the\n"
+<a name='L188'>"returned I/O object is closed, unless closefd is set to False.)\n"
+<a name='L189'>"\n"
+<a name='L190'>"mode is an optional string that specifies the mode in which the file\n"
+<a name='L191'>"is opened. It defaults to 'r' which means open for reading in text\n"
+<a name='L192'>"mode.  Other common values are 'w' for writing (truncating the file if\n"
+<a name='L193'>"it already exists), and 'a' for appending (which on some Unix systems,\n"
+<a name='L194'>"means that all writes append to the end of the file regardless of the\n"
+<a name='L195'>"current seek position). In text mode, if encoding is not specified the\n"
+<a name='L196'>"encoding used is platform dependent. (For reading and writing raw\n"
+<a name='L197'>"bytes use binary mode and leave encoding unspecified.) The available\n"
+<a name='L198'>"modes are:\n"
+<a name='L199'>"\n"
+<a name='L200'>"========= ===============================================================\n"
+<a name='L201'>"Character Meaning\n"
+<a name='L202'>"--------- ---------------------------------------------------------------\n"
+<a name='L203'>"'r'       open for reading (default)\n"
+<a name='L204'>"'w'       open for writing, truncating the file first\n"
+<a name='L205'>"'a'       open for writing, appending to the end of the file if it exists\n"
+<a name='L206'>"'b'       binary mode\n"
+<a name='L207'>"'t'       text mode (default)\n"
+<a name='L208'>"'+'       open a disk file for updating (reading and writing)\n"
+<a name='L209'>"'U'       universal newline mode (for backwards compatibility; unneeded\n"
+<a name='L210'>"          for new code)\n"
+<a name='L211'>"========= ===============================================================\n"
+<a name='L212'>"\n"
+<a name='L213'>"The default mode is 'rt' (open for reading text). For binary random\n"
+<a name='L214'>"access, the mode 'w+b' opens and truncates the file to 0 bytes, while\n"
+<a name='L215'>"'r+b' opens the file without truncation.\n"
+<a name='L216'>"\n"
+<a name='L217'>"Python distinguishes between files opened in binary and text modes,\n"
+<a name='L218'>"even when the underlying operating system doesn't. Files opened in\n"
+<a name='L219'>"binary mode (appending 'b' to the mode argument) return contents as\n"
+<a name='L220'>"bytes objects without any decoding. In text mode (the default, or when\n"
+<a name='L221'>"'t' is appended to the mode argument), the contents of the file are\n"
+<a name='L222'>"returned as strings, the bytes having been first decoded using a\n"
+<a name='L223'>"platform-dependent encoding or using the specified encoding if given.\n"
+<a name='L224'>"\n"
+<a name='L225'>"buffering is an optional integer used to set the buffering policy.\n"
+<a name='L226'>"Pass 0 to switch buffering off (only allowed in binary mode), 1 to select\n"
+<a name='L227'>"line buffering (only usable in text mode), and an integer &gt; 1 to indicate\n"
+<a name='L228'>"the size of a fixed-size chunk buffer.  When no buffering argument is\n"
+<a name='L229'>"given, the default buffering policy works as follows:\n"
+<a name='L230'>"\n"
+<a name='L231'>"* Binary files are buffered in fixed-size chunks; the size of the buffer\n"
+<a name='L232'>"  is chosen using a heuristic trying to determine the underlying device's\n"
+<a name='L233'>"  \"block size\" and falling back on `io.DEFAULT_BUFFER_SIZE`.\n"
+<a name='L234'>"  On many systems, the buffer will typically be 4096 or 8192 bytes long.\n"
+<a name='L235'>"\n"
+<a name='L236'>"* \"Interactive\" text files (files for which isatty() returns True)\n"
+<a name='L237'>"  use line buffering.  Other text files use the policy described above\n"
+<a name='L238'>"  for binary files.\n"
+<a name='L239'>"\n"
+<a name='L240'>"encoding is the name of the encoding used to decode or encode the\n"
+<a name='L241'>"file. This should only be used in text mode. The default encoding is\n"
+<a name='L242'>"platform dependent, but any encoding supported by Python can be\n"
+<a name='L243'>"passed.  See the codecs module for the list of supported encodings.\n"
+<a name='L244'>"\n"
+<a name='L245'>"errors is an optional string that specifies how encoding errors are to\n"
+<a name='L246'>"be handled---this argument should not be used in binary mode. Pass\n"
+<a name='L247'>"'strict' to raise a ValueError exception if there is an encoding error\n"
+<a name='L248'>"(the default of None has the same effect), or pass 'ignore' to ignore\n"
+<a name='L249'>"errors. (Note that ignoring encoding errors can lead to data loss.)\n"
+<a name='L250'>"See the documentation for codecs.register for a list of the permitted\n"
+<a name='L251'>"encoding error strings.\n"
+<a name='L252'>"\n"
+<a name='L253'>"newline controls how universal newlines works (it only applies to text\n"
+<a name='L254'>"mode). It can be None, '', '\\n', '\\r', and '\\r\\n'.  It works as\n"
+<a name='L255'>"follows:\n"
+<a name='L256'>"\n"
+<a name='L257'>"* On input, if newline is None, universal newlines mode is\n"
+<a name='L258'>"  enabled. Lines in the input can end in '\\n', '\\r', or '\\r\\n', and\n"
+<a name='L259'>"  these are translated into '\\n' before being returned to the\n"
+<a name='L260'>"  caller. If it is '', universal newline mode is enabled, but line\n"
+<a name='L261'>"  endings are returned to the caller untranslated. If it has any of\n"
+<a name='L262'>"  the other legal values, input lines are only terminated by the given\n"
+<a name='L263'>"  string, and the line ending is returned to the caller untranslated.\n"
+<a name='L264'>"\n"
+<a name='L265'>"* On output, if newline is None, any '\\n' characters written are\n"
+<a name='L266'>"  translated to the system default line separator, os.linesep. If\n"
+<a name='L267'>"  newline is '', no translation takes place. If newline is any of the\n"
+<a name='L268'>"  other legal values, any '\\n' characters written are translated to\n"
+<a name='L269'>"  the given string.\n"
+<a name='L270'>"\n"
+<a name='L271'>"If closefd is False, the underlying file descriptor will be kept open\n"
+<a name='L272'>"when the file is closed. This does not work when a file name is given\n"
+<a name='L273'>"and must be True in that case.\n"
+<a name='L274'>"\n"
+<a name='L275'>"open() returns a file object whose type depends on the mode, and\n"
+<a name='L276'>"through which the standard file operations such as reading and writing\n"
+<a name='L277'>"are performed. When open() is used to open a file in a text mode ('w',\n"
+<a name='L278'>"'r', 'wt', 'rt', etc.), it returns a TextIOWrapper. When used to open\n"
+<a name='L279'>"a file in a binary mode, the returned class varies: in read binary\n"
+<a name='L280'>"mode, it returns a BufferedReader; in write binary and append binary\n"
+<a name='L281'>"modes, it returns a BufferedWriter, and in read/write mode, it returns\n"
+<a name='L282'>"a BufferedRandom.\n"
+<a name='L283'>"\n"
+<a name='L284'>"It is also possible to use a string or bytearray as a file for both\n"
+<a name='L285'>"reading and writing. For strings StringIO can be used like a file\n"
+<a name='L286'>"opened in a text mode, and for bytes a BytesIO can be used like a file\n"
+<a name='L287'>"opened in a binary mode.\n"
+<a name='L288'>    );
+<a name='L289'>
+<a name='L290'><b>static</b> <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *
+<a name='L291'><a href='../S/2568.html#L638' title='Refered from 638 in Modules/_io/_iomodule.c.'>io_open</a>(PyObject *self, PyObject *args, PyObject *kwds)
+<a name='L292'><font color='red'>{</font>
+<a name='L293'>    <b>char</b> *kwlist[] = <font color='red'>{</font>"file", "mode", "buffering",
+<a name='L294'>                      "encoding", "errors", "newline",
+<a name='L295'>                      "closefd", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>;
+<a name='L296'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *file;
+<a name='L297'>    <b>char</b> *mode = "r";
+<a name='L298'>    <b>int</b> buffering = -1, closefd = 1;
+<a name='L299'>    <b>char</b> *<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *errors = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *newline = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L300'>    <b>unsigned</b> i;
+<a name='L301'>
+<a name='L302'>    <b>int</b> reading = 0, writing = 0, appending = 0, updating = 0;
+<a name='L303'>    <b>int</b> text = 0, binary = 0, universal = 0;
+<a name='L304'>
+<a name='L305'>    <b>char</b> rawmode[5], *m;
+<a name='L306'>    <b>int</b> line_buffering, isatty;
+<a name='L307'>
+<a name='L308'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *raw, *modeobj = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, *wrapper = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L309'>
+<a name='L310'>    <b>if</b> (!<a href='../D/2732.html' title='Multiple defined in 2 places.'>PyArg_ParseTupleAndKeywords</a>(<a href='../S/2858.html#L294' title='Defined at 294 in PC/bdist_wininst/install.c.'>args</a>, kwds, "O|sizzzi:open", kwlist,
+<a name='L311'>                                     &amp;file, &amp;mode, &amp;buffering,
+<a name='L312'>                                     &amp;<a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>, &amp;errors, &amp;newline,
+<a name='L313'>                                     &amp;closefd)) <font color='red'>{</font>
+<a name='L314'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L315'>    <font color='red'>}</font>
+<a name='L316'>
+<a name='L317'>    <b>if</b> (!PyUnicode_Check(file) &amp;&amp;
+<a name='L318'>        !PyBytes_Check(file) &amp;&amp;
+<a name='L319'>        !<a href='../S/2775.html#L736' title='Defined at 736 in Objects/abstract.c.'>PyNumber_Check</a>(file)) <font color='red'>{</font>
+<a name='L320'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError, "invalid file: %R", file);
+<a name='L321'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L322'>    <font color='red'>}</font>
+<a name='L323'>
+<a name='L324'>    <i><font color='green'>/* Decode mode */</font></i>
+<a name='L325'>    <b>for</b> (i = 0; i &lt; strlen(mode); i++) <font color='red'>{</font>
+<a name='L326'>        <b>char</b> c = mode[i];
+<a name='L327'>
+<a name='L328'>        <b>switch</b> (c) <font color='red'>{</font>
+<a name='L329'>        <b>case</b> 'r':
+<a name='L330'>            reading = 1;
+<a name='L331'>            <b>break</b>;
+<a name='L332'>        <b>case</b> 'w':
+<a name='L333'>            writing = 1;
+<a name='L334'>            <b>break</b>;
+<a name='L335'>        <b>case</b> 'a':
+<a name='L336'>            appending = 1;
+<a name='L337'>            <b>break</b>;
+<a name='L338'>        <b>case</b> '+':
+<a name='L339'>            updating = 1;
+<a name='L340'>            <b>break</b>;
+<a name='L341'>        <b>case</b> 't':
+<a name='L342'>            text = 1;
+<a name='L343'>            <b>break</b>;
+<a name='L344'>        <b>case</b> 'b':
+<a name='L345'>            binary = 1;
+<a name='L346'>            <b>break</b>;
+<a name='L347'>        <b>case</b> 'U':
+<a name='L348'>            universal = 1;
+<a name='L349'>            reading = 1;
+<a name='L350'>            <b>break</b>;
+<a name='L351'>        <b>default</b>:
+<a name='L352'>            <b>goto</b> invalid_mode;
+<a name='L353'>        <font color='red'>}</font>
+<a name='L354'>
+<a name='L355'>        <i><font color='green'>/* c must not be duplicated */</font></i>
+<a name='L356'>        <b>if</b> (strchr(mode+i+1, c)) <font color='red'>{</font>
+<a name='L357'>          invalid_mode:
+<a name='L358'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError, "invalid mode: '%s'", mode);
+<a name='L359'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L360'>        <font color='red'>}</font>
+<a name='L361'>
+<a name='L362'>    <font color='red'>}</font>
+<a name='L363'>
+<a name='L364'>    m = rawmode;
+<a name='L365'>    <b>if</b> (reading)   *(m++) = 'r';
+<a name='L366'>    <b>if</b> (writing)   *(m++) = 'w';
+<a name='L367'>    <b>if</b> (appending) *(m++) = 'a';
+<a name='L368'>    <b>if</b> (updating)  *(m++) = '+';
+<a name='L369'>    *m = '\0';
+<a name='L370'>
+<a name='L371'>    <i><font color='green'>/* Parameters validation */</font></i>
+<a name='L372'>    <b>if</b> (universal) <font color='red'>{</font>
+<a name='L373'>        <b>if</b> (writing || appending) <font color='red'>{</font>
+<a name='L374'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L375'>                            "can't use U and writing mode at once");
+<a name='L376'>            <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L377'>        <font color='red'>}</font>
+<a name='L378'>        reading = 1;
+<a name='L379'>    <font color='red'>}</font>
+<a name='L380'>
+<a name='L381'>    <b>if</b> (text &amp;&amp; binary) <font color='red'>{</font>
+<a name='L382'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L383'>                        "can't have text and binary mode at once");
+<a name='L384'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L385'>    <font color='red'>}</font>
+<a name='L386'>
+<a name='L387'>    <b>if</b> (reading + writing + appending &gt; 1) <font color='red'>{</font>
+<a name='L388'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L389'>                        "must have exactly one of read/write/append mode");
+<a name='L390'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L391'>    <font color='red'>}</font>
+<a name='L392'>
+<a name='L393'>    <b>if</b> (binary &amp;&amp; <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a> != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L394'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L395'>                        "binary mode doesn't take an encoding argument");
+<a name='L396'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L397'>    <font color='red'>}</font>
+<a name='L398'>
+<a name='L399'>    <b>if</b> (binary &amp;&amp; errors != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L400'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L401'>                        "binary mode doesn't take an errors argument");
+<a name='L402'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L403'>    <font color='red'>}</font>
+<a name='L404'>
+<a name='L405'>    <b>if</b> (binary &amp;&amp; newline != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L406'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L407'>                        "binary mode doesn't take a newline argument");
+<a name='L408'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L409'>    <font color='red'>}</font>
+<a name='L410'>
+<a name='L411'>    <i><font color='green'>/* Create the Raw file stream */</font></i>
+<a name='L412'>    raw = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyFileIO_Type,
+<a name='L413'>                                "Osi", file, rawmode, closefd);
+<a name='L414'>    <b>if</b> (raw == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L415'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L416'>
+<a name='L417'>    modeobj = <a href='../D/4012.html' title='Multiple defined in 3 places.'>PyUnicode_FromString</a>(mode);
+<a name='L418'>    <b>if</b> (modeobj == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L419'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L420'>
+<a name='L421'>    <i><font color='green'>/* buffering */</font></i>
+<a name='L422'>    <font color='red'>{</font>
+<a name='L423'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(raw, "isatty", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L424'>        <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L425'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L426'>        isatty = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(res);
+<a name='L427'>        Py_DECREF(res);
+<a name='L428'>        <b>if</b> (isatty == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L429'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L430'>    <font color='red'>}</font>
+<a name='L431'>
+<a name='L432'>    <b>if</b> (buffering == 1 || (buffering &lt; 0 &amp;&amp; isatty)) <font color='red'>{</font>
+<a name='L433'>        buffering = -1;
+<a name='L434'>        line_buffering = 1;
+<a name='L435'>    <font color='red'>}</font>
+<a name='L436'>    <b>else</b>
+<a name='L437'>        line_buffering = 0;
+<a name='L438'>
+<a name='L439'>    <b>if</b> (buffering &lt; 0) <font color='red'>{</font>
+<a name='L440'>        buffering = <a href='../S/2569.html#L61' title='Defined at 61 in Modules/_io/_iomodule.h.'>DEFAULT_BUFFER_SIZE</a>;
+<a name='L441'><font color='darkred'>#ifdef</font> HAVE_STRUCT_STAT_ST_BLKSIZE
+<a name='L442'>        <font color='red'>{</font>
+<a name='L443'>            <b>struct</b> stat st;
+<a name='L444'>            <b>long</b> <a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>;
+<a name='L445'>            <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *res = <a href='../D/3603.html' title='Multiple defined in 2 places.'>PyObject_CallMethod</a>(raw, "fileno", <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>);
+<a name='L446'>            <b>if</b> (res == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L447'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L448'>
+<a name='L449'>            <a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a> = <a href='../S/2799.html#L416' title='Defined at 416 in Objects/longobject.c.'>PyLong_AsLong</a>(res);
+<a name='L450'>            Py_DECREF(res);
+<a name='L451'>            <b>if</b> (<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a> == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L452'>                <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L453'>
+<a name='L454'>            <b>if</b> (fstat(<a href='../S/2759.html#L50' title='Defined at 50 in Modules/zlib/minigzip.c.'>fileno</a>, &amp;st) &gt;= 0 &amp;&amp; st.st_blksize &gt; 1)
+<a name='L455'>                buffering = st.st_blksize;
+<a name='L456'>        <font color='red'>}</font>
+<a name='L457'><font color='darkred'>#endif</font>
+<a name='L458'>    <font color='red'>}</font>
+<a name='L459'>    <b>if</b> (buffering &lt; 0) <font color='red'>{</font>
+<a name='L460'>        <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L461'>                        "invalid buffering size");
+<a name='L462'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L463'>    <font color='red'>}</font>
+<a name='L464'>
+<a name='L465'>    <i><font color='green'>/* if not buffering, returns the raw file object */</font></i>
+<a name='L466'>    <b>if</b> (buffering == 0) <font color='red'>{</font>
+<a name='L467'>        <b>if</b> (!binary) <font color='red'>{</font>
+<a name='L468'>            <a href='../S/3106.html#L122' title='Defined at 122 in Python/errors.c.'>PyErr_SetString</a>(PyExc_ValueError,
+<a name='L469'>                            "can't have unbuffered text I/O");
+<a name='L470'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L471'>        <font color='red'>}</font>
+<a name='L472'>
+<a name='L473'>        Py_DECREF(modeobj);
+<a name='L474'>        <b>return</b> raw;
+<a name='L475'>    <font color='red'>}</font>
+<a name='L476'>
+<a name='L477'>    <i><font color='green'>/* wraps into a buffered file */</font></i>
+<a name='L478'>    <font color='red'>{</font>
+<a name='L479'>        <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *Buffered_class;
+<a name='L480'>
+<a name='L481'>        <b>if</b> (updating)
+<a name='L482'>            Buffered_class = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyBufferedRandom_Type;
+<a name='L483'>        <b>else</b> <b>if</b> (writing || appending)
+<a name='L484'>            Buffered_class = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyBufferedWriter_Type;
+<a name='L485'>        <b>else</b> <b>if</b> (reading)
+<a name='L486'>            Buffered_class = (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyBufferedReader_Type;
+<a name='L487'>        <b>else</b> <font color='red'>{</font>
+<a name='L488'>            <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_ValueError,
+<a name='L489'>                         "unknown mode: '%s'", mode);
+<a name='L490'>            <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L491'>        <font color='red'>}</font>
+<a name='L492'>
+<a name='L493'>        <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(Buffered_class, "Oi", raw, buffering);
+<a name='L494'>    <font color='red'>}</font>
+<a name='L495'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(raw);
+<a name='L496'>    <b>if</b> (<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L497'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L498'>
+<a name='L499'>
+<a name='L500'>    <i><font color='green'>/* if binary, returns the buffered file */</font></i>
+<a name='L501'>    <b>if</b> (binary) <font color='red'>{</font>
+<a name='L502'>        Py_DECREF(modeobj);
+<a name='L503'>        <b>return</b> <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>;
+<a name='L504'>    <font color='red'>}</font>
+<a name='L505'>
+<a name='L506'>    <i><font color='green'>/* wraps into a TextIOWrapper */</font></i>
+<a name='L507'>    wrapper = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>((<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyTextIOWrapper_Type,
+<a name='L508'>                                    "Osssi",
+<a name='L509'>                                    <a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>,
+<a name='L510'>                                    <a href='../D/8346.html' title='Multiple defined in 2 places.'>encoding</a>, errors, newline,
+<a name='L511'>                                    line_buffering);
+<a name='L512'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L513'>    <b>if</b> (wrapper == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L514'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L515'>
+<a name='L516'>    <b>if</b> (<a href='../S/2803.html#L806' title='Defined at 806 in Objects/object.c.'>PyObject_SetAttrString</a>(wrapper, "mode", modeobj) &lt; 0)
+<a name='L517'>        <b>goto</b> <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>;
+<a name='L518'>    Py_DECREF(modeobj);
+<a name='L519'>    <b>return</b> wrapper;
+<a name='L520'>
+<a name='L521'>  <a href='../D/8389.html' title='Multiple defined in 3 places.'>error</a>:
+<a name='L522'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(raw);
+<a name='L523'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(modeobj);
+<a name='L524'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/2664.html#L607' title='Defined at 607 in Modules/expat/xmlparse.c.'>buffer</a>);
+<a name='L525'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(wrapper);
+<a name='L526'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L527'><font color='red'>}</font>
+<a name='L528'>
+<a name='L529'><i><font color='green'>/*</font></i>
+<a name='L530'><i><font color='green'> * Private helpers for the io module.</font></i>
+<a name='L531'><i><font color='green'> */</font></i>
+<a name='L532'>
+<a name='L533'><a href='../D/4353.html' title='Multiple defined in 3 places.'>Py_off_t</a>
+<a name='L534'><a href='../R/3207.html' title='Multiple refered from 4 places.'>PyNumber_AsOff_t</a>(PyObject *item, PyObject *err)
+<a name='L535'><font color='red'>{</font>
+<a name='L536'>    <a href='../D/4353.html' title='Multiple defined in 3 places.'>Py_off_t</a> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L537'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *runerr;
+<a name='L538'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> = <a href='../S/2775.html#L1196' title='Defined at 1196 in Objects/abstract.c.'>PyNumber_Index</a>(item);
+<a name='L539'>    <b>if</b> (<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a> == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L540'>        <b>return</b> -1;
+<a name='L541'>
+<a name='L542'>    <i><font color='green'>/* We're done if PyLong_AsSsize_t() returns without error. */</font></i>
+<a name='L543'>    <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PyLong_AsOff_t(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L544'>    <b>if</b> (<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> != -1 || !(runerr = <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>()))
+<a name='L545'>        <b>goto</b> finish;
+<a name='L546'>
+<a name='L547'>    <i><font color='green'>/* Error handling code -- only manage OverflowError differently */</font></i>
+<a name='L548'>    <b>if</b> (!<a href='../S/3106.html#L145' title='Defined at 145 in Python/errors.c.'>PyErr_GivenExceptionMatches</a>(runerr, PyExc_OverflowError))
+<a name='L549'>        <b>goto</b> finish;
+<a name='L550'>
+<a name='L551'>    <a href='../S/3106.html#L318' title='Defined at 318 in Python/errors.c.'>PyErr_Clear</a>();
+<a name='L552'>    <i><font color='green'>/* If no error-handling desired then the default clipping</font></i>
+<a name='L553'><i><font color='green'>       is sufficient.</font></i>
+<a name='L554'><i><font color='green'>     */</font></i>
+<a name='L555'>    <b>if</b> (!err) <font color='red'>{</font>
+<a name='L556'>        <a href='../D/6814.html' title='Multiple defined in 2 places.'>assert</a>(PyLong_Check(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>));
+<a name='L557'>        <i><font color='green'>/* Whether or not it is less than or equal to</font></i>
+<a name='L558'><i><font color='green'>           zero is determined by the sign of ob_size</font></i>
+<a name='L559'><i><font color='green'>        */</font></i>
+<a name='L560'>        <b>if</b> (<a href='../S/2799.html#L640' title='Defined at 640 in Objects/longobject.c.'>_PyLong_Sign</a>(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>) &lt; 0)
+<a name='L561'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PY_OFF_T_MIN;
+<a name='L562'>        <b>else</b>
+<a name='L563'>            <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a> = PY_OFF_T_MAX;
+<a name='L564'>    <font color='red'>}</font>
+<a name='L565'>    <b>else</b> <font color='red'>{</font>
+<a name='L566'>        <i><font color='green'>/* Otherwise replace the error with caller's error object. */</font></i>
+<a name='L567'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(err,
+<a name='L568'>                     "cannot fit '%.200s' into an offset-sized integer",
+<a name='L569'>                     item-&gt;ob_type-&gt;tp_name);
+<a name='L570'>    <font color='red'>}</font>
+<a name='L571'>
+<a name='L572'> finish:
+<a name='L573'>    Py_DECREF(<a href='../S/2252.html#L27' title='Defined at 27 in Modules/_ctypes/ctypes.h.'>value</a>);
+<a name='L574'>    <b>return</b> <a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>;
+<a name='L575'><font color='red'>}</font>
+<a name='L576'>
+<a name='L577'>
+<a name='L578'><i><font color='green'>/* Basically the "n" format code with the ability to turn None into -1. */</font></i>
+<a name='L579'><b>int</b> 
+<a name='L580'><a href='../R/5419.html' title='Multiple refered from 7 places.'>_PyIO_ConvertSsize_t</a>(PyObject *obj, <b>void</b> *result) <font color='red'>{</font>
+<a name='L581'>    <a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> limit;
+<a name='L582'>    <b>if</b> (obj == Py_None) <font color='red'>{</font>
+<a name='L583'>        limit = -1;
+<a name='L584'>    <font color='red'>}</font>
+<a name='L585'>    <b>else</b> <b>if</b> (<a href='../S/2775.html#L736' title='Defined at 736 in Objects/abstract.c.'>PyNumber_Check</a>(obj)) <font color='red'>{</font>
+<a name='L586'>        limit = <a href='../S/2775.html#L1227' title='Defined at 1227 in Objects/abstract.c.'>PyNumber_AsSsize_t</a>(obj, PyExc_OverflowError);
+<a name='L587'>        <b>if</b> (limit == -1 &amp;&amp; <a href='../D/3154.html' title='Multiple defined in 2 places.'>PyErr_Occurred</a>())
+<a name='L588'>            <b>return</b> 0;
+<a name='L589'>    <font color='red'>}</font>
+<a name='L590'>    <b>else</b> <font color='red'>{</font>
+<a name='L591'>        <a href='../S/3106.html#L600' title='Defined at 600 in Python/errors.c.'>PyErr_Format</a>(PyExc_TypeError,
+<a name='L592'>                     "integer argument expected, got '%.200s'",
+<a name='L593'>                     <a href='../D/4259.html' title='Multiple defined in 5 places.'>Py_TYPE</a>(obj)-&gt;tp_name);
+<a name='L594'>        <b>return</b> 0;
+<a name='L595'>    <font color='red'>}</font>
+<a name='L596'>    *((<a href='../D/4364.html' title='Multiple defined in 6 places.'>Py_ssize_t</a> *)<a href='../S/2250.html#L579' title='Defined at 579 in Modules/_ctypes/callproc.c.'>result</a>) = limit;
+<a name='L597'>    <b>return</b> 1;
+<a name='L598'><font color='red'>}</font>
+<a name='L599'>
+<a name='L600'>
+<a name='L601'><b>static</b> <b>int</b>
+<a name='L602'><a href='../S/2568.html#L649' title='Refered from 649 in Modules/_io/_iomodule.c.'>iomodule_traverse</a>(PyObject *mod, visitproc visit, <b>void</b> *arg) <font color='red'>{</font>
+<a name='L603'>    _PyIO_State *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2569.html#L142' title='Defined at 142 in Modules/_io/_iomodule.h.'>IO_MOD_STATE</a>(mod);
+<a name='L604'>    <b>if</b> (!<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;initialized)
+<a name='L605'>        <b>return</b> 0;
+<a name='L606'>    Py_VISIT(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;os_module);
+<a name='L607'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;locale_module != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>) <font color='red'>{</font>
+<a name='L608'>        Py_VISIT(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;locale_module);
+<a name='L609'>    <font color='red'>}</font>
+<a name='L610'>    Py_VISIT(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;unsupported_operation);
+<a name='L611'>    <b>return</b> 0;
+<a name='L612'><font color='red'>}</font>
+<a name='L613'>
+<a name='L614'>
+<a name='L615'><b>static</b> <b>int</b>
+<a name='L616'><a href='../R/8486.html' title='Multiple refered from 2 places.'>iomodule_clear</a>(PyObject *mod) <font color='red'>{</font>
+<a name='L617'>    _PyIO_State *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2569.html#L142' title='Defined at 142 in Modules/_io/_iomodule.h.'>IO_MOD_STATE</a>(mod);
+<a name='L618'>    <b>if</b> (!<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;initialized)
+<a name='L619'>        <b>return</b> 0;
+<a name='L620'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;os_module);
+<a name='L621'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;locale_module != <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L622'>        <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;locale_module);
+<a name='L623'>    <a href='../D/4095.html' title='Multiple defined in 2 places.'>Py_CLEAR</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;unsupported_operation);
+<a name='L624'>    <b>return</b> 0;
+<a name='L625'><font color='red'>}</font>
+<a name='L626'>
+<a name='L627'><b>static</b> <b>void</b>
+<a name='L628'><a href='../S/2568.html#L651' title='Refered from 651 in Modules/_io/_iomodule.c.'>iomodule_free</a>(PyObject *mod) <font color='red'>{</font>
+<a name='L629'>    <a href='../S/2568.html#L616' title='Defined at 616 in Modules/_io/_iomodule.c.'>iomodule_clear</a>(mod);
+<a name='L630'><font color='red'>}</font>
+<a name='L631'>
+<a name='L632'>
+<a name='L633'><i><font color='green'>/*</font></i>
+<a name='L634'><i><font color='green'> * Module definition</font></i>
+<a name='L635'><i><font color='green'> */</font></i>
+<a name='L636'>
+<a name='L637'><b>static</b> <a href='../D/3525.html' title='Multiple defined in 3 places.'>PyMethodDef</a> module_methods[] = <font color='red'>{</font>
+<a name='L638'>    <font color='red'>{</font>"open", (PyCFunction)<a href='../S/2568.html#L291' title='Defined at 291 in Modules/_io/_iomodule.c.'>io_open</a>, <a href='../S/2858.html#L633' title='Defined at 633 in PC/bdist_wininst/install.c.'>METH_VARARGS</a>|METH_KEYWORDS, open_doc<font color='red'>}</font>,
+<a name='L639'>    <font color='red'>{</font><a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a><font color='red'>}</font>
+<a name='L640'><font color='red'>}</font>;
+<a name='L641'>
+<a name='L642'><b>struct</b> <a href='../D/3534.html' title='Multiple defined in 2 places.'>PyModuleDef</a> _PyIO_Module = <font color='red'>{</font>
+<a name='L643'>    <a href='../S/542.html#L33' title='Defined at 33 in Include/moduleobject.h.'>PyModuleDef_HEAD_INIT</a>,
+<a name='L644'>    "io",
+<a name='L645'>    module_doc,
+<a name='L646'>    <b>sizeof</b>(_PyIO_State),
+<a name='L647'>    module_methods,
+<a name='L648'>    <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>,
+<a name='L649'>    <a href='../S/2568.html#L602' title='Defined at 602 in Modules/_io/_iomodule.c.'>iomodule_traverse</a>,
+<a name='L650'>    <a href='../S/2568.html#L616' title='Defined at 616 in Modules/_io/_iomodule.c.'>iomodule_clear</a>,
+<a name='L651'>    (freefunc)<a href='../S/2568.html#L628' title='Defined at 628 in Modules/_io/_iomodule.c.'>iomodule_free</a>,
+<a name='L652'><font color='red'>}</font>;
+<a name='L653'>
+<a name='L654'><a href='../D/3482.html' title='Multiple defined in 10 places.'>PyMODINIT_FUNC</a>
+<a name='L655'><a href='../R/3027.html' title='Multiple refered from 2 places.'>PyInit__io</a>(<b>void</b>)
+<a name='L656'><font color='red'>{</font>
+<a name='L657'>    <a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *m = PyModule_Create(&amp;_PyIO_Module);
+<a name='L658'>    _PyIO_State *<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L659'>    <b>if</b> (m == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L660'>        <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L661'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a> = <a href='../S/2569.html#L142' title='Defined at 142 in Modules/_io/_iomodule.h.'>IO_MOD_STATE</a>(m);
+<a name='L662'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;initialized = 0;
+<a name='L663'>
+<a name='L664'>    <i><font color='green'>/* put os in the module state */</font></i>
+<a name='L665'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;os_module = <a href='../S/3120.html#L2325' title='Defined at 2325 in Python/import.c.'>PyImport_ImportModule</a>("os");
+<a name='L666'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;os_module == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L667'>        <b>goto</b> fail;
+<a name='L668'>
+<a name='L669'><font color='darkred'>#define</font> <a href='../R/31.html' title='Multiple refered from 14 places.'>ADD_TYPE</a>(type, name) \
+<a name='L670'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(type) &lt; 0) \
+<a name='L671'>        <b>goto</b> fail; \
+<a name='L672'>    Py_INCREF(type); \
+<a name='L673'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, name, (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)type) &lt; 0) <font color='red'>{</font>  \
+<a name='L674'>        Py_DECREF(type); \
+<a name='L675'>        <b>goto</b> fail; \
+<a name='L676'>    <font color='red'>}</font>
+<a name='L677'>
+<a name='L678'>    <i><font color='green'>/* DEFAULT_BUFFER_SIZE */</font></i>
+<a name='L679'>    <b>if</b> (PyModule_AddIntMacro(m, <a href='../S/2569.html#L61' title='Defined at 61 in Modules/_io/_iomodule.h.'>DEFAULT_BUFFER_SIZE</a>) &lt; 0)
+<a name='L680'>        <b>goto</b> fail;
+<a name='L681'>
+<a name='L682'>    <i><font color='green'>/* UnsupportedOperation inherits from ValueError and IOError */</font></i>
+<a name='L683'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;unsupported_operation = <a href='../D/3601.html' title='Multiple defined in 2 places.'>PyObject_CallFunction</a>(
+<a name='L684'>        (<a href='../D/3593.html' title='Multiple defined in 2 places.'>PyObject</a> *)&amp;PyType_Type, "s(OO){}",
+<a name='L685'>        "UnsupportedOperation", PyExc_ValueError, PyExc_IOError);
+<a name='L686'>    <b>if</b> (<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;unsupported_operation == <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>)
+<a name='L687'>        <b>goto</b> fail;
+<a name='L688'>    Py_INCREF(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;unsupported_operation);
+<a name='L689'>    <b>if</b> (<a href='../S/3125.html#L525' title='Defined at 525 in Python/modsupport.c.'>PyModule_AddObject</a>(m, "UnsupportedOperation",
+<a name='L690'>                           <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;unsupported_operation) &lt; 0)
+<a name='L691'>        <b>goto</b> fail;
+<a name='L692'>
+<a name='L693'>    <i><font color='green'>/* BlockingIOError */</font></i>
+<a name='L694'>    _PyExc_BlockingIOError.tp_base = (<a href='../D/3899.html' title='Multiple defined in 3 places.'>PyTypeObject</a> *) PyExc_IOError;
+<a name='L695'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;_PyExc_BlockingIOError, "BlockingIOError");
+<a name='L696'>
+<a name='L697'>    <i><font color='green'>/* Concrete base types of the IO ABCs.</font></i>
+<a name='L698'><i><font color='green'>       (the ABCs themselves are declared through inheritance in io.py)</font></i>
+<a name='L699'><i><font color='green'>    */</font></i>
+<a name='L700'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyIOBase_Type, "_IOBase");
+<a name='L701'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyRawIOBase_Type, "_RawIOBase");
+<a name='L702'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyBufferedIOBase_Type, "_BufferedIOBase");
+<a name='L703'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyTextIOBase_Type, "_TextIOBase");
+<a name='L704'>
+<a name='L705'>    <i><font color='green'>/* Implementation of concrete IO objects. */</font></i>
+<a name='L706'>    <i><font color='green'>/* FileIO */</font></i>
+<a name='L707'>    PyFileIO_Type.tp_base = &amp;PyRawIOBase_Type;
+<a name='L708'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyFileIO_Type, "FileIO");
+<a name='L709'>
+<a name='L710'>    <i><font color='green'>/* BytesIO */</font></i>
+<a name='L711'>    PyBytesIO_Type.tp_base = &amp;PyBufferedIOBase_Type;
+<a name='L712'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyBytesIO_Type, "BytesIO");
+<a name='L713'>    <b>if</b> (<a href='../S/2824.html#L3799' title='Defined at 3799 in Objects/typeobject.c.'>PyType_Ready</a>(&amp;_PyBytesIOBuffer_Type) &lt; 0)
+<a name='L714'>        <b>goto</b> fail;
+<a name='L715'>
+<a name='L716'>    <i><font color='green'>/* StringIO */</font></i>
+<a name='L717'>    PyStringIO_Type.tp_base = &amp;PyTextIOBase_Type;
+<a name='L718'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyStringIO_Type, "StringIO");
+<a name='L719'>
+<a name='L720'>    <i><font color='green'>/* BufferedReader */</font></i>
+<a name='L721'>    PyBufferedReader_Type.tp_base = &amp;PyBufferedIOBase_Type;
+<a name='L722'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyBufferedReader_Type, "BufferedReader");
+<a name='L723'>
+<a name='L724'>    <i><font color='green'>/* BufferedWriter */</font></i>
+<a name='L725'>    PyBufferedWriter_Type.tp_base = &amp;PyBufferedIOBase_Type;
+<a name='L726'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyBufferedWriter_Type, "BufferedWriter");
+<a name='L727'>
+<a name='L728'>    <i><font color='green'>/* BufferedRWPair */</font></i>
+<a name='L729'>    PyBufferedRWPair_Type.tp_base = &amp;PyBufferedIOBase_Type;
+<a name='L730'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyBufferedRWPair_Type, "BufferedRWPair");
+<a name='L731'>
+<a name='L732'>    <i><font color='green'>/* BufferedRandom */</font></i>
+<a name='L733'>    PyBufferedRandom_Type.tp_base = &amp;PyBufferedIOBase_Type;
+<a name='L734'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyBufferedRandom_Type, "BufferedRandom");
+<a name='L735'>
+<a name='L736'>    <i><font color='green'>/* TextIOWrapper */</font></i>
+<a name='L737'>    PyTextIOWrapper_Type.tp_base = &amp;PyTextIOBase_Type;
+<a name='L738'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyTextIOWrapper_Type, "TextIOWrapper");
+<a name='L739'>
+<a name='L740'>    <i><font color='green'>/* IncrementalNewlineDecoder */</font></i>
+<a name='L741'>    <a href='../S/2568.html#L669' title='Defined at 669 in Modules/_io/_iomodule.c.'>ADD_TYPE</a>(&amp;PyIncrementalNewlineDecoder_Type, "IncrementalNewlineDecoder");
+<a name='L742'>
+<a name='L743'>    <i><font color='green'>/* Interned strings */</font></i>
+<a name='L744'>    <b>if</b> (!(_PyIO_str_close = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("close")))
+<a name='L745'>        <b>goto</b> fail;
+<a name='L746'>    <b>if</b> (!(_PyIO_str_closed = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("closed")))
+<a name='L747'>        <b>goto</b> fail;
+<a name='L748'>    <b>if</b> (!(_PyIO_str_decode = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("decode")))
+<a name='L749'>        <b>goto</b> fail;
+<a name='L750'>    <b>if</b> (!(_PyIO_str_encode = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("encode")))
+<a name='L751'>        <b>goto</b> fail;
+<a name='L752'>    <b>if</b> (!(_PyIO_str_fileno = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("fileno")))
+<a name='L753'>        <b>goto</b> fail;
+<a name='L754'>    <b>if</b> (!(_PyIO_str_flush = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("flush")))
+<a name='L755'>        <b>goto</b> fail;
+<a name='L756'>    <b>if</b> (!(_PyIO_str_getstate = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("getstate")))
+<a name='L757'>        <b>goto</b> fail;
+<a name='L758'>    <b>if</b> (!(_PyIO_str_isatty = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("isatty")))
+<a name='L759'>        <b>goto</b> fail;
+<a name='L760'>    <b>if</b> (!(_PyIO_str_newlines = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("newlines")))
+<a name='L761'>        <b>goto</b> fail;
+<a name='L762'>    <b>if</b> (!(_PyIO_str_nl = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("\n")))
+<a name='L763'>        <b>goto</b> fail;
+<a name='L764'>    <b>if</b> (!(_PyIO_str_read = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("read")))
+<a name='L765'>        <b>goto</b> fail;
+<a name='L766'>    <b>if</b> (!(_PyIO_str_read1 = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("read1")))
+<a name='L767'>        <b>goto</b> fail;
+<a name='L768'>    <b>if</b> (!(_PyIO_str_readable = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("readable")))
+<a name='L769'>        <b>goto</b> fail;
+<a name='L770'>    <b>if</b> (!(_PyIO_str_readinto = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("readinto")))
+<a name='L771'>        <b>goto</b> fail;
+<a name='L772'>    <b>if</b> (!(_PyIO_str_readline = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("readline")))
+<a name='L773'>        <b>goto</b> fail;
+<a name='L774'>    <b>if</b> (!(_PyIO_str_reset = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("reset")))
+<a name='L775'>        <b>goto</b> fail;
+<a name='L776'>    <b>if</b> (!(_PyIO_str_seek = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("seek")))
+<a name='L777'>        <b>goto</b> fail;
+<a name='L778'>    <b>if</b> (!(_PyIO_str_seekable = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("seekable")))
+<a name='L779'>        <b>goto</b> fail;
+<a name='L780'>    <b>if</b> (!(_PyIO_str_setstate = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("setstate")))
+<a name='L781'>        <b>goto</b> fail;
+<a name='L782'>    <b>if</b> (!(_PyIO_str_tell = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("tell")))
+<a name='L783'>        <b>goto</b> fail;
+<a name='L784'>    <b>if</b> (!(_PyIO_str_truncate = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("truncate")))
+<a name='L785'>        <b>goto</b> fail;
+<a name='L786'>    <b>if</b> (!(_PyIO_str_write = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("write")))
+<a name='L787'>        <b>goto</b> fail;
+<a name='L788'>    <b>if</b> (!(_PyIO_str_writable = <a href='../S/2828.html#L10060' title='Defined at 10060 in Objects/unicodeobject.c.'>PyUnicode_InternFromString</a>("writable")))
+<a name='L789'>        <b>goto</b> fail;
+<a name='L790'>    
+<a name='L791'>    <b>if</b> (!(_PyIO_empty_str = <a href='../D/4013.html' title='Multiple defined in 3 places.'>PyUnicode_FromStringAndSize</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)))
+<a name='L792'>        <b>goto</b> fail;
+<a name='L793'>    <b>if</b> (!(_PyIO_empty_bytes = <a href='../S/2779.html#L70' title='Defined at 70 in Objects/bytesobject.c.'>PyBytes_FromStringAndSize</a>(<a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>, 0)))
+<a name='L794'>        <b>goto</b> fail;
+<a name='L795'>    <b>if</b> (!(_PyIO_zero = <a href='../S/2799.html#L176' title='Defined at 176 in Objects/longobject.c.'>PyLong_FromLong</a>(0L)))
+<a name='L796'>        <b>goto</b> fail;
+<a name='L797'>
+<a name='L798'>    <a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;initialized = 1;
+<a name='L799'>
+<a name='L800'>    <b>return</b> m;
+<a name='L801'>
+<a name='L802'>  fail:
+<a name='L803'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;os_module);
+<a name='L804'>    <a href='../S/544.html#L767' title='Defined at 767 in Include/object.h.'>Py_XDECREF</a>(<a href='../S/530.html#L46' title='Defined at 46 in Include/grammar.h.'>state</a>-&gt;unsupported_operation);
+<a name='L805'>    Py_DECREF(m);
+<a name='L806'>    <b>return</b> <a href='../S/2891.html#L5' title='Defined at 5 in PC/os2emx/dllentry.c.'>NULL</a>;
+<a name='L807'><font color='red'>}</font>
+</pre>
+<hr>
+<a name='BOTTOM'>
+<i><font color='green'>/* [&lt;][&gt;]<a href='#L97'>[^]</a><a href='#L655'>[v]</a><a href='#TOP'>[top]</a>[bottom]<a href='../mains.html'>[index]</a><a href='../help.html'>[help]</a> */</font></i>
+</body>
+</html>
